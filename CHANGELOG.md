@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-01-18
+
+### Fixed
+
+- Concurrent WebSocket write panic caused by multiple goroutines writing to the same connection
+- Excessive "no NFC devices found" log spam when no device is connected
+
+### Changed
+
+- Device discovery moved to agent level for cleaner separation of concerns
+- Agent now starts without a device and waits for device connection
+- Hot plug-n-play support: devices are auto-discovered when plugged in and paths are cleared on disconnect
+- Systray now reads device state from agent (agent is source of truth)
+- "Refresh Devices" menu item now auto-selects first available device if none connected
+
+### Removed
+
+- Last scanned card is no longer sent to newly connected WebSocket clients
+
 ## [1.0.0] - 2026-01-11
 
 ### Added

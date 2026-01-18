@@ -30,7 +30,7 @@ type Server struct {
 	upgrader websocket.Upgrader
 
 	// Client connections (multiple allowed)
-	clients    map[*websocket.Conn]string // conn -> clientID
+	clients    map[*server.SafeConn]string // conn -> clientID
 	clientsMux sync.RWMutex
 
 	// Last received data for late joiners
@@ -43,7 +43,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 	return &Server{
 		config:  config,
 		bridge:  bridge,
-		clients: make(map[*websocket.Conn]string),
+		clients: make(map[*server.SafeConn]string),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -158,12 +158,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	conn, err := s.upgrader.Upgrade(w, r, nil)
+	wsConn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[client] WebSocket upgrade error: %v", err)
 		return
 	}
 
+	conn := server.NewSafeConn(wsConn)
 	clientID := uuid.New().String()
 
 	// Add to clients map
@@ -218,7 +219,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWriteRequest handles write requests from clients.
-func (s *Server) handleWriteRequest(conn *websocket.Conn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	// Parse write request from payload
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
@@ -325,7 +326,7 @@ func (s *Server) broadcastTagData(data nfc.NFCData) {
 }
 
 // sendTagDataToClient sends tag data to a specific client.
-func (s *Server) sendTagDataToClient(conn *websocket.Conn, data nfc.NFCData) {
+func (s *Server) sendTagDataToClient(conn *server.SafeConn, data nfc.NFCData) {
 	var errStr *string
 	if data.Err != nil {
 		e := data.Err.Error()
@@ -400,7 +401,7 @@ func (s *Server) broadcastDeviceStatus(status nfc.DeviceStatus) {
 }
 
 // sendErrorResponse sends an error response to a WebSocket client.
-func (s *Server) sendErrorResponse(conn *websocket.Conn, requestID string, errorCode string, message string) {
+func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, errorCode string, message string) {
 	response := protocol.WebSocketResponse{
 		ID:      requestID,
 		Type:    server.WSMessageTypeError,

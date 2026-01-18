@@ -19,9 +19,9 @@ import (
 type DeviceHandler struct {
 	manager           *remotenfc.Manager
 	bridge            *server.ServerBridge
-	deviceSessions    map[string]*websocket.Conn // deviceID -> websocket conn
+	deviceSessions    map[string]*server.SafeConn // deviceID -> websocket conn
 	deviceSessionsMux sync.RWMutex
-	connToDeviceID    map[*websocket.Conn]string // reverse lookup: conn -> deviceID
+	connToDeviceID    map[*server.SafeConn]string // reverse lookup: conn -> deviceID
 	upgrader          websocket.Upgrader
 }
 
@@ -30,8 +30,8 @@ func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge) *
 	return &DeviceHandler{
 		manager:        manager,
 		bridge:         bridge,
-		deviceSessions: make(map[string]*websocket.Conn),
-		connToDeviceID: make(map[*websocket.Conn]string),
+		deviceSessions: make(map[string]*server.SafeConn),
+		connToDeviceID: make(map[*server.SafeConn]string),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins
@@ -64,11 +64,14 @@ func (h *DeviceHandler) Register(s *Server) {
 
 // HandleWebSocket handles WebSocket connections from devices.
 func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	wsConn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[device] WebSocket upgrade error: %v", err)
 		return
 	}
+
+	// Wrap in SafeConn to prevent concurrent write panics
+	conn := server.NewSafeConn(wsConn)
 
 	log.Printf("[device] WebSocket connected from %s", r.RemoteAddr)
 
@@ -164,7 +167,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleRegisterDevice processes a device registration request.
-func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *websocket.Conn, req protocol.WebSocketRequest) error {
+func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *server.SafeConn, req protocol.WebSocketRequest) error {
 	// Parse DeviceRegistrationRequest from payload
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
@@ -236,7 +239,7 @@ func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *websocket.
 }
 
 // handleTagScanned processes a tag scan event from a device.
-func (h *DeviceHandler) handleTagScanned(conn *websocket.Conn, deviceID string, req protocol.WebSocketRequest) error {
+func (h *DeviceHandler) handleTagScanned(conn *server.SafeConn, deviceID string, req protocol.WebSocketRequest) error {
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
 		log.Printf("[device] Failed to marshal tag data: %v", err)
@@ -281,7 +284,7 @@ func (h *DeviceHandler) handleTagScanned(conn *websocket.Conn, deviceID string, 
 }
 
 // handleTagRemoved processes a tag removal event from a device.
-func (h *DeviceHandler) handleTagRemoved(conn *websocket.Conn, deviceID string, req protocol.WebSocketRequest) error {
+func (h *DeviceHandler) handleTagRemoved(conn *server.SafeConn, deviceID string, req protocol.WebSocketRequest) error {
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
 		log.Printf("[device] Failed to marshal tag removed data: %v", err)
@@ -320,7 +323,7 @@ func (h *DeviceHandler) handleTagRemoved(conn *websocket.Conn, deviceID string, 
 }
 
 // handleDeviceHeartbeat processes a heartbeat from a device.
-func (h *DeviceHandler) handleDeviceHeartbeat(_ *websocket.Conn, deviceID string, req protocol.WebSocketRequest) error {
+func (h *DeviceHandler) handleDeviceHeartbeat(_ *server.SafeConn, deviceID string, req protocol.WebSocketRequest) error {
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
 		return err
@@ -352,7 +355,7 @@ func (h *DeviceHandler) handleDeviceDisconnect(deviceID string) {
 }
 
 // addDeviceSession stores a WebSocket connection for a device.
-func (h *DeviceHandler) addDeviceSession(deviceID string, conn *websocket.Conn) {
+func (h *DeviceHandler) addDeviceSession(deviceID string, conn *server.SafeConn) {
 	h.deviceSessionsMux.Lock()
 	defer h.deviceSessionsMux.Unlock()
 
@@ -361,7 +364,7 @@ func (h *DeviceHandler) addDeviceSession(deviceID string, conn *websocket.Conn) 
 }
 
 // getDeviceIDFromConn retrieves the device ID for a connection.
-func (h *DeviceHandler) getDeviceIDFromConn(conn *websocket.Conn) string {
+func (h *DeviceHandler) getDeviceIDFromConn(conn *server.SafeConn) string {
 	h.deviceSessionsMux.RLock()
 	defer h.deviceSessionsMux.RUnlock()
 
@@ -393,7 +396,7 @@ func (h *DeviceHandler) SendToDevice(deviceID string, message any) error {
 }
 
 // sendError sends an error response to a device.
-func (h *DeviceHandler) sendError(conn *websocket.Conn, requestID string, errorCode string, message string) {
+func (h *DeviceHandler) sendError(conn *server.SafeConn, requestID string, errorCode string, message string) {
 	response := protocol.WebSocketResponse{
 		ID:      requestID,
 		Type:    protocol.WSTypeError,

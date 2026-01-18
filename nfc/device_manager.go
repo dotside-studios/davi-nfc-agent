@@ -179,6 +179,18 @@ func (dm *DeviceManager) DevicePath() string {
 	return dm.devicePath
 }
 
+// SetDevicePath sets the device path to use for connections.
+func (dm *DeviceManager) SetDevicePath(path string) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	dm.devicePath = path
+}
+
+// Manager returns the underlying NFC manager for device discovery.
+func (dm *DeviceManager) Manager() Manager {
+	return dm.manager
+}
+
 // TryConnect attempts to connect to the device. If the device is already connected
 // and responsive, it returns nil. Otherwise, it attempts to open and initialize the device.
 func (dm *DeviceManager) TryConnect() error {
@@ -404,6 +416,11 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 		dm.clock.Sleep(PostErrorPauseTime)
 		if errReconnect := dm.ForceReconnect(stopChan); errReconnect != nil {
 			log.Printf("Force reconnection failed after IO/Config error: %v", errReconnect)
+			// Clear device path to enable auto-discovery of new devices
+			dm.mu.Lock()
+			dm.devicePath = ""
+			dm.mu.Unlock()
+			log.Println("Device path cleared, waiting for device connection...")
 		}
 		return false
 	}
@@ -448,13 +465,15 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			}
 			dm.device = nil
 			dm.hasDevice = false
-			dm.retryCount = 0 // Reset retry count when entering cooldown
+			dm.devicePath = "" // Clear device path to enable auto-discovery
+			dm.retryCount = 0  // Reset retry count when entering cooldown
 			if !dm.inCooldown {
 				dm.inCooldown = true
 				dm.cooldownTimer.Reset(MaxRetriesCooldownPeriod)
 				log.Println("Entering long cooldown after max retries for Timeout/Closed error.")
 			}
 			dm.mu.Unlock()
+			log.Println("Device path cleared, waiting for device connection...")
 			dm.emitEvent(CooldownStarted, "Max retries reached, entering cooldown", err)
 			return true
 		}

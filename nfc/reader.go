@@ -413,6 +413,16 @@ func (r *NFCReader) doPoll() {
 
 	// Try to connect if no device
 	if !hasDev {
+		// If no device path configured, try to discover one
+		if r.deviceManager.DevicePath() == "" {
+			devices, err := r.deviceManager.Manager().ListDevices()
+			if err != nil || len(devices) == 0 {
+				return // No devices available yet
+			}
+			// Auto-select the first available device
+			log.Printf("Device discovered, auto-selecting: %s", devices[0])
+			r.deviceManager.SetDevicePath(devices[0])
+		}
 		if err := r.deviceManager.TryConnect(); err != nil {
 			// No card present is normal - just wait and retry
 			if !IsNoCardError(err) {

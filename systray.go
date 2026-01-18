@@ -41,7 +41,6 @@ func getLocalIPs() []string {
 // SystrayApp manages the system tray interface for the NFC agent
 type SystrayApp struct {
 	agent         *Agent
-	currentDevice string
 	initialDevice string
 	bootstrapPort int
 
@@ -81,7 +80,6 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int) *Systr
 	return &SystrayApp{
 		agent:           agent,
 		initialDevice:   initialDevice,
-		currentDevice:   initialDevice,
 		bootstrapPort:   bootstrapPort,
 		deviceMenuItems: make(map[string]*systray.MenuItem),
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
@@ -190,7 +188,8 @@ func (s *SystrayApp) autoStartAgent() {
 	s.setupDeviceChangeListener()
 
 	go func() {
-		if err := s.agent.Start(s.currentDevice); err == nil {
+		// Start with initial device (may be empty for auto-discovery)
+		if err := s.agent.Start(s.initialDevice); err == nil {
 			s.updateStatus("Running")
 			s.updateURLs()
 			s.mStop.Enable()
@@ -319,11 +318,14 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 
 // handleStartAgent starts the agent
 func (s *SystrayApp) handleStartAgent() {
-	if err := s.agent.Start(s.currentDevice); err == nil {
+	// Use agent's stored device path (or empty for auto-discovery)
+	devicePath := s.agent.CurrentDevicePath()
+	if err := s.agent.Start(devicePath); err == nil {
 		s.updateStatus("Running")
 		s.updateURLs()
 		s.mStart.Disable()
 		s.mStop.Enable()
+		s.updateDeviceList() // Refresh to show current device
 	} else {
 		s.updateStatus("Failed to Start")
 	}
@@ -410,11 +412,12 @@ func (s *SystrayApp) handleCardTypeToggle(filter *cardTypeFilterItem) {
 
 // handleDeviceSelection processes device menu selections
 func (s *SystrayApp) handleDeviceSelection() {
+	currentDevice := s.agent.CurrentDevicePath()
 	for deviceName, menuItem := range s.deviceMenuItems {
 		select {
 		case <-menuItem.ClickedCh:
-			if s.currentDevice != deviceName {
-				s.switchDevice(deviceName, menuItem)
+			if currentDevice != deviceName {
+				s.switchDevice(deviceName)
 			}
 		default:
 			// No click event for this menu item
@@ -423,29 +426,28 @@ func (s *SystrayApp) handleDeviceSelection() {
 }
 
 // switchDevice switches to a different NFC device
-func (s *SystrayApp) switchDevice(deviceName string, menuItem *systray.MenuItem) {
-	// Uncheck all devices
-	for _, item := range s.deviceMenuItems {
-		item.Uncheck()
+func (s *SystrayApp) switchDevice(deviceName string) {
+	// Restart agent with new device
+	s.agent.Stop()
+	if err := s.agent.Start(deviceName); err == nil {
+		s.updateStatus("Running")
+		s.updateURLs()
+		s.mStop.Enable()
+		s.mStart.Disable()
+	} else {
+		s.updateStatus("Failed to Start")
+		s.clearURLs()
+		s.mStart.Enable()
+		s.mStop.Disable()
 	}
 
-	// Check selected device
-	menuItem.Check()
-	s.currentDevice = deviceName
-
-	// Restart agent with new device
-	if s.agent.Reader != nil {
-		s.agent.Stop()
-		if err := s.agent.Start(s.currentDevice); err == nil {
-			s.updateStatus("Running")
-			s.updateURLs()
-			s.mStop.Enable()
-			s.mStart.Disable()
+	// Update menu checkmarks based on agent's current device
+	currentDevice := s.agent.CurrentDevicePath()
+	for name, item := range s.deviceMenuItems {
+		if name == currentDevice {
+			item.Check()
 		} else {
-			s.updateStatus("Failed to Start")
-			s.clearURLs()
-			s.mStart.Enable()
-			s.mStop.Disable()
+			item.Uncheck()
 		}
 	}
 }
@@ -465,16 +467,22 @@ func (s *SystrayApp) updateDeviceList() {
 		return
 	}
 
+	// Get current device from agent (source of truth)
+	currentDevice := s.agent.CurrentDevicePath()
+
+	// If agent is running but no device selected, auto-select first available
+	if s.agent.Reader != nil && currentDevice == "" && len(devices) > 0 {
+		log.Printf("[systray] Auto-selecting discovered device: %s", devices[0])
+		s.switchDevice(devices[0])
+		currentDevice = s.agent.CurrentDevicePath()
+	}
+
 	// Add device menu items
 	for _, device := range devices {
 		deviceName := device
-		isChecked := (s.currentDevice == deviceName) || (s.currentDevice == "" && len(s.deviceMenuItems) == 0)
+		isChecked := (currentDevice == deviceName)
 		item := s.mDeviceMenu.AddSubMenuItemCheckbox(deviceName, "Select this device", isChecked)
 		s.deviceMenuItems[deviceName] = item
-
-		if isChecked && s.currentDevice == "" {
-			s.currentDevice = deviceName
-		}
 	}
 }
 

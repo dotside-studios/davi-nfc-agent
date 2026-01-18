@@ -86,14 +86,13 @@ func (a *Agent) Start(devicePath string) error {
 		devices, err := a.Manager.ListDevices()
 		if err != nil {
 			a.Logger.Printf("Error listing NFC devices: %v", err)
-			return err
+			// Continue without a device - one may connect later
+		} else if len(devices) == 0 {
+			a.Logger.Println("No NFC devices found - waiting for device connection")
+		} else {
+			devicePath = devices[0]
+			a.Logger.Printf("Auto-selected NFC device: %s", devicePath)
 		}
-		if len(devices) == 0 {
-			a.Logger.Println("No NFC devices found")
-			return errors.New("no NFC devices found")
-		}
-		devicePath = devices[0]
-		a.Logger.Printf("Auto-selected NFC device: %s", devicePath)
 	}
 
 	// Store device path for potential restarts
@@ -295,4 +294,13 @@ func (a *Agent) DisallowCardType(cardType string) {
 
 func (a *Agent) IsCardTypeAllowed(cardType string) bool {
 	return a.AllowedCardTypes[cardType]
+}
+
+// CurrentDevicePath returns the current device path from the reader.
+// Returns empty string if no reader is active.
+func (a *Agent) CurrentDevicePath() string {
+	if a.Reader == nil {
+		return a.devicePath // Return stored path if reader not started
+	}
+	return a.Reader.DevicePath()
 }

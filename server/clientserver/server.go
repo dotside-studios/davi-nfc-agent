@@ -182,14 +182,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[client] Client disconnected: %s (total: %d)", clientID[:8], s.clientCount())
 	}()
 
-	// Send last card data if available
-	s.cardMu.RLock()
-	lastCard := s.lastCard
-	s.cardMu.RUnlock()
-	if lastCard != nil {
-		s.sendTagDataToClient(conn, nfc.NFCData{Card: lastCard})
-	}
-
 	// Handle incoming messages
 	for {
 		_, message, err := conn.ReadMessage()

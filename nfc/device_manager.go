@@ -210,14 +210,7 @@ func (dm *DeviceManager) TryConnect() error {
 
 	devicePathToConnect := dm.devicePath
 	if devicePathToConnect == "" {
-		devices, errList := dm.manager.ListDevices()
-		if errList != nil {
-			return fmt.Errorf("error listing NFC devices: %w", errList)
-		}
-		if len(devices) == 0 {
-			return fmt.Errorf("no NFC devices found by manager")
-		}
-		devicePathToConnect = devices[0]
+		return fmt.Errorf("no device path configured")
 	}
 
 	newDevice, errOpen := dm.manager.OpenDevice(devicePathToConnect)

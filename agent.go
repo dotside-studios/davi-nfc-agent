@@ -81,6 +81,21 @@ func (a *Agent) Start(devicePath string) error {
 		return errors.New("agent is already running")
 	}
 
+	// If no device path specified, discover available devices
+	if devicePath == "" {
+		devices, err := a.Manager.ListDevices()
+		if err != nil {
+			a.Logger.Printf("Error listing NFC devices: %v", err)
+			return err
+		}
+		if len(devices) == 0 {
+			a.Logger.Println("No NFC devices found")
+			return errors.New("no NFC devices found")
+		}
+		devicePath = devices[0]
+		a.Logger.Printf("Auto-selected NFC device: %s", devicePath)
+	}
+
 	// Store device path for potential restarts
 	a.devicePath = devicePath
 

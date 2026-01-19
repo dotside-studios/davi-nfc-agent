@@ -52,9 +52,15 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 		return nil, err
 	}
 
+	// Hold the lock for all context operations to prevent the context from being
+	// released by another goroutine calling ensureContext() while we're using it.
 	m.ctxMu.Lock()
+	defer m.ctxMu.Unlock()
+
 	ctx := m.ctx
-	m.ctxMu.Unlock()
+	if ctx == nil {
+		return nil, fmt.Errorf("PC/SC context is nil")
+	}
 
 	// If no device specified, use the first available reader
 	readerName := deviceStr
@@ -75,7 +81,7 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 
 	// Check if a card is present before attempting to connect
 	// This prevents blocking on Connect() when no card is present
-	cardPresent, err := m.isCardPresent(ctx, readerName)
+	cardPresent, err := m.isCardPresentLocked(ctx, readerName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check card presence: %w", err)
 	}
@@ -109,9 +115,10 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 	return dev, nil
 }
 
-// isCardPresent checks if a card is present in the reader using GetStatusChange
+// isCardPresentLocked checks if a card is present in the reader using GetStatusChange
 // with a very short timeout to avoid blocking.
-func (m *pcscManager) isCardPresent(ctx *scard.Context, readerName string) (bool, error) {
+// NOTE: Caller must hold ctxMu lock.
+func (m *pcscManager) isCardPresentLocked(ctx *scard.Context, readerName string) (bool, error) {
 	// Create reader state for status check
 	readerStates := []scard.ReaderState{
 		{
@@ -148,12 +155,21 @@ func (m *pcscManager) ListDevices() ([]string, error) {
 			continue
 		}
 
+		// Hold the lock while using the context to prevent it from being
+		// released by another goroutine calling ensureContext().
 		m.ctxMu.Lock()
 		ctx := m.ctx
-		m.ctxMu.Unlock()
+		if ctx == nil {
+			m.ctxMu.Unlock()
+			lastErr = fmt.Errorf("PC/SC context is nil")
+			time.Sleep(time.Millisecond * 100)
+			continue
+		}
 
 		var err error
 		readers, err = ctx.ListReaders()
+		m.ctxMu.Unlock()
+
 		if err != nil {
 			lastErr = err
 			time.Sleep(time.Millisecond * 100)

@@ -80,10 +80,14 @@ type SystrayApp struct {
 	mClientURL        *systray.MenuItem
 	mBootstrapURL     *systray.MenuItem
 	mPairingPIN       *systray.MenuItem
+	mAPISecret        *systray.MenuItem
 	mCopyDeviceURL    *systray.MenuItem
 	mCopyClientURL    *systray.MenuItem
 	mCopyBootstrapURL *systray.MenuItem
 	mCopyPairingPIN   *systray.MenuItem
+	mCopyAPISecret    *systray.MenuItem
+	mRotatePIN        *systray.MenuItem
+	mRotateAPISecret  *systray.MenuItem
 
 	deviceMenuItems map[string]*systray.MenuItem
 
@@ -155,9 +159,22 @@ func (s *SystrayApp) setupUI() {
 	s.mPairingPIN = s.mURLsMenu.AddSubMenuItem("Pairing PIN: --", "PIN required when pairing a phone")
 	s.mPairingPIN.Disable()
 	s.mCopyPairingPIN = s.mURLsMenu.AddSubMenuItem("  Copy Pairing PIN", "Copy 6-digit pairing PIN to clipboard")
+	s.mRotatePIN = s.mURLsMenu.AddSubMenuItem("  Regenerate Pairing PIN", "Generate a fresh PIN; existing pairing URLs become invalid")
 	if s.bootstrap == nil {
 		s.mPairingPIN.Hide()
 		s.mCopyPairingPIN.Hide()
+		s.mRotatePIN.Hide()
+	}
+
+	// API secret menu items (only shown if a secret is configured)
+	s.mAPISecret = s.mURLsMenu.AddSubMenuItem("API Secret: hidden", "Required from non-loopback phones/clients")
+	s.mAPISecret.Disable()
+	s.mCopyAPISecret = s.mURLsMenu.AddSubMenuItem("  Copy API Secret", "Copy the agent's API secret to clipboard")
+	s.mRotateAPISecret = s.mURLsMenu.AddSubMenuItem("  Regenerate API Secret", "Generate a fresh secret; all phones must re-handshake")
+	if s.agent.APISecret == "" {
+		s.mAPISecret.Hide()
+		s.mCopyAPISecret.Hide()
+		s.mRotateAPISecret.Hide()
 	}
 
 	systray.AddSeparator()
@@ -336,6 +353,28 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 				} else {
 					log.Printf("[systray] Copied pairing PIN to clipboard")
 				}
+			}
+		case <-s.mRotatePIN.ClickedCh:
+			if s.bootstrap != nil {
+				fresh := s.bootstrap.RotatePIN()
+				log.Printf("[systray] Pairing PIN rotated to %s", fresh)
+				s.updateURLs()
+			}
+		case <-s.mCopyAPISecret.ClickedCh:
+			if s.agent.APISecret != "" {
+				if err := copyToClipboard(s.agent.APISecret); err != nil {
+					log.Printf("[systray] Failed to copy API secret: %v", err)
+				} else {
+					log.Printf("[systray] Copied API secret to clipboard")
+				}
+			}
+		case <-s.mRotateAPISecret.ClickedCh:
+			fresh, err := s.agent.RotateAPISecret()
+			if err != nil {
+				log.Printf("[systray] Failed to rotate API secret: %v", err)
+			} else {
+				log.Printf("[systray] API secret rotated; servers restarted")
+				s.updateAPISecretLabel(fresh)
 			}
 		case <-s.mReadWriteMode.ClickedCh:
 			s.handleModeSwitch(nfc.ModeReadWrite, "Read/Write")
@@ -618,6 +657,24 @@ func (s *SystrayApp) updateURLs() {
 	} else {
 		s.mBootstrapURL.SetTitle("Pair Phone: Disabled")
 	}
+
+	s.updateAPISecretLabel(s.agent.APISecret)
+}
+
+// updateAPISecretLabel updates the systray label with a redacted view
+// of the API secret. The full secret is available via Copy.
+func (s *SystrayApp) updateAPISecretLabel(secret string) {
+	if secret == "" {
+		s.mAPISecret.SetTitle("API Secret: not set")
+		return
+	}
+	// Show first/last 4 chars only — operators can confirm the secret
+	// changed after rotation without leaking it on the screen.
+	preview := secret
+	if len(secret) > 12 {
+		preview = secret[:4] + "…" + secret[len(secret)-4:]
+	}
+	s.mAPISecret.SetTitle("API Secret: " + preview)
 }
 
 // clearURLs resets all URL displays to "Not running"

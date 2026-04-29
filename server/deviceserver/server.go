@@ -47,9 +47,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		bridge:  bridge,
 		devices: make(map[*websocket.Conn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin: server.CheckOrigin(config.AllowedOrigins),
 		},
 		handlerRegistry: server.NewHandlerRegistry(),
 	}
@@ -62,7 +60,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 
 	// Register device handler (external devices like phones)
 	if config.DeviceManager != nil {
-		deviceHandler := NewDeviceHandler(config.DeviceManager, bridge)
+		deviceHandler := NewDeviceHandler(config.DeviceManager, bridge, config.AllowedOrigins)
 		deviceHandler.Register(s)
 	}
 
@@ -203,6 +201,11 @@ func (s *Server) Stop() {
 
 // handleWebSocket handles WebSocket connections from devices.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if !server.CheckAPISecret(w, r, s.config.APISecret) {
+		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
+		return
+	}
+
 	// Try custom handlers first (e.g., remotenfc)
 	if s.handlerRegistry.TryCustomWebSocketHandler(w, r) {
 		return

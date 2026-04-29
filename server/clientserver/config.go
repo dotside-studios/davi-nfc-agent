@@ -5,8 +5,13 @@ type Config struct {
 	// Port is the HTTP/WebSocket port to listen on
 	Port int
 
-	// APISecret is the optional API secret for authentication
+	// APISecret is the API secret required for non-loopback connections.
+	// Empty means no auth (legacy / development mode).
 	APISecret string
+
+	// AllowedOrigins extends the default same-origin policy. Use ["*"]
+	// to disable origin checking entirely (NOT recommended).
+	AllowedOrigins []string
 
 	// TLS configuration (optional)
 	CertFile string // Path to TLS certificate file

@@ -285,6 +285,53 @@ func TestQREndpoint(t *testing.T) {
 	}
 }
 
+func TestRotatePIN(t *testing.T) {
+	srv, ts := newTestServer(t)
+	old := srv.PIN()
+
+	// Lock the server first.
+	for range bootstrapMaxFailures {
+		resp, _ := http.Get(ts.URL + "/ca.pem?pin=000000")
+		resp.Body.Close()
+	}
+
+	// Confirm locked.
+	resp, _ := http.Get(ts.URL + "/ca.pem?pin=" + url.QueryEscape(old))
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("pre-rotate: expected 429, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Rotate. Should produce a different PIN and reset the counter.
+	fresh := srv.RotatePIN()
+	if fresh == old {
+		t.Errorf("RotatePIN returned same value")
+	}
+	if got := srv.PIN(); got != fresh {
+		t.Errorf("PIN() = %q after rotate, want %q", got, fresh)
+	}
+
+	// New PIN should now succeed.
+	resp, err := http.Get(ts.URL + "/ca.pem?pin=" + url.QueryEscape(fresh))
+	if err != nil {
+		t.Fatalf("post-rotate: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("post-rotate: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Old PIN should no longer work.
+	resp2, err := http.Get(ts.URL + "/ca.pem?pin=" + url.QueryEscape(old))
+	if err != nil {
+		t.Fatalf("post-rotate old PIN: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Errorf("post-rotate old PIN: expected 401, got %d", resp2.StatusCode)
+	}
+}
+
 func TestIndexShowsQR(t *testing.T) {
 	_, ts := newTestServer(t)
 

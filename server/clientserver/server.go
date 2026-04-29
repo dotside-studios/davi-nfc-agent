@@ -45,9 +45,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		bridge:  bridge,
 		clients: make(map[*server.SafeConn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin: server.CheckOrigin(config.AllowedOrigins),
 		},
 	}
 }
@@ -148,14 +146,9 @@ func (s *Server) GetLastCard() *nfc.Card {
 
 // handleWebSocket handles WebSocket connections from clients.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Validate optional API secret if configured
-	if s.config.APISecret != "" {
-		secret := r.URL.Query().Get("secret")
-		if secret != s.config.APISecret {
-			log.Printf("[client] WebSocket connection rejected: invalid API secret")
-			http.Error(w, "Unauthorized: Invalid API secret", http.StatusUnauthorized)
-			return
-		}
+	if !server.CheckAPISecret(w, r, s.config.APISecret) {
+		log.Printf("[client] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
+		return
 	}
 
 	wsConn, err := s.upgrader.Upgrade(w, r, nil)

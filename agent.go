@@ -36,6 +36,7 @@ type Agent struct {
 	Reader           *nfc.NFCReader
 	AllowedCardTypes map[string]bool // Card type filter using map
 	APISecret        string
+	ConfigDir        string // Config directory; used for persisting the API secret
 
 	// Two-server architecture
 	Bridge       *server.ServerBridge
@@ -264,6 +265,31 @@ func (a *Agent) startServers() error {
 
 	a.Logger.Printf("Servers started: Device on port %d, Client on port %d", a.DevicePort, a.ClientPort)
 	return nil
+}
+
+// RotateAPISecret generates a fresh API secret, persists it under
+// ConfigDir, updates the running servers, and restarts them so the
+// new secret takes effect. Existing connections are dropped (clients
+// must re-handshake with the new secret).
+//
+// Returns the new secret. Errors propagate from filesystem ops or
+// server restart; on error the previous secret remains in effect.
+func (a *Agent) RotateAPISecret() (string, error) {
+	if a.ConfigDir == "" {
+		return "", errors.New("config dir not configured")
+	}
+
+	fresh, err := rotateAPISecret(a.ConfigDir)
+	if err != nil {
+		return "", err
+	}
+
+	a.APISecret = fresh
+	a.Logger.Println("API secret rotated; restarting servers…")
+	if err := a.RestartServers(); err != nil {
+		return fresh, err
+	}
+	return fresh, nil
 }
 
 func (a *Agent) SetAllowCardType(cardType string, allow bool) {

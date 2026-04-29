@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,7 @@ type BootstrapServer struct {
 	httpServer *http.Server
 	logger     *log.Logger
 
+	pinMu  sync.RWMutex
 	pin    string
 	failed atomic.Int32
 }
@@ -66,8 +68,26 @@ func NewBootstrapServer(manager caReader, port int) *BootstrapServer {
 	}
 }
 
-// PIN returns the 6-digit pairing PIN.
-func (s *BootstrapServer) PIN() string { return s.pin }
+// PIN returns the current 6-digit pairing PIN.
+func (s *BootstrapServer) PIN() string {
+	s.pinMu.RLock()
+	defer s.pinMu.RUnlock()
+	return s.pin
+}
+
+// RotatePIN replaces the PIN with a fresh random value and resets the
+// failed-attempt counter. Existing pairing URLs (with the old PIN
+// embedded) become invalid; the kiosk operator should regenerate any
+// QR codes already in use.
+func (s *BootstrapServer) RotatePIN() string {
+	fresh := generatePIN()
+	s.pinMu.Lock()
+	s.pin = fresh
+	s.pinMu.Unlock()
+	s.failed.Store(0)
+	s.logger.Printf("Pairing PIN rotated; failed-attempt counter reset")
+	return fresh
+}
 
 func generatePIN() string {
 	var b [4]byte
@@ -98,7 +118,7 @@ func (s *BootstrapServer) Start() error {
 	}
 
 	s.logger.Printf("Pairing server: http://localhost:%d", s.port)
-	s.logger.Printf("Pairing PIN: %s", s.pin)
+	s.logger.Printf("Pairing PIN: %s", s.PIN())
 
 	if hosts, err := GetAllHosts(); err == nil {
 		for _, h := range hosts {
@@ -146,7 +166,7 @@ func (s *BootstrapServer) requirePIN(w http.ResponseWriter, r *http.Request) boo
 		pin = r.Header.Get("X-Bootstrap-PIN")
 	}
 
-	if !pinMatch(pin, s.pin) {
+	if !pinMatch(pin, s.PIN()) {
 		n := s.failed.Add(1)
 		s.logger.Printf("Wrong PIN from %s (attempt %d/%d)", r.RemoteAddr, n, bootstrapMaxFailures)
 		http.Error(w, "Invalid PIN.", http.StatusUnauthorized)
@@ -180,7 +200,7 @@ func (s *BootstrapServer) handleInstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	pin := url.QueryEscape(s.pin)
+	pin := url.QueryEscape(s.PIN())
 	ua := r.UserAgent()
 
 	switch {
@@ -245,7 +265,7 @@ func (s *BootstrapServer) handleQR(w http.ResponseWriter, r *http.Request) {
 	if host == "" {
 		host = net.JoinHostPort("localhost", fmt.Sprintf("%d", s.port))
 	}
-	target := fmt.Sprintf("http://%s/install?pin=%s", host, url.QueryEscape(s.pin))
+	target := fmt.Sprintf("http://%s/install?pin=%s", host, url.QueryEscape(s.PIN()))
 
 	png, err := qrcode.Encode(target, qrcode.Medium, 360)
 	if err != nil {

@@ -64,14 +64,16 @@ func main() {
 
 	log.Printf("Starting %s %s", buildinfo.Name, buildinfo.FullVersion())
 
+	// Resolve the config directory once — used by both the TLS manager
+	// and the persistent API secret.
+	configDir := configDirFlag
+	if configDir == "" {
+		configDir = getDefaultConfigDir()
+	}
+
 	// Initialize auto-TLS if enabled (and no manual cert/key provided)
 	var tlsMgr *tls.Manager
 	if autoTLSFlag && certFileFlag == "" && keyFileFlag == "" {
-		configDir := configDirFlag
-		if configDir == "" {
-			configDir = getDefaultConfigDir()
-		}
-
 		tlsMgr = tls.NewManager(configDir)
 		certFile, keyFile, err := tlsMgr.EnsureCertificates()
 		if err != nil {
@@ -80,6 +82,22 @@ func main() {
 		} else {
 			certFileFlag = certFile
 			keyFileFlag = keyFile
+		}
+	}
+
+	// Resolve the API secret. Explicit -api-secret takes precedence;
+	// otherwise we load (or first-run generate) one persisted under
+	// the config directory so phones paired across restarts keep
+	// working without manual reconfiguration.
+	if apiSecretFlag == "" {
+		secret, fresh, err := loadOrCreateAPISecret(configDir)
+		if err != nil {
+			log.Printf("Warning: failed to load API secret: %v (running without auth)", err)
+		} else {
+			apiSecretFlag = secret
+			if fresh {
+				log.Printf("Generated new API secret at %s", configDir)
+			}
 		}
 	}
 
@@ -106,6 +124,7 @@ func main() {
 	agent.DevicePort = devicePortFlag
 	agent.ClientPort = clientPortFlag
 	agent.APISecret = apiSecretFlag
+	agent.ConfigDir = configDir
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration

@@ -25,17 +25,16 @@ type DeviceHandler struct {
 	upgrader          websocket.Upgrader
 }
 
-// NewDeviceHandler creates a new device handler.
-func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge) *DeviceHandler {
+// NewDeviceHandler creates a new device handler. allowedOrigins extends
+// the default same-origin policy on the device WebSocket upgrade.
+func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, allowedOrigins []string) *DeviceHandler {
 	return &DeviceHandler{
 		manager:        manager,
 		bridge:         bridge,
 		deviceSessions: make(map[string]*server.SafeConn),
 		connToDeviceID: make(map[*server.SafeConn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow all origins
-			},
+			CheckOrigin: server.CheckOrigin(allowedOrigins),
 		},
 	}
 }

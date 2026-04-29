@@ -36,6 +36,7 @@ go test ./...
 
 ### Cross-Platform Builds
 
+**macOS / Linux / WSL** (`scripts/build.sh`):
 ```bash
 # Build for current platform
 ./scripts/build.sh
@@ -47,6 +48,18 @@ go test ./...
 ./scripts/build.sh darwin arm64
 ./scripts/build.sh windows amd64
 ```
+
+**Windows** (`scripts/build.ps1`, PowerShell 5.1+):
+```powershell
+# Build for current platform (windows/amd64 by default)
+./scripts/build.ps1
+
+# Build for a specific Windows arch
+./scripts/build.ps1 windows arm64
+```
+
+Cross-compilation _from Windows_ to Linux/macOS is not supported by
+`build.ps1` (needs mingw/clang); use WSL + `build.sh` for that case.
 
 ### Build with Version Info
 

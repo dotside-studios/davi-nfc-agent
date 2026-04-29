@@ -101,32 +101,33 @@ func (m *Manager) certsExist() bool {
 	return certErr == nil && keyErr == nil
 }
 
-// hostsChanged checks if current hosts differ from cached hosts.
+// hostsChanged checks if current hosts differ from cached hosts on disk.
+// Used at startup to decide whether to regenerate; the runtime watcher
+// compares against in-memory state instead.
 func (m *Manager) hostsChanged(hosts []string) bool {
 	cachedHosts, err := m.readCachedHosts()
 	if err != nil {
 		return true // If we can't read cached hosts, assume they changed
 	}
+	return !sameHosts(cachedHosts, hosts)
+}
 
-	if len(cachedHosts) != len(hosts) {
-		return true
+// sameHosts reports whether two host slices contain the same entries
+// (order-independent). Inputs are not mutated.
+func sameHosts(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
-
-	// Sort both for comparison
-	sortedCached := make([]string, len(cachedHosts))
-	sortedHosts := make([]string, len(hosts))
-	copy(sortedCached, cachedHosts)
-	copy(sortedHosts, hosts)
-	sort.Strings(sortedCached)
-	sort.Strings(sortedHosts)
-
-	for i, h := range sortedHosts {
-		if sortedCached[i] != h {
-			return true
+	sa := append([]string(nil), a...)
+	sb := append([]string(nil), b...)
+	sort.Strings(sa)
+	sort.Strings(sb)
+	for i := range sa {
+		if sa[i] != sb[i] {
+			return false
 		}
 	}
-
-	return false
+	return true
 }
 
 // readCachedHosts reads the cached hosts from file.
@@ -323,6 +324,9 @@ func (m *Manager) StopWatching() {
 }
 
 // watchNetworkLoop monitors for network changes and regenerates certificates.
+// Comparison is against in-memory state (lastHosts), not the on-disk hosts
+// cache, so a transient writeCachedHosts failure cannot wedge the loop into
+// regenerating every tick.
 func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -337,14 +341,13 @@ func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struc
 				continue
 			}
 
-			if !m.hostsChanged(currentHosts) {
-				continue
-			}
-
 			m.mu.Lock()
 			prev := append([]string(nil), m.lastHosts...)
-			m.lastHosts = currentHosts
 			m.mu.Unlock()
+
+			if sameHosts(prev, currentHosts) {
+				continue
+			}
 
 			m.logger.Printf("Network change detected: %v -> %v", prev, currentHosts)
 
@@ -353,7 +356,12 @@ func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struc
 				continue
 			}
 
-			// Notify listeners
+			// Only commit lastHosts after a successful regen so the next tick
+			// retries if regeneration partially failed.
+			m.mu.Lock()
+			m.lastHosts = currentHosts
+			m.mu.Unlock()
+
 			select {
 			case notifyCh <- struct{}{}:
 			default:

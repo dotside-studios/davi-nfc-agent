@@ -3,6 +3,7 @@ package tls
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -122,6 +123,34 @@ func TestCertsExist(t *testing.T) {
 	os.WriteFile(mgr.keyFile, []byte("key"), 0600)
 	if !mgr.certsExist() {
 		t.Error("Expected certsExist=true when both files exist")
+	}
+}
+
+func TestSameHosts(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []string
+		want bool
+	}{
+		{"both empty", nil, nil, true},
+		{"identical order", []string{"a", "b"}, []string{"a", "b"}, true},
+		{"reordered", []string{"a", "b", "c"}, []string{"c", "a", "b"}, true},
+		{"different length", []string{"a"}, []string{"a", "b"}, false},
+		{"different content", []string{"a", "b"}, []string{"a", "c"}, false},
+		{"ipv6 + ipv4 mix", []string{"127.0.0.1", "::1", "192.168.1.5"}, []string{"::1", "192.168.1.5", "127.0.0.1"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origA := append([]string(nil), tt.a...)
+			origB := append([]string(nil), tt.b...)
+			if got := sameHosts(tt.a, tt.b); got != tt.want {
+				t.Errorf("sameHosts(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+			// Inputs must not be mutated.
+			if !reflect.DeepEqual(tt.a, origA) || !reflect.DeepEqual(tt.b, origB) {
+				t.Errorf("sameHosts mutated its inputs: a=%v (was %v), b=%v (was %v)", tt.a, origA, tt.b, origB)
+			}
+		})
 	}
 }
 

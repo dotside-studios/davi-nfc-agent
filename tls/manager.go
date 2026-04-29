@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jittering/truststore"
@@ -27,7 +28,8 @@ type Manager struct {
 	hostsFile  string
 	logger     *log.Logger
 
-	// Network change watching
+	// Network change watching. mu guards the three fields below.
+	mu                sync.Mutex
 	networkChangeChan chan struct{}
 	stopWatchChan     chan struct{}
 	lastHosts         []string
@@ -287,24 +289,33 @@ func (m *Manager) ReadCACert() ([]byte, error) {
 // WatchNetworkChanges starts watching for network changes and returns a channel
 // that signals when certificates have been regenerated due to IP changes.
 // The channel receives a signal after new certificates are ready.
+// Safe to call multiple times; subsequent calls return the existing channel.
 func (m *Manager) WatchNetworkChanges() <-chan struct{} {
+	m.mu.Lock()
 	if m.networkChangeChan != nil {
-		return m.networkChangeChan
+		ch := m.networkChangeChan
+		m.mu.Unlock()
+		return ch
 	}
 
-	m.networkChangeChan = make(chan struct{}, 1)
-	m.stopWatchChan = make(chan struct{})
-
-	// Initialize with current hosts
+	notifyCh := make(chan struct{}, 1)
+	stopCh := make(chan struct{})
+	m.networkChangeChan = notifyCh
+	m.stopWatchChan = stopCh
 	m.lastHosts, _ = GetAllHosts()
+	m.mu.Unlock()
 
-	go m.watchNetworkLoop()
+	// Pass channels by parameter so the goroutine doesn't race with
+	// StopWatching reading/writing m.stopWatchChan.
+	go m.watchNetworkLoop(stopCh, notifyCh)
 
-	return m.networkChangeChan
+	return notifyCh
 }
 
-// StopWatching stops the network change watcher.
+// StopWatching stops the network change watcher. Safe to call multiple times.
 func (m *Manager) StopWatching() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.stopWatchChan != nil {
 		close(m.stopWatchChan)
 		m.stopWatchChan = nil
@@ -312,13 +323,13 @@ func (m *Manager) StopWatching() {
 }
 
 // watchNetworkLoop monitors for network changes and regenerates certificates.
-func (m *Manager) watchNetworkLoop() {
+func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-m.stopWatchChan:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			currentHosts, err := GetAllHosts()
@@ -326,22 +337,27 @@ func (m *Manager) watchNetworkLoop() {
 				continue
 			}
 
-			if m.hostsChanged(currentHosts) {
-				m.logger.Printf("Network change detected: %v -> %v", m.lastHosts, currentHosts)
-				m.lastHosts = currentHosts
+			if !m.hostsChanged(currentHosts) {
+				continue
+			}
 
-				// Regenerate certificates
-				if err := m.RegenerateCertificates(); err != nil {
-					m.logger.Printf("Failed to regenerate certificates: %v", err)
-					continue
-				}
+			m.mu.Lock()
+			prev := append([]string(nil), m.lastHosts...)
+			m.lastHosts = currentHosts
+			m.mu.Unlock()
 
-				// Notify listeners
-				select {
-				case m.networkChangeChan <- struct{}{}:
-				default:
-					// Channel full, skip
-				}
+			m.logger.Printf("Network change detected: %v -> %v", prev, currentHosts)
+
+			if err := m.RegenerateCertificates(); err != nil {
+				m.logger.Printf("Failed to regenerate certificates: %v", err)
+				continue
+			}
+
+			// Notify listeners
+			select {
+			case notifyCh <- struct{}{}:
+			default:
+				// Channel full, skip
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package tls
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -122,4 +123,45 @@ func TestCertsExist(t *testing.T) {
 	if !mgr.certsExist() {
 		t.Error("Expected certsExist=true when both files exist")
 	}
+}
+
+// TestWatchNetworkChangesConcurrency exercises the watcher init/teardown paths
+// under concurrent callers. Run with -race to detect data races on the
+// networkChangeChan / stopWatchChan / lastHosts fields.
+func TestWatchNetworkChangesConcurrency(t *testing.T) {
+	mgr := NewManager(t.TempDir())
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+
+	// Concurrent WatchNetworkChanges callers must all return the same channel.
+	chans := make([]<-chan struct{}, goroutines)
+	wg.Add(goroutines)
+	for i := range goroutines {
+		go func(idx int) {
+			defer wg.Done()
+			chans[idx] = mgr.WatchNetworkChanges()
+		}(i)
+	}
+	wg.Wait()
+
+	first := chans[0]
+	if first == nil {
+		t.Fatal("WatchNetworkChanges returned nil channel")
+	}
+	for i, ch := range chans {
+		if ch != first {
+			t.Errorf("call %d returned a different channel; expected single shared channel", i)
+		}
+	}
+
+	// Concurrent StopWatching calls must not panic on double-close.
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			mgr.StopWatching()
+		}()
+	}
+	wg.Wait()
 }

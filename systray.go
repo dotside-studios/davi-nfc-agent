@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
 // cardTypeFilterItem holds a menu item and its associated card type
@@ -62,6 +64,7 @@ type SystrayApp struct {
 	agent         *Agent
 	initialDevice string
 	bootstrapPort int
+	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
 
 	// Menu items
 	mStatus     *systray.MenuItem
@@ -76,9 +79,11 @@ type SystrayApp struct {
 	mDeviceURL        *systray.MenuItem
 	mClientURL        *systray.MenuItem
 	mBootstrapURL     *systray.MenuItem
+	mPairingPIN       *systray.MenuItem
 	mCopyDeviceURL    *systray.MenuItem
 	mCopyClientURL    *systray.MenuItem
 	mCopyBootstrapURL *systray.MenuItem
+	mCopyPairingPIN   *systray.MenuItem
 
 	deviceMenuItems map[string]*systray.MenuItem
 
@@ -94,12 +99,15 @@ type SystrayApp struct {
 	cardTypeFilters map[string]*cardTypeFilterItem // Maps card type to filter item
 }
 
-// NewSystrayApp creates a new systray application
-func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int) *SystrayApp {
+// NewSystrayApp creates a new systray application. bootstrap may be nil
+// if the pairing server is disabled (e.g. -bootstrap-port 0); the
+// pairing PIN menu item is hidden in that case.
+func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer) *SystrayApp {
 	return &SystrayApp{
 		agent:           agent,
 		initialDevice:   initialDevice,
 		bootstrapPort:   bootstrapPort,
+		bootstrap:       bootstrap,
 		deviceMenuItems: make(map[string]*systray.MenuItem),
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
 	}
@@ -141,9 +149,16 @@ func (s *SystrayApp) setupUI() {
 	s.mClientURL = s.mURLsMenu.AddSubMenuItem("Client: Not running", "ClientServer URL")
 	s.mClientURL.Disable()
 	s.mCopyClientURL = s.mURLsMenu.AddSubMenuItem("  Copy Client URL", "Copy ClientServer URL to clipboard")
-	s.mBootstrapURL = s.mURLsMenu.AddSubMenuItem("CA Cert: Not running", "CA Certificate download URL")
+	s.mBootstrapURL = s.mURLsMenu.AddSubMenuItem("Pair Phone: Not running", "Phone-pairing page URL")
 	s.mBootstrapURL.Disable()
-	s.mCopyBootstrapURL = s.mURLsMenu.AddSubMenuItem("  Copy CA URL", "Copy CA Certificate URL to clipboard")
+	s.mCopyBootstrapURL = s.mURLsMenu.AddSubMenuItem("  Copy Pairing URL", "Copy phone-pairing URL to clipboard")
+	s.mPairingPIN = s.mURLsMenu.AddSubMenuItem("Pairing PIN: --", "PIN required when pairing a phone")
+	s.mPairingPIN.Disable()
+	s.mCopyPairingPIN = s.mURLsMenu.AddSubMenuItem("  Copy Pairing PIN", "Copy 6-digit pairing PIN to clipboard")
+	if s.bootstrap == nil {
+		s.mPairingPIN.Hide()
+		s.mCopyPairingPIN.Hide()
+	}
 
 	systray.AddSeparator()
 
@@ -307,11 +322,19 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 				}
 			}
 		case <-s.mCopyBootstrapURL.ClickedCh:
-			if url := s.getBootstrapURL(); url != "" {
-				if err := copyToClipboard(url); err != nil {
+			if u := s.getBootstrapURL(); u != "" {
+				if err := copyToClipboard(u); err != nil {
 					log.Printf("[systray] Failed to copy to clipboard: %v", err)
 				} else {
-					log.Printf("[systray] Copied CA Certificate URL to clipboard")
+					log.Printf("[systray] Copied phone-pairing URL to clipboard")
+				}
+			}
+		case <-s.mCopyPairingPIN.ClickedCh:
+			if s.bootstrap != nil {
+				if err := copyToClipboard(s.bootstrap.PIN()); err != nil {
+					log.Printf("[systray] Failed to copy PIN: %v", err)
+				} else {
+					log.Printf("[systray] Copied pairing PIN to clipboard")
 				}
 			}
 		case <-s.mReadWriteMode.ClickedCh:
@@ -581,12 +604,19 @@ func (s *SystrayApp) updateURLs() {
 	clientURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
 	s.mClientURL.SetTitle(fmt.Sprintf("Client: %s", clientURL))
 
-	// Bootstrap/CA URL (always HTTP, only if bootstrap port is set)
+	// Phone-pairing URL (always HTTP, only if bootstrap port is set).
+	// The URL embeds the PIN so a clicked link goes straight through.
 	if s.bootstrapPort > 0 {
-		bootstrapURL := fmt.Sprintf("http://%s", hostPort(ip, s.bootstrapPort))
-		s.mBootstrapURL.SetTitle(fmt.Sprintf("CA Cert: %s", bootstrapURL))
+		base := fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
+		if s.bootstrap != nil {
+			pinURL := base + "?pin=" + url.QueryEscape(s.bootstrap.PIN())
+			s.mBootstrapURL.SetTitle(fmt.Sprintf("Pair Phone: %s", pinURL))
+			s.mPairingPIN.SetTitle(fmt.Sprintf("Pairing PIN: %s", s.bootstrap.PIN()))
+		} else {
+			s.mBootstrapURL.SetTitle(fmt.Sprintf("Pair Phone: %s", base))
+		}
 	} else {
-		s.mBootstrapURL.SetTitle("CA Cert: Disabled")
+		s.mBootstrapURL.SetTitle("Pair Phone: Disabled")
 	}
 }
 
@@ -639,7 +669,9 @@ func (s *SystrayApp) getClientURL() string {
 	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
 }
 
-// getBootstrapURL returns the CA certificate download URL
+// getBootstrapURL returns the phone-pairing page URL with the PIN
+// pre-filled so a colleague clicking it from chat lands on the QR
+// directly. Returns "" if the pairing server is disabled.
 func (s *SystrayApp) getBootstrapURL() string {
 	if s.bootstrapPort <= 0 {
 		return ""
@@ -651,7 +683,11 @@ func (s *SystrayApp) getBootstrapURL() string {
 		ip = ips[0]
 	}
 
-	return fmt.Sprintf("http://%s", hostPort(ip, s.bootstrapPort))
+	base := fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
+	if s.bootstrap != nil {
+		return base + "?pin=" + url.QueryEscape(s.bootstrap.PIN())
+	}
+	return base
 }
 
 // clipboardCmd describes one candidate clipboard utility.

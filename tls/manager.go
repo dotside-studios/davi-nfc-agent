@@ -324,49 +324,55 @@ func (m *Manager) StopWatching() {
 }
 
 // watchNetworkLoop monitors for network changes and regenerates certificates.
-// Comparison is against in-memory state (lastHosts), not the on-disk hosts
-// cache, so a transient writeCachedHosts failure cannot wedge the loop into
-// regenerating every tick.
+// Driven by native OS address-change notifications when available
+// (netlink/route socket/NotifyAddrChange) with a 30s ticker as a safety net
+// in case events are missed. Comparison is against in-memory state
+// (lastHosts), not the on-disk hosts cache, so a transient writeCachedHosts
+// failure cannot wedge the loop into regenerating every tick.
 func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struct{}) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	addrCh := addrChangeNotifier(stopCh)
 
 	for {
 		select {
 		case <-stopCh:
 			return
 		case <-ticker.C:
-			currentHosts, err := GetAllHosts()
-			if err != nil {
-				continue
-			}
+		case <-addrCh:
+		}
 
-			m.mu.Lock()
-			prev := append([]string(nil), m.lastHosts...)
-			m.mu.Unlock()
+		currentHosts, err := GetAllHosts()
+		if err != nil {
+			continue
+		}
 
-			if sameHosts(prev, currentHosts) {
-				continue
-			}
+		m.mu.Lock()
+		prev := append([]string(nil), m.lastHosts...)
+		m.mu.Unlock()
 
-			m.logger.Printf("Network change detected: %v -> %v", prev, currentHosts)
+		if sameHosts(prev, currentHosts) {
+			continue
+		}
 
-			if err := m.RegenerateCertificates(); err != nil {
-				m.logger.Printf("Failed to regenerate certificates: %v", err)
-				continue
-			}
+		m.logger.Printf("Network change detected: %v -> %v", prev, currentHosts)
 
-			// Only commit lastHosts after a successful regen so the next tick
-			// retries if regeneration partially failed.
-			m.mu.Lock()
-			m.lastHosts = currentHosts
-			m.mu.Unlock()
+		if err := m.RegenerateCertificates(); err != nil {
+			m.logger.Printf("Failed to regenerate certificates: %v", err)
+			continue
+		}
 
-			select {
-			case notifyCh <- struct{}{}:
-			default:
-				// Channel full, skip
-			}
+		// Only commit lastHosts after a successful regen so the next tick
+		// retries if regeneration partially failed.
+		m.mu.Lock()
+		m.lastHosts = currentHosts
+		m.mu.Unlock()
+
+		select {
+		case notifyCh <- struct{}{}:
+		default:
+			// Channel full, skip
 		}
 	}
 }

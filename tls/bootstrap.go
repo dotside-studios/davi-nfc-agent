@@ -357,8 +357,13 @@ func (s *BootstrapServer) buildAppleProfile() ([]byte, error) {
 // the QR. Also works on a phone hit directly (you'll just see the QR
 // in miniature; scanning your own screen doesn't help, so include a
 // PIN-entry fallback for that case).
+//
+// Copy is aimed at non-technical kiosk operators: concrete steps,
+// no jargon, the most-skipped step (iOS Certificate Trust Settings)
+// is visually called out.
 func (s *BootstrapServer) serveInstallPage(w http.ResponseWriter) {
 	appName := buildinfo.DisplayName
+	caName := appName + " NFC CA"
 	fingerprint, _ := s.manager.GetCAFingerprint()
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
@@ -369,27 +374,34 @@ func (s *BootstrapServer) serveInstallPage(w http.ResponseWriter) {
 <title>%s · Pair a phone</title>
 <style>
 * { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #f5f5f5; color: #222; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #f5f5f5; color: #222; line-height: 1.5; }
 h1 { margin: 0 0 8px; font-size: 1.5em; }
-h2 { color: #555; font-size: 0.85em; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+h2 { color: #333; font-size: 1.05em; margin: 0 0 12px; }
 .card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .qr { display: block; margin: 16px auto; max-width: 320px; height: auto; image-rendering: pixelated; }
-.lede { color: #444; line-height: 1.45; }
+.lede { color: #444; }
 .muted { color: #777; font-size: 0.9em; }
 .fp { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.7em; color: #888; word-break: break-all; }
-ol li { margin-bottom: 6px; line-height: 1.45; }
+ol, ul { padding-left: 20px; }
+ol li, ul li { margin-bottom: 8px; }
 form { margin-top: 16px; display: flex; gap: 8px; }
 input[type=text] { flex: 1; padding: 12px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; font-family: ui-monospace, monospace; letter-spacing: 0.1em; }
 button { padding: 12px 18px; border: 0; border-radius: 8px; background: #007AFF; color: #fff; font-weight: 600; cursor: pointer; }
 button[disabled] { background: #ccc; cursor: not-allowed; }
+.callout { background: #fff8e1; border-left: 4px solid #ff9800; padding: 16px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+.callout strong { color: #b75900; }
+.platform { display: inline-block; background: #eef2f7; color: #334; padding: 1px 8px; border-radius: 4px; font-size: 0.85em; font-weight: 600; margin-right: 6px; }
+.tip { background: #e8f4fd; border-left: 4px solid #2196f3; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 0.95em; }
+.tip strong { color: #0d47a1; }
+.footer { color: #999; font-size: 0.8em; text-align: center; margin-top: 24px; }
 </style>
 </head>
 <body>
 <div class="card">
     <h1>Pair a phone with this kiosk</h1>
-    <p class="lede">Open your phone's camera and point it at the QR code below. Your phone will guide you through the rest.</p>
+    <p class="lede">Open your phone's camera and point it at the QR code below. Tap the link your phone shows.</p>
     <img class="qr" src="/qr.png" alt="Pairing QR" />
-    <p class="muted" style="text-align:center">If the QR doesn't scan, type the PIN shown in the kiosk's tray icon below.</p>
+    <p class="muted" style="text-align:center">No camera or scanner? Type the 6-digit PIN from the kiosk's tray icon.</p>
     <form id="manualForm" action="/install" method="get">
         <input type="text" name="pin" id="pinInput" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit PIN" autocomplete="off" required>
         <button type="submit" id="pairBtn" disabled>Pair</button>
@@ -397,18 +409,28 @@ button[disabled] { background: #ccc; cursor: not-allowed; }
 </div>
 
 <div class="card">
-    <h2>What happens next</h2>
-    <ol>
-        <li><strong>iPhone:</strong> a configuration profile downloads. Open <em>Settings → Profile Downloaded</em> and tap <strong>Install</strong>. Then <em>Settings → General → About → Certificate Trust Settings</em> and enable trust for <em>%s NFC CA</em>.</li>
-        <li><strong>Android:</strong> Chrome opens an install prompt. Confirm and (if asked) name the certificate.</li>
-        <li>You're done — the phone now trusts this kiosk for NFC pairing.</li>
-    </ol>
+    <h2>What your phone will show</h2>
+    <p><span class="platform">iPhone</span> A pop-up asks if you want to <strong>download a configuration profile</strong>. Tap <strong>Allow</strong>. Then open <strong>Settings</strong> — at the very top you'll see <strong>Profile Downloaded</strong>. Tap it, then <strong>Install</strong>, and enter your phone passcode.</p>
+    <p><span class="platform">Android</span> Chrome will pop up <strong>"Install certificate"</strong>. Confirm, then if asked, name it (e.g. <em>%s</em>) and confirm again with your screen-lock PIN/pattern.</p>
+</div>
+
+<div class="callout">
+    <strong>iPhone — one extra step everyone forgets</strong>
+    <p style="margin: 6px 0 0;">After installing, go to <strong>Settings → General → About → Certificate Trust Settings</strong> and turn on the toggle next to <strong>%s</strong>. The phone won't actually trust the kiosk until you do this, and there's no warning that you skipped it.</p>
 </div>
 
 <div class="card">
-    <h2>Trust details</h2>
-    <p class="muted">Self-signed CA generated by this kiosk. Pair on a trusted network — an active attacker on a hostile network could substitute a different certificate during pairing.</p>
-    <p class="fp">SHA-256: %s</p>
+    <h2>If something looks wrong</h2>
+    <ul>
+        <li>The certificate name your phone shows should be <strong>%s</strong>. If it's anything else, close the page and tell your IT contact — somebody else may be on the network.</li>
+        <li>Pair on the same Wi-Fi as the kiosk: ideally the kiosk's own network or your office Wi-Fi. Avoid pairing over public Wi-Fi (cafés, airports, hotels).</li>
+        <li>Wrong PIN five times will lock the kiosk's pairing for safety. Restart the kiosk app to unlock.</li>
+    </ul>
+</div>
+
+<div class="footer">
+    Kiosk certificate fingerprint (for IT verification):<br>
+    <span class="fp">SHA-256: %s</span>
 </div>
 <script>
 (function() {
@@ -420,7 +442,7 @@ button[disabled] { background: #ccc; cursor: not-allowed; }
 })();
 </script>
 </body>
-</html>`, appName, appName, fingerprint)
+</html>`, appName, caName, caName, caName, fingerprint)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))

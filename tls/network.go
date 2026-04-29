@@ -5,7 +5,9 @@ import (
 	"net"
 )
 
-// GetLANIPs returns all local IPv4 addresses (non-loopback).
+// GetLANIPs returns local non-loopback IP addresses (both IPv4 and IPv6 globals).
+// IPv6 link-local addresses (fe80::/10) and unspecified addresses are skipped because
+// they are not routable across hosts and would clutter certificate SANs.
 func GetLANIPs() ([]string, error) {
 	var ips []string
 
@@ -34,10 +36,10 @@ func GetLANIPs() ([]string, error) {
 				ip = v.IP
 			}
 
-			// Only include IPv4 addresses
-			if ip != nil && ip.To4() != nil && !ip.IsLoopback() {
-				ips = append(ips, ip.String())
+			if ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				continue
 			}
+			ips = append(ips, ip.String())
 		}
 	}
 
@@ -45,8 +47,10 @@ func GetLANIPs() ([]string, error) {
 }
 
 // GetAllHosts returns localhost + LAN IPs for certificate generation.
+// Includes both IPv4 (127.0.0.1) and IPv6 (::1) loopback so certs validate
+// regardless of which family the client resolves localhost to.
 func GetAllHosts() ([]string, error) {
-	hosts := []string{"localhost", "127.0.0.1"}
+	hosts := []string{"localhost", "127.0.0.1", "::1"}
 
 	lanIPs, err := GetLANIPs()
 	if err != nil {

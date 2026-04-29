@@ -52,7 +52,7 @@ func (s *BootstrapServer) Start() error {
 	if hosts, err := GetAllHosts(); err == nil {
 		for _, h := range hosts {
 			if h != "localhost" {
-				s.logger.Printf("  http://%s:%d/ca.pem", h, s.port)
+				s.logger.Printf("  http://%s/ca.pem", net.JoinHostPort(h, fmt.Sprintf("%d", s.port)))
 			}
 		}
 	}
@@ -210,11 +210,11 @@ func (s *BootstrapServer) handleInstructions(w http.ResponseWriter, r *http.Requ
     <div class="card">
         <h2>Download URLs</h2>
         <p style="font-family: monospace; font-size: 0.9em;">
-            http://localhost:%d/ca.pem<br>
+            http://%s/ca.pem<br>
 %s        </p>
     </div>
 </body>
-</html>`, appName, appName, appName, fingerprint, s.port, formatIPLinks(hosts, s.port))
+</html>`, appName, appName, appName, fingerprint, net.JoinHostPort("localhost", fmt.Sprintf("%d", s.port)), formatIPLinks(hosts, s.port))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
@@ -222,13 +222,15 @@ func (s *BootstrapServer) handleInstructions(w http.ResponseWriter, r *http.Requ
 
 // formatIPLinks formats IP addresses as HTML links.
 func formatIPLinks(hosts []string, port int) string {
+	portStr := fmt.Sprintf("%d", port)
 	var links []string
 	for _, h := range hosts {
-		if h != "localhost" && h != "127.0.0.1" {
-			// Check if it's a valid IP (not a hostname)
-			if ip := net.ParseIP(h); ip != nil {
-				links = append(links, fmt.Sprintf("            http://%s:%d/ca.pem<br>", h, port))
-			}
+		if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+			continue
+		}
+		// Check if it's a valid IP (not a hostname)
+		if ip := net.ParseIP(h); ip != nil {
+			links = append(links, fmt.Sprintf("            http://%s/ca.pem<br>", net.JoinHostPort(h, portStr)))
 		}
 	}
 	return strings.Join(links, "\n")

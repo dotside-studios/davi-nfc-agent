@@ -53,9 +53,12 @@ func NewManager(configDir string) *Manager {
 // Returns cert and key file paths, or error.
 // Installs CA if not already trusted (may prompt user for password).
 func (m *Manager) EnsureCertificates() (certFile, keyFile string, err error) {
-	// Ensure TLS directory exists
+	// Ensure TLS directory exists with restrictive permissions.
 	if err := os.MkdirAll(m.tlsDir, 0700); err != nil {
 		return "", "", fmt.Errorf("failed to create TLS directory: %w", err)
+	}
+	if err := secureDir(m.tlsDir); err != nil {
+		m.logger.Printf("Warning: failed to lock down TLS directory permissions: %v", err)
 	}
 
 	// Get current hosts
@@ -144,9 +147,9 @@ func (m *Manager) readCachedHosts() ([]string, error) {
 	return hosts, scanner.Err()
 }
 
-// writeCachedHosts writes the hosts to cache file.
+// writeCachedHosts writes the hosts to cache file with owner-only permissions.
 func (m *Manager) writeCachedHosts(hosts []string) error {
-	file, err := os.Create(m.hostsFile)
+	file, err := os.OpenFile(m.hostsFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
@@ -156,14 +159,21 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 		fmt.Fprintln(file, host)
 	}
 
+	// Re-apply restrictive ACL on Windows where the mode bits are advisory.
+	if err := secureFile(m.hostsFile); err != nil {
+		m.logger.Printf("Warning: failed to lock down hosts file permissions: %v", err)
+	}
 	return nil
 }
 
 // generateCertificates generates new certificates using truststore.
 func (m *Manager) generateCertificates(hosts []string) error {
-	// Set CAROOT to our config directory so truststore stores CA there
+	// Set CAROOT to our config directory so truststore stores CA there.
 	if err := os.MkdirAll(m.caDir, 0700); err != nil {
 		return fmt.Errorf("failed to create CA directory: %w", err)
+	}
+	if err := secureDir(m.caDir); err != nil {
+		m.logger.Printf("Warning: failed to lock down CA directory permissions: %v", err)
 	}
 	os.Setenv("CAROOT", m.caDir)
 
@@ -193,7 +203,7 @@ func (m *Manager) generateCertificates(hosts []string) error {
 		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
 
-	// Rename files to our expected names
+	// Rename files to our expected names.
 	if cert.CertFile != m.certFile {
 		if err := os.Rename(cert.CertFile, m.certFile); err != nil {
 			return fmt.Errorf("failed to rename cert file: %w", err)
@@ -203,6 +213,12 @@ func (m *Manager) generateCertificates(hosts []string) error {
 		if err := os.Rename(cert.KeyFile, m.keyFile); err != nil {
 			return fmt.Errorf("failed to rename key file: %w", err)
 		}
+	}
+
+	// Restrict ACL on the private key. The cert is public, but truststore may
+	// have created the key world-readable on Windows (Unix mode bits ignored).
+	if err := secureFile(m.keyFile); err != nil {
+		m.logger.Printf("Warning: failed to lock down key file permissions: %v", err)
 	}
 
 	// Cache the hosts

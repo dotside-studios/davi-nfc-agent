@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"time"
 
 	"fyne.io/systray"
@@ -20,22 +21,37 @@ type cardTypeFilterItem struct {
 	cardType string
 }
 
-// getLocalIPs returns a list of local IP addresses (excluding loopback)
+// getLocalIPs returns local non-loopback IP addresses (both IPv4 and IPv6 globals).
+// IPv4 addresses come first so callers that pick ips[0] get the most broadly
+// compatible address. Link-local and unspecified addresses are skipped.
 func getLocalIPs() []string {
-	var ips []string
+	var v4, v6 []string
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return ips
+		return nil
 	}
 
 	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ipNet.IP.To4() != nil {
-				ips = append(ips, ipNet.IP.String())
-			}
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP
+		if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			continue
+		}
+		if ip.To4() != nil {
+			v4 = append(v4, ip.String())
+		} else {
+			v6 = append(v6, ip.String())
 		}
 	}
-	return ips
+	return append(v4, v6...)
+}
+
+// hostPort joins a host and port using bracket notation for IPv6 literals.
+func hostPort(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // SystrayApp manages the system tray interface for the NFC agent
@@ -551,7 +567,7 @@ func (s *SystrayApp) updateURLs() {
 	if devicePort == 0 {
 		devicePort = DEFAULT_DEVICE_PORT
 	}
-	deviceURL := fmt.Sprintf("%s://%s:%d/ws", wsProto, ip, devicePort)
+	deviceURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
 	s.mDeviceURL.SetTitle(fmt.Sprintf("Device: %s", deviceURL))
 
 	// Client server URL
@@ -559,12 +575,12 @@ func (s *SystrayApp) updateURLs() {
 	if clientPort == 0 {
 		clientPort = DEFAULT_CLIENT_PORT
 	}
-	clientURL := fmt.Sprintf("%s://%s:%d/ws", wsProto, ip, clientPort)
+	clientURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
 	s.mClientURL.SetTitle(fmt.Sprintf("Client: %s", clientURL))
 
 	// Bootstrap/CA URL (always HTTP, only if bootstrap port is set)
 	if s.bootstrapPort > 0 {
-		bootstrapURL := fmt.Sprintf("http://%s:%d", ip, s.bootstrapPort)
+		bootstrapURL := fmt.Sprintf("http://%s", hostPort(ip, s.bootstrapPort))
 		s.mBootstrapURL.SetTitle(fmt.Sprintf("CA Cert: %s", bootstrapURL))
 	} else {
 		s.mBootstrapURL.SetTitle("CA Cert: Disabled")
@@ -596,7 +612,7 @@ func (s *SystrayApp) getDeviceURL() string {
 	if devicePort == 0 {
 		devicePort = DEFAULT_DEVICE_PORT
 	}
-	return fmt.Sprintf("%s://%s:%d/ws", wsProto, ip, devicePort)
+	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
 }
 
 // getClientURL returns the current ClientServer URL
@@ -617,7 +633,7 @@ func (s *SystrayApp) getClientURL() string {
 	if clientPort == 0 {
 		clientPort = DEFAULT_CLIENT_PORT
 	}
-	return fmt.Sprintf("%s://%s:%d/ws", wsProto, ip, clientPort)
+	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
 }
 
 // getBootstrapURL returns the CA certificate download URL
@@ -632,7 +648,7 @@ func (s *SystrayApp) getBootstrapURL() string {
 		ip = ips[0]
 	}
 
-	return fmt.Sprintf("http://%s:%d", ip, s.bootstrapPort)
+	return fmt.Sprintf("http://%s", hostPort(ip, s.bootstrapPort))
 }
 
 // copyToClipboard copies text to the system clipboard

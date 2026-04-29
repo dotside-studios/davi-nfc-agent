@@ -27,26 +27,20 @@ func TestGetAllHosts(t *testing.T) {
 
 	t.Logf("Hosts for certificate: %v", hosts)
 
-	// Should always include localhost and 127.0.0.1
-	if len(hosts) < 2 {
-		t.Error("Expected at least localhost and 127.0.0.1")
+	// Should always include localhost, 127.0.0.1, and ::1
+	if len(hosts) < 3 {
+		t.Error("Expected at least localhost, 127.0.0.1, and ::1")
 	}
 
-	hasLocalhost := false
-	hasLoopback := false
+	want := map[string]bool{"localhost": false, "127.0.0.1": false, "::1": false}
 	for _, h := range hosts {
-		if h == "localhost" {
-			hasLocalhost = true
-		}
-		if h == "127.0.0.1" {
-			hasLoopback = true
+		if _, ok := want[h]; ok {
+			want[h] = true
 		}
 	}
-
-	if !hasLocalhost {
-		t.Error("Expected localhost in hosts")
-	}
-	if !hasLoopback {
-		t.Error("Expected 127.0.0.1 in hosts")
+	for h, found := range want {
+		if !found {
+			t.Errorf("Expected %q in hosts", h)
+		}
 	}
 }

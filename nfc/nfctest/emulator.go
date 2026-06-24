@@ -239,7 +239,43 @@ type classicEmulator struct {
 	authedKey byte         // key type used for the current auth (MIFAREKeyA/B)
 	bricked   map[int]bool // sectors invalidated by inconsistent access bits
 	present   bool
+	is4K      bool // 4K geometry: sectors 32-39 have 16 blocks each
 	removalModel
+}
+
+// classicSectorOf returns the physical sector containing an absolute block. For
+// 4K, sectors 32-39 (blocks 128-255) hold 16 blocks each.
+func classicSectorOf(block int, is4K bool) int {
+	if is4K && block >= 128 {
+		return 32 + (block-128)/16
+	}
+	return block / 4
+}
+
+// classicTrailerBlock returns the absolute trailer block of a sector.
+func classicTrailerBlock(sector int, is4K bool) int {
+	if is4K && sector >= 32 {
+		return 128 + (sector-32)*16 + 15
+	}
+	return sector*4 + 3
+}
+
+// classicAreaIndex maps an absolute block to its access-condition area (0-2 for
+// data, 3 for the trailer). Large 4K sectors group their 15 data blocks into
+// three areas of five.
+func classicAreaIndex(block int, is4K bool) int {
+	sector := classicSectorOf(block, is4K)
+	if is4K && sector >= 32 {
+		inSector := block - (128 + (sector-32)*16)
+		if inSector == 15 {
+			return 3
+		}
+		if a := inSector / 5; a < 3 {
+			return a
+		}
+		return 2
+	}
+	return block % 4
 }
 
 // setRemoveAfter makes the card leave the field after n transceive operations.
@@ -264,6 +300,28 @@ func newClassicEmulator() *classicEmulator {
 		}
 		// Transport access bits FF 07 80 (data blocks read/write with either
 		// key; trailer rewritable with key A), GPB 0x69.
+		e.blocks[tr][6], e.blocks[tr][7] = 0xFF, 0x07
+		e.blocks[tr][8], e.blocks[tr][9] = 0x80, 0x69
+	}
+	return e
+}
+
+// newClassic4KEmulator builds a blank MIFARE Classic 4K (256 blocks, 40 sectors:
+// 0-31 with 4 blocks, 32-39 with 16 blocks), all trailers in transport config.
+func newClassic4KEmulator() *classicEmulator {
+	e := &classicEmulator{
+		blocks:  make([][16]byte, 256),
+		authed:  -1,
+		bricked: make(map[int]bool),
+		present: true,
+		is4K:    true,
+	}
+	for sector := 0; sector < 40; sector++ {
+		tr := classicTrailerBlock(sector, true)
+		for i := 0; i < 6; i++ {
+			e.blocks[tr][i] = 0xFF
+			e.blocks[tr][10+i] = 0xFF
+		}
 		e.blocks[tr][6], e.blocks[tr][7] = 0xFF, 0x07
 		e.blocks[tr][8], e.blocks[tr][9] = 0x80, 0x69
 	}
@@ -325,9 +383,10 @@ func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
 		// A trailer written with inconsistent access bits invalidates the
 		// sector on real silicon — model that so formatting mistakes are
 		// observable in software.
-		if block%4 == 3 {
+		sector := classicSectorOf(block, e.is4K)
+		if block == classicTrailerBlock(sector, e.is4K) {
 			if _, ok := accessConditions(e.blocks[block]); !ok {
-				e.bricked[block/4] = true
+				e.bricked[sector] = true
 			}
 		}
 		return []byte{nfc.SW1Success, nfc.SW2Success}, nil
@@ -366,8 +425,8 @@ func (e *classicEmulator) rekeySector(sector int, key []byte) {
 }
 
 func (e *classicEmulator) authenticate(block int, keyType byte) bool {
-	sector := block / 4
-	tr := sector*4 + 3
+	sector := classicSectorOf(block, e.is4K)
+	tr := classicTrailerBlock(sector, e.is4K)
 	if e.loadedKey == nil || tr >= len(e.blocks) || e.bricked[sector] {
 		return false
 	}
@@ -383,24 +442,27 @@ func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 	return false
 }
 
-func (e *classicEmulator) isAuthedFor(block int) bool { return e.authed == block/4 }
+func (e *classicEmulator) isAuthedFor(block int) bool {
+	return e.authed == classicSectorOf(block, e.is4K)
+}
 
 // accessAllows reports whether the current authentication permits the given
 // read (write=false) or write (write=true) of an absolute block, per the
 // sector trailer's access bits. A sector whose access bits are inconsistent (or
 // already bricked) denies everything.
 func (e *classicEmulator) accessAllows(block int, write bool) bool {
-	sector := block / 4
+	sector := classicSectorOf(block, e.is4K)
 	if e.bricked[sector] {
 		return false
 	}
-	cond, ok := accessConditions(e.blocks[sector*4+3])
+	cond, ok := accessConditions(e.blocks[classicTrailerBlock(sector, e.is4K)])
 	if !ok {
 		return false
 	}
 	keyB := e.authedKey == nfc.MIFAREKeyB
-	ci := condIndex(cond[block%4])
-	if block%4 == 3 {
+	area := classicAreaIndex(block, e.is4K)
+	ci := condIndex(cond[area])
+	if area == 3 {
 		// Trailer: model the permission to rewrite it (Key A write column).
 		if write {
 			return classicTrailerWritePerm(ci).allows(keyB)

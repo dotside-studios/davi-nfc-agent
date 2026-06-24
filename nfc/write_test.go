@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestWriteMessageWithResult_RetriesThenSucceeds(t *testing.T) {
 	mockTag.WriteDataFunc = func(_ []byte) error {
 		writeCalls++
 		if writeCalls == 1 {
-			return errOf("transient RF glitch")
+			return errors.New("transient RF glitch")
 		}
 		return nil
 	}
@@ -190,12 +191,3 @@ func TestWriteMessageWithResult_SkipVerify(t *testing.T) {
 		t.Errorf("expected 1 attempt, got %d", result.Attempts)
 	}
 }
-
-// errOf is a tiny helper to build a plain (non-permanent) error.
-func errOf(msg string) error {
-	return &simpleErr{msg}
-}
-
-type simpleErr struct{ s string }
-
-func (e *simpleErr) Error() string { return e.s }

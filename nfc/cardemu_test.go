@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -25,6 +26,12 @@ type memEmulator struct {
 	pages       [][4]byte
 	dynLockPage int // 0 means no dynamic lock area (original Ultralight)
 	present     bool
+
+	// Fault injection (set before use): failWrites NAKs the next N write
+	// commands to exercise retry; corrupt stores inverted bytes to exercise
+	// read-back verification.
+	failWrites int
+	corrupt    bool
 }
 
 // newNTAGEmulator builds an emulator with the geometry of the given NTAG model.
@@ -80,7 +87,19 @@ func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
 		if len(cmd) < 5+lc {
 			return emuFail(), nil
 		}
-		if !e.writeMem(int(page), cmd[5:5+lc]) {
+		if e.failWrites > 0 {
+			e.failWrites--
+			return emuFail(), nil // simulate a transient NAK
+		}
+		data := cmd[5 : 5+lc]
+		if e.corrupt {
+			bad := make([]byte, len(data))
+			for i, b := range data {
+				bad[i] = b ^ 0xFF
+			}
+			data = bad
+		}
+		if !e.writeMem(int(page), data) {
 			return emuFail(), nil
 		}
 		return []byte{SW1Success, SW2Success}, nil
@@ -604,5 +623,149 @@ func TestPipeline_DESFireWriteVerify(t *testing.T) {
 	}
 	if !result.Verified {
 		t.Error("expected verified write through the DESFire driver")
+	}
+}
+
+// --- Edge cases: stress the reliability features against real drivers ---
+
+// TestPipeline_NTAGLargePayloadMultiPage writes a payload spanning many pages so
+// the page-iteration math and read-back verification are exercised at scale, not
+// just for a single page.
+func TestPipeline_NTAGLargePayloadMultiPage(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215) // 504-byte capacity
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("a", 200)), WriteOptions{Overwrite: true, Index: -1})
+	if err != nil {
+		t.Fatalf("multi-page write: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected multi-page write to verify by read-back")
+	}
+}
+
+// TestPipeline_ClassicMultiSector writes a payload large enough to span several
+// MIFARE Classic sectors, exercising per-sector re-authentication and
+// sector-trailer skipping under verification.
+func TestPipeline_ClassicMultiSector(t *testing.T) {
+	emu := newClassicEmulator()
+	tag := newPCSCClassicTag(emu, "04112233", DetectedClassic1K)
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("y", 120)), WriteOptions{Overwrite: true, Index: -1})
+	if err != nil {
+		t.Fatalf("multi-sector write: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected multi-sector write to verify by read-back")
+	}
+}
+
+// TestPipeline_OversizedWriteRejected confirms a payload larger than the tag's
+// capacity is rejected (rather than silently truncated or corrupting the tag).
+func TestPipeline_OversizedWriteRejected(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG213) // 144-byte capacity
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG213)
+	reader := newWriteTestReader(t, tag)
+
+	if _, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("z", 300)), WriteOptions{Overwrite: true, Index: -1}); err == nil {
+		t.Error("expected oversized write to be rejected")
+	}
+}
+
+// TestPipeline_RetryRecoversFromTransientFailure injects a single transient NAK
+// and confirms the reader retries and still verifies — proving retry works
+// against the real driver, not just a mock.
+func TestPipeline_RetryRecoversFromTransientFailure(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	emu.failWrites = 1 // first page write NAKs; the retry should recover
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage("retry me"), WriteOptions{Overwrite: true, Index: -1})
+	if err != nil {
+		t.Fatalf("expected retry to recover, got: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected verified after retry")
+	}
+	if result.Attempts < 2 {
+		t.Errorf("expected >=2 attempts after a transient failure, got %d", result.Attempts)
+	}
+}
+
+// TestPipeline_VerificationCatchesBadWrite makes every write land wrong and
+// confirms read-back verification refuses to report success — the core safety
+// property of the write pipeline.
+func TestPipeline_VerificationCatchesBadWrite(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	emu.corrupt = true // writes store inverted bytes
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	if _, err := reader.WriteMessageWithResult(textMessage("oops"), WriteOptions{Overwrite: true, Index: -1}); err == nil {
+		t.Error("verification should have caught the corrupted write and returned an error")
+	}
+}
+
+// TestPipeline_WriteAfterLockFails confirms that once a tag is locked, a
+// subsequent write through the reader fails rather than silently no-op'ing.
+func TestPipeline_WriteAfterLockFails(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	if _, err := reader.WriteMessageWithResult(textMessage("first"), WriteOptions{Overwrite: true, Index: -1, Lock: true}); err != nil {
+		t.Fatalf("write+lock: %v", err)
+	}
+	if _, err := reader.WriteMessageWithResult(textMessage("second"), WriteOptions{Overwrite: true, Index: -1}); err == nil {
+		t.Error("expected a write to a locked tag to fail")
+	}
+}
+
+// TestPipeline_EraseThroughReader writes data, erases via the reader, and
+// confirms the erase is verified.
+func TestPipeline_EraseThroughReader(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	if _, err := reader.WriteMessageWithResult(textMessage("data"), WriteOptions{Overwrite: true, Index: -1}); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+	result, err := reader.EraseCard()
+	if err != nil {
+		t.Fatalf("EraseCard: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected erase to be verified")
+	}
+}
+
+// TestPipeline_AppendRecord exercises the partial-update (append) path: a second
+// record is merged into the existing message rather than overwriting it.
+func TestPipeline_AppendRecord(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	if _, err := reader.WriteMessageWithResult(textMessage("first"), WriteOptions{Overwrite: true, Index: -1}); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if _, err := reader.WriteMessageWithResult(textMessage("second"), WriteOptions{Overwrite: false, Index: -1}); err != nil {
+		t.Fatalf("append write: %v", err)
+	}
+
+	raw, err := tag.ReadData()
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	msg, err := DecodeNDEF(raw)
+	if err != nil {
+		t.Fatalf("decode NDEF: %v", err)
+	}
+	if got := len(msg.Records()); got != 2 {
+		t.Errorf("expected 2 records after append, got %d", got)
 	}
 }

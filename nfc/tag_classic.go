@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"fmt"
+	"sync"
 )
 
 // Default MIFARE keys to try during authentication
@@ -15,6 +16,42 @@ var classicDefaultKeys = [][]byte{
 type pcscClassicTag struct {
 	pcscBaseTag
 	is4K bool
+
+	// candidateKeys holds additional authentication keys to try (beyond the
+	// built-in defaults) when reading or writing this tag. Configured via
+	// SetCandidateKeys, typically from NFCReader.SetClassicKeys, so production
+	// cards that don't use default keys can still be accessed. Guarded by keyMu
+	// because the reader injects keys from both its poll and write paths, which
+	// can run on different goroutines for the same tag.
+	keyMu         sync.Mutex
+	candidateKeys [][]byte
+}
+
+// SetCandidateKeys configures additional 6-byte MIFARE Classic authentication
+// keys to try, in addition to the built-in defaults, when authenticating
+// sectors. Configured keys are tried first, then the defaults, so factory and
+// NFC-Forum cards keep working. Invalid-length keys are ignored; a nil or empty
+// slice clears the configured keys (defaults only).
+func (t *pcscClassicTag) SetCandidateKeys(keys [][]byte) {
+	t.keyMu.Lock()
+	defer t.keyMu.Unlock()
+	t.candidateKeys = nil
+	for _, k := range keys {
+		if len(k) == 6 {
+			t.candidateKeys = append(t.candidateKeys, append([]byte(nil), k...))
+		}
+	}
+}
+
+// keysToTry returns the ordered set of keys to attempt during authentication:
+// configured candidate keys first, then the built-in defaults.
+func (t *pcscClassicTag) keysToTry() [][]byte {
+	t.keyMu.Lock()
+	defer t.keyMu.Unlock()
+	if len(t.candidateKeys) == 0 {
+		return classicDefaultKeys
+	}
+	return append(append([][]byte(nil), t.candidateKeys...), classicDefaultKeys...)
 }
 
 func newPCSCClassicTag(dev CardTransport, uid string, tagType DetectedTagType) *pcscClassicTag {
@@ -52,7 +89,7 @@ func (t *pcscClassicTag) Capabilities() TagCapabilities {
 func (t *pcscClassicTag) authenticateSector(sector int) error {
 	authBlock := sector*4 + 3 // Sector trailer block
 
-	for _, key := range classicDefaultKeys {
+	for _, key := range t.keysToTry() {
 		// Load key into reader's key slot 0
 		loadCmd := LoadKeyAPDU(0x00, key)
 		resp, err := t.transmitRaw(loadCmd)

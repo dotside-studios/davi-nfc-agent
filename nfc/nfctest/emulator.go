@@ -261,6 +261,26 @@ func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
 	return emuFail(), nil
 }
 
+// block returns a copy of the given absolute block, holding the lock so tests
+// can inspect emulator state without racing the reader's poll.
+func (e *classicEmulator) block(i int) [16]byte {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.blocks[i]
+}
+
+// rekeyAll sets Key A and Key B of every sector trailer to the given 6-byte key,
+// simulating a card provisioned with non-default keys.
+func (e *classicEmulator) rekeyAll(key []byte) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for s := 0; s < 16; s++ {
+		tr := s*4 + 3
+		copy(e.blocks[tr][0:6], key)
+		copy(e.blocks[tr][10:16], key)
+	}
+}
+
 func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 	sector := block / 4
 	tr := sector*4 + 3

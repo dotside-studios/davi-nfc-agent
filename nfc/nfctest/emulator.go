@@ -47,6 +47,27 @@ const (
 // to a locked page).
 func emuFail() []byte { return []byte{0x63, 0x00} }
 
+// removalModel lets an emulator simulate the card leaving the field mid-operation
+// after a given number of transceive operations. Embedded by each emulator and
+// accessed under that emulator's lock.
+type removalModel struct {
+	ops           int
+	removeAfterOp int // 0 = never remove
+}
+
+// shouldRemove increments the op counter and reports whether the card should now
+// be treated as removed. Caller must hold the emulator lock.
+func (r *removalModel) shouldRemove() bool {
+	r.ops++
+	return r.removeAfterOp > 0 && r.ops > r.removeAfterOp
+}
+
+// emuRemoved is the card-removed error an emulator returns once the modeled card
+// has left the field, mirroring a PC/SC removed-card error.
+func emuRemoved(after int) error {
+	return nfc.NewCardRemovedError(fmt.Errorf("card removed (emulated) after %d operations", after))
+}
+
 // memEmulator is an in-memory NTAG/Ultralight tag speaking the PC/SC pseudo-APDU
 // protocol (READ = FF B0, WRITE = FF D6) with static/dynamic lock-byte rules.
 // Safe for concurrent use (the reader poll touches it alongside writes).
@@ -55,9 +76,17 @@ type memEmulator struct {
 	pages       [][4]byte
 	dynLockPage int // 0 = no dynamic lock area (original Ultralight)
 	present     bool
+	removalModel
 
 	failWrites int  // NAK the next N writes (retry testing)
 	corrupt    bool // store inverted bytes (verification testing)
+}
+
+// setRemoveAfter makes the card leave the field after n transceive operations.
+func (e *memEmulator) setRemoveAfter(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removeAfterOp = n
 }
 
 func newNTAGEmulator(model nfc.DetectedTagType) *memEmulator {
@@ -90,6 +119,11 @@ func (e *memEmulator) IsCardPresent() bool {
 func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if e.shouldRemove() {
+		e.present = false
+		return nil, emuRemoved(e.removeAfterOp)
+	}
 
 	if len(cmd) < 5 || cmd[0] != nfc.CLAPCSC {
 		return emuFail(), nil
@@ -205,6 +239,14 @@ type classicEmulator struct {
 	authedKey byte         // key type used for the current auth (MIFAREKeyA/B)
 	bricked   map[int]bool // sectors invalidated by inconsistent access bits
 	present   bool
+	removalModel
+}
+
+// setRemoveAfter makes the card leave the field after n transceive operations.
+func (e *classicEmulator) setRemoveAfter(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removeAfterOp = n
 }
 
 func newClassicEmulator() *classicEmulator {
@@ -237,6 +279,11 @@ func (e *classicEmulator) IsCardPresent() bool {
 func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if e.shouldRemove() {
+		e.present = false
+		return nil, emuRemoved(e.removeAfterOp)
+	}
 
 	if len(cmd) < 5 || cmd[0] != nfc.CLAPCSC {
 		return emuFail(), nil
@@ -457,9 +504,17 @@ type desfireEmulator struct {
 	selectedNDEF bool
 	file2        []byte
 	present      bool
+	removalModel
 
 	readOff, readRemain   int
 	writeOff, writeRemain int
+}
+
+// setRemoveAfter makes the card leave the field after n transceive operations.
+func (e *desfireEmulator) setRemoveAfter(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removeAfterOp = n
 }
 
 func newDESFireEmulator() *desfireEmulator {
@@ -479,6 +534,11 @@ func dfResp(data []byte, status byte) []byte {
 func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if e.shouldRemove() {
+		e.present = false
+		return nil, emuRemoved(e.removeAfterOp)
+	}
 
 	if len(cmd) < 5 || cmd[0] != nfc.CLADESFire {
 		return dfResp(nil, 0xA0), nil

@@ -382,3 +382,111 @@ func TestClassicEmulator_AuthRequiredForAccess(t *testing.T) {
 		t.Error("expected ReadData to fail when no default key authenticates sector 1")
 	}
 }
+
+// desfireEmulator is an in-memory DESFire NDEF tag speaking the ISO-wrapped
+// native protocol the real pcscDESFireTag emits (CLA 0x90: SelectApplication
+// 0x5A, ReadData 0xBD, WriteData 0x3D). Responses carry the DESFire native
+// status in SW2 with SW1=0x91 (0x00 = OK), matching real silicon — which is why
+// the tag layer needed DESFire-specific status handling. File 2 holds the
+// NLEN-prefixed NDEF message.
+//
+// Frame chaining (the 0x91 0xAF "additional frame" flow for payloads beyond one
+// frame) is not modeled; round-trips here use short messages. Real DESFire
+// chunks reads/writes at ~59 bytes — a fidelity limit to revisit on hardware,
+// and a gap the production code does not handle yet either.
+type desfireEmulator struct {
+	selectedNDEF bool
+	file2        []byte
+	present      bool
+}
+
+func newDESFireEmulator() *desfireEmulator {
+	return &desfireEmulator{file2: make([]byte, 256), present: true}
+}
+
+func (e *desfireEmulator) IsCardPresent() bool { return e.present }
+
+// dfResp wraps optional data with the DESFire status (SW = 91 <status>).
+func dfResp(data []byte, status byte) []byte {
+	return append(append([]byte(nil), data...), 0x91, status)
+}
+
+func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
+	if len(cmd) < 5 || cmd[0] != CLADESFire {
+		return dfResp(nil, 0xA0), nil
+	}
+	lc := int(cmd[4])
+	if len(cmd) < 5+lc {
+		return dfResp(nil, 0x7E), nil // length error
+	}
+	body := cmd[5 : 5+lc]
+	switch cmd[1] {
+	case DFCmdSelectApplication:
+		if len(body) == 3 && body[0] == 0x00 && body[1] == 0x00 && body[2] == 0x01 {
+			e.selectedNDEF = true
+			return dfResp(nil, 0x00), nil
+		}
+		return dfResp(nil, 0xA0), nil // application not found
+	case DFCmdReadData:
+		off, length, ok := e.fileRange(body)
+		if !ok {
+			return dfResp(nil, 0xBE), nil // boundary error
+		}
+		return dfResp(e.file2[off:off+length], 0x00), nil
+	case DFCmdWriteData:
+		off, length, ok := e.fileRange(body)
+		if !ok || len(body) < 7+length {
+			return dfResp(nil, 0xBE), nil
+		}
+		copy(e.file2[off:off+length], body[7:7+length])
+		return dfResp(nil, 0x00), nil
+	}
+	return dfResp(nil, 0xA0), nil
+}
+
+// fileRange decodes (fileNo, 3-byte LE offset, 3-byte LE length) from a
+// Read/Write command body and validates it targets file 2 within bounds.
+func (e *desfireEmulator) fileRange(body []byte) (off, length int, ok bool) {
+	if !e.selectedNDEF || len(body) < 7 || body[0] != 0x02 {
+		return 0, 0, false
+	}
+	off = int(body[1]) | int(body[2])<<8 | int(body[3])<<16
+	length = int(body[4]) | int(body[5])<<8 | int(body[6])<<16
+	if off < 0 || length < 0 || off+length > len(e.file2) {
+		return 0, 0, false
+	}
+	return off, length, true
+}
+
+// TestDESFireEmulator_WriteReadRoundTrip runs the real pcscDESFireTag
+// WriteData/ReadData (select app + NLEN + NDEF, with DESFire status handling)
+// against the emulator.
+func TestDESFireEmulator_WriteReadRoundTrip(t *testing.T) {
+	e := newDESFireEmulator()
+	tag := newPCSCDESFireTag(e, "04DE5F1RE0")
+
+	if err := tag.WriteData(sampleNDEF); err != nil {
+		t.Fatalf("WriteData: %v", err)
+	}
+	got, err := tag.ReadData()
+	if err != nil {
+		t.Fatalf("ReadData: %v", err)
+	}
+	if !bytes.Equal(got, sampleNDEF) {
+		t.Errorf("round-trip mismatch:\n got % X\nwant % X", got, sampleNDEF)
+	}
+}
+
+// TestDESFire_WrappedStatusNotPlainISO documents why DESFire needs its own
+// status handling: a wrapped DESFire OK (91 00) is not the ISO success (90 00)
+// the generic APDU layer recognizes. The tag layer previously used that generic
+// check and would have rejected every real DESFire response.
+func TestDESFire_WrappedStatusNotPlainISO(t *testing.T) {
+	parsed, err := ParseAPDUResponse([]byte{0xDE, 0xAD, 0x91, 0x00})
+	if err != nil {
+		t.Fatalf("ParseAPDUResponse: %v", err)
+	}
+	if parsed.IsSuccess() {
+		t.Error("wrapped DESFire OK (91 00) must not pass the generic ISO 90 00 check")
+	}
+}

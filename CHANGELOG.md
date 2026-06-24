@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only the static lock bytes (pages 3-15), leaving the bulk of an NTAG215/216
   writable while reporting a successful lock; it now also sets the model's
   dynamic lock bytes. Validated end-to-end against in-memory tag emulators
+- DESFire read/write now interpret the DESFire native status word (wrapped
+  `91 00` = OK) instead of requiring ISO `90 00`. The old generic check would
+  have rejected every real DESFire response. Frame chaining (`91 AF`, payloads
+  >~59 bytes) is still unhandled — pending hardware validation
 
 ### Added
 

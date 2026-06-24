@@ -47,8 +47,6 @@ const (
 // to a locked page).
 func emuFail() []byte { return []byte{0x63, 0x00} }
 
-// --- NTAG / Ultralight emulator -------------------------------------------
-
 // memEmulator is an in-memory NTAG/Ultralight tag speaking the PC/SC pseudo-APDU
 // protocol (READ = FF B0, WRITE = FF D6) with static/dynamic lock-byte rules.
 // Safe for concurrent use (the reader poll touches it alongside writes).
@@ -187,8 +185,6 @@ func (e *memEmulator) lockedMem(page int) bool {
 	return false
 }
 
-// --- MIFARE Classic emulator ----------------------------------------------
-
 // classicEmulator is an in-memory Classic 1K speaking load-key/authenticate/
 // read/update with per-sector key enforcement.
 type classicEmulator struct {
@@ -277,8 +273,6 @@ func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 }
 
 func (e *classicEmulator) isAuthedFor(block int) bool { return e.authed == block/4 }
-
-// --- DESFire emulator ------------------------------------------------------
 
 // desfireEmulator is an in-memory DESFire NDEF tag speaking the ISO-wrapped
 // native protocol with real 91-xx status words and frame chaining.
@@ -394,8 +388,6 @@ func (e *desfireEmulator) fileRange(body []byte) (off, length int, ok bool) {
 	}
 	return off, length, true
 }
-
-// --- Façade: declarative cards presented to an emulated reader -------------
 
 // EmulatedCard is a tag of a given kind, optionally preloaded with NDEF content,
 // backed by an emulator running the production driver.

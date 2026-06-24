@@ -23,8 +23,6 @@ func textMessage(content string) *nfc.NDEFMessage {
 
 func memOf(c *EmulatedCard) *memEmulator { return c.transport.(*memEmulator) }
 
-// --- Low-level emulator tests (real driver over emulated silicon) ----------
-
 func TestKnownAnswer_PseudoAPDUFraming(t *testing.T) {
 	if got, want := nfc.ReadBinaryAPDU(4, 4), []byte{0xFF, 0xB0, 0x00, 0x04, 0x04}; !bytes.Equal(got, want) {
 		t.Errorf("READ APDU framing = % X", got)
@@ -184,8 +182,6 @@ func TestDESFire_WrappedStatusNotPlainISO(t *testing.T) {
 	}
 }
 
-// --- Façade: full reader pipeline over emulated silicon --------------------
-
 func TestPipeline_NTAGWriteVerify(t *testing.T) {
 	reader := NewEmulatedReader(t, NTAG215("04A1B2C3D4E5F6"))
 	result, err := reader.WriteMessageWithResult(textMessage("emulated"), nfc.WriteOptions{Overwrite: true, Index: -1})
@@ -313,8 +309,6 @@ func TestPipeline_EraseThroughReader(t *testing.T) {
 		t.Error("expected erase to be verified")
 	}
 }
-
-// --- Façade DX showcase: a preloaded card consumed by the reader -----------
 
 // TestFacade_PreloadThenAppendThroughReader shows the high-level flow: declare a
 // card preloaded with content, present it to a reader, and have the reader read

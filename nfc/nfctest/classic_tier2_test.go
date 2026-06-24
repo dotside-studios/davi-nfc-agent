@@ -140,3 +140,25 @@ func TestClassicEmulator_ForceInitializeReadsBackThroughDefaultKeys(t *testing.T
 		t.Errorf("post-format round-trip mismatch: % X", got)
 	}
 }
+
+// TestClassicEmulator_ForceInitializeAbortsOnInaccessibleSector verifies the
+// formatter's preflight check: if any sector can't be authenticated with the
+// available keys, formatting aborts before modifying anything, so the card is
+// not left half-formatted.
+func TestClassicEmulator_ForceInitializeAbortsOnInaccessibleSector(t *testing.T) {
+	e := newClassicEmulator()
+	// Make sector 5 use a key the formatter doesn't know about.
+	e.rekeySector(5, []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11})
+
+	tag := nfc.NewEmulatedTag(e, "04112233", nfc.DetectedClassic1K)
+	aw := tag.(nfc.AdvancedWriter)
+
+	if err := aw.WriteDataWithOptions(sampleNDEF, nfc.TagWriteOptions{ForceInitialize: true}); err == nil {
+		t.Fatal("expected formatting to abort when a sector is inaccessible")
+	}
+
+	// Sector 0 must be untouched (still factory key, not the MAD key).
+	if bytes.Equal(e.block(3)[0:6], nfc.KeyMAD) {
+		t.Error("sector 0 was modified despite the preflight abort")
+	}
+}

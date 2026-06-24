@@ -14,10 +14,22 @@ import "fmt"
 //     (0xD3F7...) with the standard NDEF access bits, so phones can read it.
 //
 // WARNING: this rewrites sector trailers (keys + access bits). On real hardware
-// this is irreversible and incorrect access bits can permanently lock a sector.
+// a structurally invalid or wrongly-configured trailer can permanently lock a
+// sector. Two safeguards keep this RECOVERABLE rather than irreversible:
+//
+//   - Every trailer is validated before being written (validateNDEFTrailer):
+//     the access bits must be internally consistent (the card stores each
+//     condition bit with its complement; a mismatch invalidates the sector),
+//     and the access condition must keep the trailer rewritable with Key B.
+//   - Key B is left at the known factory value (0xFF). Combined with the
+//     trailer-writable-with-Key-B access condition, any misconfiguration can be
+//     undone by authenticating with Key B and rewriting the trailer.
+//
 // The byte values below are the canonical NDEF-format constants used by
-// established tools; this path is gated behind WriteOptions.ForceInitialize and
-// SHOULD be validated against real cards before being relied on in production.
+// established tools; this path is gated behind WriteOptions.ForceInitialize.
+// The emulator models key transitions and byte writes but NOT access-bit
+// semantics, so this SHOULD still be validated against real cards before being
+// relied on in production.
 const (
 	// NFC Forum NDEF AID as stored in the MAD (low byte, high byte).
 	madAIDNDEFLo = 0x03
@@ -76,6 +88,25 @@ func (t *pcscClassicTag) formatAndWriteNDEF(data []byte) error {
 	capacity := dataSectors * dataBlocksPerSector * 16
 	if len(tlv) > capacity {
 		return NewCapacityExceededError("FormatNDEF", t.uid, len(tlv), capacity)
+	}
+
+	// Safety: never write a sector trailer that could brick the sector. Both
+	// trailers must be internally consistent and must keep the trailer
+	// rewritable with Key B (so a misconfiguration is recoverable).
+	if err := validateNDEFTrailer(madSectorTrailer); err != nil {
+		return fmt.Errorf("formatNDEF: refusing to write MAD trailer: %w", err)
+	}
+	if err := validateNDEFTrailer(ndefSectorTrailer); err != nil {
+		return fmt.Errorf("formatNDEF: refusing to write NDEF trailer: %w", err)
+	}
+
+	// Preflight: confirm every sector we are about to rewrite is accessible with
+	// the current keys before modifying anything, so an inaccessible card aborts
+	// cleanly instead of being left half-formatted.
+	for sector := 0; sector <= dataSectors; sector++ {
+		if err := t.authenticateSector(sector); err != nil {
+			return fmt.Errorf("formatNDEF (UID: %s): sector %d not accessible, aborting before any write: %w", t.uid, sector, err)
+		}
 	}
 
 	// 1. Write the MAD into sector 0 and switch its trailer to the MAD key.
@@ -157,6 +188,57 @@ func madCRC(data []byte) byte {
 		}
 	}
 	return crc
+}
+
+// trailerCondRecoverable is the sector-trailer access condition (C1=0, C2=1,
+// C3=1) used by NDEF formatting. It keeps the trailer rewritable with Key B —
+// Key B can rewrite Key A, the access bits, and Key B itself — so a
+// misconfiguration can be undone by authenticating with the known Key B.
+const trailerCondRecoverable = 0b011
+
+// accessBitsConsistent verifies the integrity of a sector trailer's three
+// access-condition bytes. Each Cx nibble is stored alongside its bit-complement;
+// the card rejects (and may permanently invalidate the sector for) a trailer
+// whose complements don't match.
+//
+// Layout: byte6 = [~C2 | ~C1], byte7 = [C1 | ~C3], byte8 = [C3 | C2]
+// (high nibble | low nibble).
+func accessBitsConsistent(b6, b7, b8 byte) bool {
+	c1 := (b7 >> 4) & 0x0F
+	c2 := b8 & 0x0F
+	c3 := (b8 >> 4) & 0x0F
+	c1inv := b6 & 0x0F
+	c2inv := (b6 >> 4) & 0x0F
+	c3inv := b7 & 0x0F
+	return c1inv == (^c1&0x0F) && c2inv == (^c2&0x0F) && c3inv == (^c3&0x0F)
+}
+
+// trailerAccessCondition returns the 3-bit access condition (C1<<2 | C2<<1 | C3)
+// for the sector trailer block (block index 3).
+func trailerAccessCondition(b6, b7, b8 byte) byte {
+	c1 := (b7 >> 4) & 0x0F
+	c2 := b8 & 0x0F
+	c3 := (b8 >> 4) & 0x0F
+	bit := func(n, i byte) byte { return (n >> i) & 1 }
+	return bit(c1, 3)<<2 | bit(c2, 3)<<1 | bit(c3, 3)
+}
+
+// validateNDEFTrailer reports whether a 16-byte sector trailer is safe to write
+// during formatting: the access bits must be internally consistent (so the card
+// doesn't reject/invalidate the sector) and must keep the trailer rewritable
+// with Key B (so any misconfiguration is recoverable).
+func validateNDEFTrailer(trailer []byte) error {
+	if len(trailer) != 16 {
+		return fmt.Errorf("sector trailer must be 16 bytes, got %d", len(trailer))
+	}
+	b6, b7, b8 := trailer[6], trailer[7], trailer[8]
+	if !accessBitsConsistent(b6, b7, b8) {
+		return fmt.Errorf("access bits %02X %02X %02X are inconsistent (would invalidate the sector)", b6, b7, b8)
+	}
+	if trailerAccessCondition(b6, b7, b8) != trailerCondRecoverable {
+		return fmt.Errorf("access bits %02X %02X %02X do not keep the trailer rewritable with Key B (not recoverable)", b6, b7, b8)
+	}
+	return nil
 }
 
 // Ensure pcscClassicTag implements AdvancedWriter.

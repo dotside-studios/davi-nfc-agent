@@ -281,6 +281,16 @@ func (e *classicEmulator) rekeyAll(key []byte) {
 	}
 }
 
+// rekeySector sets Key A and Key B of a single sector trailer to the given
+// 6-byte key, simulating a card where one sector uses an unknown key.
+func (e *classicEmulator) rekeySector(sector int, key []byte) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	tr := sector*4 + 3
+	copy(e.blocks[tr][0:6], key)
+	copy(e.blocks[tr][10:16], key)
+}
+
 func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 	sector := block / 4
 	tr := sector*4 + 3

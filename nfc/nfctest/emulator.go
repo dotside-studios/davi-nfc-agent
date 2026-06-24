@@ -192,23 +192,36 @@ func (e *memEmulator) lockedMem(page int) bool {
 }
 
 // classicEmulator is an in-memory Classic 1K speaking load-key/authenticate/
-// read/update with per-sector key enforcement.
+// read/update with per-sector key enforcement AND sector-trailer access-bit
+// enforcement: reads/writes are checked against the access conditions for the
+// authenticated key, and a trailer written with inconsistent access bits bricks
+// the sector (no key can access it), mirroring real silicon. This lets the NDEF
+// formatting and recovery paths be validated in software.
 type classicEmulator struct {
 	mu        sync.Mutex
 	blocks    [][16]byte
 	loadedKey []byte
-	authed    int // authenticated sector, -1 = none
+	authed    int          // authenticated sector, -1 = none
+	authedKey byte         // key type used for the current auth (MIFAREKeyA/B)
+	bricked   map[int]bool // sectors invalidated by inconsistent access bits
 	present   bool
 }
 
 func newClassicEmulator() *classicEmulator {
-	e := &classicEmulator{blocks: make([][16]byte, 64), authed: -1, present: true}
+	e := &classicEmulator{
+		blocks:  make([][16]byte, 64),
+		authed:  -1,
+		bricked: make(map[int]bool),
+		present: true,
+	}
 	for sector := 0; sector < 16; sector++ {
 		tr := sector*4 + 3
 		for i := 0; i < 6; i++ {
 			e.blocks[tr][i] = 0xFF    // key A
 			e.blocks[tr][10+i] = 0xFF // key B
 		}
+		// Transport access bits FF 07 80 (data blocks read/write with either
+		// key; trailer rewritable with key A), GPB 0x69.
 		e.blocks[tr][6], e.blocks[tr][7] = 0xFF, 0x07
 		e.blocks[tr][8], e.blocks[tr][9] = 0x80, 0x69
 	}
@@ -249,13 +262,27 @@ func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
 		if block < 0 || block >= len(e.blocks) || !e.isAuthedFor(block) {
 			return emuFail(), nil
 		}
+		if !e.accessAllows(block, false) {
+			return emuFail(), nil
+		}
 		return append(append([]byte(nil), e.blocks[block][:]...), nfc.SW1Success, nfc.SW2Success), nil
 	case nfc.INSUpdateBin:
 		block, lc := int(cmd[3]), int(cmd[4])
 		if lc != 16 || len(cmd) < 5+lc || block <= 0 || block >= len(e.blocks) || !e.isAuthedFor(block) {
 			return emuFail(), nil
 		}
+		if !e.accessAllows(block, true) {
+			return emuFail(), nil
+		}
 		copy(e.blocks[block][:], cmd[5:5+lc])
+		// A trailer written with inconsistent access bits invalidates the
+		// sector on real silicon — model that so formatting mistakes are
+		// observable in software.
+		if block%4 == 3 {
+			if _, ok := accessConditions(e.blocks[block]); !ok {
+				e.bricked[block/4] = true
+			}
+		}
 		return []byte{nfc.SW1Success, nfc.SW2Success}, nil
 	}
 	return emuFail(), nil
@@ -294,7 +321,7 @@ func (e *classicEmulator) rekeySector(sector int, key []byte) {
 func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 	sector := block / 4
 	tr := sector*4 + 3
-	if e.loadedKey == nil || tr >= len(e.blocks) {
+	if e.loadedKey == nil || tr >= len(e.blocks) || e.bricked[sector] {
 		return false
 	}
 	stored := e.blocks[tr][0:6]
@@ -303,12 +330,125 @@ func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 	}
 	if string(e.loadedKey) == string(stored) {
 		e.authed = sector
+		e.authedKey = keyType
 		return true
 	}
 	return false
 }
 
 func (e *classicEmulator) isAuthedFor(block int) bool { return e.authed == block/4 }
+
+// accessAllows reports whether the current authentication permits the given
+// read (write=false) or write (write=true) of an absolute block, per the
+// sector trailer's access bits. A sector whose access bits are inconsistent (or
+// already bricked) denies everything.
+func (e *classicEmulator) accessAllows(block int, write bool) bool {
+	sector := block / 4
+	if e.bricked[sector] {
+		return false
+	}
+	cond, ok := accessConditions(e.blocks[sector*4+3])
+	if !ok {
+		return false
+	}
+	keyB := e.authedKey == nfc.MIFAREKeyB
+	ci := condIndex(cond[block%4])
+	if block%4 == 3 {
+		// Trailer: model the permission to rewrite it (Key A write column).
+		if write {
+			return classicTrailerWritePerm(ci).allows(keyB)
+		}
+		return true // reading the trailer is allowed (keys read back as stored)
+	}
+	if write {
+		return classicDataWritePerm(ci).allows(keyB)
+	}
+	return classicDataReadPerm(ci).allows(keyB)
+}
+
+// classicPerm models who may perform a MIFARE Classic operation under a given
+// access condition.
+type classicPerm int
+
+const (
+	permNever classicPerm = iota
+	permKeyA
+	permKeyB
+	permKeyAB
+)
+
+func (p classicPerm) allows(keyB bool) bool {
+	switch p {
+	case permKeyAB:
+		return true
+	case permKeyA:
+		return !keyB
+	case permKeyB:
+		return keyB
+	default:
+		return false
+	}
+}
+
+// accessConditions parses the (C1,C2,C3) triple for each of the 4 blocks in a
+// sector from the trailer's access bytes (6-8). ok is false if the bytes fail
+// the complement-integrity check, i.e. an invalid/bricked sector.
+// Layout: byte6 = [~C2 | ~C1], byte7 = [C1 | ~C3], byte8 = [C3 | C2].
+func accessConditions(trailer [16]byte) (cond [4][3]byte, ok bool) {
+	b6, b7, b8 := trailer[6], trailer[7], trailer[8]
+	c1 := (b7 >> 4) & 0x0F
+	c2 := b8 & 0x0F
+	c3 := (b8 >> 4) & 0x0F
+	if (b6&0x0F) != (^c1&0x0F) || ((b6>>4)&0x0F) != (^c2&0x0F) || (b7&0x0F) != (^c3&0x0F) {
+		return cond, false
+	}
+	for i := 0; i < 4; i++ {
+		cond[i][0] = (c1 >> uint(i)) & 1
+		cond[i][1] = (c2 >> uint(i)) & 1
+		cond[i][2] = (c3 >> uint(i)) & 1
+	}
+	return cond, true
+}
+
+// condIndex packs a (C1,C2,C3) triple into a 3-bit index C1<<2|C2<<1|C3.
+func condIndex(c [3]byte) byte { return c[0]<<2 | c[1]<<1 | c[2] }
+
+// classicDataReadPerm / classicDataWritePerm / classicTrailerWritePerm encode
+// the MIFARE Classic access-condition tables (NXP MF1S50yyX datasheet).
+func classicDataReadPerm(ci byte) classicPerm {
+	switch ci {
+	case 0b000, 0b010, 0b100, 0b110, 0b001:
+		return permKeyAB
+	case 0b011, 0b101:
+		return permKeyB
+	default: // 111
+		return permNever
+	}
+}
+
+func classicDataWritePerm(ci byte) classicPerm {
+	switch ci {
+	case 0b000:
+		return permKeyAB
+	case 0b100, 0b110, 0b011:
+		return permKeyB
+	default: // 010, 001, 101, 111
+		return permNever
+	}
+}
+
+// classicTrailerWritePerm models the permission to rewrite a sector trailer,
+// using the Key A write column (formatting always rewrites Key A).
+func classicTrailerWritePerm(ci byte) classicPerm {
+	switch ci {
+	case 0b000, 0b001:
+		return permKeyA
+	case 0b100, 0b011:
+		return permKeyB
+	default: // 010, 110, 101, 111
+		return permNever
+	}
+}
 
 // desfireEmulator is an in-memory DESFire NDEF tag speaking the ISO-wrapped
 // native protocol with real 91-xx status words and frame chaining.

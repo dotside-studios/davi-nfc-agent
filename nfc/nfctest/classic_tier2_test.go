@@ -158,7 +158,61 @@ func TestClassicEmulator_ForceInitializeAbortsOnInaccessibleSector(t *testing.T)
 	}
 
 	// Sector 0 must be untouched (still factory key, not the MAD key).
-	if bytes.Equal(e.block(3)[0:6], nfc.KeyMAD) {
+	sector0Trailer := e.block(3)
+	if bytes.Equal(sector0Trailer[0:6], nfc.KeyMAD) {
 		t.Error("sector 0 was modified despite the preflight abort")
+	}
+}
+
+// TestClassicEmulator_FormattedTrailerRecoverableWithKeyB proves, in software,
+// the recoverability guarantee: after formatting, a data sector trailer (access
+// condition 011) cannot be rewritten with Key A but CAN be rewritten with the
+// known Key B (0xFF) — so a misconfiguration is always recoverable.
+func TestClassicEmulator_FormattedTrailerRecoverableWithKeyB(t *testing.T) {
+	e := newClassicEmulator()
+	tag := nfc.NewEmulatedTag(e, "04112233", nfc.DetectedClassic1K)
+	if err := tag.(nfc.AdvancedWriter).WriteDataWithOptions(sampleNDEF, nfc.TagWriteOptions{ForceInitialize: true}); err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	classic := tag.(nfc.ClassicTag)
+
+	// A consistent replacement trailer (transport config) to write back.
+	replacement := make([]byte, 16)
+	copy(replacement[0:6], nfc.KeyDefault)
+	replacement[6], replacement[7], replacement[8], replacement[9] = 0xFF, 0x07, 0x80, 0x69
+	copy(replacement[10:16], nfc.KeyDefault)
+
+	// Key A is the NFC Forum public key after formatting, but condition 011
+	// does not permit rewriting the trailer with Key A.
+	if err := classic.Write(1, 3, replacement, nfc.KeyNFCForum, nfc.KeyTypeA); err == nil {
+		t.Error("trailer should NOT be rewritable with Key A under access condition 011")
+	}
+	// Key B (still the known 0xFF) can rewrite it — the recovery path.
+	if err := classic.Write(1, 3, replacement, nfc.KeyDefault, nfc.KeyTypeB); err != nil {
+		t.Errorf("trailer should be recoverable with Key B: %v", err)
+	}
+}
+
+// TestClassicEmulator_InconsistentTrailerBricksSector proves the bricking
+// mechanism the validator guards against: writing a trailer with inconsistent
+// access bits (which the transport config permits) makes the sector permanently
+// inaccessible. validateNDEFTrailer prevents the formatter from ever doing this.
+func TestClassicEmulator_InconsistentTrailerBricksSector(t *testing.T) {
+	e := newClassicEmulator()
+	tag := nfc.NewEmulatedTag(e, "04112233", nfc.DetectedClassic1K)
+	classic := tag.(nfc.ClassicTag)
+
+	bad := make([]byte, 16)
+	copy(bad[0:6], nfc.KeyDefault)
+	bad[6], bad[7], bad[8] = 0x00, 0x00, 0x00 // inconsistent access bits
+	copy(bad[10:16], nfc.KeyDefault)
+
+	// The transport access bits permit writing the trailer with Key A.
+	if err := classic.Write(1, 3, bad, nfc.KeyDefault, nfc.KeyTypeA); err != nil {
+		t.Fatalf("transport config should permit the (bad) trailer write: %v", err)
+	}
+	// The sector is now bricked: no key can access it.
+	if _, err := classic.Read(1, 0, nfc.KeyDefault, nfc.KeyTypeA); err == nil {
+		t.Error("sector should be inaccessible after an inconsistent trailer (bricked)")
 	}
 }

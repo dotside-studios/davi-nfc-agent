@@ -27,9 +27,9 @@ import "fmt"
 //
 // The byte values below are the canonical NDEF-format constants used by
 // established tools; this path is gated behind WriteOptions.ForceInitialize.
-// The emulator models key transitions and byte writes but NOT access-bit
-// semantics, so this SHOULD still be validated against real cards before being
-// relied on in production.
+// The test emulator (nfctest) enforces access-bit semantics and models sector
+// bricking, so the formatting and recovery logic is validated in software; a
+// final confirmation that a phone reads the formatted tag is still worthwhile.
 const (
 	// NFC Forum NDEF AID as stored in the MAD (low byte, high byte).
 	madAIDNDEFLo = 0x03

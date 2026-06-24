@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expanded write record types beyond text/uri: `url`, `mailto`/`email`, `tel`,
+  `sms`, `geo`, `smartposter` (URI + title), `mime`, `vcard`, `external`, `aar`
+  (Android Application Record / app launch), and fully custom `raw` records
+  (TNF + type + payload). New `NDEFSmartPoster` and `NDEFRaw` builders
+- URI records are now written with the longest matching NFC Forum abbreviation
+  prefix (e.g. `https://`, `tel:`, `mailto:`), saving bytes on small tags; the
+  decoder understands the full prefix table for tags written by other tools
 - Read-after-write verification: writes are now confirmed by reading the data
   back and comparing it to what was written, bringing write reliability to parity
   with the read path

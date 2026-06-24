@@ -321,9 +321,32 @@ Write NDEF data to a card (complete overwrite):
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | Yes | `text` or `uri` |
-| `content` | string | Yes | Text or URI content |
-| `language` | string | No | ISO language code (default: `en`) |
+| `type` | string | No | Record type (see below). Defaults to `text`. |
+| `content` | string | Varies | Primary value: text, URI, domain, package name, etc. |
+| `language` | string | No | ISO language code for `text`/`smartposter` (default: `en`) |
+| `mimeType` | string | No | Media type for `mime` records |
+| `title` | string | No | Display title for `smartposter` records |
+| `payload` | bytes (base64) | No | Raw bytes for `mime`, `vcard`, `external`, `raw` |
+| `tnf` | number | No | Type Name Format (0–7) for `raw` records |
+| `typeBytes` | bytes (base64) | No | NDEF type bytes for `raw` records |
+| `id` | bytes (base64) | No | Optional record ID for `raw` records |
+
+**Supported `type` values:**
+
+| `type` | Fields used | Notes |
+|--------|-------------|-------|
+| `text` | `content`, `language` | Default when `type` omitted |
+| `uri` / `url` | `content` | Prefix is auto-abbreviated to save tag space |
+| `mailto` / `email`, `tel`, `sms`, `geo` | `content` | URI shortcut; scheme prepended if absent |
+| `smartposter` | `content` (URI), `title`, `language` | "Tap to open *title*" — URI + label |
+| `mime` | `mimeType`, `payload` (or `content`) | Arbitrary MIME media record |
+| `vcard` | `content` or `payload` | Contact card (`text/vcard` MIME) |
+| `external` | `content` (`domain:type`), `payload` | NFC Forum external type |
+| `aar` | `content` (package name) | Android Application Record (app launch) |
+| `raw` | `tnf`, `typeBytes`, `id`, `payload` | Fully custom record |
+
+WiFi credentials can be written as a `mime` record with `mimeType` set to
+`application/vnd.wfa.wsc` and a WSC-formatted `payload`.
 
 ### Write Response
 

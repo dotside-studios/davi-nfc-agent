@@ -68,6 +68,32 @@ func TestWriteMessageWithResult_VerifiesByDefault(t *testing.T) {
 	}
 }
 
+// TestEraseCard confirms erasing overwrites the tag with a verified empty NDEF.
+func TestEraseCard(t *testing.T) {
+	mockTag := NewMockClassicTag("04E2A5E1")
+	mockTag.IsConnected = true
+	mockTag.Data = EncodeNdefMessageWithTextRecord("old data", "en")
+
+	reader := newWriteTestReader(t, mockTag)
+
+	result, err := reader.EraseCard()
+	if err != nil {
+		t.Fatalf("EraseCard() failed: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected erase to be verified")
+	}
+
+	msg, err := DecodeNDEF(mockTag.Data)
+	if err != nil {
+		t.Fatalf("erased tag did not contain valid NDEF: %v", err)
+	}
+	records := msg.Records()
+	if len(records) != 1 || records[0].TNF != 0x00 {
+		t.Errorf("expected a single empty record, got %+v", records)
+	}
+}
+
 // TestWriteMessageWithResult_RetriesThenSucceeds confirms that a transient write
 // failure is retried and the eventual success is reported with the attempt count.
 func TestWriteMessageWithResult_RetriesThenSucceeds(t *testing.T) {

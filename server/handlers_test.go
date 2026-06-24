@@ -219,6 +219,15 @@ func TestBuildNDEFMessage_RecordTypes(t *testing.T) {
 			},
 		},
 		{
+			name:   "empty record",
+			record: WriteRecord{Type: "empty"},
+			check: func(t *testing.T, r nfc.NDEFRecord) {
+				if r.TNF != 0x00 {
+					t.Errorf("expected empty record TNF 0x00, got 0x%02X", r.TNF)
+				}
+			},
+		},
+		{
 			name:   "raw record",
 			record: WriteRecord{Type: "raw", TNF: tnfPtr(0x02), TypeBytes: []byte("x/y"), Payload: []byte("z")},
 			check: func(t *testing.T, r nfc.NDEFRecord) {

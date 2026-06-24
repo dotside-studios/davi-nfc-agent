@@ -343,6 +343,7 @@ Write NDEF data to a card (complete overwrite):
 | `vcard` | `content` or `payload` | Contact card (`text/vcard` MIME) |
 | `external` | `content` (`domain:type`), `payload` | NFC Forum external type |
 | `aar` | `content` (package name) | Android Application Record (app launch) |
+| `empty` / `erase` | — | Empty record — blanks/formats the tag (reversible) |
 | `raw` | `tnf`, `typeBytes`, `id`, `payload` | Fully custom record |
 
 WiFi credentials can be written as a `mime` record with `mimeType` set to

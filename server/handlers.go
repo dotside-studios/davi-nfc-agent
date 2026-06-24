@@ -152,6 +152,10 @@ func buildRecord(record WriteRecord) (nfc.NDEFRecordBuilder, error) {
 		// payload is the package name.
 		return &nfc.NDEFExternal{Domain: "android.com:pkg", Data: []byte(record.Content)}, nil
 
+	case "empty", "erase":
+		// An empty NDEF record marks the tag as formatted but blank.
+		return &nfc.NDEFEmpty{}, nil
+
 	case "raw", "custom":
 		if record.TNF == nil {
 			return nil, fmt.Errorf("raw record requires tnf")

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Erase/format support: `NFCReader.EraseCard` and an `empty` write record type
+  overwrite a tag with an empty NDEF message (verified like any write, and
+  composable with `lock`). Reversible — the tag can be rewritten afterward
 - Password-protection capability reporting (`TagCapabilities.SupportsPassword`,
   true for NTAG21x) and the reader API contract (`SetCardPassword`,
   `RemoveCardPassword`, `PasswordOptions`). The destructive NTAG config writes

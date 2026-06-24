@@ -602,6 +602,18 @@ func (r *NFCReader) WriteCardData(text string) error {
 	})
 }
 
+// EraseCard overwrites the presented tag with an empty NDEF message, making it
+// read as blank. This is reversible — the tag can be rewritten afterward. The
+// write is verified like any other write.
+func (r *NFCReader) EraseCard() (*WriteResult, error) {
+	msg := NewNDEFMessage()
+	msg.AddRecord((&NDEFEmpty{}).ToRecord())
+	return r.WriteMessageWithResult(msg, WriteOptions{
+		Overwrite: true,
+		Index:     -1,
+	})
+}
+
 // prepareCardForWrite performs common validation and card retrieval for write operations.
 // It checks permissions, device availability, retrieves and validates the tag, and returns the Card.
 func (r *NFCReader) prepareCardForWrite() (*Card, error) {

@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 )
 
@@ -12,11 +13,15 @@ import (
 // Ultralight datasheets, so the production pcscNtagTag / pcscUltralightTag logic
 // (page math, TLV, lock bytes) runs against emulated silicon — no hardware.
 //
+// It is safe for concurrent use: when driven through the reader the background
+// poll goroutine touches it alongside a write, and the tests run under -race.
+//
 // Lock granularity is modeled per the datasheets: the static lock bytes
 // (page 2, bytes 2-3) cover pages 3-15, and the NTAG dynamic lock bytes cover
 // pages >=16 in 16-page blocks. The block granularity is a datasheet-derived
 // model and should be cross-checked against real hardware.
 type memEmulator struct {
+	mu          sync.Mutex
 	pages       [][4]byte
 	dynLockPage int // 0 means no dynamic lock area (original Ultralight)
 	present     bool
@@ -48,17 +53,24 @@ func newUltralightEmulator() *memEmulator {
 	}
 }
 
-func (e *memEmulator) IsCardPresent() bool { return e.present }
+func (e *memEmulator) IsCardPresent() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.present
+}
 
 // Transceive decodes the PC/SC pseudo-APDU and applies memory/lock rules.
 func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if len(cmd) < 5 || cmd[0] != CLAPCSC {
 		return emuFail(), nil
 	}
 	ins, page := cmd[1], cmd[3]
 	switch ins {
 	case INSReadBinary: // FF B0 00 <page> <Le>
-		data, ok := e.read(int(page), int(cmd[4]))
+		data, ok := e.readMem(int(page), int(cmd[4]))
 		if !ok {
 			return emuFail(), nil
 		}
@@ -68,7 +80,7 @@ func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
 		if len(cmd) < 5+lc {
 			return emuFail(), nil
 		}
-		if !e.write(int(page), cmd[5:5+lc]) {
+		if !e.writeMem(int(page), cmd[5:5+lc]) {
 			return emuFail(), nil
 		}
 		return []byte{SW1Success, SW2Success}, nil
@@ -76,13 +88,21 @@ func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
 	return emuFail(), nil
 }
 
+// tryWrite attempts a raw page write under the lock and reports success. Tests
+// use it to probe lock state.
+func (e *memEmulator) tryWrite(page int, data []byte) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.writeMem(page, data)
+}
+
 // emuFail mimics the reader returning a non-success status (e.g. on a NAK'd
 // write to a locked page).
 func emuFail() []byte { return []byte{0x63, 0x00} }
 
-// read returns le bytes starting at the given page. Reads are always permitted
-// (no read-password is modeled).
-func (e *memEmulator) read(page, le int) ([]byte, bool) {
+// readMem returns le bytes starting at the given page. Reads are always
+// permitted (no read-password is modeled). The caller must hold e.mu.
+func (e *memEmulator) readMem(page, le int) ([]byte, bool) {
 	out := make([]byte, 0, le+4)
 	for p := page; len(out) < le; p++ {
 		if p < 0 || p >= len(e.pages) {
@@ -93,8 +113,9 @@ func (e *memEmulator) read(page, le int) ([]byte, bool) {
 	return out[:le], true
 }
 
-// write applies a 4-byte page write, honoring read-only and lock-byte rules.
-func (e *memEmulator) write(page int, data []byte) bool {
+// writeMem applies a 4-byte page write, honoring read-only and lock-byte rules.
+// The caller must hold e.mu.
+func (e *memEmulator) writeMem(page int, data []byte) bool {
 	if page < 0 || page >= len(e.pages) || len(data) != 4 {
 		return false
 	}
@@ -113,7 +134,7 @@ func (e *memEmulator) write(page int, data []byte) bool {
 		}
 		return true
 	default:
-		if e.locked(page) {
+		if e.lockedMem(page) {
 			return false
 		}
 		copy(e.pages[page][:], data)
@@ -121,8 +142,9 @@ func (e *memEmulator) write(page int, data []byte) bool {
 	}
 }
 
-// locked reports whether a page is write-locked given the current lock bytes.
-func (e *memEmulator) locked(page int) bool {
+// lockedMem reports whether a page is write-locked given the current lock bytes.
+// The caller must hold e.mu.
+func (e *memEmulator) lockedMem(page int) bool {
 	lock0 := e.pages[2][2] // static lock byte 0
 	lock1 := e.pages[2][3] // static lock byte 1
 	switch {
@@ -222,7 +244,7 @@ func TestUltralightEmulator_LockMakesUserPagesReadOnly(t *testing.T) {
 	}
 
 	for _, page := range []int{4, 8, 15} {
-		if e.write(page, []byte{1, 2, 3, 4}) {
+		if e.tryWrite(page, []byte{1, 2, 3, 4}) {
 			t.Errorf("page %d should be locked after MakeReadOnly", page)
 		}
 	}
@@ -250,7 +272,7 @@ func TestNTAGEmulator_LockMakesAllUserPagesReadOnly(t *testing.T) {
 		}
 
 		for _, page := range []int{4, 15, 16, tc.highPage} {
-			if e.write(page, []byte{1, 2, 3, 4}) {
+			if e.tryWrite(page, []byte{1, 2, 3, 4}) {
 				t.Errorf("model %d: page %d writable after lock (expected locked)", tc.model, page)
 			}
 		}
@@ -261,8 +283,9 @@ func TestNTAGEmulator_LockMakesAllUserPagesReadOnly(t *testing.T) {
 // pseudo-APDU protocol the real pcscClassicTag emits: load key (FF 82),
 // authenticate (FF 86), read block (FF B0), update block (FF D6). It models the
 // 16-sector / 4-block layout with per-sector key authentication enforced before
-// block access, so the production auth + block I/O logic runs against it.
+// block access. Safe for concurrent use (reader poll + write under -race).
 type classicEmulator struct {
+	mu        sync.Mutex
 	blocks    [][16]byte
 	loadedKey []byte
 	authed    int // authenticated sector, -1 if none
@@ -289,9 +312,16 @@ func newClassicEmulator() *classicEmulator {
 	return e
 }
 
-func (e *classicEmulator) IsCardPresent() bool { return e.present }
+func (e *classicEmulator) IsCardPresent() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.present
+}
 
 func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if len(cmd) < 5 || cmd[0] != CLAPCSC {
 		return emuFail(), nil
 	}
@@ -329,7 +359,7 @@ func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
 }
 
 // authenticate succeeds when the loaded key matches the target sector's stored
-// key A (0x60) or key B (0x61).
+// key A (0x60) or key B (0x61). The caller must hold e.mu.
 func (e *classicEmulator) authenticate(block int, keyType byte) bool {
 	sector := block / 4
 	tr := sector*4 + 3
@@ -388,13 +418,14 @@ func TestClassicEmulator_AuthRequiredForAccess(t *testing.T) {
 // 0x5A, ReadData 0xBD, WriteData 0x3D). Responses carry the DESFire native
 // status in SW2 with SW1=0x91 (0x00 = OK), matching real silicon — which is why
 // the tag layer needed DESFire-specific status handling. File 2 holds the
-// NLEN-prefixed NDEF message.
+// NLEN-prefixed NDEF message. Safe for concurrent use (reader poll under -race).
 //
 // Frame chaining (the 0x91 0xAF "additional frame" flow for payloads beyond one
 // frame) is not modeled; round-trips here use short messages. Real DESFire
 // chunks reads/writes at ~59 bytes — a fidelity limit to revisit on hardware,
 // and a gap the production code does not handle yet either.
 type desfireEmulator struct {
+	mu           sync.Mutex
 	selectedNDEF bool
 	file2        []byte
 	present      bool
@@ -404,7 +435,11 @@ func newDESFireEmulator() *desfireEmulator {
 	return &desfireEmulator{file2: make([]byte, 256), present: true}
 }
 
-func (e *desfireEmulator) IsCardPresent() bool { return e.present }
+func (e *desfireEmulator) IsCardPresent() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.present
+}
 
 // dfResp wraps optional data with the DESFire status (SW = 91 <status>).
 func dfResp(data []byte, status byte) []byte {
@@ -412,6 +447,9 @@ func dfResp(data []byte, status byte) []byte {
 }
 
 func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if len(cmd) < 5 || cmd[0] != CLADESFire {
 		return dfResp(nil, 0xA0), nil
 	}
@@ -445,7 +483,8 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 }
 
 // fileRange decodes (fileNo, 3-byte LE offset, 3-byte LE length) from a
-// Read/Write command body and validates it targets file 2 within bounds.
+// Read/Write command body and validates it targets file 2 within bounds. The
+// caller must hold e.mu.
 func (e *desfireEmulator) fileRange(body []byte) (off, length int, ok bool) {
 	if !e.selectedNDEF || len(body) < 7 || body[0] != 0x02 {
 		return 0, 0, false
@@ -488,5 +527,82 @@ func TestDESFire_WrappedStatusNotPlainISO(t *testing.T) {
 	}
 	if parsed.IsSuccess() {
 		t.Error("wrapped DESFire OK (91 00) must not pass the generic ISO 90 00 check")
+	}
+}
+
+// --- Full-pipeline tests: the real reader write path over emulated silicon ---
+//
+// These drive NFCReader.WriteMessageWithResult — capacity check, write,
+// read-back verification, retry, structured result, and the lock option —
+// against a real pcsc tag backed by an emulator, so the whole write stack
+// (reader orchestration + tag driver + "silicon") is exercised together rather
+// than each half in isolation.
+
+// TestPipeline_NTAGWriteVerify confirms the reader's read-back verification
+// passes against a real NTAG driver + emulator.
+func TestPipeline_NTAGWriteVerify(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage("emulated"), WriteOptions{Overwrite: true, Index: -1})
+	if err != nil {
+		t.Fatalf("WriteMessageWithResult: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected the write to be verified by read-back through the real driver")
+	}
+}
+
+// TestPipeline_NTAGWriteThenLock confirms write+lock through the reader leaves
+// the emulated NTAG215 genuinely read-only across both lock ranges.
+func TestPipeline_NTAGWriteThenLock(t *testing.T) {
+	emu := newNTAGEmulator(DetectedNTAG215)
+	tag := newPCSCNtagTag(emu, "04A1B2C3D4E5F6", DetectedNTAG215)
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage("lock me"), WriteOptions{Overwrite: true, Index: -1, Lock: true})
+	if err != nil {
+		t.Fatalf("write+lock: %v", err)
+	}
+	if !result.Verified || !result.Locked {
+		t.Fatalf("expected verified+locked, got %+v", result)
+	}
+	for _, page := range []int{4, 16, 129} {
+		if emu.tryWrite(page, []byte{1, 2, 3, 4}) {
+			t.Errorf("page %d writable after write+lock", page)
+		}
+	}
+}
+
+// TestPipeline_ClassicWriteVerify drives the reader pipeline against a real
+// Classic driver + emulator (key auth + block I/O + verification).
+func TestPipeline_ClassicWriteVerify(t *testing.T) {
+	emu := newClassicEmulator()
+	tag := newPCSCClassicTag(emu, "04112233", DetectedClassic1K)
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage("classic"), WriteOptions{Overwrite: true, Index: -1})
+	if err != nil {
+		t.Fatalf("WriteMessageWithResult: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected verified write through the Classic driver")
+	}
+}
+
+// TestPipeline_DESFireWriteVerify drives the reader pipeline against a real
+// DESFire driver + emulator (select app + NLEN + NDEF + status handling).
+func TestPipeline_DESFireWriteVerify(t *testing.T) {
+	emu := newDESFireEmulator()
+	tag := newPCSCDESFireTag(emu, "04DE5F1RE0")
+	reader := newWriteTestReader(t, tag)
+
+	result, err := reader.WriteMessageWithResult(textMessage("desfire"), WriteOptions{Overwrite: true, Index: -1})
+	if err != nil {
+		t.Fatalf("WriteMessageWithResult: %v", err)
+	}
+	if !result.Verified {
+		t.Error("expected verified write through the DESFire driver")
 	}
 }

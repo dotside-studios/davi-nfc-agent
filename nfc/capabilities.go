@@ -25,6 +25,11 @@ type TagCapabilities struct {
 	SupportsNDEF           bool `json:"supportsNdef"`
 	SupportsCrypto         bool `json:"supportsCrypto,omitempty"`
 	SupportsAuthentication bool `json:"supportsAuthentication,omitempty"`
+
+	// SupportsPassword indicates the tag supports simple password protection
+	// (e.g. NTAG PWD/PACK/AUTH0). This is distinct from SupportsAuthentication,
+	// which covers crypto-based mutual authentication (DESFire, Ultralight C).
+	SupportsPassword bool `json:"supportsPassword,omitempty"`
 }
 
 // DeviceCapabilities describes what operations a device supports.
@@ -160,6 +165,7 @@ func InferTagCapabilities(tagType string) TagCapabilities {
 		caps.CanWrite = true
 		caps.CanTransceive = false
 		caps.CanLock = true
+		caps.SupportsPassword = true // NTAG21x support PWD/PACK/AUTH0
 		caps.TagFamily = "NTAG"
 		caps.Technology = "ISO14443A"
 		if strings.Contains(tagTypeLower, "213") {

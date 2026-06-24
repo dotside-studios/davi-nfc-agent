@@ -437,6 +437,29 @@ Response (`type: "lockResponse"`):
 
 If the present tag does not support locking, `success` is `false` with an error.
 
+### Password Protection (planned)
+
+Password protection (NTAG `PWD`/`PACK`/`AUTH0`) is **not yet available**. The
+per-tag capability is reported (`supportsPassword`, true for NTAG21x) and the
+API contract below is fixed, but the destructive configuration writes are gated
+off pending validation on real hardware — a wrong `AUTH0`/`ACCESS` value can
+permanently lock a tag. Calls currently return a not-supported error.
+
+Planned request shape (subject to change until enabled):
+
+```json
+{
+  "id": "req_10",
+  "type": "passwordRequest",
+  "payload": {
+    "action": "set",            // "set" or "remove"
+    "password": "01020304",     // hex, 4 bytes
+    "protectRead": false,        // false = write-protect only
+    "startPage": 4               // first protected page (AUTH0)
+  }
+}
+```
+
 **Error:**
 
 ```json

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Password-protection capability reporting (`TagCapabilities.SupportsPassword`,
+  true for NTAG21x) and the reader API contract (`SetCardPassword`,
+  `RemoveCardPassword`, `PasswordOptions`). The destructive NTAG config writes
+  (PWD/PACK/AUTH0/ACCESS) are intentionally gated off and return a clear
+  not-supported error pending validation on real hardware, since a wrong
+  configuration can permanently lock a tag
 - Tag locking (make read-only) exposed through the API: write-and-lock in one
   step via `"lock": true` on a write request, or lock an already-written tag
   with a standalone `lockRequest`. Supported on lockable tags (NTAG,

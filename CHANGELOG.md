@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- NTAG locking now locks the **entire** user area. `MakeReadOnly` previously set
+  only the static lock bytes (pages 3-15), leaving the bulk of an NTAG215/216
+  writable while reporting a successful lock; it now also sets the model's
+  dynamic lock bytes. Validated end-to-end against in-memory tag emulators
+
 ### Added
 
 - Tag capabilities exposed over the wire: every `tagData` broadcast now carries

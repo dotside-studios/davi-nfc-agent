@@ -228,19 +228,31 @@ func TestUltralightEmulator_LockMakesUserPagesReadOnly(t *testing.T) {
 	}
 }
 
-// TestNTAGEmulator_LockLocksStaticPages verifies the part of NTAG locking that
-// works today: the static lock bytes lock pages 3-15.
-func TestNTAGEmulator_LockLocksStaticPages(t *testing.T) {
-	e := newNTAGEmulator(DetectedNTAG215)
-	tag := newPCSCNtagTag(e, "04A1B2C3D4E5F6", DetectedNTAG215)
-
-	if err := tag.MakeReadOnly(); err != nil {
-		t.Fatalf("MakeReadOnly: %v", err)
+// TestNTAGEmulator_LockMakesAllUserPagesReadOnly verifies that locking an NTAG
+// makes its ENTIRE user area read-only — both the static-lock range (pages 3-15)
+// and the dynamic-lock range (pages >=16). With only the static lock bytes set,
+// pages >=16 stayed writable; this is the regression guard for that fix.
+func TestNTAGEmulator_LockMakesAllUserPagesReadOnly(t *testing.T) {
+	cases := []struct {
+		model    DetectedTagType
+		highPage int // last user page for the model
+	}{
+		{DetectedNTAG213, 39},
+		{DetectedNTAG215, 129},
+		{DetectedNTAG216, 225},
 	}
+	for _, tc := range cases {
+		e := newNTAGEmulator(tc.model)
+		tag := newPCSCNtagTag(e, "04A1B2C3D4E5F6", tc.model)
 
-	for _, page := range []int{4, 10, 15} {
-		if e.write(page, []byte{1, 2, 3, 4}) {
-			t.Errorf("page %d should be locked by the static lock bytes", page)
+		if err := tag.MakeReadOnly(); err != nil {
+			t.Fatalf("model %d: MakeReadOnly: %v", tc.model, err)
+		}
+
+		for _, page := range []int{4, 15, 16, tc.highPage} {
+			if e.write(page, []byte{1, 2, 3, 4}) {
+				t.Errorf("model %d: page %d writable after lock (expected locked)", tc.model, page)
+			}
 		}
 	}
 }

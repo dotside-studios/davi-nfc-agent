@@ -151,14 +151,40 @@ func (t *pcscNtagTag) CanMakeReadOnly() (bool, error) {
 }
 
 func (t *pcscNtagTag) MakeReadOnly() error {
-	// Write lock bytes to page 2
+	// A complete lock needs BOTH lock regions. The static lock bytes (page 2)
+	// only cover pages 3-15; the bulk of an NTAG215/216's user memory (pages
+	// >=16) is governed by the dynamic lock bytes. Setting only the static lock
+	// bytes — as this previously did — leaves most of the tag writable.
+	//
+	// Lock the dynamic area first, then the static area.
+	dynPage := t.dynamicLockPage()
+	dyn, err := t.readPage(dynPage)
+	if err != nil {
+		return fmt.Errorf("failed to read dynamic lock page %d: %w", dynPage, err)
+	}
+	dyn[0], dyn[1], dyn[2] = 0xFF, 0xFF, 0xFF // byte 3 is RFU
+	if err := t.writePage(dynPage, dyn); err != nil {
+		return fmt.Errorf("failed to set dynamic lock bytes: %w", err)
+	}
+
 	page2, err := t.readPage(2)
 	if err != nil {
 		return fmt.Errorf("failed to read page 2: %w", err)
 	}
-
 	page2[2] = 0xFF
 	page2[3] = 0xFF
-
 	return t.writePage(2, page2)
+}
+
+// dynamicLockPage returns the page holding the dynamic lock bytes for this NTAG
+// model. These lock the user pages above the static-lock range (pages >=16).
+func (t *pcscNtagTag) dynamicLockPage() byte {
+	switch t.detectedType {
+	case DetectedNTAG213:
+		return 40
+	case DetectedNTAG216:
+		return 226
+	default: // NTAG215
+		return 130
+	}
 }

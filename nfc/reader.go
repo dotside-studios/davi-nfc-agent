@@ -60,6 +60,41 @@ type NFCReader struct {
 	operationTimeout time.Duration  // Timeout for tag operations
 	cardCheckTicker  Ticker         // Ticker for periodic card presence checks (based on cache)
 	workerWg         sync.WaitGroup // Tracks worker goroutine completion
+	classicKeys      [][]byte       // Extra MIFARE Classic auth keys (guarded by statusMux)
+}
+
+// classicKeyConfigurable is implemented by tags that accept additional
+// authentication keys (currently MIFARE Classic).
+type classicKeyConfigurable interface {
+	SetCandidateKeys(keys [][]byte)
+}
+
+// SetClassicKeys configures additional 6-byte MIFARE Classic authentication keys
+// to try when reading or writing Classic cards that don't use default keys.
+// Keys are applied to each Classic tag the reader encounters, tried before the
+// built-in defaults. Pass nil to clear.
+func (r *NFCReader) SetClassicKeys(keys [][]byte) {
+	cp := make([][]byte, 0, len(keys))
+	for _, k := range keys {
+		cp = append(cp, append([]byte(nil), k...))
+	}
+	r.statusMux.Lock()
+	r.classicKeys = cp
+	r.statusMux.Unlock()
+}
+
+// applyClassicKeys injects any configured Classic keys into a tag that supports
+// them, just before it is wrapped in a Card for a read or write.
+func (r *NFCReader) applyClassicKeys(tag Tag) {
+	r.statusMux.RLock()
+	keys := r.classicKeys
+	r.statusMux.RUnlock()
+	if len(keys) == 0 {
+		return
+	}
+	if kc, ok := tag.(classicKeyConfigurable); ok {
+		kc.SetCandidateKeys(keys)
+	}
 }
 
 // NewNFCReader creates and initializes a new NFCReader instance with default ModeReadWrite.
@@ -323,6 +358,7 @@ func (r *NFCReader) handleTagPolling(tags []Tag) {
 		}
 
 		// Create Card wrapper
+		r.applyClassicKeys(tag)
 		card := NewCard(tag)
 		if _, err := card.ReadMessage(); err != nil {
 			// Check if this is a card removal error - if so, close the device
@@ -664,6 +700,7 @@ func (r *NFCReader) prepareCardForWrite() (*Card, error) {
 	}
 
 	// Create Card wrapper for the tag
+	r.applyClassicKeys(tag)
 	card := NewCard(tag)
 	return card, nil
 }

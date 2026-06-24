@@ -123,7 +123,7 @@ func InferTagCapabilities(tagType string) TagCapabilities {
 	case strings.Contains(tagTypeLower, "mifare classic") || strings.Contains(tagTypeLower, "classic"):
 		caps.CanWrite = true
 		caps.CanTransceive = false
-		caps.CanLock = true
+		caps.CanLock = false // Not implemented (no sector-trailer access-bit locking)
 		caps.TagFamily = "MIFARE Classic"
 		caps.Technology = "ISO14443A"
 		caps.SupportsCrypto = true

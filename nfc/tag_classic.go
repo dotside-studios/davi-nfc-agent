@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"fmt"
+	"sync"
 )
 
 // Default MIFARE keys to try during authentication
@@ -15,6 +16,42 @@ var classicDefaultKeys = [][]byte{
 type pcscClassicTag struct {
 	pcscBaseTag
 	is4K bool
+
+	// candidateKeys holds additional authentication keys to try (beyond the
+	// built-in defaults) when reading or writing this tag. Configured via
+	// SetCandidateKeys, typically from NFCReader.SetClassicKeys, so production
+	// cards that don't use default keys can still be accessed. Guarded by keyMu
+	// because the reader injects keys from both its poll and write paths, which
+	// can run on different goroutines for the same tag.
+	keyMu         sync.Mutex
+	candidateKeys [][]byte
+}
+
+// SetCandidateKeys configures additional 6-byte MIFARE Classic authentication
+// keys to try, in addition to the built-in defaults, when authenticating
+// sectors. Configured keys are tried first, then the defaults, so factory and
+// NFC-Forum cards keep working. Invalid-length keys are ignored; a nil or empty
+// slice clears the configured keys (defaults only).
+func (t *pcscClassicTag) SetCandidateKeys(keys [][]byte) {
+	t.keyMu.Lock()
+	defer t.keyMu.Unlock()
+	t.candidateKeys = nil
+	for _, k := range keys {
+		if len(k) == 6 {
+			t.candidateKeys = append(t.candidateKeys, append([]byte(nil), k...))
+		}
+	}
+}
+
+// keysToTry returns the ordered set of keys to attempt during authentication:
+// configured candidate keys first, then the built-in defaults.
+func (t *pcscClassicTag) keysToTry() [][]byte {
+	t.keyMu.Lock()
+	defer t.keyMu.Unlock()
+	if len(t.candidateKeys) == 0 {
+		return classicDefaultKeys
+	}
+	return append(append([][]byte(nil), t.candidateKeys...), classicDefaultKeys...)
 }
 
 func newPCSCClassicTag(dev CardTransport, uid string, tagType DetectedTagType) *pcscClassicTag {
@@ -52,7 +89,7 @@ func (t *pcscClassicTag) Capabilities() TagCapabilities {
 func (t *pcscClassicTag) authenticateSector(sector int) error {
 	authBlock := sector*4 + 3 // Sector trailer block
 
-	for _, key := range classicDefaultKeys {
+	for _, key := range t.keysToTry() {
 		// Load key into reader's key slot 0
 		loadCmd := LoadKeyAPDU(0x00, key)
 		resp, err := t.transmitRaw(loadCmd)
@@ -199,14 +236,16 @@ func (t *pcscClassicTag) ReadData() ([]byte, error) {
 		}
 		allData = append(allData, blockData...)
 
-		// Check for NDEF terminator (0xFE)
-		for _, b := range blockData {
-			if b == 0xFE {
-				goto done
-			}
+		// Stop once the complete NDEF message TLV has been read. We must not
+		// stop at the first 0xFE byte seen in a block: 0xFE occurs naturally
+		// inside NDEF payloads (UTF-8 text, URIs, binary data), and that naive
+		// scan truncated any multi-block message whose payload happened to
+		// contain one. Length-based TLV parsing reads exactly as many blocks as
+		// the message needs and no more.
+		if _, found := TLVFindNDEF(allData); found {
+			break
 		}
 	}
-done:
 
 	if len(allData) == 0 {
 		// Check if error was due to card removal (APDU errors when card is gone)
@@ -293,11 +332,14 @@ func (t *pcscClassicTag) IsWritable() (bool, error) {
 }
 
 func (t *pcscClassicTag) CanMakeReadOnly() (bool, error) {
-	return true, nil
+	// MIFARE Classic locking (writing access bits into the sector trailers) is
+	// not implemented. Report it honestly so callers don't attempt a lock that
+	// is guaranteed to fail after an otherwise successful write.
+	return false, nil
 }
 
 func (t *pcscClassicTag) MakeReadOnly() error {
-	return fmt.Errorf("MIFARE Classic MakeReadOnly not yet implemented")
+	return NewNotSupportedError("MIFARE Classic MakeReadOnly")
 }
 
 // authenticateWithKey authenticates to a sector using a specific key and key type

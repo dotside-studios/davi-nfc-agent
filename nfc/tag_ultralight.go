@@ -140,14 +140,29 @@ func (t *pcscUltralightTag) CanMakeReadOnly() (bool, error) {
 }
 
 func (t *pcscUltralightTag) MakeReadOnly() error {
-	// Write lock bytes to page 2
-	// Bytes 2-3 of page 2 are lock bytes
+	// A complete lock needs both lock regions on an Ultralight C. The static
+	// lock bytes (page 2) only cover pages 3-15, but an UL-C has 48 pages;
+	// pages 16-47 are governed by the dynamic lock bytes at page 0x28. Setting
+	// only the static lock — as this previously did — left most of an UL-C
+	// writable. The original Ultralight has just 16 pages and no dynamic lock
+	// area, so the static lock alone is complete there.
+	if t.isC {
+		const dynamicLockPage = 0x28 // page 40
+		dyn, err := t.readPage(dynamicLockPage)
+		if err != nil {
+			return fmt.Errorf("failed to read dynamic lock page %d: %w", dynamicLockPage, err)
+		}
+		dyn[0], dyn[1], dyn[2] = 0xFF, 0xFF, 0xFF // byte 3 is RFU
+		if err := t.writePage(dynamicLockPage, dyn); err != nil {
+			return fmt.Errorf("failed to set dynamic lock bytes: %w", err)
+		}
+	}
+
+	// Static lock bytes live in page 2, bytes 2-3 (locks pages 3-15).
 	page2, err := t.readPage(2)
 	if err != nil {
 		return fmt.Errorf("failed to read page 2: %w", err)
 	}
-
-	// Set lock bytes to 0xFF to lock all pages
 	page2[2] = 0xFF
 	page2[3] = 0xFF
 

@@ -14,8 +14,8 @@ func TestInferTagCapabilities_MifareClassic1K(t *testing.T) {
 	if caps.CanTransceive {
 		t.Error("Expected CanTransceive to be false for Classic")
 	}
-	if !caps.CanLock {
-		t.Error("Expected CanLock to be true")
+	if caps.CanLock {
+		t.Error("Expected CanLock to be false for Classic (locking not implemented)")
 	}
 	if caps.TagFamily != "MIFARE Classic" {
 		t.Errorf("TagFamily = %q, want %q", caps.TagFamily, "MIFARE Classic")
@@ -190,8 +190,8 @@ func TestCanTagHelpers(t *testing.T) {
 		t.Error("Expected CanTagWrite to be true for Classic")
 	}
 
-	if !CanTagLock(mock) {
-		t.Error("Expected CanTagLock to be true for Classic")
+	if CanTagLock(mock) {
+		t.Error("Expected CanTagLock to be false for Classic (locking not implemented)")
 	}
 }
 

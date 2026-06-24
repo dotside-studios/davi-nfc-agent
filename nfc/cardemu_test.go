@@ -256,3 +256,129 @@ func TestNTAGEmulator_LockMakesAllUserPagesReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// classicEmulator is an in-memory MIFARE Classic 1K that speaks the PC/SC
+// pseudo-APDU protocol the real pcscClassicTag emits: load key (FF 82),
+// authenticate (FF 86), read block (FF B0), update block (FF D6). It models the
+// 16-sector / 4-block layout with per-sector key authentication enforced before
+// block access, so the production auth + block I/O logic runs against it.
+type classicEmulator struct {
+	blocks    [][16]byte
+	loadedKey []byte
+	authed    int // authenticated sector, -1 if none
+	present   bool
+}
+
+// newClassicEmulator builds a 1K emulator with factory-default sector trailers
+// (key A and key B = FF*6, default access bits).
+func newClassicEmulator() *classicEmulator {
+	e := &classicEmulator{
+		blocks:  make([][16]byte, 64),
+		authed:  -1,
+		present: true,
+	}
+	for sector := 0; sector < 16; sector++ {
+		tr := sector*4 + 3
+		for i := 0; i < 6; i++ {
+			e.blocks[tr][i] = 0xFF    // key A
+			e.blocks[tr][10+i] = 0xFF // key B
+		}
+		e.blocks[tr][6], e.blocks[tr][7] = 0xFF, 0x07 // default access bytes
+		e.blocks[tr][8], e.blocks[tr][9] = 0x80, 0x69
+	}
+	return e
+}
+
+func (e *classicEmulator) IsCardPresent() bool { return e.present }
+
+func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
+	if len(cmd) < 5 || cmd[0] != CLAPCSC {
+		return emuFail(), nil
+	}
+	switch cmd[1] {
+	case INSLoadKey: // FF 82 00 <slot> <Lc> <key>
+		lc := int(cmd[4])
+		if len(cmd) < 5+lc {
+			return emuFail(), nil
+		}
+		e.loadedKey = append([]byte(nil), cmd[5:5+lc]...)
+		return []byte{SW1Success, SW2Success}, nil
+	case INSAuth: // FF 86 00 00 05 01 00 <block> <keyType> <slot>
+		if len(cmd) < 10 {
+			return emuFail(), nil
+		}
+		if e.authenticate(int(cmd[7]), cmd[8]) {
+			return []byte{SW1Success, SW2Success}, nil
+		}
+		return emuFail(), nil
+	case INSReadBinary: // FF B0 00 <block> <Le>
+		block := int(cmd[3])
+		if block < 0 || block >= len(e.blocks) || !e.isAuthedFor(block) {
+			return emuFail(), nil
+		}
+		return append(append([]byte(nil), e.blocks[block][:]...), SW1Success, SW2Success), nil
+	case INSUpdateBin: // FF D6 00 <block> <Lc> <data>
+		block, lc := int(cmd[3]), int(cmd[4])
+		if lc != 16 || len(cmd) < 5+lc || block <= 0 || block >= len(e.blocks) || !e.isAuthedFor(block) {
+			return emuFail(), nil // block 0 is the read-only manufacturer block
+		}
+		copy(e.blocks[block][:], cmd[5:5+lc])
+		return []byte{SW1Success, SW2Success}, nil
+	}
+	return emuFail(), nil
+}
+
+// authenticate succeeds when the loaded key matches the target sector's stored
+// key A (0x60) or key B (0x61).
+func (e *classicEmulator) authenticate(block int, keyType byte) bool {
+	sector := block / 4
+	tr := sector*4 + 3
+	if e.loadedKey == nil || tr >= len(e.blocks) {
+		return false
+	}
+	stored := e.blocks[tr][0:6] // key A
+	if keyType == MIFAREKeyB {
+		stored = e.blocks[tr][10:16]
+	}
+	if bytes.Equal(e.loadedKey, stored) {
+		e.authed = sector
+		return true
+	}
+	return false
+}
+
+func (e *classicEmulator) isAuthedFor(block int) bool { return e.authed == block/4 }
+
+// TestClassicEmulator_WriteReadRoundTrip runs the real pcscClassicTag WriteData/
+// ReadData (key auth + block writes + TLV) against the emulator.
+func TestClassicEmulator_WriteReadRoundTrip(t *testing.T) {
+	e := newClassicEmulator()
+	tag := newPCSCClassicTag(e, "04112233", DetectedClassic1K)
+
+	if err := tag.WriteData(sampleNDEF); err != nil {
+		t.Fatalf("WriteData: %v", err)
+	}
+	got, err := tag.ReadData()
+	if err != nil {
+		t.Fatalf("ReadData: %v", err)
+	}
+	if !bytes.Equal(got, sampleNDEF) {
+		t.Errorf("round-trip mismatch:\n got % X\nwant % X", got, sampleNDEF)
+	}
+}
+
+// TestClassicEmulator_AuthRequiredForAccess verifies the auth flow is enforced:
+// a sector whose keys aren't among the defaults can't be read.
+func TestClassicEmulator_AuthRequiredForAccess(t *testing.T) {
+	e := newClassicEmulator()
+	tr := 1*4 + 3 // sector 1 trailer
+	for i := 0; i < 6; i++ {
+		e.blocks[tr][i] = 0x11    // non-default key A
+		e.blocks[tr][10+i] = 0x22 // non-default key B
+	}
+	tag := newPCSCClassicTag(e, "04112233", DetectedClassic1K)
+
+	if _, err := tag.ReadData(); err == nil {
+		t.Error("expected ReadData to fail when no default key authenticates sector 1")
+	}
+}

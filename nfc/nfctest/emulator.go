@@ -75,6 +75,12 @@ func newUltralightEmulator() *memEmulator {
 	return &memEmulator{pages: make([][4]byte, 16), present: true}
 }
 
+func newUltralightCEmulator() *memEmulator {
+	// Ultralight C: 48 pages, with dynamic lock bytes at page 0x28 (40)
+	// governing the user pages above the static-lock range.
+	return &memEmulator{pages: make([][4]byte, 48), dynLockPage: 0x28, present: true}
+}
+
 func (e *memEmulator) IsCardPresent() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -420,6 +426,9 @@ func NTAG216(uid string) *EmulatedCard {
 }
 func Ultralight(uid string) *EmulatedCard {
 	return newCard(nfc.DetectedUltralight, uid, newUltralightEmulator())
+}
+func UltralightC(uid string) *EmulatedCard {
+	return newCard(nfc.DetectedUltralightC, uid, newUltralightCEmulator())
 }
 func Classic1K(uid string) *EmulatedCard {
 	return newCard(nfc.DetectedClassic1K, uid, newClassicEmulator())

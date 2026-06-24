@@ -199,14 +199,16 @@ func (t *pcscClassicTag) ReadData() ([]byte, error) {
 		}
 		allData = append(allData, blockData...)
 
-		// Check for NDEF terminator (0xFE)
-		for _, b := range blockData {
-			if b == 0xFE {
-				goto done
-			}
+		// Stop once the complete NDEF message TLV has been read. We must not
+		// stop at the first 0xFE byte seen in a block: 0xFE occurs naturally
+		// inside NDEF payloads (UTF-8 text, URIs, binary data), and that naive
+		// scan truncated any multi-block message whose payload happened to
+		// contain one. Length-based TLV parsing reads exactly as many blocks as
+		// the message needs and no more.
+		if _, found := TLVFindNDEF(allData); found {
+			break
 		}
 	}
-done:
 
 	if len(allData) == 0 {
 		// Check if error was due to card removal (APDU errors when card is gone)
@@ -293,11 +295,14 @@ func (t *pcscClassicTag) IsWritable() (bool, error) {
 }
 
 func (t *pcscClassicTag) CanMakeReadOnly() (bool, error) {
-	return true, nil
+	// MIFARE Classic locking (writing access bits into the sector trailers) is
+	// not implemented. Report it honestly so callers don't attempt a lock that
+	// is guaranteed to fail after an otherwise successful write.
+	return false, nil
 }
 
 func (t *pcscClassicTag) MakeReadOnly() error {
-	return fmt.Errorf("MIFARE Classic MakeReadOnly not yet implemented")
+	return NewNotSupportedError("MIFARE Classic MakeReadOnly")
 }
 
 // authenticateWithKey authenticates to a sector using a specific key and key type

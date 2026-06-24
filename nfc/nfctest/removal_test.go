@@ -47,7 +47,10 @@ func TestRemoval_DuringReadReturnsCardRemoved(t *testing.T) {
 	for _, tc := range removalCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			tag, rem := tc.make()
-			rem.setRemoveAfter(2) // leave the field a couple of operations in
+			// Remove on the 2nd transceive op: this lands mid-operation for
+			// every family, including DESFire whose blank-card read completes in
+			// just select + read-NLEN.
+			rem.setRemoveAfter(1)
 
 			_, err := tag.ReadData()
 			if err == nil {
@@ -67,7 +70,7 @@ func TestRemoval_DuringWriteReturnsCardRemoved(t *testing.T) {
 	for _, tc := range removalCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			tag, rem := tc.make()
-			rem.setRemoveAfter(2)
+			rem.setRemoveAfter(1)
 
 			err := tag.WriteData(sampleNDEF)
 			if err == nil {

@@ -8,7 +8,7 @@ type pcscDESFireTag struct {
 	pcscBaseTag
 }
 
-func newPCSCDESFireTag(dev cardTransport, uid string) *pcscDESFireTag {
+func newPCSCDESFireTag(dev CardTransport, uid string) *pcscDESFireTag {
 	return &pcscDESFireTag{
 		pcscBaseTag: pcscBaseTag{
 			device:       dev,

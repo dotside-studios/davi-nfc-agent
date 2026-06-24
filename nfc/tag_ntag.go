@@ -10,7 +10,7 @@ type pcscNtagTag struct {
 	maxPages byte
 }
 
-func newPCSCNtagTag(dev cardTransport, uid string, tagType DetectedTagType) *pcscNtagTag {
+func newPCSCNtagTag(dev CardTransport, uid string, tagType DetectedTagType) *pcscNtagTag {
 	maxPages := byte(45) // NTAG213
 	switch tagType {
 	case DetectedNTAG215:

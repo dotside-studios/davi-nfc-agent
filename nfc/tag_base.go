@@ -1,17 +1,18 @@
 package nfc
 
-// cardTransport is the hardware boundary every PC/SC tag talks through: it sends
+// CardTransport is the hardware boundary every PC/SC tag talks through: it sends
 // an APDU and reports card presence. *pcscDevice satisfies it in production; an
-// in-memory emulator can satisfy it in tests, letting the real tag I/O logic
-// (page math, lock bytes, TLV) run against emulated silicon without hardware.
-type cardTransport interface {
+// in-memory emulator satisfies it in tests (see package nfctest), letting the
+// real tag I/O logic (page math, lock bytes, TLV) run against emulated silicon
+// without hardware. Wrap one in a driver with NewEmulatedTag.
+type CardTransport interface {
 	Transceive(cmd []byte) ([]byte, error)
 	IsCardPresent() bool
 }
 
 // pcscBaseTag provides common functionality for PC/SC tag implementations
 type pcscBaseTag struct {
-	device       cardTransport
+	device       CardTransport
 	uid          string
 	detectedType DetectedTagType
 	connected    bool

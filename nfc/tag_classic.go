@@ -17,7 +17,7 @@ type pcscClassicTag struct {
 	is4K bool
 }
 
-func newPCSCClassicTag(dev cardTransport, uid string, tagType DetectedTagType) *pcscClassicTag {
+func newPCSCClassicTag(dev CardTransport, uid string, tagType DetectedTagType) *pcscClassicTag {
 	return &pcscClassicTag{
 		pcscBaseTag: pcscBaseTag{
 			device:       dev,

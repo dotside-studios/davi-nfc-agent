@@ -53,6 +53,10 @@ type WriteRecord struct {
 type WriteRequest struct {
 	// Records is an array of NDEF records to write
 	Records []WriteRecord `json:"records"`
+
+	// Lock, when true, makes the tag permanently read-only after a successful
+	// write. Only tags that support locking honor this. WARNING: irreversible.
+	Lock bool `json:"lock,omitempty"`
 }
 
 // BuildNDEFMessage builds an NDEF message from the request.
@@ -188,6 +192,7 @@ func HandleWriteRequest(reader *nfc.NFCReader, writeReq WriteRequest) (*nfc.Writ
 	result, err := reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
 		Overwrite: true,
 		Index:     -1,
+		Lock:      writeReq.Lock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("write failed: %w", err)

@@ -174,6 +174,9 @@ func (s *Server) Start() error {
 	// Start write request handler
 	go s.handleWriteRequests()
 
+	// Start lock request handler
+	go s.handleLockRequests()
+
 	// Block until shutdown
 	<-s.ctx.Done()
 	log.Printf("[device] Server context cancelled, shutting down...")
@@ -303,6 +306,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	result, err := reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
 		Overwrite: true,
 		Index:     -1,
+		Lock:      msg.Request.Lock,
 	})
 	if err != nil {
 		msg.ResponseCh <- server.WriteResponseMessage{
@@ -314,6 +318,50 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	}
 
 	msg.ResponseCh <- server.WriteResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Payload:   result,
+	}
+}
+
+// handleLockRequests listens for make-read-only requests from the client server.
+func (s *Server) handleLockRequests() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg, ok := <-s.bridge.LockRequest:
+			if !ok {
+				return
+			}
+			s.executeLockRequest(msg)
+		}
+	}
+}
+
+// executeLockRequest executes a lock request from the client server.
+func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
+	reader := s.config.Reader
+	if reader == nil {
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     "No NFC reader available",
+		}
+		return
+	}
+
+	result, err := reader.LockCard()
+	if err != nil {
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return
+	}
+
+	msg.ResponseCh <- server.LockResponseMessage{
 		RequestID: msg.RequestID,
 		Success:   true,
 		Payload:   result,

@@ -21,6 +21,8 @@ const (
 	WSMessageTypeDeviceStatus  = "deviceStatus"
 	WSMessageTypeWriteRequest  = "writeRequest"
 	WSMessageTypeWriteResponse = "writeResponse"
+	WSMessageTypeLockRequest   = "lockRequest"
+	WSMessageTypeLockResponse  = "lockResponse"
 	WSMessageTypeError         = "error"
 )
 

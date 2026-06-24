@@ -382,11 +382,60 @@ data back to verify it landed.
 | `bytesWritten` | number | Size of the encoded NDEF message written |
 | `verified` | bool | `true` when the write was confirmed by reading it back |
 | `attempts` | number | Number of write attempts before success |
+| `locked` | bool | `true` when the tag was made read-only (see below) |
 
 A write that cannot be confirmed (verification mismatch after retries) returns an
 error response rather than a success — `success: true` means the data is on the
 tag. A response with `verified: false` only occurs if verification was explicitly
 disabled by the agent.
+
+### Locking Tags (Make Read-Only)
+
+Locking is **irreversible** — once a tag is made read-only it can never be
+written again. Only tags that support locking (e.g. NTAG, MIFARE Ultralight)
+can be locked; others return an error.
+
+**Write and lock in one step** — add `"lock": true` to a write request:
+
+```json
+{
+  "id": "req_1",
+  "type": "writeRequest",
+  "payload": {
+    "lock": true,
+    "records": [{ "type": "uri", "content": "https://example.com" }]
+  }
+}
+```
+
+The write response then includes `"locked": true`.
+
+**Lock an already-written tag** — send a `lockRequest`:
+
+```json
+{
+  "id": "req_9",
+  "type": "lockRequest"
+}
+```
+
+Response (`type: "lockResponse"`):
+
+```json
+{
+  "id": "req_9",
+  "type": "lockResponse",
+  "success": true,
+  "payload": {
+    "message": "Lock operation completed successfully",
+    "uid": "04A1B2C3D4E5F6",
+    "tagType": "MIFARE Ultralight",
+    "locked": true
+  }
+}
+```
+
+If the present tag does not support locking, `success` is `false` with an error.
 
 **Error:**
 

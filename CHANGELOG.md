@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tag locking (make read-only) exposed through the API: write-and-lock in one
+  step via `"lock": true` on a write request, or lock an already-written tag
+  with a standalone `lockRequest`. Supported on lockable tags (NTAG,
+  Ultralight); others return a clear error. New `NFCReader.LockCard` and
+  `WriteOptions.Lock`
 - Expanded write record types beyond text/uri: `url`, `mailto`/`email`, `tel`,
   `sms`, `geo`, `smartposter` (URI + title), `mime`, `vcard`, `external`, `aar`
   (Android Application Record / app launch), and fully custom `raw` records

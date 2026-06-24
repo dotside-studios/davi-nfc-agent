@@ -551,6 +551,11 @@ type WriteOptions struct {
 	// SkipCapacityCheck disables the pre-flight check that the encoded NDEF
 	// message fits within the tag's reported NDEF capacity.
 	SkipCapacityCheck bool
+
+	// Lock, when true, makes the tag permanently read-only after a successful
+	// verified write. Only tags that support locking (e.g. NTAG, Ultralight)
+	// honor this; others return an error. WARNING: locking is irreversible.
+	Lock bool
 }
 
 // WriteResult describes the outcome of a successful write operation. It gives
@@ -568,6 +573,19 @@ type WriteResult struct {
 	Verified bool `json:"verified"`
 	// Attempts is the number of write attempts made before success.
 	Attempts int `json:"attempts"`
+	// Locked is true when the tag was made permanently read-only as part of the
+	// write (see WriteOptions.Lock).
+	Locked bool `json:"locked,omitempty"`
+}
+
+// LockResult describes the outcome of a make-read-only (lock) operation.
+type LockResult struct {
+	// UID of the tag that was locked.
+	UID string `json:"uid"`
+	// TagType is the human-readable tag type string.
+	TagType string `json:"tagType"`
+	// Locked is true when the tag was made permanently read-only.
+	Locked bool `json:"locked"`
 }
 
 // WriteCardData attempts to write data to a detected NFC card using default options (overwrite mode).
@@ -852,14 +870,72 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 		}
 
 		result = res
-		log.Printf("Successfully wrote NDEF message to card UID: %s (verified=%v, attempts=%d)",
-			card.UID, res.Verified, res.Attempts)
+
+		// Optionally make the tag read-only after a successful write.
+		if opts.Lock {
+			if _, lockErr := r.lockCard(card); lockErr != nil {
+				return fmt.Errorf("write to card UID %s succeeded but lock failed: %w", card.UID, lockErr)
+			}
+			result.Locked = true
+		}
+
+		log.Printf("Successfully wrote NDEF message to card UID: %s (verified=%v, attempts=%d, locked=%v)",
+			card.UID, res.Verified, res.Attempts, result.Locked)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// LockCard makes the currently presented tag permanently read-only. This is
+// irreversible. Only tags that support locking (e.g. NTAG, Ultralight) succeed;
+// others return a not-supported error.
+func (r *NFCReader) LockCard() (*LockResult, error) {
+	var result *LockResult
+	err := r.withTagOperation(func() error {
+		card, err := r.prepareCardForWrite()
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			r.statusMux.Lock()
+			r.isWriting = false
+			r.statusMux.Unlock()
+		}()
+
+		res, err := r.lockCard(card)
+		if err != nil {
+			return fmt.Errorf("failed to lock card UID %s (Type: %s): %w", card.UID, card.Type, err)
+		}
+		result = res
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// lockCard makes the given card's tag read-only. Card-removal and not-supported
+// errors are surfaced directly so callers can react appropriately.
+func (r *NFCReader) lockCard(card *Card) (*LockResult, error) {
+	locker, ok := card.tag.(TagLocker)
+	if !ok {
+		return nil, NewNotSupportedError("MakeReadOnly")
+	}
+
+	if err := locker.MakeReadOnly(); err != nil {
+		if IsCardRemovedError(err) || IsNotSupportedError(err) {
+			return nil, err
+		}
+		return nil, NewWriteError(fmt.Sprintf("lockCard (UID: %s)", card.UID), err)
+	}
+
+	log.Printf("lockCard (UID: %s, Type: %s): tag locked read-only", card.UID, card.Type)
+	return &LockResult{UID: card.UID, TagType: card.Type, Locked: true}, nil
 }
 
 // withTagOperation performs a protected tag operation with timeout.

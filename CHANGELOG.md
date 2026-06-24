@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Read-after-write verification: writes are now confirmed by reading the data
+  back and comparing it to what was written, bringing write reliability to parity
+  with the read path
+- Automatic write retry with linear backoff on transient failures (configurable
+  via `WriteOptions.MaxWriteAttempts`); permanent failures (card removed,
+  read-only, capacity exceeded) are never retried
+- Pre-flight capacity check that rejects NDEF messages larger than the tag's
+  usable capacity before any write is attempted
+- Structured write results (`WriteResult` / `WriteMessageWithResult`) surfaced in
+  the `writeResponse` payload: `uid`, `tagType`, `bytesWritten`, `verified`, and
+  `attempts`
+
+### Changed
+
+- A `writeResponse` with `success: true` now guarantees the data was verified on
+  the tag; unconfirmed writes return an error instead
+
 ## [1.0.2] - 2026-01-19
 
 ### Fixed

@@ -31,6 +31,17 @@ type MockTag struct {
 	// Data is the data returned by ReadData()
 	Data []byte
 
+	// ReadDataFunc allows custom ReadData behavior (e.g. simulating a verification
+	// mismatch or a transient read error). If nil, ReadData returns Data or
+	// ReadDataError. Called with the mock's lock held; must not re-enter the mock.
+	ReadDataFunc func() ([]byte, error)
+
+	// WriteDataFunc allows custom WriteData behavior (e.g. failing a fixed number
+	// of times before succeeding). If it returns nil, the data is still stored so
+	// a subsequent ReadData reflects the write. If nil, WriteData stores Data or
+	// returns WriteDataError. Called with the mock's lock held.
+	WriteDataFunc func([]byte) error
+
 	// ReadDataError, if set, will be returned by ReadData()
 	ReadDataError error
 
@@ -154,6 +165,10 @@ func (m *MockTag) ReadData() ([]byte, error) {
 		return nil, fmt.Errorf("tag not connected")
 	}
 
+	if m.ReadDataFunc != nil {
+		return m.ReadDataFunc()
+	}
+
 	if m.ReadDataError != nil {
 		return nil, m.ReadDataError
 	}
@@ -179,11 +194,15 @@ func (m *MockTag) WriteData(data []byte) error {
 		return fmt.Errorf("tag is read-only")
 	}
 
-	if m.WriteDataError != nil {
+	if m.WriteDataFunc != nil {
+		if err := m.WriteDataFunc(data); err != nil {
+			return err
+		}
+	} else if m.WriteDataError != nil {
 		return m.WriteDataError
 	}
 
-	// Store a copy of the data
+	// Store a copy of the data so a subsequent ReadData reflects the write.
 	m.Data = make([]byte, len(data))
 	copy(m.Data, data)
 	return nil

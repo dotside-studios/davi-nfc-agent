@@ -335,10 +335,35 @@ Write NDEF data to a card (complete overwrite):
   "type": "writeResponse",
   "success": true,
   "payload": {
-    "message": "Write operation completed successfully"
+    "message": "Write operation completed successfully",
+    "uid": "04A1B2C3D4E5F6",
+    "tagType": "MIFARE Ultralight",
+    "bytesWritten": 28,
+    "verified": true,
+    "attempts": 1
   }
 }
 ```
+
+The agent confirms every write before reporting success: it checks the encoded
+message against the tag's capacity, retries transient failures, and reads the
+data back to verify it landed.
+
+**Success Payload Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | string | Human-readable status |
+| `uid` | string | UID of the tag that was written |
+| `tagType` | string | Detected tag type |
+| `bytesWritten` | number | Size of the encoded NDEF message written |
+| `verified` | bool | `true` when the write was confirmed by reading it back |
+| `attempts` | number | Number of write attempts before success |
+
+A write that cannot be confirmed (verification mismatch after retries) returns an
+error response rather than a success — `success: true` means the data is on the
+tag. A response with `verified: false` only occurs if verification was explicitly
+disabled by the agent.
 
 **Error:**
 

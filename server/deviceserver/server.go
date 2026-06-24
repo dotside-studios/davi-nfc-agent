@@ -297,8 +297,10 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 		return
 	}
 
-	// Write to card with overwrite option
-	err = reader.WriteMessageWithOptions(ndefMsg, nfc.WriteOptions{
+	// Write to card with overwrite option. WriteMessageWithResult performs a
+	// capacity check, retries on transient failures, and verifies the write by
+	// reading it back, returning the verified outcome.
+	result, err := reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -314,6 +316,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	msg.ResponseCh <- server.WriteResponseMessage{
 		RequestID: msg.RequestID,
 		Success:   true,
+		Payload:   result,
 	}
 }
 

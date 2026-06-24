@@ -248,9 +248,19 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 		Success: response.Success,
 	}
 	if response.Success {
-		wsResponse.Payload = map[string]interface{}{
+		payload := map[string]interface{}{
 			"message": "Write operation completed successfully",
 		}
+		// Surface the verified write outcome so clients can confirm the data
+		// actually landed (verified), how many attempts it took, and the size.
+		if wr, ok := response.Payload.(*nfc.WriteResult); ok && wr != nil {
+			payload["uid"] = wr.UID
+			payload["tagType"] = wr.TagType
+			payload["bytesWritten"] = wr.BytesWritten
+			payload["verified"] = wr.Verified
+			payload["attempts"] = wr.Attempts
+		}
+		wsResponse.Payload = payload
 	} else {
 		wsResponse.Error = response.Error
 		wsResponse.Payload = map[string]interface{}{

@@ -11,7 +11,7 @@ type pcscISO14443Tag struct {
 	pcscBaseTag
 }
 
-func newPCSCISO14443Tag(dev *pcscDevice, uid string) *pcscISO14443Tag {
+func newPCSCISO14443Tag(dev CardTransport, uid string) *pcscISO14443Tag {
 	return &pcscISO14443Tag{
 		pcscBaseTag: pcscBaseTag{
 			device:       dev,

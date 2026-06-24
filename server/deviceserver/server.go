@@ -174,6 +174,12 @@ func (s *Server) Start() error {
 	// Start write request handler
 	go s.handleWriteRequests()
 
+	// Start lock request handler
+	go s.handleLockRequests()
+
+	// Start capabilities request handler
+	go s.handleCapabilitiesRequests()
+
 	// Block until shutdown
 	<-s.ctx.Done()
 	log.Printf("[device] Server context cancelled, shutting down...")
@@ -297,10 +303,13 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 		return
 	}
 
-	// Write to card with overwrite option
-	err = reader.WriteMessageWithOptions(ndefMsg, nfc.WriteOptions{
+	// Write to card with overwrite option. WriteMessageWithResult performs a
+	// capacity check, retries on transient failures, and verifies the write by
+	// reading it back, returning the verified outcome.
+	result, err := reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
 		Overwrite: true,
 		Index:     -1,
+		Lock:      msg.Request.Lock,
 	})
 	if err != nil {
 		msg.ResponseCh <- server.WriteResponseMessage{
@@ -314,6 +323,95 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	msg.ResponseCh <- server.WriteResponseMessage{
 		RequestID: msg.RequestID,
 		Success:   true,
+		Payload:   result,
+	}
+}
+
+// handleLockRequests listens for make-read-only requests from the client server.
+func (s *Server) handleLockRequests() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg, ok := <-s.bridge.LockRequest:
+			if !ok {
+				return
+			}
+			s.executeLockRequest(msg)
+		}
+	}
+}
+
+// executeLockRequest executes a lock request from the client server.
+func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
+	reader := s.config.Reader
+	if reader == nil {
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     "No NFC reader available",
+		}
+		return
+	}
+
+	result, err := reader.LockCard()
+	if err != nil {
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return
+	}
+
+	msg.ResponseCh <- server.LockResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Payload:   result,
+	}
+}
+
+// handleCapabilitiesRequests listens for capabilities queries from the client server.
+func (s *Server) handleCapabilitiesRequests() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg, ok := <-s.bridge.CapabilitiesRequest:
+			if !ok {
+				return
+			}
+			s.executeCapabilitiesRequest(msg)
+		}
+	}
+}
+
+// executeCapabilitiesRequest queries the present tag's capabilities.
+func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessage) {
+	reader := s.config.Reader
+	if reader == nil {
+		msg.ResponseCh <- server.CapabilitiesResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     "No NFC reader available",
+		}
+		return
+	}
+
+	caps, err := reader.GetCapabilities()
+	if err != nil {
+		msg.ResponseCh <- server.CapabilitiesResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return
+	}
+
+	msg.ResponseCh <- server.CapabilitiesResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Payload:   caps,
 	}
 }
 

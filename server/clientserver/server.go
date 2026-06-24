@@ -196,6 +196,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch req.Type {
 		case server.WSMessageTypeWriteRequest:
 			s.handleWriteRequest(conn, clientID, req)
+		case server.WSMessageTypeLockRequest:
+			s.handleLockRequest(conn, clientID, req)
+		case server.WSMessageTypeCapabilitiesRequest:
+			s.handleCapabilitiesRequest(conn, clientID, req)
 		default:
 			log.Printf("[client] Unknown message type: %s", req.Type)
 			s.sendErrorResponse(conn, req.ID, "UNKNOWN_TYPE", fmt.Sprintf("Unknown message type: %s", req.Type))
@@ -248,9 +252,20 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 		Success: response.Success,
 	}
 	if response.Success {
-		wsResponse.Payload = map[string]interface{}{
+		payload := map[string]interface{}{
 			"message": "Write operation completed successfully",
 		}
+		// Surface the verified write outcome so clients can confirm the data
+		// actually landed (verified), how many attempts it took, and the size.
+		if wr, ok := response.Payload.(*nfc.WriteResult); ok && wr != nil {
+			payload["uid"] = wr.UID
+			payload["tagType"] = wr.TagType
+			payload["bytesWritten"] = wr.BytesWritten
+			payload["verified"] = wr.Verified
+			payload["attempts"] = wr.Attempts
+			payload["locked"] = wr.Locked
+		}
+		wsResponse.Payload = payload
 	} else {
 		wsResponse.Error = response.Error
 		wsResponse.Payload = map[string]interface{}{
@@ -260,6 +275,96 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 
 	if err := conn.WriteJSON(wsResponse); err != nil {
 		log.Printf("[client] Failed to send write response: %v", err)
+	}
+}
+
+// handleLockRequest handles make-read-only (lock) requests from clients.
+func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+	requestID := req.ID
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+
+	msg := server.LockRequestMessage{
+		RequestID:  requestID,
+		ClientID:   clientID,
+		ResponseCh: make(chan server.LockResponseMessage, 1),
+	}
+
+	// Send through bridge and wait for response
+	response, err := s.bridge.SendLockRequest(msg)
+	if err != nil {
+		log.Printf("[client] Lock request failed: %v", err)
+		s.sendErrorResponse(conn, req.ID, "LOCK_FAILED", err.Error())
+		return
+	}
+
+	wsResponse := protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    server.WSMessageTypeLockResponse,
+		Success: response.Success,
+	}
+	if response.Success {
+		payload := map[string]interface{}{
+			"message": "Lock operation completed successfully",
+		}
+		if lr, ok := response.Payload.(*nfc.LockResult); ok && lr != nil {
+			payload["uid"] = lr.UID
+			payload["tagType"] = lr.TagType
+			payload["locked"] = lr.Locked
+		}
+		wsResponse.Payload = payload
+	} else {
+		wsResponse.Error = response.Error
+		wsResponse.Payload = map[string]interface{}{
+			"code": "LOCK_FAILED",
+		}
+	}
+
+	if err := conn.WriteJSON(wsResponse); err != nil {
+		log.Printf("[client] Failed to send lock response: %v", err)
+	}
+}
+
+// handleCapabilitiesRequest handles capabilities queries for the present tag.
+func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+	requestID := req.ID
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+
+	msg := server.CapabilitiesRequestMessage{
+		RequestID:  requestID,
+		ClientID:   clientID,
+		ResponseCh: make(chan server.CapabilitiesResponseMessage, 1),
+	}
+
+	// Send through bridge and wait for response
+	response, err := s.bridge.SendCapabilitiesRequest(msg)
+	if err != nil {
+		log.Printf("[client] Capabilities request failed: %v", err)
+		s.sendErrorResponse(conn, req.ID, "CAPABILITIES_FAILED", err.Error())
+		return
+	}
+
+	wsResponse := protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    server.WSMessageTypeCapabilitiesResponse,
+		Success: response.Success,
+	}
+	if response.Success {
+		wsResponse.Payload = map[string]interface{}{
+			"capabilities": response.Payload,
+		}
+	} else {
+		wsResponse.Error = response.Error
+		wsResponse.Payload = map[string]interface{}{
+			"code": "CAPABILITIES_FAILED",
+		}
+	}
+
+	if err := conn.WriteJSON(wsResponse); err != nil {
+		log.Printf("[client] Failed to send capabilities response: %v", err)
 	}
 }
 
@@ -322,11 +427,12 @@ func (s *Server) sendTagDataToClient(conn *server.SafeConn, data nfc.NFCData) {
 
 	if data.Card != nil {
 		payload = map[string]interface{}{
-			"uid":        data.Card.UID,
-			"type":       data.Card.Type,
-			"technology": data.Card.Technology,
-			"scannedAt":  data.Card.ScannedAt.Format("2006-01-02T15:04:05Z07:00"),
-			"err":        errStr,
+			"uid":          data.Card.UID,
+			"type":         data.Card.Type,
+			"technology":   data.Card.Technology,
+			"scannedAt":    data.Card.ScannedAt.Format("2006-01-02T15:04:05Z07:00"),
+			"capabilities": data.Card.Capabilities(),
+			"err":          errStr,
 		}
 
 		// Try to read and parse message from card

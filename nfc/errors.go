@@ -115,6 +115,28 @@ func NewTransceiveError(op string, cause error) *NFCError {
 	}
 }
 
+// NewCapacityExceededError creates an error for when the data to write is
+// larger than the tag's usable NDEF capacity.
+func NewCapacityExceededError(op, tagUID string, needed, available int) *NFCError {
+	return &NFCError{
+		Code:    ErrCodeCapacityExceeded,
+		Op:      op,
+		TagUID:  tagUID,
+		Message: fmt.Sprintf("data too large: %d bytes exceeds tag NDEF capacity of %d bytes", needed, available),
+	}
+}
+
+// NewReadOnlyError creates an error for write attempts on a read-only tag.
+func NewReadOnlyError(op, tagUID string, cause error) *NFCError {
+	return &NFCError{
+		Code:    ErrCodeReadOnly,
+		Op:      op,
+		TagUID:  tagUID,
+		Message: "tag is read-only",
+		Cause:   cause,
+	}
+}
+
 // IsNotSupportedError checks if an error indicates an unsupported operation.
 func IsNotSupportedError(err error) bool {
 	if err == nil {
@@ -147,6 +169,43 @@ func IsAuthError(err error) bool {
 	var nfcErr *NFCError
 	if errors.As(err, &nfcErr) {
 		return nfcErr.Code == ErrCodeAuthFailed
+	}
+	return false
+}
+
+// IsWriteError checks if an error indicates a write failure.
+func IsWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nfcErr *NFCError
+	if errors.As(err, &nfcErr) {
+		return nfcErr.Code == ErrCodeWriteFailed
+	}
+	return false
+}
+
+// IsCapacityExceededError checks if an error indicates the data exceeded the
+// tag's usable NDEF capacity.
+func IsCapacityExceededError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nfcErr *NFCError
+	if errors.As(err, &nfcErr) {
+		return nfcErr.Code == ErrCodeCapacityExceeded
+	}
+	return false
+}
+
+// IsReadOnlyError checks if an error indicates the tag is read-only.
+func IsReadOnlyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nfcErr *NFCError
+	if errors.As(err, &nfcErr) {
+		return nfcErr.Code == ErrCodeReadOnly
 	}
 	return false
 }

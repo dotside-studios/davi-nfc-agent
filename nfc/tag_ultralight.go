@@ -10,7 +10,7 @@ type pcscUltralightTag struct {
 	isC bool
 }
 
-func newPCSCUltralightTag(dev *pcscDevice, uid string, tagType DetectedTagType) *pcscUltralightTag {
+func newPCSCUltralightTag(dev CardTransport, uid string, tagType DetectedTagType) *pcscUltralightTag {
 	return &pcscUltralightTag{
 		pcscBaseTag: pcscBaseTag{
 			device:       dev,

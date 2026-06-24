@@ -220,6 +220,14 @@ When a card is detected and read:
     "type": "MIFARE Classic 1K",
     "technology": "ISO14443A",
     "scannedAt": "2024-10-06T12:34:56Z",
+    "capabilities": {
+      "canRead": true,
+      "canWrite": true,
+      "canLock": true,
+      "maxNdefSize": 716,
+      "tagFamily": "MIFARE Classic",
+      "supportsNdef": true
+    },
     "message": {
       "type": "ndef",
       "records": [
@@ -245,6 +253,7 @@ When a card is detected and read:
 | `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental) |
 | `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.) |
 | `scannedAt` | ISO 8601 timestamp |
+| `capabilities` | What the tag supports — see [Tag Capabilities](#tag-capabilities) |
 | `message` | Structured NDEF message data |
 | `text` | Quick access to first text record |
 | `err` | Error message or `null` on success |
@@ -321,9 +330,33 @@ Write NDEF data to a card (complete overwrite):
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | Yes | `text` or `uri` |
-| `content` | string | Yes | Text or URI content |
-| `language` | string | No | ISO language code (default: `en`) |
+| `type` | string | No | Record type (see below). Defaults to `text`. |
+| `content` | string | Varies | Primary value: text, URI, domain, package name, etc. |
+| `language` | string | No | ISO language code for `text`/`smartposter` (default: `en`) |
+| `mimeType` | string | No | Media type for `mime` records |
+| `title` | string | No | Display title for `smartposter` records |
+| `payload` | bytes (base64) | No | Raw bytes for `mime`, `vcard`, `external`, `raw` |
+| `tnf` | number | No | Type Name Format (0–7) for `raw` records |
+| `typeBytes` | bytes (base64) | No | NDEF type bytes for `raw` records |
+| `id` | bytes (base64) | No | Optional record ID for `raw` records |
+
+**Supported `type` values:**
+
+| `type` | Fields used | Notes |
+|--------|-------------|-------|
+| `text` | `content`, `language` | Default when `type` omitted |
+| `uri` / `url` | `content` | Prefix is auto-abbreviated to save tag space |
+| `mailto` / `email`, `tel`, `sms`, `geo` | `content` | URI shortcut; scheme prepended if absent |
+| `smartposter` | `content` (URI), `title`, `language` | "Tap to open *title*" — URI + label |
+| `mime` | `mimeType`, `payload` (or `content`) | Arbitrary MIME media record |
+| `vcard` | `content` or `payload` | Contact card (`text/vcard` MIME) |
+| `external` | `content` (`domain:type`), `payload` | NFC Forum external type |
+| `aar` | `content` (package name) | Android Application Record (app launch) |
+| `empty` / `erase` | — | Empty record — blanks/formats the tag (reversible) |
+| `raw` | `tnf`, `typeBytes`, `id`, `payload` | Fully custom record |
+
+WiFi credentials can be written as a `mime` record with `mimeType` set to
+`application/vnd.wfa.wsc` and a WSC-formatted `payload`.
 
 ### Write Response
 
@@ -335,7 +368,164 @@ Write NDEF data to a card (complete overwrite):
   "type": "writeResponse",
   "success": true,
   "payload": {
-    "message": "Write operation completed successfully"
+    "message": "Write operation completed successfully",
+    "uid": "04A1B2C3D4E5F6",
+    "tagType": "MIFARE Ultralight",
+    "bytesWritten": 28,
+    "verified": true,
+    "attempts": 1
+  }
+}
+```
+
+The agent confirms every write before reporting success: it checks the encoded
+message against the tag's capacity, retries transient failures, and reads the
+data back to verify it landed.
+
+**Success Payload Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | string | Human-readable status |
+| `uid` | string | UID of the tag that was written |
+| `tagType` | string | Detected tag type |
+| `bytesWritten` | number | Size of the encoded NDEF message written |
+| `verified` | bool | `true` when the write was confirmed by reading it back |
+| `attempts` | number | Number of write attempts before success |
+| `locked` | bool | `true` when the tag was made read-only (see below) |
+
+A write that cannot be confirmed (verification mismatch after retries) returns an
+error response rather than a success — `success: true` means the data is on the
+tag. A response with `verified: false` only occurs if verification was explicitly
+disabled by the agent.
+
+### Tag Capabilities
+
+Every `tagData` broadcast includes a `capabilities` object describing what the
+present tag supports, so a client can gate its UI (show "lock"/"password" only
+when supported, render a capacity meter, etc.) without a round-trip.
+
+```json
+{
+  "canRead": true,
+  "canWrite": true,
+  "canTransceive": false,
+  "canLock": true,
+  "isReadOnly": false,
+  "memorySize": 540,
+  "maxNdefSize": 504,
+  "technology": "ISO14443A",
+  "tagFamily": "NTAG",
+  "supportsNdef": true,
+  "supportsPassword": true
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `canRead` / `canWrite` | Whether read / write operations are supported |
+| `canTransceive` | Raw APDU transceive supported |
+| `canLock` | Tag can be made permanently read-only |
+| `isReadOnly` | Tag is already locked (omitted when false) |
+| `memorySize` | Total memory in bytes (omitted when unknown) |
+| `maxNdefSize` | Maximum NDEF message size in bytes (omitted when unknown) |
+| `tagFamily` | `MIFARE Classic`, `DESFire`, `NTAG`, `MIFARE Ultralight`, `Type 4`, … |
+| `supportsNdef` | Tag supports NDEF |
+| `supportsPassword` | Tag supports simple password protection (NTAG21x `PWD`/`PACK`) |
+
+**Query on demand** — to fetch capabilities without waiting for the next scan,
+send a `capabilitiesRequest`:
+
+```json
+{
+  "id": "req_cap",
+  "type": "capabilitiesRequest"
+}
+```
+
+Response (`type: "capabilitiesResponse"`):
+
+```json
+{
+  "id": "req_cap",
+  "type": "capabilitiesResponse",
+  "success": true,
+  "payload": {
+    "capabilities": { "canWrite": true, "canLock": true, "supportsPassword": true, "maxNdefSize": 504 }
+  }
+}
+```
+
+The query requires exactly one tag to be present; if none (or several) are
+present, `success` is `false` with an error.
+
+### Locking Tags (Make Read-Only)
+
+Locking is **irreversible** — once a tag is made read-only it can never be
+written again. Only tags that support locking (e.g. NTAG, MIFARE Ultralight)
+can be locked; others return an error.
+
+**Write and lock in one step** — add `"lock": true` to a write request:
+
+```json
+{
+  "id": "req_1",
+  "type": "writeRequest",
+  "payload": {
+    "lock": true,
+    "records": [{ "type": "uri", "content": "https://example.com" }]
+  }
+}
+```
+
+The write response then includes `"locked": true`.
+
+**Lock an already-written tag** — send a `lockRequest`:
+
+```json
+{
+  "id": "req_9",
+  "type": "lockRequest"
+}
+```
+
+Response (`type: "lockResponse"`):
+
+```json
+{
+  "id": "req_9",
+  "type": "lockResponse",
+  "success": true,
+  "payload": {
+    "message": "Lock operation completed successfully",
+    "uid": "04A1B2C3D4E5F6",
+    "tagType": "MIFARE Ultralight",
+    "locked": true
+  }
+}
+```
+
+If the present tag does not support locking, `success` is `false` with an error.
+
+### Password Protection (planned)
+
+Password protection (NTAG `PWD`/`PACK`/`AUTH0`) is **not yet available**. The
+per-tag capability is reported (`supportsPassword`, true for NTAG21x) and the
+API contract below is fixed, but the destructive configuration writes are gated
+off pending validation on real hardware — a wrong `AUTH0`/`ACCESS` value can
+permanently lock a tag. Calls currently return a not-supported error.
+
+Planned request shape (subject to change until enabled):
+
+```json
+{
+  "id": "req_10",
+  "type": "passwordRequest",
+  "payload": {
+    "action": "set",            // "set" or "remove"
+    "password": "01020304",     // hex, 4 bytes
+    "protectRead": false,        // false = write-protect only
+    "startPage": 4               // first protected page (AUTH0)
   }
 }
 ```

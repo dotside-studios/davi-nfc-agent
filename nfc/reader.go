@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"sync"
@@ -18,6 +19,17 @@ const (
 	MaxRetriesCooldownPeriod    = 30 * time.Second
 	PostErrorPauseTime          = 1 * time.Second
 	UnhandledErrorRetryInterval = 1 * time.Second
+)
+
+// Write reliability defaults.
+const (
+	// DefaultMaxWriteAttempts is the number of write+verify attempts made on a
+	// single write operation before giving up, when WriteOptions.MaxWriteAttempts
+	// is not set.
+	DefaultMaxWriteAttempts = 3
+	// WriteRetryBackoff is the base delay between write retries. The delay grows
+	// linearly with the attempt number (backoff, 2*backoff, ...).
+	WriteRetryBackoff = 50 * time.Millisecond
 )
 
 // ReaderMode defines the access mode for the NFC reader.
@@ -524,6 +536,56 @@ type WriteOptions struct {
 	// contain existing data. WARNING: This will erase all existing data on the card.
 	// Only set this to true if you explicitly want to wipe and reinitialize the card.
 	ForceInitialize bool
+
+	// SkipVerify disables read-after-write verification. By default (false), the
+	// reader re-reads the card after writing and confirms the data matches what
+	// was written, retrying on mismatch.
+	SkipVerify bool
+
+	// MaxWriteAttempts caps the number of write+verify attempts on transient
+	// failures (write error, verification mismatch, or transient read error).
+	// If <= 0, DefaultMaxWriteAttempts is used. Permanent failures such as card
+	// removal, read-only tags, and capacity overflow are never retried.
+	MaxWriteAttempts int
+
+	// SkipCapacityCheck disables the pre-flight check that the encoded NDEF
+	// message fits within the tag's reported NDEF capacity.
+	SkipCapacityCheck bool
+
+	// Lock, when true, makes the tag permanently read-only after a successful
+	// verified write. Only tags that support locking (e.g. NTAG, Ultralight)
+	// honor this; others return an error. WARNING: locking is irreversible.
+	Lock bool
+}
+
+// WriteResult describes the outcome of a successful write operation. It gives
+// callers (and ultimately the frontend) the same confidence for writes that the
+// read path already provides: confirmation that the bytes actually landed.
+type WriteResult struct {
+	// UID of the tag that was written.
+	UID string `json:"uid"`
+	// TagType is the human-readable tag type string.
+	TagType string `json:"tagType"`
+	// BytesWritten is the size of the encoded NDEF message written to the tag.
+	BytesWritten int `json:"bytesWritten"`
+	// Verified is true when the write was confirmed by reading the data back and
+	// comparing it to what was written.
+	Verified bool `json:"verified"`
+	// Attempts is the number of write attempts made before success.
+	Attempts int `json:"attempts"`
+	// Locked is true when the tag was made permanently read-only as part of the
+	// write (see WriteOptions.Lock).
+	Locked bool `json:"locked,omitempty"`
+}
+
+// LockResult describes the outcome of a make-read-only (lock) operation.
+type LockResult struct {
+	// UID of the tag that was locked.
+	UID string `json:"uid"`
+	// TagType is the human-readable tag type string.
+	TagType string `json:"tagType"`
+	// Locked is true when the tag was made permanently read-only.
+	Locked bool `json:"locked"`
 }
 
 // WriteCardData attempts to write data to a detected NFC card using default options (overwrite mode).
@@ -535,6 +597,18 @@ func (r *NFCReader) WriteCardData(text string) error {
 	}
 	ndefMsg := msg.MustBuild()
 	return r.WriteMessageWithOptions(ndefMsg, WriteOptions{
+		Overwrite: true,
+		Index:     -1,
+	})
+}
+
+// EraseCard overwrites the presented tag with an empty NDEF message, making it
+// read as blank. This is reversible — the tag can be rewritten afterward. The
+// write is verified like any other write.
+func (r *NFCReader) EraseCard() (*WriteResult, error) {
+	msg := NewNDEFMessage()
+	msg.AddRecord((&NDEFEmpty{}).ToRecord())
+	return r.WriteMessageWithResult(msg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -594,89 +668,202 @@ func (r *NFCReader) prepareCardForWrite() (*Card, error) {
 	return card, nil
 }
 
-// writeMessageToCard performs the actual write operation with NDEF message handling.
-// Supports overwrite mode and partial update (append/replace at index).
-func (r *NFCReader) writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions) error {
+// writeMessageToCard performs the actual write operation with NDEF message
+// handling, a pre-flight capacity check, bounded retries, and read-after-write
+// verification. Supports overwrite mode and partial update (append/replace at
+// index). It returns a WriteResult describing the outcome on success.
+func (r *NFCReader) writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
 	log.Printf("writeMessageToCard (UID: %s, Type: %s): overwrite=%v, index=%d",
 		card.UID, card.Type, opts.Overwrite, opts.Index)
 
-	// Read current message to determine behavior
-	cachedMsg, cardReadErr := card.ReadMessage()
-	if cachedMsg == nil && cardReadErr == nil {
-		log.Printf("writeMessageToCard (UID: %s): card does not have NDEF data, using overwrite", card.UID)
-		opts.Overwrite = true
+	// Resolve the final NDEF message to write (overwrite vs partial merge).
+	finalMsg, err := r.resolveWriteMessage(card, msg, opts)
+	if err != nil {
+		return nil, err
 	}
 
+	// Encode once: this is the exact NDEF payload we expect to read back.
+	data, err := finalMsg.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("writeMessageToCard (UID: %s): error encoding message: %w", card.UID, err)
+	}
+
+	// Pre-flight capacity check against the tag's reported NDEF capacity.
+	if !opts.SkipCapacityCheck {
+		if err := checkWriteCapacity(card.tag, len(data)); err != nil {
+			return nil, err
+		}
+	}
+
+	attempts := opts.MaxWriteAttempts
+	if attempts <= 0 {
+		attempts = DefaultMaxWriteAttempts
+	}
+	verify := !opts.SkipVerify
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			log.Printf("writeMessageToCard (UID: %s): retry attempt %d/%d (last error: %v)",
+				card.UID, attempt, attempts, lastErr)
+			r.clock.Sleep(time.Duration(attempt-1) * WriteRetryBackoff)
+		}
+
+		// Perform the write.
+		if err := r.writeOnce(card, data, opts); err != nil {
+			if isPermanentWriteError(err) {
+				return nil, err
+			}
+			lastErr = err
+			continue
+		}
+
+		// If verification is disabled, treat a clean write as success.
+		if !verify {
+			log.Printf("writeMessageToCard (UID: %s): write completed (unverified, attempt %d)", card.UID, attempt)
+			return newWriteResult(card, len(data), false, attempt), nil
+		}
+
+		// Read back and confirm the data landed.
+		verified, err := r.verifyWrite(card, data)
+		if err != nil {
+			if isPermanentWriteError(err) {
+				return nil, err
+			}
+			lastErr = fmt.Errorf("verification read failed: %w", err)
+			continue
+		}
+		if verified {
+			log.Printf("writeMessageToCard (UID: %s): write verified successfully (attempt %d)", card.UID, attempt)
+			return newWriteResult(card, len(data), true, attempt), nil
+		}
+		lastErr = fmt.Errorf("write verification mismatch: data read back does not match data written")
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unknown write failure")
+	}
+	return nil, NewWriteError(fmt.Sprintf("writeMessageToCard (UID: %s)", card.UID),
+		fmt.Errorf("failed after %d attempt(s): %w", attempts, lastErr))
+}
+
+// resolveWriteMessage determines the final NDEF message to write, applying
+// overwrite vs partial-update (append/replace) semantics against the card's
+// current contents. A card with no usable NDEF content is always overwritten.
+func (r *NFCReader) resolveWriteMessage(card *Card, msg *NDEFMessage, opts WriteOptions) (*NDEFMessage, error) {
+	cachedMsg, _ := card.ReadMessage()
 	cachedNdef, isNDEF := cachedMsg.(*NDEFMessage)
+
 	if !isNDEF || len(cachedNdef.Records()) == 0 {
-		log.Printf("writeMessageToCard (UID: %s): card message is not NDEF, using overwrite", card.UID)
+		// Card is blank, non-NDEF, or unreadable: a full overwrite is the only
+		// safe option.
+		if !opts.Overwrite {
+			log.Printf("resolveWriteMessage (UID: %s): card has no usable NDEF data, forcing overwrite", card.UID)
+		}
 		opts.Overwrite = true
 	}
 
 	if opts.Overwrite {
-		// Direct overwrite with provided message
-		data, err := msg.Encode()
-		if err != nil {
-			return fmt.Errorf("writeMessageToCard (UID: %s): error encoding message: %w", card.UID, err)
-		}
-
-		// If tag supports AdvancedWriter interface and ForceInitialize is set, use it
-		if opts.ForceInitialize {
-			if advWriter, ok := card.tag.(AdvancedWriter); ok {
-				tagOpts := TagWriteOptions{
-					ForceInitialize: opts.ForceInitialize,
-				}
-				if err := advWriter.WriteDataWithOptions(data, tagOpts); err != nil {
-					return fmt.Errorf("writeMessageToCard (UID: %s): error from WriteDataWithOptions: %w", card.UID, err)
-				}
-				log.Printf("writeMessageToCard (UID: %s): card write with ForceInitialize completed successfully.", card.UID)
-				return nil
-			}
-			log.Printf("writeMessageToCard (UID: %s): ForceInitialize requested but tag doesn't support AdvancedWriter, using standard write", card.UID)
-		}
-
-		// Standard write path
-		if err := card.WriteMessage(msg); err != nil {
-			return fmt.Errorf("writeMessageToCard (UID: %s): error from card.WriteMessage: %w", card.UID, err)
-		}
-
-		log.Printf("writeMessageToCard (UID: %s): card write completed successfully.", card.UID)
-		return nil
+		return msg, nil
 	}
 
-	// Partial update mode: merge records from provided message into existing message
-	log.Printf("writeMessageToCard (UID: %s): attempting NDEF partial update", card.UID)
+	// Partial update: merge new records into the existing message.
+	log.Printf("resolveWriteMessage (UID: %s): merging records for partial update", card.UID)
+	cachedBuilder := cachedNdef.ToBuilder()
+	newBuilder := msg.ToBuilder()
 
-	cachedMsgBuilder := cachedNdef.ToBuilder()
-	newMsgBuilder := msg.ToBuilder()
-
-	if opts.Index <= -1 || opts.Index >= len(cachedMsgBuilder.Records) {
-		// Append mode: add all new records
-		log.Printf("writeMessageToCard (UID: %s): appending %d new record(s)", card.UID, len(newMsgBuilder.Records))
-		cachedMsgBuilder.Records = append(cachedMsgBuilder.Records, newMsgBuilder.Records...)
+	if opts.Index <= -1 || opts.Index >= len(cachedBuilder.Records) {
+		log.Printf("resolveWriteMessage (UID: %s): appending %d new record(s)", card.UID, len(newBuilder.Records))
+		cachedBuilder.Records = append(cachedBuilder.Records, newBuilder.Records...)
 	} else {
-		// Replace mode: replace record at index with first new record
-		log.Printf("writeMessageToCard (UID: %s): replacing record at index %d", card.UID, opts.Index)
-		if len(newMsgBuilder.Records) > 0 {
-			cachedMsgBuilder.Records[opts.Index] = newMsgBuilder.Records[0]
+		log.Printf("resolveWriteMessage (UID: %s): replacing record at index %d", card.UID, opts.Index)
+		if len(newBuilder.Records) > 0 {
+			cachedBuilder.Records[opts.Index] = newBuilder.Records[0]
 		}
 	}
 
-	// Build and write updated message
-	updatedMsg := cachedMsgBuilder.MustBuild()
+	updated, err := cachedBuilder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("resolveWriteMessage (UID: %s): failed to build merged message: %w", card.UID, err)
+	}
+	return updated, nil
+}
+
+// writeOnce performs a single write of the encoded NDEF data to the tag. It
+// writes the bytes directly (rather than through the Card's buffer) so that a
+// failed attempt leaves no partial buffer behind for the next retry.
+func (r *NFCReader) writeOnce(card *Card, data []byte, opts WriteOptions) error {
+	// Clear any cached read state so the verification read hits the tag.
 	card.Reset()
-	if err := card.WriteMessage(updatedMsg); err != nil {
-		log.Printf("writeMessageToCard (UID: %s): NDEF partial write failed: %v", card.UID, err)
-		return fmt.Errorf("writeMessageToCard (UID: %s): partial write failed: %w", card.UID, err)
+
+	if opts.ForceInitialize {
+		if advWriter, ok := card.tag.(AdvancedWriter); ok {
+			return advWriter.WriteDataWithOptions(data, TagWriteOptions{ForceInitialize: true})
+		}
+		log.Printf("writeOnce (UID: %s): ForceInitialize requested but tag doesn't support AdvancedWriter, using standard write", card.UID)
 	}
 
-	log.Printf("writeMessageToCard (UID: %s): NDEF partial write succeeded", card.UID)
+	card.LastAccessed = time.Now()
+	return card.tag.WriteData(data)
+}
+
+// verifyWrite re-reads the card and reports whether its NDEF contents exactly
+// match the bytes that were written.
+func (r *NFCReader) verifyWrite(card *Card, expected []byte) (bool, error) {
+	card.Reset()
+	readBack, err := card.tag.ReadData()
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(readBack, expected), nil
+}
+
+// checkWriteCapacity verifies the encoded NDEF message fits within the tag's
+// reported NDEF capacity. Tags that don't report a capacity (MaxNDEFSize == 0)
+// are not checked here; their WriteData implementation enforces hard limits.
+func checkWriteCapacity(tag Tag, ndefLen int) error {
+	caps := GetTagCapabilities(tag)
+	if caps.MaxNDEFSize > 0 && ndefLen > caps.MaxNDEFSize {
+		return NewCapacityExceededError("WriteMessage", tag.UID(), ndefLen, caps.MaxNDEFSize)
+	}
 	return nil
 }
 
-// WriteMessageWithOptions writes an NDEF message to a detected NFC card with options for record manipulation.
+// isPermanentWriteError reports whether an error should abort the write
+// immediately rather than be retried.
+func isPermanentWriteError(err error) bool {
+	return IsCardRemovedError(err) ||
+		IsReadOnlyError(err) ||
+		IsCapacityExceededError(err) ||
+		IsNotSupportedError(err)
+}
+
+// newWriteResult builds a WriteResult from a card and write metadata.
+func newWriteResult(card *Card, bytesWritten int, verified bool, attempts int) *WriteResult {
+	return &WriteResult{
+		UID:          card.UID,
+		TagType:      card.Type,
+		BytesWritten: bytesWritten,
+		Verified:     verified,
+		Attempts:     attempts,
+	}
+}
+
+// WriteMessageWithOptions writes an NDEF message to a detected NFC card with
+// options for record manipulation. It performs a pre-flight capacity check,
+// retries on transient failures, and (unless disabled) verifies the write by
+// reading the data back. Use WriteMessageWithResult to obtain the WriteResult.
 func (r *NFCReader) WriteMessageWithOptions(msg *NDEFMessage, opts WriteOptions) error {
-	return r.withTagOperation(func() error {
+	_, err := r.WriteMessageWithResult(msg, opts)
+	return err
+}
+
+// WriteMessageWithResult is like WriteMessageWithOptions but returns a
+// WriteResult describing the outcome (verification status, attempts, and bytes
+// written) so callers can surface real write confidence to the user.
+func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
+	var result *WriteResult
+	err := r.withTagOperation(func() error {
 		card, err := r.prepareCardForWrite()
 		if err != nil {
 			return err
@@ -689,13 +876,78 @@ func (r *NFCReader) WriteMessageWithOptions(msg *NDEFMessage, opts WriteOptions)
 		}()
 
 		log.Printf("Attempting to write NDEF message to card UID: %s, Type: %s", card.UID, card.Type)
-		if err := r.writeMessageToCard(card, msg, opts); err != nil {
+		res, err := r.writeMessageToCard(card, msg, opts)
+		if err != nil {
 			return fmt.Errorf("failed to write to card UID %s (Type: %s): %w", card.UID, card.Type, err)
 		}
 
-		log.Printf("Successfully wrote NDEF message to card UID: %s", card.UID)
+		result = res
+
+		// Optionally make the tag read-only after a successful write.
+		if opts.Lock {
+			if _, lockErr := r.lockCard(card); lockErr != nil {
+				return fmt.Errorf("write to card UID %s succeeded but lock failed: %w", card.UID, lockErr)
+			}
+			result.Locked = true
+		}
+
+		log.Printf("Successfully wrote NDEF message to card UID: %s (verified=%v, attempts=%d, locked=%v)",
+			card.UID, res.Verified, res.Attempts, result.Locked)
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// LockCard makes the currently presented tag permanently read-only. This is
+// irreversible. Only tags that support locking (e.g. NTAG, Ultralight) succeed;
+// others return a not-supported error.
+func (r *NFCReader) LockCard() (*LockResult, error) {
+	var result *LockResult
+	err := r.withTagOperation(func() error {
+		card, err := r.prepareCardForWrite()
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			r.statusMux.Lock()
+			r.isWriting = false
+			r.statusMux.Unlock()
+		}()
+
+		res, err := r.lockCard(card)
+		if err != nil {
+			return fmt.Errorf("failed to lock card UID %s (Type: %s): %w", card.UID, card.Type, err)
+		}
+		result = res
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// lockCard makes the given card's tag read-only. Card-removal and not-supported
+// errors are surfaced directly so callers can react appropriately.
+func (r *NFCReader) lockCard(card *Card) (*LockResult, error) {
+	locker, ok := card.tag.(TagLocker)
+	if !ok {
+		return nil, NewNotSupportedError("MakeReadOnly")
+	}
+
+	if err := locker.MakeReadOnly(); err != nil {
+		if IsCardRemovedError(err) || IsNotSupportedError(err) {
+			return nil, err
+		}
+		return nil, NewWriteError(fmt.Sprintf("lockCard (UID: %s)", card.UID), err)
+	}
+
+	log.Printf("lockCard (UID: %s, Type: %s): tag locked read-only", card.UID, card.Type)
+	return &LockResult{UID: card.UID, TagType: card.Type, Locked: true}, nil
 }
 
 // withTagOperation performs a protected tag operation with timeout.
@@ -716,6 +968,38 @@ func (r *NFCReader) withTagOperation(operation func() error) error {
 		// For now, just return timeout. The operation might still be running.
 		return fmt.Errorf("operation timed out after %v", r.operationTimeout)
 	}
+}
+
+// GetCapabilities reports the capabilities of the tag currently presented to
+// the reader — memory size, writability, lock and password support, and
+// read-only state. It requires exactly one tag to be present, performs no
+// write, and works regardless of reader mode (including read-only). This lets
+// clients query what a tag supports before attempting a write or lock.
+func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
+	var caps TagCapabilities
+	err := r.withTagOperation(func() error {
+		if !r.deviceManager.HasDevice() {
+			return fmt.Errorf("no NFC device connected")
+		}
+
+		tags, err := r.GetTags()
+		if err != nil {
+			return fmt.Errorf("failed to get tags: %w", err)
+		}
+		if len(tags) == 0 {
+			return fmt.Errorf("no card detected")
+		}
+		if len(tags) > 1 {
+			return fmt.Errorf("multiple cards detected (%d tags), please present only one card", len(tags))
+		}
+
+		caps = GetTagCapabilities(tags[0])
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &caps, nil
 }
 
 // GetTags retrieves available tags from the connected NFC device.

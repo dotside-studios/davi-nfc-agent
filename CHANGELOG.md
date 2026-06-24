@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- NTAG locking now locks the **entire** user area. `MakeReadOnly` previously set
+  only the static lock bytes (pages 3-15), leaving the bulk of an NTAG215/216
+  writable while reporting a successful lock; it now also sets the model's
+  dynamic lock bytes. Validated end-to-end against in-memory tag emulators
+- DESFire read/write now interpret the DESFire native status word (wrapped
+  `91 00` = OK) instead of requiring ISO `90 00`. The old generic check would
+  have rejected every real DESFire response
+- DESFire read/write now follow the additional-frame (`91 AF`) chain, so NDEF
+  payloads larger than a single ~59-byte native frame work. Validated against
+  the in-memory DESFire emulator; the per-frame size is datasheet-modeled and
+  wants a hardware cross-check
+
+### Added
+
+- Tag capabilities exposed over the wire: every `tagData` broadcast now carries
+  a `capabilities` object (memory, max-NDEF size, `canWrite`, `canLock`,
+  `isReadOnly`, `supportsPassword`), and clients can fetch the present tag's
+  capabilities on demand via a `capabilitiesRequest`/`capabilitiesResponse`
+  message. Backed by `NFCReader.GetCapabilities` and `Card.Capabilities`
+- Erase/format support: `NFCReader.EraseCard` and an `empty` write record type
+  overwrite a tag with an empty NDEF message (verified like any write, and
+  composable with `lock`). Reversible — the tag can be rewritten afterward
+- Password-protection capability reporting (`TagCapabilities.SupportsPassword`,
+  true for NTAG21x) and the reader API contract (`SetCardPassword`,
+  `RemoveCardPassword`, `PasswordOptions`). The destructive NTAG config writes
+  (PWD/PACK/AUTH0/ACCESS) are intentionally gated off and return a clear
+  not-supported error pending validation on real hardware, since a wrong
+  configuration can permanently lock a tag
+- Tag locking (make read-only) exposed through the API: write-and-lock in one
+  step via `"lock": true` on a write request, or lock an already-written tag
+  with a standalone `lockRequest`. Supported on lockable tags (NTAG,
+  Ultralight); others return a clear error. New `NFCReader.LockCard` and
+  `WriteOptions.Lock`
+- Expanded write record types beyond text/uri: `url`, `mailto`/`email`, `tel`,
+  `sms`, `geo`, `smartposter` (URI + title), `mime`, `vcard`, `external`, `aar`
+  (Android Application Record / app launch), and fully custom `raw` records
+  (TNF + type + payload). New `NDEFSmartPoster` and `NDEFRaw` builders
+- URI records are now written with the longest matching NFC Forum abbreviation
+  prefix (e.g. `https://`, `tel:`, `mailto:`), saving bytes on small tags; the
+  decoder understands the full prefix table for tags written by other tools
+- Read-after-write verification: writes are now confirmed by reading the data
+  back and comparing it to what was written, bringing write reliability to parity
+  with the read path
+- Automatic write retry with linear backoff on transient failures (configurable
+  via `WriteOptions.MaxWriteAttempts`); permanent failures (card removed,
+  read-only, capacity exceeded) are never retried
+- Pre-flight capacity check that rejects NDEF messages larger than the tag's
+  usable capacity before any write is attempted
+- Structured write results (`WriteResult` / `WriteMessageWithResult`) surfaced in
+  the `writeResponse` payload: `uid`, `tagType`, `bytesWritten`, `verified`, and
+  `attempts`
+
+### Changed
+
+- A `writeResponse` with `success: true` now guarantees the data was verified on
+  the tag; unconfirmed writes return an error instead
+
 ## [1.0.2] - 2026-01-19
 
 ### Fixed

@@ -60,6 +60,17 @@ func NewCard(tag Tag) *Card {
 	}
 }
 
+// Capabilities reports what operations the card's tag supports (memory,
+// writability, lock/password support, read-only state). When the underlying
+// tag is available it is queried directly; otherwise capabilities are inferred
+// from the tag type string.
+func (c *Card) Capabilities() TagCapabilities {
+	if c.tag != nil {
+		return GetTagCapabilities(c.tag)
+	}
+	return InferTagCapabilities(c.Type)
+}
+
 // inferTechnology determines the NFC technology from the tag type string.
 func inferTechnology(tagType string) string {
 	// Simple heuristic based on tag type string

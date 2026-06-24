@@ -1,6 +1,9 @@
 package nfc
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Message represents data that can be written to/read from a card.
 // Different implementations handle different encoding schemes.
@@ -196,44 +199,85 @@ func DecodeText(data []byte) *TextMessage {
 	return NewTextMessage(data)
 }
 
-// MakeURIRecordPayload creates the payload for an NDEF URI record.
+// uriPrefixes is the NFC Forum URI Record Type Definition (RTD) abbreviation
+// table. The slice index is the identifier code stored as the first payload
+// byte; the value is the prefix it expands to. Index 0 is the empty
+// (no-abbreviation) prefix.
+var uriPrefixes = []string{
+	"",                           // 0x00
+	"http://www.",                // 0x01
+	"https://www.",               // 0x02
+	"http://",                    // 0x03
+	"https://",                   // 0x04
+	"tel:",                       // 0x05
+	"mailto:",                    // 0x06
+	"ftp://anonymous:anonymous@", // 0x07
+	"ftp://ftp.",                 // 0x08
+	"ftps://",                    // 0x09
+	"sftp://",                    // 0x0A
+	"smb://",                     // 0x0B
+	"nfs://",                     // 0x0C
+	"ftp://",                     // 0x0D
+	"dav://",                     // 0x0E
+	"news:",                      // 0x0F
+	"telnet://",                  // 0x10
+	"imap:",                      // 0x11
+	"rtsp://",                    // 0x12
+	"urn:",                       // 0x13
+	"pop:",                       // 0x14
+	"sip:",                       // 0x15
+	"sips:",                      // 0x16
+	"tftp:",                      // 0x17
+	"btspp://",                   // 0x18
+	"btl2cap://",                 // 0x19
+	"btgoep://",                  // 0x1A
+	"tcpobex://",                 // 0x1B
+	"irdaobex://",                // 0x1C
+	"file://",                    // 0x1D
+	"urn:epc:id:",                // 0x1E
+	"urn:epc:tag:",               // 0x1F
+	"urn:epc:pat:",               // 0x20
+	"urn:epc:raw:",               // 0x21
+	"urn:epc:",                   // 0x22
+	"urn:nfc:",                   // 0x23
+}
+
+// MakeURIRecordPayload creates the payload for an NDEF URI record. It selects
+// the longest matching NFC Forum abbreviation prefix to minimize the bytes
+// written to the tag (URI capacity is scarce on small tags).
 func MakeURIRecordPayload(uri string) []byte {
-	// URI record format: [identifier code][URI string]
-	// Identifier code 0x00 means no prefix abbreviation
-	payload := make([]byte, 1+len(uri))
-	payload[0] = 0x00 // No abbreviation
-	copy(payload[1:], []byte(uri))
+	bestCode := byte(0)
+	bestLen := 0
+	// Skip index 0 (empty prefix); find the longest prefix the URI starts with.
+	for code := 1; code < len(uriPrefixes); code++ {
+		p := uriPrefixes[code]
+		if len(p) > bestLen && strings.HasPrefix(uri, p) {
+			bestCode = byte(code)
+			bestLen = len(p)
+		}
+	}
+
+	suffix := uri[bestLen:]
+	payload := make([]byte, 1+len(suffix))
+	payload[0] = bestCode
+	copy(payload[1:], suffix)
 	return payload
 }
 
-// parseURIRecordPayload extracts URI from an NDEF URI record payload.
+// parseURIRecordPayload extracts the URI from an NDEF URI record payload,
+// expanding the NFC Forum abbreviation prefix. Identifier codes outside the
+// known table are treated as no prefix (forward-compatible).
 func parseURIRecordPayload(payload []byte) (string, error) {
 	if len(payload) < 1 {
 		return "", fmt.Errorf("URI record payload too short")
 	}
 
-	identifierCode := payload[0]
-	uriBytes := payload[1:]
-
-	// Handle URI prefix abbreviations
-	var prefix string
-	switch identifierCode {
-	case 0x00:
-		prefix = ""
-	case 0x01:
-		prefix = "http://www."
-	case 0x02:
-		prefix = "https://www."
-	case 0x03:
-		prefix = "http://"
-	case 0x04:
-		prefix = "https://"
-	// Add more as needed
-	default:
-		prefix = ""
+	prefix := ""
+	if code := int(payload[0]); code > 0 && code < len(uriPrefixes) {
+		prefix = uriPrefixes[code]
 	}
 
-	return prefix + string(uriBytes), nil
+	return prefix + string(payload[1:]), nil
 }
 
 // High-level record types for declarative message construction
@@ -307,6 +351,68 @@ func (e *NDEFExternal) ToRecord() NDEFRecord {
 		TNF:     0x04, // External Type
 		Type:    []byte(e.Domain),
 		Payload: e.Data,
+	}
+}
+
+// NDEFSmartPoster represents a high-level Smart Poster record: a URI with an
+// optional human-readable title. It encodes as a Well Known "Sp" record whose
+// payload is a nested NDEF message containing an optional Title (Text) record
+// and a mandatory URI record. This is the most common "tap to open <label>"
+// tag and is widely understood by phones.
+type NDEFSmartPoster struct {
+	URI      string
+	Title    string // Optional display title
+	Language string // Optional, defaults to "en" when Title is set
+}
+
+// ToRecord converts NDEFSmartPoster to NDEFRecord.
+func (s *NDEFSmartPoster) ToRecord() NDEFRecord {
+	var records []NDEFRecord
+	if s.Title != "" {
+		lang := s.Language
+		if lang == "" {
+			lang = "en"
+		}
+		records = append(records, NDEFRecord{
+			TNF:     0x01, // Well Known
+			Type:    []byte("T"),
+			Payload: MakeTextRecordPayload(s.Title, lang),
+		})
+	}
+	records = append(records, NDEFRecord{
+		TNF:     0x01, // Well Known
+		Type:    []byte("U"),
+		Payload: MakeURIRecordPayload(s.URI),
+	})
+
+	// encodeNDEFRecords only errors on an empty slice; records always contains
+	// the URI record, so the error is unreachable here.
+	payload, _ := encodeNDEFRecords(records)
+	return NDEFRecord{
+		TNF:     0x01, // Well Known
+		Type:    []byte("Sp"),
+		Payload: payload,
+	}
+}
+
+// NDEFRaw represents a fully specified NDEF record for advanced or custom use
+// cases where the caller provides the TNF, type, optional ID, and payload
+// directly (e.g. proprietary external types or non-NDEF-Forum records).
+type NDEFRaw struct {
+	TNF     uint8
+	Type    []byte
+	ID      []byte
+	Payload []byte
+}
+
+// ToRecord converts NDEFRaw to NDEFRecord. The TNF is masked to its valid
+// 3-bit range.
+func (r *NDEFRaw) ToRecord() NDEFRecord {
+	return NDEFRecord{
+		TNF:     r.TNF & 0x07,
+		Type:    r.Type,
+		ID:      r.ID,
+		Payload: r.Payload,
 	}
 }
 

@@ -14,6 +14,10 @@ type ServerBridge struct {
 	// LockRequest flows from Client -> Device for make-read-only operations
 	LockRequest chan LockRequestMessage
 
+	// CapabilitiesRequest flows from Client -> Device to query the present tag's
+	// capabilities before a write/lock.
+	CapabilitiesRequest chan CapabilitiesRequestMessage
+
 	// DeviceStatus flows from Device -> Client for device state updates
 	DeviceStatus chan nfc.DeviceStatus
 
@@ -78,14 +82,42 @@ type LockResponseMessage struct {
 	Payload any
 }
 
+// CapabilitiesRequestMessage wraps a capabilities query with client identification.
+type CapabilitiesRequestMessage struct {
+	// RequestID correlates request with response
+	RequestID string
+
+	// ClientID identifies the requesting client
+	ClientID string
+
+	// ResponseCh receives the capabilities result (buffered, size 1)
+	ResponseCh chan CapabilitiesResponseMessage
+}
+
+// CapabilitiesResponseMessage wraps capabilities query results.
+type CapabilitiesResponseMessage struct {
+	// RequestID correlates with the original request
+	RequestID string
+
+	// Success indicates if the query succeeded
+	Success bool
+
+	// Error contains error message if Success is false
+	Error string
+
+	// Payload contains the tag capabilities (*nfc.TagCapabilities)
+	Payload any
+}
+
 // NewServerBridge creates a new bridge with buffered channels.
 func NewServerBridge() *ServerBridge {
 	return &ServerBridge{
-		TagData:      make(chan nfc.NFCData, 10),
-		WriteRequest: make(chan WriteRequestMessage, 10),
-		LockRequest:  make(chan LockRequestMessage, 10),
-		DeviceStatus: make(chan nfc.DeviceStatus, 10),
-		done:         make(chan struct{}),
+		TagData:             make(chan nfc.NFCData, 10),
+		WriteRequest:        make(chan WriteRequestMessage, 10),
+		LockRequest:         make(chan LockRequestMessage, 10),
+		CapabilitiesRequest: make(chan CapabilitiesRequestMessage, 10),
+		DeviceStatus:        make(chan nfc.DeviceStatus, 10),
+		done:                make(chan struct{}),
 	}
 }
 
@@ -95,6 +127,7 @@ func (b *ServerBridge) Close() {
 	close(b.TagData)
 	close(b.WriteRequest)
 	close(b.LockRequest)
+	close(b.CapabilitiesRequest)
 	close(b.DeviceStatus)
 }
 
@@ -169,6 +202,28 @@ func (b *ServerBridge) SendLockRequest(msg LockRequestMessage) (LockResponseMess
 		select {
 		case <-b.done:
 			return LockResponseMessage{}, ErrBridgeClosed
+		case resp := <-msg.ResponseCh:
+			return resp, nil
+		}
+	}
+}
+
+// SendCapabilitiesRequest sends a capabilities query to the device server and
+// waits for the response. Returns the response or an error if the bridge is closed.
+func (b *ServerBridge) SendCapabilitiesRequest(msg CapabilitiesRequestMessage) (CapabilitiesResponseMessage, error) {
+	// Ensure response channel is created
+	if msg.ResponseCh == nil {
+		msg.ResponseCh = make(chan CapabilitiesResponseMessage, 1)
+	}
+
+	select {
+	case <-b.done:
+		return CapabilitiesResponseMessage{}, ErrBridgeClosed
+	case b.CapabilitiesRequest <- msg:
+		// Wait for response
+		select {
+		case <-b.done:
+			return CapabilitiesResponseMessage{}, ErrBridgeClosed
 		case resp := <-msg.ResponseCh:
 			return resp, nil
 		}

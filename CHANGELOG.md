@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tag capabilities exposed over the wire: every `tagData` broadcast now carries
+  a `capabilities` object (memory, max-NDEF size, `canWrite`, `canLock`,
+  `isReadOnly`, `supportsPassword`), and clients can fetch the present tag's
+  capabilities on demand via a `capabilitiesRequest`/`capabilitiesResponse`
+  message. Backed by `NFCReader.GetCapabilities` and `Card.Capabilities`
 - Erase/format support: `NFCReader.EraseCard` and an `empty` write record type
   overwrite a tag with an empty NDEF message (verified like any write, and
   composable with `lock`). Reversible — the tag can be rewritten afterward

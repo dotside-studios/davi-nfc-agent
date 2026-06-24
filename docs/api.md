@@ -220,6 +220,14 @@ When a card is detected and read:
     "type": "MIFARE Classic 1K",
     "technology": "ISO14443A",
     "scannedAt": "2024-10-06T12:34:56Z",
+    "capabilities": {
+      "canRead": true,
+      "canWrite": true,
+      "canLock": true,
+      "maxNdefSize": 716,
+      "tagFamily": "MIFARE Classic",
+      "supportsNdef": true
+    },
     "message": {
       "type": "ndef",
       "records": [
@@ -245,6 +253,7 @@ When a card is detected and read:
 | `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental) |
 | `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.) |
 | `scannedAt` | ISO 8601 timestamp |
+| `capabilities` | What the tag supports — see [Tag Capabilities](#tag-capabilities) |
 | `message` | Structured NDEF message data |
 | `text` | Quick access to first text record |
 | `err` | Error message or `null` on success |
@@ -389,6 +398,66 @@ A write that cannot be confirmed (verification mismatch after retries) returns a
 error response rather than a success — `success: true` means the data is on the
 tag. A response with `verified: false` only occurs if verification was explicitly
 disabled by the agent.
+
+### Tag Capabilities
+
+Every `tagData` broadcast includes a `capabilities` object describing what the
+present tag supports, so a client can gate its UI (show "lock"/"password" only
+when supported, render a capacity meter, etc.) without a round-trip.
+
+```json
+{
+  "canRead": true,
+  "canWrite": true,
+  "canTransceive": false,
+  "canLock": true,
+  "isReadOnly": false,
+  "memorySize": 540,
+  "maxNdefSize": 504,
+  "technology": "ISO14443A",
+  "tagFamily": "NTAG",
+  "supportsNdef": true,
+  "supportsPassword": true
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `canRead` / `canWrite` | Whether read / write operations are supported |
+| `canTransceive` | Raw APDU transceive supported |
+| `canLock` | Tag can be made permanently read-only |
+| `isReadOnly` | Tag is already locked (omitted when false) |
+| `memorySize` | Total memory in bytes (omitted when unknown) |
+| `maxNdefSize` | Maximum NDEF message size in bytes (omitted when unknown) |
+| `tagFamily` | `MIFARE Classic`, `DESFire`, `NTAG`, `MIFARE Ultralight`, `Type 4`, … |
+| `supportsNdef` | Tag supports NDEF |
+| `supportsPassword` | Tag supports simple password protection (NTAG21x `PWD`/`PACK`) |
+
+**Query on demand** — to fetch capabilities without waiting for the next scan,
+send a `capabilitiesRequest`:
+
+```json
+{
+  "id": "req_cap",
+  "type": "capabilitiesRequest"
+}
+```
+
+Response (`type: "capabilitiesResponse"`):
+
+```json
+{
+  "id": "req_cap",
+  "type": "capabilitiesResponse",
+  "success": true,
+  "payload": {
+    "capabilities": { "canWrite": true, "canLock": true, "supportsPassword": true, "maxNdefSize": 504 }
+  }
+}
+```
+
+The query requires exactly one tag to be present; if none (or several) are
+present, `success` is `false` with an error.
 
 ### Locking Tags (Make Read-Only)
 

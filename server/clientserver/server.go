@@ -198,6 +198,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.handleWriteRequest(conn, clientID, req)
 		case server.WSMessageTypeLockRequest:
 			s.handleLockRequest(conn, clientID, req)
+		case server.WSMessageTypeCapabilitiesRequest:
+			s.handleCapabilitiesRequest(conn, clientID, req)
 		default:
 			log.Printf("[client] Unknown message type: %s", req.Type)
 			s.sendErrorResponse(conn, req.ID, "UNKNOWN_TYPE", fmt.Sprintf("Unknown message type: %s", req.Type))
@@ -324,6 +326,48 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 	}
 }
 
+// handleCapabilitiesRequest handles capabilities queries for the present tag.
+func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+	requestID := req.ID
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+
+	msg := server.CapabilitiesRequestMessage{
+		RequestID:  requestID,
+		ClientID:   clientID,
+		ResponseCh: make(chan server.CapabilitiesResponseMessage, 1),
+	}
+
+	// Send through bridge and wait for response
+	response, err := s.bridge.SendCapabilitiesRequest(msg)
+	if err != nil {
+		log.Printf("[client] Capabilities request failed: %v", err)
+		s.sendErrorResponse(conn, req.ID, "CAPABILITIES_FAILED", err.Error())
+		return
+	}
+
+	wsResponse := protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    server.WSMessageTypeCapabilitiesResponse,
+		Success: response.Success,
+	}
+	if response.Success {
+		wsResponse.Payload = map[string]interface{}{
+			"capabilities": response.Payload,
+		}
+	} else {
+		wsResponse.Error = response.Error
+		wsResponse.Payload = map[string]interface{}{
+			"code": "CAPABILITIES_FAILED",
+		}
+	}
+
+	if err := conn.WriteJSON(wsResponse); err != nil {
+		log.Printf("[client] Failed to send capabilities response: %v", err)
+	}
+}
+
 // listenBridgeTagData listens for tag data from the bridge and broadcasts to clients.
 func (s *Server) listenBridgeTagData() {
 	for {
@@ -383,11 +427,12 @@ func (s *Server) sendTagDataToClient(conn *server.SafeConn, data nfc.NFCData) {
 
 	if data.Card != nil {
 		payload = map[string]interface{}{
-			"uid":        data.Card.UID,
-			"type":       data.Card.Type,
-			"technology": data.Card.Technology,
-			"scannedAt":  data.Card.ScannedAt.Format("2006-01-02T15:04:05Z07:00"),
-			"err":        errStr,
+			"uid":          data.Card.UID,
+			"type":         data.Card.Type,
+			"technology":   data.Card.Technology,
+			"scannedAt":    data.Card.ScannedAt.Format("2006-01-02T15:04:05Z07:00"),
+			"capabilities": data.Card.Capabilities(),
+			"err":          errStr,
 		}
 
 		// Try to read and parse message from card

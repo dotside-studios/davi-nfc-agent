@@ -970,6 +970,38 @@ func (r *NFCReader) withTagOperation(operation func() error) error {
 	}
 }
 
+// GetCapabilities reports the capabilities of the tag currently presented to
+// the reader — memory size, writability, lock and password support, and
+// read-only state. It requires exactly one tag to be present, performs no
+// write, and works regardless of reader mode (including read-only). This lets
+// clients query what a tag supports before attempting a write or lock.
+func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
+	var caps TagCapabilities
+	err := r.withTagOperation(func() error {
+		if !r.deviceManager.HasDevice() {
+			return fmt.Errorf("no NFC device connected")
+		}
+
+		tags, err := r.GetTags()
+		if err != nil {
+			return fmt.Errorf("failed to get tags: %w", err)
+		}
+		if len(tags) == 0 {
+			return fmt.Errorf("no card detected")
+		}
+		if len(tags) > 1 {
+			return fmt.Errorf("multiple cards detected (%d tags), please present only one card", len(tags))
+		}
+
+		caps = GetTagCapabilities(tags[0])
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &caps, nil
+}
+
 // GetTags retrieves available tags from the connected NFC device.
 func (r *NFCReader) GetTags() ([]Tag, error) {
 	dev := r.deviceManager.Device()

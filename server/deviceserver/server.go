@@ -177,6 +177,9 @@ func (s *Server) Start() error {
 	// Start lock request handler
 	go s.handleLockRequests()
 
+	// Start capabilities request handler
+	go s.handleCapabilitiesRequests()
+
 	// Block until shutdown
 	<-s.ctx.Done()
 	log.Printf("[device] Server context cancelled, shutting down...")
@@ -365,6 +368,50 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 		RequestID: msg.RequestID,
 		Success:   true,
 		Payload:   result,
+	}
+}
+
+// handleCapabilitiesRequests listens for capabilities queries from the client server.
+func (s *Server) handleCapabilitiesRequests() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg, ok := <-s.bridge.CapabilitiesRequest:
+			if !ok {
+				return
+			}
+			s.executeCapabilitiesRequest(msg)
+		}
+	}
+}
+
+// executeCapabilitiesRequest queries the present tag's capabilities.
+func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessage) {
+	reader := s.config.Reader
+	if reader == nil {
+		msg.ResponseCh <- server.CapabilitiesResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     "No NFC reader available",
+		}
+		return
+	}
+
+	caps, err := reader.GetCapabilities()
+	if err != nil {
+		msg.ResponseCh <- server.CapabilitiesResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return
+	}
+
+	msg.ResponseCh <- server.CapabilitiesResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Payload:   caps,
 	}
 }
 

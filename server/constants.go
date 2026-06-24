@@ -23,7 +23,11 @@ const (
 	WSMessageTypeWriteResponse = "writeResponse"
 	WSMessageTypeLockRequest   = "lockRequest"
 	WSMessageTypeLockResponse  = "lockResponse"
-	WSMessageTypeError         = "error"
+
+	WSMessageTypeCapabilitiesRequest  = "capabilitiesRequest"
+	WSMessageTypeCapabilitiesResponse = "capabilitiesResponse"
+
+	WSMessageTypeError = "error"
 )
 
 // CORS configuration

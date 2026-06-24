@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dynamic lock bytes. Validated end-to-end against in-memory tag emulators
 - DESFire read/write now interpret the DESFire native status word (wrapped
   `91 00` = OK) instead of requiring ISO `90 00`. The old generic check would
-  have rejected every real DESFire response. Frame chaining (`91 AF`, payloads
-  >~59 bytes) is still unhandled — pending hardware validation
+  have rejected every real DESFire response
+- DESFire read/write now follow the additional-frame (`91 AF`) chain, so NDEF
+  payloads larger than a single ~59-byte native frame work. Validated against
+  the in-memory DESFire emulator; the per-frame size is datasheet-modeled and
+  wants a hardware cross-check
 
 ### Added
 

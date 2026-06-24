@@ -448,6 +448,10 @@ type desfireEmulator struct {
 	selectedNDEF bool
 	file2        []byte
 	present      bool
+
+	// Frame-chaining cursors for a read/write in progress.
+	readOff, readRemain   int
+	writeOff, writeRemain int
 }
 
 func newDESFireEmulator() *desfireEmulator {
@@ -489,16 +493,59 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		if !ok {
 			return dfResp(nil, 0xBE), nil // boundary error
 		}
-		return dfResp(e.file2[off:off+length], 0x00), nil
+		e.readOff, e.readRemain = off, length
+		return e.nextReadFrame(), nil
 	case DFCmdWriteData:
-		off, length, ok := e.fileRange(body)
-		if !ok || len(body) < 7+length {
+		off, total, ok := e.fileRange(body)
+		if !ok {
 			return dfResp(nil, 0xBE), nil
 		}
-		copy(e.file2[off:off+length], body[7:7+length])
-		return dfResp(nil, 0x00), nil
+		n := len(body) - 7 // data carried in this first frame
+		if n > total {
+			n = total
+		}
+		copy(e.file2[off:off+n], body[7:7+n])
+		e.writeOff, e.writeRemain = off+n, total-n
+		if e.writeRemain > 0 {
+			return dfResp(nil, dfStatusAdditionalFrame), nil
+		}
+		return dfResp(nil, dfStatusOK), nil
+	case DFCmdAdditionalFrame:
+		if e.writeRemain > 0 { // write continuation
+			n := len(body)
+			if n > e.writeRemain {
+				n = e.writeRemain
+			}
+			copy(e.file2[e.writeOff:e.writeOff+n], body[:n])
+			e.writeOff += n
+			e.writeRemain -= n
+			if e.writeRemain > 0 {
+				return dfResp(nil, dfStatusAdditionalFrame), nil
+			}
+			return dfResp(nil, dfStatusOK), nil
+		}
+		if e.readRemain > 0 { // read continuation
+			return e.nextReadFrame(), nil
+		}
+		return dfResp(nil, 0xA0), nil
 	}
 	return dfResp(nil, 0xA0), nil
+}
+
+// nextReadFrame returns up to dfFrameData bytes from the pending read, signaling
+// an additional frame (0xAF) while bytes remain. The caller must hold e.mu.
+func (e *desfireEmulator) nextReadFrame() []byte {
+	n := e.readRemain
+	if n > dfFrameData {
+		n = dfFrameData
+	}
+	chunk := e.file2[e.readOff : e.readOff+n]
+	e.readOff += n
+	e.readRemain -= n
+	if e.readRemain > 0 {
+		return dfResp(chunk, dfStatusAdditionalFrame)
+	}
+	return dfResp(chunk, dfStatusOK)
 }
 
 // fileRange decodes (fileNo, 3-byte LE offset, 3-byte LE length) from a
@@ -532,6 +579,26 @@ func TestDESFireEmulator_WriteReadRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(got, sampleNDEF) {
 		t.Errorf("round-trip mismatch:\n got % X\nwant % X", got, sampleNDEF)
+	}
+}
+
+// TestDESFireEmulator_ChainedReadWrite exercises frame chaining: a payload well
+// beyond one ~59-byte native frame must be split across additional frames on
+// write and reassembled on read.
+func TestDESFireEmulator_ChainedReadWrite(t *testing.T) {
+	emu := newDESFireEmulator()
+	tag := newPCSCDESFireTag(emu, "04DE5F1RE0")
+
+	big := bytes.Repeat([]byte{0xAB}, 150) // spans ~3 frames
+	if err := tag.WriteData(big); err != nil {
+		t.Fatalf("chained WriteData: %v", err)
+	}
+	got, err := tag.ReadData()
+	if err != nil {
+		t.Fatalf("chained ReadData: %v", err)
+	}
+	if !bytes.Equal(got, big) {
+		t.Errorf("chained round-trip mismatch: got %d bytes, want %d", len(got), len(big))
 	}
 }
 

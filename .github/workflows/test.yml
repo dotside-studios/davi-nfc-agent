@@ -28,6 +28,10 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+          # Only fail on issues introduced by the PR's diff. The repository has
+          # pre-existing lint debt; gating on new-only keeps the bar at "don't
+          # add more" without blocking on the historical backlog.
+          only-new-issues: true
 
   test:
     runs-on: ubuntu-latest

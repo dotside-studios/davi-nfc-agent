@@ -104,7 +104,6 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 		DeviceType:    "unknown",
 	}
 
-	// Get device metadata if available
 	if info, ok := device.(DeviceInfoProvider); ok {
 		caps.DeviceType = info.DeviceType()
 		caps.SupportedTagTypes = info.SupportedTagTypes()

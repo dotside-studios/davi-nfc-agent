@@ -27,28 +27,23 @@ type Tag struct {
 	mu           sync.RWMutex
 }
 
-// UID returns the tag's unique identifier.
 func (t *Tag) UID() string {
 	return t.uid
 }
 
-// Type returns the tag type as a string.
 func (t *Tag) Type() string {
 	return t.tagType
 }
 
-// NumericType returns a numeric representation of the tag type.
-// For smartphone tags, we return 0 as they don't have freefare numeric types.
+// NumericType returns 0: smartphone tags have no freefare numeric type.
 func (t *Tag) NumericType() int {
 	return 0
 }
 
-// Capabilities returns the capabilities of this smartphone tag.
-// Smartphone tags are read-only as writes must go through the WebSocket protocol.
 func (t *Tag) Capabilities() nfc.TagCapabilities {
 	return nfc.TagCapabilities{
 		CanRead:       true,
-		CanWrite:      false, // Writes require WebSocket protocol
+		CanWrite:      false,
 		CanTransceive: false,
 		CanLock:       false,
 		TagFamily:     t.tagType,
@@ -57,7 +52,7 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	}
 }
 
-// ReadData returns the tag data (NDEF or raw).
+// ReadData returns the tag data, preferring NDEF over raw bytes.
 func (t *Tag) ReadData() ([]byte, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -68,10 +63,6 @@ func (t *Tag) ReadData() ([]byte, error) {
 
 	return t.rawData, nil
 }
-
-// Connect, Disconnect, WriteData, Transceive, IsWritable, CanMakeReadOnly, and
-// MakeReadOnly are inherited from nfc.BaseTag. Smartphone tags are read-only:
-// writes must go through the server -> device WebSocket, not the Tag interface.
 
 // GetNDEFMessage returns the parsed NDEF message if available.
 func (t *Tag) GetNDEFMessage() (*nfc.NDEFMessage, error) {
@@ -85,12 +76,10 @@ func (t *Tag) GetNDEFMessage() (*nfc.NDEFMessage, error) {
 	return nil, fmt.Errorf("no NDEF message available")
 }
 
-// ScannedAt returns the timestamp when this tag was scanned.
 func (t *Tag) ScannedAt() time.Time {
 	return t.scannedAt
 }
 
-// SourceDevice returns the device ID that scanned this tag.
 func (t *Tag) SourceDevice() string {
 	return t.sourceDevice
 }

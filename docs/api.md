@@ -1,6 +1,6 @@
 # API Reference
 
-The NFC Agent uses a two-server architecture:
+The NFC Agent uses a multi-server architecture:
 
 | Server | Port | Purpose |
 |--------|------|---------|

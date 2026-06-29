@@ -502,10 +502,12 @@
                         <strong>Note:</strong> Writing overwrites all existing records and is verified by reading the tag back.
                     </div>
 
-                    <div v-if="writeResult" class="card-data" style="margin-bottom: 15px;">
-                        <div><strong>Tag:</strong> {{ writeResult.tagType }} ({{ writeResult.uid }})</div>
+                    <!-- Only shown when the server returns structured verification
+                         details; older agents that omit them degrade gracefully. -->
+                    <div v-if="writeResult && (writeResult.uid || 'verified' in writeResult)" class="card-data" style="margin-bottom: 15px;">
+                        <div v-if="writeResult.tagType || writeResult.uid"><strong>Tag:</strong> {{ writeResult.tagType }} ({{ writeResult.uid }})</div>
                         <div v-if="writeResult.bytesWritten"><strong>Bytes written:</strong> {{ writeResult.bytesWritten }}</div>
-                        <div><strong>Verified:</strong> {{ writeResult.verified ? 'Yes' : 'No' }}</div>
+                        <div v-if="'verified' in writeResult"><strong>Verified:</strong> {{ writeResult.verified ? 'Yes' : 'No' }}</div>
                         <div v-if="writeResult.attempts"><strong>Attempts:</strong> {{ writeResult.attempts }}</div>
                         <div v-if="writeResult.locked"><strong>Locked:</strong> Yes</div>
                     </div>

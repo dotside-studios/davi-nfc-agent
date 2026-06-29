@@ -9,7 +9,13 @@ import (
 )
 
 // Tag wraps mobile app NFC data in the nfc.Tag interface.
+//
+// Smartphone tags are read-only (writes go through the WebSocket protocol, not
+// the Tag interface), so the connection, write, transceive, and lock methods are
+// inherited from nfc.BaseTag as no-ops / "not supported".
 type Tag struct {
+	nfc.BaseTag
+
 	uid          string
 	tagType      string
 	technology   string
@@ -61,42 +67,6 @@ func (t *Tag) ReadData() ([]byte, error) {
 	}
 
 	return t.rawData, nil
-}
-
-// WriteData is not supported for smartphone tags.
-// Write requests must go through server -> device WebSocket.
-func (t *Tag) WriteData(data []byte) error {
-	return nfc.NewNotSupportedError("WriteData")
-}
-
-// Transceive is not supported for smartphone tags.
-func (t *Tag) Transceive(data []byte) ([]byte, error) {
-	return nil, nfc.NewNotSupportedError("Transceive")
-}
-
-// Connect is a no-op for smartphone tags (already "connected" via WebSocket).
-func (t *Tag) Connect() error {
-	return nil
-}
-
-// Disconnect is a no-op for smartphone tags.
-func (t *Tag) Disconnect() error {
-	return nil
-}
-
-// IsWritable returns false for smartphone tags as they don't support direct writes.
-func (t *Tag) IsWritable() (bool, error) {
-	return false, nil
-}
-
-// CanMakeReadOnly returns false for smartphone tags.
-func (t *Tag) CanMakeReadOnly() (bool, error) {
-	return false, nil
-}
-
-// MakeReadOnly is not supported for smartphone tags.
-func (t *Tag) MakeReadOnly() error {
-	return nfc.NewNotSupportedError("MakeReadOnly")
 }
 
 // GetNDEFMessage returns the parsed NDEF message if available.

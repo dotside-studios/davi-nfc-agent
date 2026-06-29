@@ -15,20 +15,20 @@ type pcscBaseTag struct {
 	device       CardTransport
 	uid          string
 	detectedType DetectedTagType
-	connected    bool
 }
 
 func (t *pcscBaseTag) UID() string {
 	return t.uid
 }
 
+// Connect and Disconnect are no-ops: PC/SC tags are returned ready-to-use from
+// GetTags() and the framework never calls these. They exist only to satisfy the
+// TagConnection part of the Tag interface.
 func (t *pcscBaseTag) Connect() error {
-	t.connected = true
 	return nil
 }
 
 func (t *pcscBaseTag) Disconnect() error {
-	t.connected = false
 	return nil
 }
 

@@ -124,15 +124,25 @@ func (d *MyDevice) GetTags() ([]nfc.Tag, error) {
 
 ### Step 3: Implement the Tag Interface
 
+The `Tag` interface bundles several role interfaces (identity, connection, read,
+write, transceive, lock). Rather than implement all of them, **embed
+`nfc.BaseTag`** and override only the methods your tag actually supports. The
+base provides safe defaults: connection is a no-op, and write/transceive/lock
+operations report "not supported".
+
+You only ever need to implement the four methods that have no sensible default:
+`UID()`, `Type()`, `NumericType()`, and `ReadData()`.
+
 ```go
 type MyTag struct {
-    uid       string
-    tagType   string
-    device    *MyDevice
-    connected bool
+    nfc.BaseTag // supplies Connect/Disconnect/WriteData/Transceive/IsWritable/CanMakeReadOnly/MakeReadOnly
+
+    uid     string
+    tagType string
+    device  *MyDevice
 }
 
-// --- TagIdentifier ---
+// --- TagIdentifier (required) ---
 
 func (t *MyTag) UID() string {
     return t.uid
@@ -144,6 +154,13 @@ func (t *MyTag) Type() string {
 
 func (t *MyTag) NumericType() int {
     return 0 // Your type code
+}
+
+// --- TagReader (required) ---
+
+func (t *MyTag) ReadData() ([]byte, error) {
+    // Read NDEF data from the tag and return raw NDEF bytes.
+    return nil, nil
 }
 
 // --- TagCapabilityProvider (optional but recommended) ---
@@ -161,55 +178,24 @@ func (t *MyTag) Capabilities() nfc.TagCapabilities {
     }
 }
 
-// --- TagConnection ---
+// --- Override only what you support ---
 
-func (t *MyTag) Connect() error {
-    // Establish connection to tag (if needed)
-    t.connected = true
-    return nil
-}
-
-func (t *MyTag) Disconnect() error {
-    t.connected = false
-    return nil
-}
-
-// --- TagReader ---
-
-func (t *MyTag) ReadData() ([]byte, error) {
-    // Read NDEF data from the tag
-    // Return raw NDEF bytes
-    return nil, nil
-}
-
-// --- TagWriter ---
-
+// If your tag is writable, override WriteData (otherwise it inherits the
+// BaseTag default that returns a NotSupported error):
 func (t *MyTag) WriteData(data []byte) error {
-    // Write NDEF data to the tag
-    return nfc.NewNotSupportedError("WriteData") // If not supported
+    // Write NDEF data to the tag.
+    return nil
 }
 
-// --- TagTransceiver ---
-
-func (t *MyTag) Transceive(data []byte) ([]byte, error) {
-    // Send raw command to tag and return response
-    return nil, nfc.NewNotSupportedError("Transceive")
-}
-
-// --- TagLocker ---
-
-func (t *MyTag) IsWritable() (bool, error) {
-    return true, nil
-}
-
-func (t *MyTag) CanMakeReadOnly() (bool, error) {
-    return false, nil
-}
-
-func (t *MyTag) MakeReadOnly() error {
-    return nfc.NewNotSupportedError("MakeReadOnly")
-}
+// Connect/Disconnect/Transceive/IsWritable/CanMakeReadOnly/MakeReadOnly are all
+// inherited from nfc.BaseTag. Override any of them the same way if your tag
+// supports them.
 ```
+
+> Keep `Capabilities()` in sync with what you actually override: if you advertise
+> `CanWrite: true`, make sure you override `WriteData`. See
+> [Capability-Based Implementation](#capability-based-implementation) for a test
+> helper that catches drift.
 
 ### Step 4: Register with MultiManager
 
@@ -263,21 +249,43 @@ The `MultiManager` automatically listens to managers that implement `DeviceChang
 
 ## Capability-Based Implementation
 
-You don't need to implement all methods if your device doesn't support them. Use capabilities to advertise what's supported:
+You don't need to implement all methods if your device doesn't support them.
+Embed `nfc.BaseTag` so unsupported operations already return the right
+"not supported" error, then advertise what *is* supported via `Capabilities()`:
 
 ```go
+type MyTag struct {
+    nfc.BaseTag // WriteData/Transceive/MakeReadOnly default to "not supported"
+    // ...
+}
+
 func (t *MyTag) Capabilities() nfc.TagCapabilities {
     return nfc.TagCapabilities{
         CanRead:       true,
-        CanWrite:      false, // Read-only device
+        CanWrite:      false, // Read-only device — no need to override WriteData
         CanTransceive: false,
         CanLock:       false,
     }
 }
+```
 
-func (t *MyTag) WriteData(data []byte) error {
-    // Return structured error for unsupported operations
-    return nfc.NewNotSupportedError("WriteData")
+Because the defaults come from `BaseTag`, a read-only tag literally just needs
+`UID`, `Type`, `NumericType`, and `ReadData` — there is no `WriteData` boilerplate
+to write.
+
+### Keeping capabilities honest
+
+`Capabilities()` and actual method behavior are two separate sources of truth, so
+they can drift. Drop `nfc.AssertCapabilitiesConsistent` into your tests to catch
+the common cases (it performs only non-mutating checks and never writes or locks
+the tag):
+
+```go
+func TestMyTagCapabilities(t *testing.T) {
+    tag := &MyTag{ /* ... */ }
+    if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {
+        t.Fatal(err)
+    }
 }
 ```
 
@@ -474,10 +482,16 @@ A device that receives tag data over the network (read-only):
 
 ```go
 type NetworkTag struct {
+    nfc.BaseTag // write/transceive/lock default to "not supported"
+
     uid     string
     tagType string
     data    []byte // Pre-loaded data
 }
+
+func (t *NetworkTag) UID() string      { return t.uid }
+func (t *NetworkTag) Type() string     { return t.tagType }
+func (t *NetworkTag) NumericType() int { return 0 }
 
 func (t *NetworkTag) Capabilities() nfc.TagCapabilities {
     return nfc.TagCapabilities{
@@ -493,9 +507,7 @@ func (t *NetworkTag) ReadData() ([]byte, error) {
     return t.data, nil
 }
 
-func (t *NetworkTag) WriteData(data []byte) error {
-    return nfc.NewNotSupportedError("WriteData")
-}
+// No WriteData needed — inherited from nfc.BaseTag as "not supported".
 ```
 
 ### Serial PN532 Reader
@@ -531,33 +543,44 @@ func (d *PN532Device) GetTags() ([]nfc.Tag, error) {
 
 ## Interface Reference
 
-### Required Methods
+### Methods you must implement
 
-| Method | Interface | Required |
-|--------|-----------|----------|
-| `UID()` | TagIdentifier | Yes |
-| `Type()` | TagIdentifier | Yes |
-| `NumericType()` | TagIdentifier | Yes |
-| `Connect()` | TagConnection | Yes (can be no-op) |
-| `Disconnect()` | TagConnection | Yes (can be no-op) |
-| `ReadData()` | TagReader | Yes |
-| `WriteData()` | TagWriter | Yes (can return error) |
-| `Transceive()` | TagTransceiver | Yes (can return error) |
-| `IsWritable()` | TagLocker | Yes |
-| `CanMakeReadOnly()` | TagLocker | Yes |
-| `MakeReadOnly()` | TagLocker | Yes (can return error) |
+These four have no sensible default and must be implemented on every tag:
+
+| Method | Interface |
+|--------|-----------|
+| `UID()` | TagIdentifier |
+| `Type()` | TagIdentifier |
+| `NumericType()` | TagIdentifier |
+| `ReadData()` | TagReader |
+
+### Methods provided by `nfc.BaseTag`
+
+Embedding `nfc.BaseTag` supplies these with safe defaults. Override only the ones
+your tag supports:
+
+| Method | Interface | BaseTag default |
+|--------|-----------|-----------------|
+| `Connect()` | TagConnection | no-op (returns nil) |
+| `Disconnect()` | TagConnection | no-op (returns nil) |
+| `WriteData()` | TagWriter | returns NotSupported |
+| `Transceive()` | TagTransceiver | returns NotSupported |
+| `IsWritable()` | TagLocker | returns false |
+| `CanMakeReadOnly()` | TagLocker | returns false |
+| `MakeReadOnly()` | TagLocker | returns NotSupported |
 
 ### Optional Methods
 
 | Method | Interface | Purpose |
 |--------|-----------|---------|
 | `Capabilities()` | TagCapabilityProvider | Runtime tag capability discovery |
+| `WriteDataWithOptions()` | AdvancedWriter | Write with initialization options |
 | `DeviceChanges()` | DeviceChangeNotifier | Device add/remove notifications |
 | `DeviceType()` | DeviceInfoProvider | Device type identifier ("libnfc", "smartphone") |
 | `SupportedTagTypes()` | DeviceInfoProvider | List of supported tag types |
 | `SupportsEvents()` | DeviceEventEmitter | Whether device emits tag events |
+| `SupportsTransceive()` | DeviceTransceiver | Whether device supports raw transceive |
 | `IsHealthy()` | DeviceHealthChecker | Connection health validation |
-| `WriteDataWithOptions()` | AdvancedWriter | Write with initialization options |
 | `Register()` | server.ServerHandler | WebSocket integration |
 | `Close()` | server.ServerHandlerCloser | Cleanup on shutdown |
 
@@ -589,6 +612,21 @@ When `SupportsEvents()` returns true, `BuildDeviceCapabilities()` will automatic
 - `CanPoll: false`
 - `CanTransceive: false`
 - `SupportsEvents: true`
+
+### DeviceTransceiver Interface
+
+Polling devices default to `CanTransceive: true`. If your polling device's
+`Transceive` actually returns a `NotSupported` error, implement
+`DeviceTransceiver` so the reported capabilities match reality:
+
+```go
+func (d *MyDevice) SupportsTransceive() bool {
+    return false // Device cannot do raw transceive
+}
+```
+
+When present, `SupportsTransceive()` is authoritative for `CanTransceive` in the
+capabilities built by `BuildDeviceCapabilities()`.
 
 ### DeviceHealthChecker Interface
 

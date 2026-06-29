@@ -1,6 +1,9 @@
 package nfc
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // TagCapabilities describes what operations a tag supports.
 type TagCapabilities struct {
@@ -67,6 +70,15 @@ type DeviceEventEmitter interface {
 	SupportsEvents() bool
 }
 
+// DeviceTransceiver is an optional interface that lets a device declare whether
+// it actually supports raw Transceive. Devices that do not implement it default
+// to CanTransceive=true (the common case for polling hardware readers).
+// Implement this to report false when your device's Transceive returns a
+// NotSupported error, so GetDeviceCapabilities reflects reality.
+type DeviceTransceiver interface {
+	SupportsTransceive() bool
+}
+
 // GetTagCapabilities returns capabilities for any Tag.
 // If the tag implements TagCapabilityProvider, it uses that.
 // Otherwise, it infers capabilities from the tag type string.
@@ -87,8 +99,8 @@ func GetDeviceCapabilities(device Device) DeviceCapabilities {
 // checking which interfaces the device implements.
 func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 	caps := DeviceCapabilities{
-		CanTransceive: true,  // Default true, will check for actual support
-		CanPoll:       true,  // Default true
+		CanTransceive: true, // Default for polling readers; refined below
+		CanPoll:       true, // Default for polling readers; refined below
 		DeviceType:    "unknown",
 	}
 
@@ -104,6 +116,13 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 		caps.SupportsEvents = true
 		caps.CanPoll = false       // Event-driven, not polling
 		caps.CanTransceive = false // Usually no raw transceive for event-based
+	}
+
+	// Let the device explicitly declare transceive support if it implements
+	// DeviceTransceiver. This takes precedence over the defaults above so a
+	// polling device whose Transceive returns NotSupported can report it.
+	if tr, ok := device.(DeviceTransceiver); ok {
+		caps.CanTransceive = tr.SupportsTransceive()
 	}
 
 	return caps
@@ -215,4 +234,42 @@ func CanTagTransceive(tag Tag) bool {
 // CanTagLock checks if a tag can be made read-only.
 func CanTagLock(tag Tag) bool {
 	return GetTagCapabilities(tag).CanLock
+}
+
+// AssertCapabilitiesConsistent verifies that a tag's declared TagCapabilities
+// agree with the tag's query methods, returning a descriptive error on the
+// first mismatch (nil if consistent). It is intended for implementers' unit
+// tests to catch capability drift between Capabilities() and behavior.
+//
+// It performs ONLY non-mutating (read-only) checks and never calls WriteData,
+// Transceive, or MakeReadOnly, since those may perform real or irreversible
+// I/O on hardware. Specifically it checks:
+//
+//   - Capabilities().CanLock matches CanMakeReadOnly()
+//   - When Capabilities().IsReadOnly is true, IsWritable() reports false
+//
+// Supported write/transceive/lock behavior cannot be auto-verified without
+// device I/O; cover those directly in your own tests.
+func AssertCapabilitiesConsistent(tag Tag) error {
+	caps := GetTagCapabilities(tag)
+
+	canRO, err := tag.CanMakeReadOnly()
+	if err != nil {
+		return fmt.Errorf("CanMakeReadOnly returned an error: %w", err)
+	}
+	if canRO != caps.CanLock {
+		return fmt.Errorf("capability drift: Capabilities().CanLock=%t but CanMakeReadOnly()=%t", caps.CanLock, canRO)
+	}
+
+	if caps.IsReadOnly {
+		writable, err := tag.IsWritable()
+		if err != nil {
+			return fmt.Errorf("IsWritable returned an error: %w", err)
+		}
+		if writable {
+			return fmt.Errorf("capability drift: Capabilities().IsReadOnly=true but IsWritable() reports the tag is writable")
+		}
+	}
+
+	return nil
 }

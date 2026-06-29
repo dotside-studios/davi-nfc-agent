@@ -408,9 +408,10 @@ This allows applications to handle both formatted and unformatted tags gracefull
 
 The package handles connection lifecycle automatically:
 
-- Tags are connected on first operation
-- Connections are cached and reused
 - `device.GetTags()` performs polling and returns ready-to-use tags
+- `Tag.Connect()` / `Disconnect()` exist for interface completeness but are not
+  required by the framework; tags are usable as soon as `GetTags()` returns them
+  (custom tags can inherit these as no-ops from `nfc.BaseTag`)
 - Clean up with `device.Close()`
 
 ## Thread Safety

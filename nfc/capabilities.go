@@ -118,9 +118,7 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 		caps.CanTransceive = false // Usually no raw transceive for event-based
 	}
 
-	// Let the device explicitly declare transceive support if it implements
-	// DeviceTransceiver. This takes precedence over the defaults above so a
-	// polling device whose Transceive returns NotSupported can report it.
+	// An explicit DeviceTransceiver declaration overrides the defaults above.
 	if tr, ok := device.(DeviceTransceiver); ok {
 		caps.CanTransceive = tr.SupportsTransceive()
 	}

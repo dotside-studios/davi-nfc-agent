@@ -34,25 +34,15 @@ package nfc
 //	// MakeReadOnly are inherited from BaseTag.
 type BaseTag struct{}
 
-// Connect is a no-op. Override if your tag needs explicit connection setup.
-func (BaseTag) Connect() error { return nil }
-
-// Disconnect is a no-op. Override if your tag needs explicit teardown.
+func (BaseTag) Connect() error    { return nil }
 func (BaseTag) Disconnect() error { return nil }
 
-// WriteData reports that writing is not supported. Override to support writes.
 func (BaseTag) WriteData(data []byte) error { return NewNotSupportedError("WriteData") }
 
-// Transceive reports that raw exchange is not supported. Override to support it.
 func (BaseTag) Transceive(data []byte) ([]byte, error) {
 	return nil, NewNotSupportedError("Transceive")
 }
 
-// IsWritable reports false. Override if your tag can be written.
-func (BaseTag) IsWritable() (bool, error) { return false, nil }
-
-// CanMakeReadOnly reports false. Override if your tag supports locking.
+func (BaseTag) IsWritable() (bool, error)      { return false, nil }
 func (BaseTag) CanMakeReadOnly() (bool, error) { return false, nil }
-
-// MakeReadOnly reports that locking is not supported. Override to support it.
-func (BaseTag) MakeReadOnly() error { return NewNotSupportedError("MakeReadOnly") }
+func (BaseTag) MakeReadOnly() error            { return NewNotSupportedError("MakeReadOnly") }

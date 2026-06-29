@@ -6,8 +6,13 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 
 - **Multiple Device Support**: Hardware NFC readers and remote devices simultaneously
 - **Remote NFC Devices**: Smartphones, browsers with WebNFC, or any device that can connect to the API
-- **Read/Write NDEF**: Text and URI records
+- **Rich NDEF Read/Write**: Text, URI, smart poster, vCard, MIME, geo, tel/sms/mailto, Android Application Records, and fully custom raw records
+- **Reliable Writes**: Read-after-write verification, automatic retry on transient failures, and pre-flight capacity checks
+- **Tag Locking & Erase**: Make tags read-only or wipe them back to an empty NDEF message
+- **Tag Capabilities**: Memory size, usable capacity, and write/lock/password support reported with every scan
 - **Real-time WebSocket**: Instant tag data broadcasting
+- **Secure by Default**: Automatic TLS (WSS) with a CA bootstrap server, plus optional API-secret authentication
+- **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
 - **Cross-platform**: Linux, macOS, Windows
 - **System Tray UI**: Device management and status
 
@@ -20,7 +25,7 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 - Browsers with WebNFC (Chrome on Android)
 - Custom hardware or IoT devices
 
-**Card Types**: MIFARE Classic, DESFire, Ultralight, ISO14443-4 Type 4A (experimental)
+**Card Types**: MIFARE Classic (incl. NDEF formatting and custom keys), DESFire, Ultralight, NTAG21x, ISO14443-4 Type 4A (experimental)
 
 ## Quick Start
 
@@ -38,18 +43,27 @@ See the [Installation Guide](docs/installation.md) for platform-specific setup a
 ### Command-line Options
 
 ```bash
-./davi-nfc-agent                    # System tray mode (default)
-./davi-nfc-agent -cli               # CLI mode
-./davi-nfc-agent -client-port 8080  # Custom client port
-./davi-nfc-agent -device pn532_uart:/dev/ttyUSB0  # Specific device
-./davi-nfc-agent -api-secret mysecret  # API authentication
+./davi-nfc-agent                       # System tray mode (default)
+./davi-nfc-agent -version              # Print version information and exit
+./davi-nfc-agent -device "ACS ACR122U" # Use a specific PC/SC reader by name
+./davi-nfc-agent -client-port 8080     # Custom client server port (default 9471)
+./davi-nfc-agent -device-port 9480     # Custom device server port (default 9470)
+./davi-nfc-agent -api-secret mysecret  # Set the API authentication secret
+./davi-nfc-agent -auto-tls=false       # Disable automatic TLS certificate management
+./davi-nfc-agent -cert cert.pem -key key.pem  # Use your own TLS certificate
+./davi-nfc-agent -config-dir ./config  # Override the config directory
 ```
+
+By default the agent generates and persists a TLS certificate and an API secret
+under a platform-specific config directory, so paired devices keep working
+across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
 
 ## Usage Examples
 
-The agent runs two servers:
+The agent runs three servers:
 - **Device Server** (port 9470): Connects NFC readers and smartphones
 - **Client Server** (port 9471): Serves client applications
+- **CA Bootstrap Server** (port 9472): Serves the TLS root certificate for device setup (auto-TLS only)
 
 ### JavaScript / TypeScript
 

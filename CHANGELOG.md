@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payloads larger than a single ~59-byte native frame work. Validated against
   the in-memory DESFire emulator; the per-frame size is datasheet-modeled and
   wants a hardware cross-check
+- TLS network watcher no longer infinite-loops regenerating certificates when
+  the hosts-cache write fails. The watcher now compares against in-memory
+  `lastHosts` (updated only after a fully successful regeneration) instead of
+  the possibly-stale disk cache, so a partial failure retries cleanly on the
+  next tick instead of re-running truststore install + cert generation forever
+- TLS `Manager` network-watcher state (`networkChangeChan`, `stopWatchChan`,
+  `lastHosts`) is now mutex-guarded, fixing a data race under `-race` and a
+  double-`StopWatching` close-of-closed-channel panic
+- Network-change watchers now shut down reliably on quiescent sockets. The
+  close-to-interrupt trick (which Linux/Darwin don't guarantee will wake a
+  thread already blocked in `recvfrom`) is replaced with a short receive
+  timeout so the watcher loop observes stop and returns within ~200ms
 
 ### Added
 
@@ -60,11 +72,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structured write results (`WriteResult` / `WriteMessageWithResult`) surfaced in
   the `writeResponse` payload: `uid`, `tagType`, `bytesWritten`, `verified`, and
   `attempts`
+- MIFARE Classic NDEF formatting and custom-key support: blank Classic 1K cards
+  can be formatted as NFC Forum tags (MAD written to sector 0, sector trailers
+  switched to NFC Forum config, with validation that keeps trailers rewritable
+  with Key B to prevent bricking), and cards provisioned with non-default keys
+  can be read/written via `NFCReader.SetClassicKeys` / `pcscClassicTag`
+  candidate keys (#3)
+- PNP phone pairing: a QR-first flow for using a phone as an NFC reader. The
+  agent generates a 6-digit PIN (`crypto/rand`) shown in the systray; `/qr.png`
+  encodes a PIN-gated `/install` URL, and `/install` user-agent-routes to an
+  unsigned iOS `.mobileconfig` or an Android DER `.crt` that the OS installs
+  directly. `/ca.pem` remains (PIN-gated) for legacy clients, and five wrong
+  PIN attempts lock pairing until restart. New systray "Pair Phone" and
+  "Pairing PIN" items. Adds `github.com/skip2/go-qrcode`
+- Native OS network-change watcher for certificate regeneration: subscribes to
+  the platform address-change source (Linux `AF_NETLINK`, macOS `PF_ROUTE`,
+  Windows `NotifyAddrChange`) so a network roam regenerates TLS certs in
+  milliseconds instead of waiting on the old 5s poll, now demoted to a 30s
+  safety net
+- IPv6 support: `GetLANIPs` / `getLocalIPs` now return both IPv4 and IPv6
+  globals (IPv4 preferred for `ips[0]` callers), all host:port composition goes
+  through `net.JoinHostPort` so IPv6 literals are bracketed, and `::1` is
+  accepted as a valid host
+- Clipboard fallback on Linux: the systray copy buttons now pick the clipboard
+  utility by display server (`wl-copy` on Wayland, then `xclip`/`xsel` on X11)
+  instead of assuming `xclip`, with a clear install hint naming the packages
+  when none is present. macOS (`pbcopy`) and Windows (`clip`) are unchanged
+
+### Security
+
+- Tier-1 hardening across the WebSocket servers. `CheckOrigin` now rejects
+  cross-site WebSocket hijacking (both Upgraders previously returned `true`,
+  letting any visited website read live NFC events from localhost); the device
+  server (phone-as-reader) and client server now require an API secret
+  (loopback-bypassed, constant-time compared, supplied via `?secret=` or
+  `Authorization: Bearer`); the secret is auto-generated (32-byte URL-safe
+  base64) and persisted under the config dir with mode 0600 + Windows DACL on
+  first run; and both the pairing PIN and the API secret are rotatable from the
+  systray ("Regenerate Pairing PIN" / "Regenerate API Secret")
+- Windows TLS file permissions: the TLS and CA directories, `server.key`, and
+  `hosts.txt` now receive an explicit DACL granting only the current user,
+  Administrators, and SYSTEM. Unix 0600/0700 mode bits are advisory on Windows,
+  so private keys were previously world-readable
 
 ### Changed
 
 - A `writeResponse` with `success: true` now guarantees the data was verified on
   the tag; unconfirmed writes return an error instead
+- Streamlined the custom Manager/Device/Tag extension surface for library
+  consumers: custom tag implementations can embed `BaseTag` to inherit sensible
+  defaults instead of implementing the full interface by hand
 
 ## [1.0.2] - 2026-01-19
 

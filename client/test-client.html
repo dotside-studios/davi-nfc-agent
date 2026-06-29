@@ -422,6 +422,20 @@
                     </div>
                 </div>
 
+                <!-- Capabilities -->
+                <div class="section" v-if="card.capabilities">
+                    <h2>Tag Capabilities</h2>
+                    <div class="card-data">
+                        <div v-if="card.capabilities.tagFamily"><strong>Family:</strong> {{ card.capabilities.tagFamily }}</div>
+                        <div v-if="card.capabilities.memorySize"><strong>Memory:</strong> {{ card.capabilities.memorySize }} bytes</div>
+                        <div v-if="card.capabilities.maxNdefSize"><strong>Max NDEF:</strong> {{ card.capabilities.maxNdefSize }} bytes</div>
+                        <div><strong>Writable:</strong> {{ card.capabilities.canWrite ? 'Yes' : 'No' }}</div>
+                        <div><strong>Lockable:</strong> {{ card.capabilities.canLock ? 'Yes' : 'No' }}</div>
+                        <div v-if="card.capabilities.isReadOnly"><strong>Read-only:</strong> Yes (locked)</div>
+                        <div v-if="card.capabilities.supportsPassword"><strong>Password:</strong> Supported (NTAG21x)</div>
+                    </div>
+                </div>
+
                 <!-- Records -->
                 <div class="section" v-if="card.records && card.records.length > 0">
                     <h2>NDEF Records</h2>
@@ -447,25 +461,63 @@
                     </div>
 
                     <div class="form-group">
-                        <label>Content</label>
-                        <textarea v-model="writeForm.content" :disabled="writeStatus.writing" placeholder="Enter text or URI to write"></textarea>
-                    </div>
-
-                    <div class="form-group">
                         <label>Record Type</label>
                         <select v-model="writeForm.type" :disabled="writeStatus.writing">
                             <option value="text">Text</option>
                             <option value="uri">URI</option>
+                            <option value="mailto">Email (mailto)</option>
+                            <option value="tel">Phone (tel)</option>
+                            <option value="sms">SMS</option>
+                            <option value="geo">Geo location</option>
+                            <option value="smartposter">Smart Poster</option>
+                            <option value="mime">MIME</option>
+                            <option value="vcard">vCard</option>
+                            <option value="aar">Android App Record</option>
                         </select>
                     </div>
 
-                    <div class="alert alert-info">
-                        <strong>Note:</strong> Writing will overwrite all existing records on the card.
+                    <div class="form-group">
+                        <label>Content</label>
+                        <textarea v-model="writeForm.content" :disabled="writeStatus.writing" placeholder="Enter the record content (text, URI, email, package name, ...)"></textarea>
                     </div>
 
-                    <button @click="writeCard" :disabled="writeStatus.writing || !writeForm.content.trim()">
-                        {{ writeStatus.writing ? 'Writing...' : 'Write to Card' }}
-                    </button>
+                    <div class="form-group" v-if="writeForm.type === 'smartposter'">
+                        <label>Title (optional)</label>
+                        <input type="text" v-model="writeForm.title" :disabled="writeStatus.writing" placeholder="Display title">
+                    </div>
+
+                    <div class="form-group" v-if="writeForm.type === 'mime'">
+                        <label>MIME Type</label>
+                        <input type="text" v-model="writeForm.mimeType" :disabled="writeStatus.writing" placeholder="e.g. text/plain">
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" v-model="writeForm.lock" :disabled="writeStatus.writing">
+                            Lock tag after writing (irreversible)
+                        </label>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <strong>Note:</strong> Writing overwrites all existing records and is verified by reading the tag back.
+                    </div>
+
+                    <div v-if="writeResult" class="card-data" style="margin-bottom: 15px;">
+                        <div><strong>Tag:</strong> {{ writeResult.tagType }} ({{ writeResult.uid }})</div>
+                        <div v-if="writeResult.bytesWritten"><strong>Bytes written:</strong> {{ writeResult.bytesWritten }}</div>
+                        <div><strong>Verified:</strong> {{ writeResult.verified ? 'Yes' : 'No' }}</div>
+                        <div v-if="writeResult.attempts"><strong>Attempts:</strong> {{ writeResult.attempts }}</div>
+                        <div v-if="writeResult.locked"><strong>Locked:</strong> Yes</div>
+                    </div>
+
+                    <div class="two-col">
+                        <button @click="writeCard" :disabled="writeStatus.writing || !writeForm.content.trim()">
+                            {{ writeStatus.writing ? 'Writing...' : 'Write to Card' }}
+                        </button>
+                        <button class="danger" @click="eraseCard" :disabled="writeStatus.writing">
+                            Erase Tag
+                        </button>
+                    </div>
                 </div>
 
                 <button class="secondary" @click="backToScan">Back to Scan</button>
@@ -665,15 +717,21 @@
                     type: '',
                     technology: '',
                     scannedAt: null,
-                    records: []
+                    records: [],
+                    capabilities: null
                 });
 
                 const rawPayload = ref(null);
 
                 const writeForm = reactive({
                     content: '',
-                    type: 'text'
+                    type: 'text',
+                    title: '',
+                    mimeType: '',
+                    lock: false
                 });
+
+                const writeResult = ref(null);
 
                 const writeStatus = reactive({
                     writing: false,
@@ -783,13 +841,38 @@
                         card.records = data.message.records;
                     }
 
+                    // Tag capabilities are reported with every scan (memory, max NDEF
+                    // size, write/lock/password support, read-only state).
+                    card.capabilities = data.capabilities || null;
+
                     rawPayload.value = data;
 
                     writeForm.content = '';
+                    writeForm.lock = false;
                     writeStatus.message = '';
                     writeStatus.type = '';
+                    writeResult.value = null;
 
                     clientState.value = 'card';
+                }
+
+                // Build a single NDEF record from the write form, mapping the
+                // selected type to the fields the server expects (see docs/api.md).
+                function buildRecord() {
+                    const content = writeForm.content.trim();
+                    const record = { type: writeForm.type, content };
+
+                    switch (writeForm.type) {
+                        case 'text':
+                        case 'smartposter':
+                            record.language = 'en';
+                            if (writeForm.title.trim()) record.title = writeForm.title.trim();
+                            break;
+                        case 'mime':
+                            record.mimeType = writeForm.mimeType.trim() || 'text/plain';
+                            break;
+                    }
+                    return record;
                 }
 
                 async function writeCard() {
@@ -799,43 +882,58 @@
                         return;
                     }
 
-                    const content = writeForm.content.trim();
-                    if (!content) return;
+                    if (!writeForm.content.trim()) return;
 
                     writeStatus.writing = true;
                     writeStatus.message = 'Writing...';
                     writeStatus.type = 'alert-info';
+                    writeResult.value = null;
 
                     try {
-                        const request = {
-                            records: [
-                                {
-                                    type: writeForm.type,
-                                    content: content,
-                                    language: writeForm.type === 'text' ? 'en' : undefined
-                                }
-                            ]
-                        };
+                        const request = { records: [buildRecord()] };
+                        // Write-and-lock in one step when requested (irreversible).
+                        if (writeForm.lock) request.lock = true;
 
-                        await nfcClient.write(request);
+                        // The write response carries verification details:
+                        // verified, bytesWritten, attempts, and (when locked) locked.
+                        const result = await nfcClient.write(request);
+                        writeResult.value = result || null;
 
-                        writeStatus.message = 'Write successful!';
+                        writeStatus.message = 'Write successful (verified on tag)!';
                         writeStatus.type = 'alert-success';
                         writeForm.content = '';
-
-                        setTimeout(() => {
-                            writeStatus.message = '';
-                            writeStatus.type = '';
-                        }, 5000);
+                        writeForm.lock = false;
                     } catch (err) {
                         console.error('Write error:', err);
                         writeStatus.message = `Error: ${err.message || err}`;
                         writeStatus.type = 'alert-error';
+                    } finally {
+                        writeStatus.writing = false;
+                    }
+                }
 
-                        setTimeout(() => {
-                            writeStatus.message = '';
-                            writeStatus.type = '';
-                        }, 5000);
+                // Erase the tag back to an empty NDEF message (reversible).
+                async function eraseCard() {
+                    if (!nfcClient || !nfcClient.isConnected()) {
+                        writeStatus.message = 'Not connected';
+                        writeStatus.type = 'alert-error';
+                        return;
+                    }
+
+                    writeStatus.writing = true;
+                    writeStatus.message = 'Erasing...';
+                    writeStatus.type = 'alert-info';
+                    writeResult.value = null;
+
+                    try {
+                        const result = await nfcClient.write({ records: [{ type: 'empty' }] });
+                        writeResult.value = result || null;
+                        writeStatus.message = 'Tag erased.';
+                        writeStatus.type = 'alert-success';
+                    } catch (err) {
+                        console.error('Erase error:', err);
+                        writeStatus.message = `Error: ${err.message || err}`;
+                        writeStatus.type = 'alert-error';
                     } finally {
                         writeStatus.writing = false;
                     }
@@ -1104,9 +1202,11 @@
                     rawPayload,
                     writeForm,
                     writeStatus,
+                    writeResult,
                     connectClient,
                     disconnectClient,
                     writeCard,
+                    eraseCard,
                     backToScan,
 
                     // Device mode

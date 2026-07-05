@@ -632,15 +632,12 @@ func (s *SystrayApp) updateURLs() {
 	if devicePort == 0 {
 		devicePort = DEFAULT_DEVICE_PORT
 	}
-	deviceURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
+	// Devices and clients share the single agent port. Devices connect with
+	// ?mode=device; clients use plain /ws.
+	deviceURL := fmt.Sprintf("%s://%s/ws?mode=device", wsProto, hostPort(ip, devicePort))
 	s.mDeviceURL.SetTitle(fmt.Sprintf("Device: %s", deviceURL))
 
-	// Client server URL
-	clientPort := s.agent.ClientPort
-	if clientPort == 0 {
-		clientPort = DEFAULT_CLIENT_PORT
-	}
-	clientURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
+	clientURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
 	s.mClientURL.SetTitle(fmt.Sprintf("Client: %s", clientURL))
 
 	// Phone-pairing URL (always HTTP, only if bootstrap port is set).
@@ -719,9 +716,9 @@ func (s *SystrayApp) getClientURL() string {
 		wsProto = "wss"
 	}
 
-	clientPort := s.agent.ClientPort
+	clientPort := s.agent.DevicePort
 	if clientPort == 0 {
-		clientPort = DEFAULT_CLIENT_PORT
+		clientPort = DEFAULT_DEVICE_PORT
 	}
 	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
 }

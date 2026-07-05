@@ -1,12 +1,13 @@
 # API Reference
 
-The NFC Agent uses a multi-server architecture:
+The NFC Agent serves both roles from a single server on one port:
 
 | Server | Port | Purpose |
 |--------|------|---------|
-| **Device Server** | 9470 | Connects NFC devices (hardware readers, smartphones, browsers) |
-| **Client Server** | 9471 | Serves client applications consuming NFC data |
+| **Agent Server** | 9470 | Serves both NFC devices (hardware readers, smartphones, browsers) via `/ws?mode=device` and client applications via `/ws` |
 | **CA Bootstrap** | 9472 | Serves TLS certificates for device setup |
+
+The agent server port is configurable via `-device-port` (default 9470).
 
 ---
 
@@ -169,22 +170,24 @@ Devices can discover the agent on the local network without knowing the IP addre
 
 ---
 
-## Client Server API
+## Client API
 
-The Client Server provides NFC data to client applications.
+The agent provides NFC data to client applications on the same port as devices
+(plain `/ws`, without the `?mode=device` query). This is the agent server port
+(default 9470, configurable via `-device-port`).
 
 ### Connecting
 
 Connect via WebSocket:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:9471/ws');
+const ws = new WebSocket('ws://localhost:9470/ws');
 ```
 
 **With API secret:**
 
 ```javascript
-const ws = new WebSocket('ws://localhost:9471/ws?secret=your-secret');
+const ws = new WebSocket('ws://localhost:9470/ws?secret=your-secret');
 ```
 
 ### Session Behavior
@@ -572,23 +575,27 @@ socket.send(JSON.stringify({
 
 ## REST API
 
-Base URL: `http://localhost:9471/api/v1`
+Base URL: `http://localhost:9470/api/v1`
 
 ### Health Check
 
 **GET `/api/v1/health`**
 
 ```bash
-curl http://localhost:9471/api/v1/health
+curl http://localhost:9470/api/v1/health
 ```
 
 Response:
 
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "type": "agent"
 }
 ```
+
+Both `/health` and `/api/v1/health` are served on the agent server port and
+report `"type": "agent"`.
 
 ---
 

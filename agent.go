@@ -12,6 +12,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -38,14 +39,17 @@ type Agent struct {
 	APISecret        string
 	ConfigDir        string // Config directory; used for persisting the API secret
 
-	// Two-server architecture
-	Bridge       *server.ServerBridge
-	DeviceServer *deviceserver.Server
-	ClientServer *clientserver.Server
-	DevicePort   int // Default: 9470
-	ClientPort   int // Default: 9471
+	// Server architecture. The device and client endpoints are served from a
+	// single listener (UnifiedServer) on DevicePort. DeviceServer and
+	// ClientServer hold the device/client logic; the unified server fronts
+	// both and routes each /ws connection to the right one.
+	Bridge        *server.ServerBridge
+	UnifiedServer *unifiedserver.Server
+	DeviceServer  *deviceserver.Server
+	ClientServer  *clientserver.Server
+	DevicePort    int // Single agent server port. Default: 9470
 
-	// TLS configuration (optional, shared by both servers)
+	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
 	KeyFile    string       // Path to TLS private key file
 	TLSManager *tls.Manager // TLS manager for auto-TLS and network watching
@@ -62,7 +66,6 @@ func NewAgent(nfcManager nfc.Manager) *Agent {
 		Manager:           nfcManager,
 		AllowedCardTypes:  make(map[string]bool),
 		DevicePort:        9470,
-		ClientPort:        9471,
 		serverRestartChan: make(chan struct{}, 1),
 	}
 }
@@ -124,6 +127,11 @@ func (a *Agent) Stop() {
 	}
 
 	a.Logger.Println("Stopping agent...")
+
+	if a.UnifiedServer != nil {
+		a.UnifiedServer.Stop()
+		a.UnifiedServer = nil
+	}
 
 	if a.ClientServer != nil {
 		a.ClientServer.Stop()
@@ -201,6 +209,11 @@ func (a *Agent) RestartServers() error {
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
 func (a *Agent) stopServers() {
+	if a.UnifiedServer != nil {
+		a.UnifiedServer.Stop()
+		a.UnifiedServer = nil
+	}
+
 	if a.ClientServer != nil {
 		a.ClientServer.Stop()
 		a.ClientServer = nil
@@ -240,30 +253,29 @@ func (a *Agent) startServers() error {
 		}
 	}
 
-	// Create device server
+	// Create device server (handles NFC device connections)
 	a.DeviceServer = deviceserver.New(deviceserver.Config{
 		Reader:           a.Reader,
 		DeviceManager:    deviceManager,
-		Port:             a.DevicePort,
 		APISecret:        a.APISecret,
 		AllowedCardTypes: a.AllowedCardTypes,
-		CertFile:         a.CertFile,
-		KeyFile:          a.KeyFile,
 	}, a.Bridge)
 
-	// Create client server
+	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
-		Port:      a.ClientPort,
 		APISecret: a.APISecret,
-		CertFile:  a.CertFile,
-		KeyFile:   a.KeyFile,
 	}, a.Bridge)
 
-	// Start both servers
-	go a.DeviceServer.Start()
-	go a.ClientServer.Start()
+	// Single listener fronts both the device and client handlers.
+	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
+		Port:     a.DevicePort,
+		CertFile: a.CertFile,
+		KeyFile:  a.KeyFile,
+	}, a.DeviceServer, a.ClientServer)
 
-	a.Logger.Printf("Servers started: Device on port %d, Client on port %d", a.DevicePort, a.ClientPort)
+	go a.UnifiedServer.Start()
+
+	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", a.DevicePort)
 	return nil
 }
 

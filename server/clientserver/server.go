@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -22,9 +21,8 @@ type Server struct {
 	config Config
 	bridge *server.ServerBridge
 
-	httpServer *http.Server
-	ctx        context.Context
-	cancel     context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// WebSocket upgrader
 	upgrader websocket.Upgrader
@@ -50,81 +48,39 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 	}
 }
 
-// Start starts the client server.
-func (s *Server) Start() error {
-	log.Printf("[client] Starting Client Server on port %d...", s.config.Port)
-
-	// Create context
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-
-	// Set up HTTP routes
-	mux := http.NewServeMux()
-
-	// WebSocket endpoint for clients
-	mux.HandleFunc("/ws", s.enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		s.handleWebSocket(w, r)
-	}))
-
-	// Health check
-	mux.HandleFunc("/api/v1/health", s.enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":    "ok",
-			"type":      "client",
-			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
-			"clients":   s.clientCount(),
-		})
-	}))
-
-	// Root
-	mux.HandleFunc("/", s.enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("NFC Client Server"))
-	}))
-
-	// Create HTTP server
-	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.Port),
-		Handler: mux,
-	}
-
-	// Start HTTP server in goroutine
-	go func() {
-		var err error
-		if s.config.TLSEnabled() {
-			log.Printf("[client] Listening on :%d (TLS)", s.config.Port)
-			err = s.httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
-		} else {
-			log.Printf("[client] Listening on :%d", s.config.Port)
-			err = s.httpServer.ListenAndServe()
-		}
-		if err != nil && err != http.ErrServerClosed {
-			log.Printf("[client] HTTP server error: %v", err)
-		}
-	}()
+// StartBackground starts the client-side background work — the bridge listeners
+// that fan tag data and device status out to connected clients — under the given
+// parent context, without binding an HTTP listener. It returns immediately once
+// the goroutines are running.
+//
+// The unified server owns the HTTP listener and routes client WebSocket
+// connections here via ServeWS.
+func (s *Server) StartBackground(ctx context.Context) {
+	// Derive a cancelable context so Stop can tear the goroutines down even
+	// when the parent context outlives this server.
+	s.ctx, s.cancel = context.WithCancel(ctx)
 
 	// Start bridge listeners
 	go s.listenBridgeTagData()
 	go s.listenBridgeDeviceStatus()
-
-	// Block until shutdown
-	<-s.ctx.Done()
-	log.Printf("[client] Server context cancelled, shutting down...")
-
-	return nil
 }
 
-// Stop stops the client server.
-func (s *Server) Stop() {
-	if s.httpServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.httpServer.Shutdown(ctx)
-	}
+// ServeWS handles a WebSocket connection request for a client. It performs its
+// own API-secret check and origin validation, so it is safe to call directly
+// from a shared listener (unified single-port mode).
+func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
+	s.handleWebSocket(w, r)
+}
 
+// ClientCount returns the number of currently connected clients.
+func (s *Server) ClientCount() int {
+	return s.clientCount()
+}
+
+// Stop stops the client server's background work. The unified server owns the
+// HTTP listener; this only cancels the context the background goroutines run
+// under.
+func (s *Server) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -505,21 +461,5 @@ func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, erro
 
 	if err := conn.WriteJSON(response); err != nil {
 		log.Printf("[client] Failed to send error response: %v", err)
-	}
-}
-
-// enableCORS adds CORS headers.
-func (s *Server) enableCORS(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next(w, r)
 	}
 }

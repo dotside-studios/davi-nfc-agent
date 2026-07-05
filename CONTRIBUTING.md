@@ -111,8 +111,9 @@ davi-nfc-agent/
 │   ├── remotenfc/       # Smartphone NFC support
 │   └── multimanager/    # Multiple manager aggregation
 ├── server/              # WebSocket servers
-│   ├── deviceserver/    # Device server (port 9470)
-│   └── clientserver/    # Client server (port 9471)
+│   ├── unifiedserver/   # Single listener (port 9470) fronting both roles
+│   ├── deviceserver/    # Device connection handling logic
+│   └── clientserver/    # Client connection handling logic
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
 ├── client/              # JavaScript client library
@@ -128,10 +129,13 @@ davi-nfc-agent/
 - See [nfc/README.md](nfc/README.md) for details
 
 **Server Layer** (`server/`)
-- Two-server architecture:
+- Single-server architecture: one listener on port 9470 (configurable via
+  `-device-port`) serves both roles, distinguished by connection path
+  (`/ws?mode=device` for devices, `/ws` for clients):
+  - **UnifiedServer**: Fronts both roles on the single port
   - **DeviceServer**: Handles NFC devices and hardware readers
   - **ClientServer**: Handles client applications
-- Bridge component for inter-server communication
+- Bridge component connects the device and client handlers in-process
 
 **TLS Layer** (`tls/`)
 - Automatic certificate generation

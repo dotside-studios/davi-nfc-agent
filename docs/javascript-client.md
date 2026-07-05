@@ -28,6 +28,12 @@ A framework-agnostic JavaScript client for integrating with the NFC Agent.
 
 ## NFCClient (Client Server)
 
+Use `NFCClient` to consume NFC data as a client application. It connects to the
+same agent port as [`NFCDeviceClient`](#nfcdeviceclient-device-input) (port 9470
+by default, configurable via `-device-port`) — devices and clients share one
+port, distinguished only by the connection path (`/ws?mode=device` for devices,
+plain `/ws` for clients).
+
 ## Installation
 
 Copy the client files to your project:
@@ -47,7 +53,7 @@ Or include directly in HTML:
 
 ```javascript
 // Create client instance
-const client = new NFCClient('http://localhost:9471', {
+const client = new NFCClient('http://localhost:9470', {
   apiSecret: 'your-secret',  // Optional
   autoReconnect: true        // Auto-reconnect on disconnect
 });
@@ -164,7 +170,7 @@ client.on('error', (err) => { /* ... */ });
 ### Simple Tag Reader
 
 ```javascript
-const client = new NFCClient('http://localhost:9471');
+const client = new NFCClient('http://localhost:9470');
 
 client.on('tagData', (data) => {
   document.getElementById('uid').textContent = data.uid;
@@ -177,7 +183,7 @@ await client.connect();
 ### Write to Card
 
 ```javascript
-const client = new NFCClient('http://localhost:9471');
+const client = new NFCClient('http://localhost:9470');
 await client.connect();
 
 // Write single text record
@@ -197,7 +203,7 @@ await client.write({
 ### Append to Existing Data
 
 ```javascript
-const client = new NFCClient('http://localhost:9471');
+const client = new NFCClient('http://localhost:9470');
 await client.connect();
 
 client.on('tagData', async (data) => {
@@ -223,7 +229,7 @@ client.on('tagData', async (data) => {
 ### With Error Handling
 
 ```javascript
-const client = new NFCClient('http://localhost:9471');
+const client = new NFCClient('http://localhost:9470');
 
 client.on('error', (err) => {
   console.error('NFC Error:', err);
@@ -250,7 +256,7 @@ TypeScript definitions are provided in `nfc-client.d.ts`. Import types:
 ```typescript
 import { NFCClient, TagData, DeviceStatus, WriteRequest } from './nfc-client';
 
-const client = new NFCClient('http://localhost:9471');
+const client = new NFCClient('http://localhost:9470');
 
 client.on('tagData', (data: TagData) => {
   console.log(data.uid);

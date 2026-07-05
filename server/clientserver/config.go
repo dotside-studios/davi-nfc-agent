@@ -1,10 +1,9 @@
 package clientserver
 
-// Config holds configuration for the Client Server.
+// Config holds configuration for the client handling logic. The HTTP listener
+// and TLS are owned by the unified server, so this carries only what the client
+// handlers need.
 type Config struct {
-	// Port is the HTTP/WebSocket port to listen on
-	Port int
-
 	// APISecret is the API secret required for non-loopback connections.
 	// Empty means no auth (legacy / development mode).
 	APISecret string
@@ -12,13 +11,4 @@ type Config struct {
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]
 	// to disable origin checking entirely (NOT recommended).
 	AllowedOrigins []string
-
-	// TLS configuration (optional)
-	CertFile string // Path to TLS certificate file
-	KeyFile  string // Path to TLS private key file
-}
-
-// TLSEnabled returns true if TLS is configured.
-func (c Config) TLSEnabled() bool {
-	return c.CertFile != "" && c.KeyFile != ""
 }

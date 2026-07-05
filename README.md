@@ -46,8 +46,7 @@ See the [Installation Guide](docs/installation.md) for platform-specific setup a
 ./davi-nfc-agent                       # System tray mode (default)
 ./davi-nfc-agent -version              # Print version information and exit
 ./davi-nfc-agent -device "ACS ACR122U" # Use a specific PC/SC reader by name
-./davi-nfc-agent -client-port 8080     # Custom client server port (default 9471)
-./davi-nfc-agent -device-port 9480     # Custom device server port (default 9470)
+./davi-nfc-agent -device-port 9480     # Custom agent server port (default 9470, serves both devices and clients)
 ./davi-nfc-agent -api-secret mysecret  # Set the API authentication secret
 ./davi-nfc-agent -auto-tls=false       # Disable automatic TLS certificate management
 ./davi-nfc-agent -cert cert.pem -key key.pem  # Use your own TLS certificate
@@ -60,9 +59,8 @@ across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
 
 ## Usage Examples
 
-The agent runs three servers:
-- **Device Server** (port 9470): Connects NFC readers and smartphones
-- **Client Server** (port 9471): Serves client applications
+The agent runs a single server on one port that fills both roles, plus a bootstrap helper:
+- **Agent Server** (port 9470): Serves both NFC devices (readers and smartphones, via `/ws?mode=device`) and client applications (via `/ws`) on the same port. The port is configurable via `-device-port`.
 - **CA Bootstrap Server** (port 9472): Serves the TLS root certificate for device setup (auto-TLS only)
 
 ### JavaScript / TypeScript
@@ -70,7 +68,7 @@ The agent runs three servers:
 Use the included [client library](docs/javascript-client.md) for browser or Node.js applications.
 
 ```javascript
-const client = new NFCClient('http://localhost:9471');
+const client = new NFCClient('http://localhost:9470');
 
 client.on('tagData', (data) => {
   console.log('Card:', data.uid, data.text);
@@ -86,12 +84,12 @@ await client.write({
 
 ### Android (Kotlin)
 
-Connect to the Client Server via WebSocket using OkHttp or similar.
+Connect to the agent's client endpoint via WebSocket using OkHttp or similar.
 
 ```kotlin
 val client = OkHttpClient()
 val request = Request.Builder()
-    .url("ws://192.168.1.100:9471/ws")
+    .url("ws://192.168.1.100:9470/ws")
     .build()
 
 val listener = object : WebSocketListener() {
@@ -133,7 +131,7 @@ if (NFCDeviceClient.isWebNFCSupported()) {
 Connect directly without a client library. See [API Reference](docs/api.md) for all message types.
 
 ```javascript
-const ws = new WebSocket('ws://localhost:9471/ws');
+const ws = new WebSocket('ws://localhost:9470/ws');
 
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);

@@ -4,17 +4,14 @@ package deviceserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/gorilla/websocket"
-	"github.com/grandcat/zeroconf"
 )
 
 // Server handles device connections and tag data input.
@@ -22,18 +19,14 @@ type Server struct {
 	config Config
 	bridge *server.ServerBridge
 
-	httpServer *http.Server
-	ctx        context.Context
-	cancel     context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Handler registry for device message types
 	handlerRegistry *server.HandlerRegistry
 
 	// WebSocket upgrader
 	upgrader websocket.Upgrader
-
-	// mDNS service for auto-discovery
-	mdnsServer *zeroconf.Server
 
 	// Device connections (phones, etc.)
 	devices    map[*websocket.Conn]string // conn -> deviceID
@@ -96,9 +89,17 @@ func (s *Server) BroadcastDeviceStatus(status nfc.DeviceStatus) {
 	}
 }
 
-// Start starts the device server.
-func (s *Server) Start() error {
-	log.Printf("[device] Starting Device Server on port %d...", s.config.Port)
+// StartBackground starts the device-side background work — the NFC reader,
+// lifecycle handlers, and the write/lock/capabilities bridge consumers — under
+// the given parent context, without binding an HTTP listener. It returns
+// immediately once the goroutines are running.
+//
+// The unified server owns the HTTP listener and routes device WebSocket
+// connections here via ServeWS.
+func (s *Server) StartBackground(ctx context.Context) {
+	// Derive a cancelable context so Stop can tear the goroutines down even
+	// when the parent context outlives this server.
+	s.ctx, s.cancel = context.WithCancel(ctx)
 
 	reader := s.config.Reader
 
@@ -112,57 +113,6 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Create context
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-
-	// Set up HTTP routes
-	mux := http.NewServeMux()
-
-	// WebSocket endpoint for devices (bidirectional)
-	mux.HandleFunc("/ws", s.enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		s.handleWebSocket(w, r)
-	}))
-
-	// Health check
-	mux.HandleFunc("/health", s.enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"status": "ok",
-			"type":   "device",
-		})
-	}))
-
-	// Root
-	mux.HandleFunc("/", s.enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("NFC Device Server"))
-	}))
-
-	// Create HTTP server
-	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.Port),
-		Handler: mux,
-	}
-
-	// Start HTTP server in goroutine
-	go func() {
-		var err error
-		if s.config.TLSEnabled() {
-			log.Printf("[device] Listening on :%d (TLS)", s.config.Port)
-			err = s.httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
-		} else {
-			log.Printf("[device] Listening on :%d", s.config.Port)
-			err = s.httpServer.ListenAndServe()
-		}
-		if err != nil && err != http.ErrServerClosed {
-			log.Printf("[device] HTTP server error: %v", err)
-		}
-	}()
-
-	// Start mDNS service
-	if err := s.startMDNS(); err != nil {
-		log.Printf("[device] Warning: Failed to start mDNS: %v", err)
-	}
-
 	// Start reader
 	if reader != nil {
 		reader.Start()
@@ -171,35 +121,23 @@ func (s *Server) Start() error {
 	// Start lifecycle handlers
 	s.handlerRegistry.StartLifecycleHandlers(s.ctx)
 
-	// Start write request handler
+	// Start bridge request consumers
 	go s.handleWriteRequests()
-
-	// Start lock request handler
 	go s.handleLockRequests()
-
-	// Start capabilities request handler
 	go s.handleCapabilitiesRequests()
-
-	// Block until shutdown
-	<-s.ctx.Done()
-	log.Printf("[device] Server context cancelled, shutting down...")
-
-	return nil
 }
 
-// Stop stops the device server.
+// ServeWS handles a WebSocket connection request for a device. It performs its
+// own API-secret check and origin validation, so it is safe to call directly
+// from a shared listener (unified single-port mode).
+func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
+	s.handleWebSocket(w, r)
+}
+
+// Stop stops the device server's background work. The unified server owns the
+// HTTP listener; this only cancels the context the background goroutines run
+// under.
 func (s *Server) Stop() {
-	if s.mdnsServer != nil {
-		s.mdnsServer.Shutdown()
-		s.mdnsServer = nil
-	}
-
-	if s.httpServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.httpServer.Shutdown(ctx)
-	}
-
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -413,43 +351,4 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 		Success:   true,
 		Payload:   caps,
 	}
-}
-
-// enableCORS adds CORS headers.
-func (s *Server) enableCORS(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next(w, r)
-	}
-}
-
-// startMDNS starts the mDNS service for auto-discovery.
-func (s *Server) startMDNS() error {
-	var err error
-	s.mdnsServer, err = zeroconf.Register(
-		server.MDNSDeviceServiceName,
-		server.MDNSDeviceServiceType,
-		server.MDNSDomain,
-		s.config.Port,
-		[]string{
-			"version=1.0",
-			"protocol=websocket",
-			"path=/ws",
-			"type=device",
-		},
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to register mDNS service: %w", err)
-	}
-	log.Printf("[device] mDNS service registered: %s on port %d", server.MDNSDeviceServiceType, s.config.Port)
-	return nil
 }

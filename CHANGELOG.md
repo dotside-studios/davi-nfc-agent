@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Single-port architecture.** The device server (previously port 9470) and
+  client server (previously port 9471) are now served from one listener on a
+  single port (default 9470). NFC devices connect to `/ws?mode=device` (or with
+  the `X-Device-Mode: true` header); web clients connect to plain `/ws`. Both
+  `/health` and `/api/v1/health` are served on the one port and report
+  `"type":"agent"`. A new `server/unifiedserver` package fronts the existing
+  device/client handlers and routes each connection; the in-process bridge
+  between them is unchanged.
+
+### Removed
+
+- The `-client-port` flag. The client endpoint now shares the agent port; set
+  the single port via `-device-port` (default 9470).
+
 ## [1.0.3] - 2026-06-29
 
 ### Fixed

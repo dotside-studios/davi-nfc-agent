@@ -1,9 +1,12 @@
 /**
  * NFC Device Client
  *
- * A universal JavaScript client for connecting to the Davi NFC Agent Device Server.
+ * A universal JavaScript client for connecting to the Davi NFC Agent as a device.
  * Works in both Node.js and browser environments. NFC source agnostic - integrate
  * with any NFC library (WebNFC, React Native NFC, etc.) by calling scanTag().
+ *
+ * Connects to the agent's device endpoint (/ws?mode=device) on the shared agent
+ * port (default 9470); web clients use NFCClient (plain /ws) on the same port.
  *
  * @example Browser
  * const client = new NFCDeviceClient('ws://localhost:9470', {
@@ -41,7 +44,7 @@
 class NFCDeviceClient {
   /**
    * Creates a new NFC Device client instance
-   * @param {string} serverUrl - Base URL of the Device Server (e.g., 'ws://localhost:9470')
+   * @param {string} serverUrl - Base URL of the NFC Agent (e.g., 'ws://localhost:9470')
    * @param {Object} options - Configuration options
    * @param {Function} [options.WebSocket] - Custom WebSocket class (required in Node.js, optional in browser)
    * @param {string} [options.deviceName='NFC Device'] - Device name for registration

@@ -11,9 +11,9 @@ The agent server port is configurable via `-device-port` (default 9470).
 
 ---
 
-## Device Server API
+## Device API
 
-The Device Server accepts connections from NFC devices that provide tag data.
+The device endpoint accepts connections from NFC devices that provide tag data.
 
 ### Connecting
 
@@ -161,7 +161,7 @@ Server requests the device to write data to a tag:
 
 ### mDNS Discovery
 
-The Device Server advertises via mDNS/Bonjour:
+The agent advertises via mDNS/Bonjour:
 
 - **Service Type**: `_nfc-device._tcp`
 - **Domain**: `local.`

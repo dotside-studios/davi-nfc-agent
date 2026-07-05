@@ -20,7 +20,7 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 
 **Hardware Readers**: ACR122U, ACR1252U, and other PC/SC-compatible readers
 
-**Remote Devices**: Any NFC-capable device that connects via the [Device Server API](docs/api.md#device-server-api), including:
+**Remote Devices**: Any NFC-capable device that connects via the [Device API](docs/api.md#device-api), including:
 - Smartphones (iPhone 7+/iOS 13+, Android 4.4+)
 - Browsers with WebNFC (Chrome on Android)
 - Custom hardware or IoT devices
@@ -109,7 +109,7 @@ See [API Reference](docs/api.md) for the full WebSocket protocol.
 
 ### Use Your Phone as an NFC Reader
 
-Connect your smartphone to the Device Server using the [NFCDeviceClient](docs/javascript-client.md#nfcdeviceclient-device-input).
+Connect your smartphone to the agent using the [NFCDeviceClient](docs/javascript-client.md#nfcdeviceclient-device-input).
 
 ```javascript
 const device = new NFCDeviceClient('ws://192.168.1.100:9470');

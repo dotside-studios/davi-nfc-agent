@@ -4,8 +4,12 @@
  * A framework-agnostic JavaScript client for connecting to the NFC Agent server.
  * Supports session management, WebSocket communication, and NFC card operations.
  *
+ * Connects to the agent's client endpoint (plain /ws) on the shared agent port
+ * (default 9470). NFC readers/devices use NFCDeviceClient (/ws?mode=device) on
+ * the same port.
+ *
  * @example
- * const client = new NFCClient('http://localhost:18080');
+ * const client = new NFCClient('http://localhost:9470');
  *
  * client.on('tagData', (data) => {
  *   console.log('Card detected:', data.uid, data.text);
@@ -20,7 +24,7 @@
 class NFCClient {
   /**
    * Creates a new NFC client instance
-   * @param {string} serverUrl - Base URL of the NFC Agent server (e.g., 'http://localhost:18080')
+   * @param {string} serverUrl - Base URL of the NFC Agent server (e.g., 'http://localhost:9470')
    * @param {Object} options - Configuration options
    * @param {string} [options.apiSecret] - Optional API secret for authentication
    * @param {boolean} [options.autoReconnect=true] - Automatically reconnect on disconnect

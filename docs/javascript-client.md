@@ -4,7 +4,7 @@ A framework-agnostic JavaScript client for integrating with the NFC Agent.
 
 ## Table of Contents
 
-- [NFCClient (Client Server)](#nfcclient-client-server)
+- [NFCClient (client role)](#nfcclient-client-role)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
   - [API Reference](#api-reference)
@@ -26,7 +26,7 @@ A framework-agnostic JavaScript client for integrating with the NFC Agent.
 
 ---
 
-## NFCClient (Client Server)
+## NFCClient (client role)
 
 Use `NFCClient` to consume NFC data as a client application. It connects to the
 same agent port as [`NFCDeviceClient`](#nfcdeviceclient-device-input) (port 9470
@@ -269,7 +269,7 @@ See `client/nfc-client.d.ts` for full type definitions.
 
 # NFCDeviceClient (Device Input)
 
-Use `NFCDeviceClient` to connect to the **Device Server** (port 9470) as an NFC device. This is a universal library that works in both Node.js and browser environments, allowing any NFC-capable device to act as a reader.
+Use `NFCDeviceClient` to connect to the **agent** (port 9470) as an NFC device. This is a universal library that works in both Node.js and browser environments, allowing any NFC-capable device to act as a reader.
 
 The library is **NFC-source agnostic** - integrate with any NFC library (WebNFC, React Native NFC Manager, etc.) by calling `scanTag()` when your NFC library detects a tag.
 
@@ -341,7 +341,7 @@ new NFCDeviceClient(serverUrl, options?)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `serverUrl` | string | Device Server URL (e.g., `ws://localhost:9470`) |
+| `serverUrl` | string | Agent URL (e.g., `ws://localhost:9470`) |
 | `options.WebSocket` | class | Custom WebSocket class (required in Node.js, optional in browser) |
 | `options.deviceName` | string | Device name for registration (default: `'NFC Device'`) |
 | `options.platform` | string | Platform identifier: `'web'`, `'ios'`, `'android'`, `'node'` (default: `'unknown'`) |
@@ -358,7 +358,7 @@ new NFCDeviceClient(serverUrl, options?)
 
 #### `connect()`
 
-Connect to the Device Server and register as a device.
+Connect to the agent and register as a device.
 
 ```javascript
 await client.connect();
@@ -714,7 +714,7 @@ See `client/nfc-device-client.d.ts` for full type definitions.
 
 ## mDNS / Bonjour Discovery
 
-The Device Server advertises itself via mDNS/Bonjour, allowing clients to discover the server on the local network without knowing the IP address.
+The agent advertises itself via mDNS/Bonjour, allowing clients to discover the server on the local network without knowing the IP address.
 
 **Service Details:**
 - **Service Type:** `_nfc-device._tcp`

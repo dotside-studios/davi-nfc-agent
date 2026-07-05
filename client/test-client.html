@@ -375,7 +375,7 @@
                     <div v-if="clientError" class="alert alert-error">{{ clientError }}</div>
 
                     <div class="form-group">
-                        <label>Client Server URL</label>
+                        <label>Agent URL (client)</label>
                         <input type="text" v-model="clientUrl" :disabled="clientConnecting">
                     </div>
                     <div class="form-group">
@@ -536,7 +536,7 @@
                     <div v-if="deviceError" class="alert alert-error">{{ deviceError }}</div>
 
                     <div class="form-group">
-                        <label>Device Server URL</label>
+                        <label>Agent URL (device)</label>
                         <input type="text" v-model="deviceUrl" :disabled="deviceConnecting">
                     </div>
                     <div class="form-group">

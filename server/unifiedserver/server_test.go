@@ -70,7 +70,7 @@ func dialAndProbe(t *testing.T, wsURL string) string {
 		t.Fatalf("write to %s failed: %v", wsURL, err)
 	}
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	var out protocol.WebSocketResponse
 	if err := conn.ReadJSON(&out); err != nil {
 		t.Fatalf("read from %s failed: %v", wsURL, err)

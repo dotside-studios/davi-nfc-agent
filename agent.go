@@ -273,7 +273,11 @@ func (a *Agent) startServers() error {
 		KeyFile:  a.KeyFile,
 	}, a.DeviceServer, a.ClientServer)
 
-	go a.UnifiedServer.Start()
+	go func() {
+		if err := a.UnifiedServer.Start(); err != nil {
+			a.Logger.Printf("Unified server error: %v", err)
+		}
+	}()
 
 	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", a.DevicePort)
 	return nil

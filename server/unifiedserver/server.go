@@ -134,7 +134,7 @@ func (s *Server) Handler() http.Handler {
 	// Device-style health check (kept for backward compatibility).
 	mux.HandleFunc("/health", enableCORS(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "ok",
 			"type":    "agent",
 			"clients": s.client.ClientCount(),
@@ -148,7 +148,7 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "ok",
 			"type":      "agent",
 			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
@@ -158,7 +158,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Root
 	mux.HandleFunc("/", enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("NFC Agent"))
+		_, _ = w.Write([]byte("NFC Agent"))
 	}))
 
 	return mux
@@ -176,7 +176,7 @@ func (s *Server) Stop() {
 	if s.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		s.httpServer.Shutdown(ctx)
+		_ = s.httpServer.Shutdown(ctx)
 	}
 
 	if s.cancel != nil {

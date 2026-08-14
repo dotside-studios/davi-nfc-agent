@@ -74,6 +74,14 @@ class NFCDeviceClient {
     this.canRead = options.canRead !== false;
     this.canWrite = options.canWrite || false;
     this.nfcType = options.nfcType || 'custom';
+
+    // Extended capabilities, sent only when the agent speaks v1 or later.
+    this.canTransceive = options.canTransceive || false;
+    this.canTransceiveRaw = options.canTransceiveRaw || false;
+    this.canLock = options.canLock || false;
+    this.deviceType = options.deviceType || '';
+    this.supportedTagTypes = options.supportedTagTypes || [];
+    this.maxBaudRate = options.maxBaudRate || 0;
     this.autoHeartbeat = options.autoHeartbeat !== false;
     this.heartbeatInterval = options.heartbeatInterval || 30000;
     this.autoReconnect = options.autoReconnect !== false;
@@ -315,7 +323,8 @@ class NFCDeviceClient {
           capabilities: {
             canRead: this.canRead,
             canWrite: this.canWrite,
-            nfcType: this.nfcType
+            nfcType: this.nfcType,
+            ...(this.protocolVersion >= 1 ? this._extendedCapabilities() : {})
           },
           metadata: {
             userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'
@@ -325,6 +334,22 @@ class NFCDeviceClient {
 
       this._send(message);
     });
+  }
+
+  /**
+   * Builds the v1 capability additions, omitting anything left at its default so
+   * a device that declares nothing extra sends a v0-shaped object.
+   * @private
+   */
+  _extendedCapabilities() {
+    const caps = {};
+    if (this.canTransceive) caps.canTransceive = true;
+    if (this.canTransceiveRaw) caps.canTransceiveRaw = true;
+    if (this.canLock) caps.canLock = true;
+    if (this.deviceType) caps.deviceType = this.deviceType;
+    if (this.supportedTagTypes.length) caps.supportedTagTypes = this.supportedTagTypes;
+    if (this.maxBaudRate) caps.maxBaudRate = this.maxBaudRate;
+    return caps;
   }
 
   /**
@@ -457,6 +482,9 @@ class NFCDeviceClient {
    * @param {string} [tagData.atr] - Answer to Reset data
    * @param {Object} [tagData.ndefMessage] - NDEF message with records array
    * @param {string} [tagData.rawData] - Raw tag data (base64 encoded)
+   * @param {Object} [tagData.capabilities] - What this tag supports, if the device
+   *   knows (memorySize, maxNdefSize, tagFamily, supportsPassword, ...). Omitted,
+   *   the agent infers them from `type`.
    * @returns {Promise<void>}
    */
   async scanTag(tagData) {
@@ -478,7 +506,8 @@ class NFCDeviceClient {
         atr: tagData.atr || '',
         scannedAt: tagData.scannedAt || new Date().toISOString(),
         ndefMessage: tagData.ndefMessage || null,
-        rawData: tagData.rawData || null
+        rawData: tagData.rawData || null,
+        ...(tagData.capabilities ? { capabilities: tagData.capabilities } : {})
       }
     };
 

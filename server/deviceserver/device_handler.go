@@ -233,12 +233,8 @@ func (h *DeviceHandler) register(conn *server.SafeConn, reqID string, regReq pro
 		Platform:        regReq.Platform,
 		AppVersion:      regReq.AppVersion,
 		ProtocolVersion: version,
-		Capabilities: remotenfc.DeviceCapabilities{
-			CanRead:  regReq.Capabilities.CanRead,
-			CanWrite: regReq.Capabilities.CanWrite,
-			NFCType:  regReq.Capabilities.NFCType,
-		},
-		Metadata: regReq.Metadata,
+		Capabilities:    regReq.Capabilities,
+		Metadata:        regReq.Metadata,
 	})
 	if err != nil {
 		h.sendError(conn, reqID, "REGISTRATION_FAILED", err.Error())
@@ -305,14 +301,15 @@ func (h *DeviceHandler) handleTagScanned(conn *server.SafeConn, deviceID string,
 
 	// Convert to remotenfc.TagData and send
 	phoneTagData := remotenfc.TagData{
-		DeviceID:    tagData.DeviceID,
-		UID:         tagData.UID,
-		Technology:  tagData.Technology,
-		Type:        tagData.Type,
-		ATR:         tagData.ATR,
-		ScannedAt:   tagData.ScannedAt,
-		NDEFMessage: tagData.NDEFMessage,
-		RawData:     tagData.RawData,
+		DeviceID:     tagData.DeviceID,
+		UID:          tagData.UID,
+		Technology:   tagData.Technology,
+		Type:         tagData.Type,
+		ATR:          tagData.ATR,
+		ScannedAt:    tagData.ScannedAt,
+		NDEFMessage:  tagData.NDEFMessage,
+		RawData:      tagData.RawData,
+		Capabilities: tagData.Capabilities,
 	}
 
 	if err := h.manager.SendTagData(deviceID, phoneTagData); err != nil {

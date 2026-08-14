@@ -89,13 +89,24 @@ func (d *Device) Connection() string {
 
 // DeviceType returns the device type identifier (implements nfc.DeviceInfoProvider).
 func (d *Device) DeviceType() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.capabilities.DeviceType != "" {
+		return d.capabilities.DeviceType
+	}
 	return "smartphone"
 }
 
 // SupportedTagTypes returns the NFC types this device supports (implements nfc.DeviceInfoProvider).
+// A v0 device declares only its radio technology, which is all we can report.
 func (d *Device) SupportedTagTypes() []string {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
+	if len(d.capabilities.SupportedTagTypes) > 0 {
+		return append([]string(nil), d.capabilities.SupportedTagTypes...)
+	}
 	return []string{d.capabilities.NFCType}
 }
 

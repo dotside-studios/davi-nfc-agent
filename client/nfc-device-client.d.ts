@@ -54,6 +54,42 @@ export interface NFCDeviceClientOptions {
   nfcType?: string;
 
   /**
+   * Device supports APDU-level exchange (IsoDep.transceive, sendCommand,
+   * PN532 InDataExchange). Sent only when the agent speaks protocol v1.
+   * @default false
+   */
+  canTransceive?: boolean;
+
+  /**
+   * Device supports framing-level exchange (NfcA.transceive,
+   * PN532 InCommunicateThru).
+   * @default false
+   */
+  canTransceiveRaw?: boolean;
+
+  /**
+   * Device can make a tag read-only
+   * @default false
+   */
+  canLock?: boolean;
+
+  /**
+   * Kind of device, e.g. 'smartphone', 'pn532-serial'
+   * @default 'smartphone'
+   */
+  deviceType?: string;
+
+  /**
+   * Tag families this device handles, e.g. ['MIFARE Classic', 'NTAG']
+   */
+  supportedTagTypes?: string[];
+
+  /**
+   * Maximum baud rate in bps, for serial-attached readers
+   */
+  maxBaudRate?: number;
+
+  /**
    * Automatically send heartbeats
    * @default true
    */
@@ -238,6 +274,42 @@ export interface DeviceTagData {
    * Raw tag data (base64 encoded)
    */
   rawData?: string | null;
+
+  /**
+   * What this tag supports, if the device knows. Omitted, the agent infers it
+   * from `type`. Requires protocol v1.
+   */
+  capabilities?: TagCapabilities;
+}
+
+/**
+ * Capabilities of a scanned tag
+ */
+export interface TagCapabilities {
+  canRead?: boolean;
+  canWrite?: boolean;
+  canTransceive?: boolean;
+  canLock?: boolean;
+  isReadOnly?: boolean;
+
+  /** Total memory in bytes */
+  memorySize?: number;
+
+  /** Maximum NDEF message size in bytes */
+  maxNdefSize?: number;
+
+  /** e.g. 'ISO14443A' */
+  technology?: string;
+
+  /** e.g. 'MIFARE Classic', 'NTAG' */
+  tagFamily?: string;
+
+  supportsNdef?: boolean;
+  supportsCrypto?: boolean;
+  supportsAuthentication?: boolean;
+
+  /** Simple password protection (NTAG PWD/PACK/AUTH0) */
+  supportsPassword?: boolean;
 }
 
 /**

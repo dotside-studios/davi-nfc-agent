@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // Tag wraps mobile app NFC data in the nfc.Tag interface.
@@ -23,7 +24,8 @@ type Tag struct {
 	ndefMsg      *nfc.NDEFMessage // Parsed NDEF message
 	rawData      []byte           // Raw tag data from mobile app
 	scannedAt    time.Time
-	sourceDevice string // Device ID that scanned this tag
+	sourceDevice string                    // Device ID that scanned this tag
+	declaredCaps *protocol.TagCapabilities // What the device reported, if anything
 	mu           sync.RWMutex
 }
 
@@ -43,18 +45,37 @@ func (t *Tag) NumericType() int {
 	return 0
 }
 
-// Capabilities returns the capabilities of this smartphone tag.
-// Smartphone tags are read-only as writes must go through the WebSocket protocol.
+// Capabilities returns the capabilities of this smartphone tag, starting from
+// whatever the device declared for it.
+//
+// The operation bits are forced off regardless of the declaration: writes and
+// transceives still route through the device WebSocket protocol rather than the
+// Tag interface, so claiming them here would be capability drift.
 func (t *Tag) Capabilities() nfc.TagCapabilities {
-	return nfc.TagCapabilities{
-		CanRead:       true,
-		CanWrite:      false, // Writes require WebSocket protocol
-		CanTransceive: false,
-		CanLock:       false,
-		TagFamily:     t.tagType,
-		Technology:    t.technology,
-		SupportsNDEF:  t.ndefMsg != nil || t.ndefData != nil,
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var caps nfc.TagCapabilities
+	if t.declaredCaps != nil {
+		caps = *t.declaredCaps
 	}
+
+	if caps.TagFamily == "" {
+		caps.TagFamily = t.tagType
+	}
+	if caps.Technology == "" {
+		caps.Technology = t.technology
+	}
+	if !caps.SupportsNDEF {
+		caps.SupportsNDEF = t.ndefMsg != nil || t.ndefData != nil
+	}
+
+	caps.CanRead = true
+	caps.CanWrite = false
+	caps.CanTransceive = false
+	caps.CanLock = false
+
+	return caps
 }
 
 // ReadData returns the tag data (NDEF or raw).

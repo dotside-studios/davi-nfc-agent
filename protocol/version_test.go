@@ -107,3 +107,38 @@ func TestHelloResponseFlattensRegistration(t *testing.T) {
 		t.Errorf("protocolVersion = %v, want %d: %s", round["protocolVersion"], DeviceProtocolV1, out)
 	}
 }
+
+// A v0 device sends only the original three capability fields. The extended
+// struct must still accept that payload, with the additions reading as false.
+func TestLegacyDeviceCapabilitiesStillParse(t *testing.T) {
+	raw := []byte(`{"canRead": true, "canWrite": false, "nfcType": "corenfc"}`)
+
+	var caps DeviceCapabilities
+	if err := json.Unmarshal(raw, &caps); err != nil {
+		t.Fatalf("unmarshal legacy capabilities: %v", err)
+	}
+
+	if !caps.CanRead || caps.CanWrite || caps.NFCType != "corenfc" {
+		t.Errorf("legacy fields not preserved: %+v", caps)
+	}
+	if caps.CanTransceive || caps.CanTransceiveRaw || caps.CanLock {
+		t.Errorf("absent v1 fields must read as false: %+v", caps)
+	}
+	if caps.DeviceType != "" || len(caps.SupportedTagTypes) != 0 {
+		t.Errorf("absent v1 fields must read as zero: %+v", caps)
+	}
+}
+
+// The v1 additions are omitempty, so a device that declares nothing extra
+// serializes to the same object a v0 device would send.
+func TestDeviceCapabilitiesOmitEmptyAdditions(t *testing.T) {
+	out, err := json.Marshal(DeviceCapabilities{CanRead: true, NFCType: "nfca"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	want := `{"canRead":true,"canWrite":false,"nfcType":"nfca"}`
+	if string(out) != want {
+		t.Errorf("marshalled = %s, want %s", out, want)
+	}
+}

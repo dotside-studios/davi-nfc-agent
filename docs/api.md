@@ -49,7 +49,12 @@ registration fields, so setup costs one round trip:
     "capabilities": {
       "canRead": true,
       "canWrite": false,
-      "nfcType": "corenfc"
+      "nfcType": "corenfc",
+      "canTransceive": false,
+      "canTransceiveRaw": false,
+      "canLock": false,
+      "deviceType": "smartphone",
+      "supportedTagTypes": ["NTAG", "MIFARE Ultralight"]
     },
     "metadata": {
       "userAgent": "..."
@@ -57,6 +62,28 @@ registration fields, so setup costs one round trip:
   }
 }
 ```
+
+#### Device Capabilities
+
+`canRead`, `canWrite`, and `nfcType` are the original v0 declaration and are
+always sent. The rest are v1 additions — omit any that do not apply, and a
+device declaring nothing extra sends exactly the v0 object.
+
+| Field | Meaning |
+|-------|---------|
+| `canRead` / `canWrite` | Device can read / write NDEF |
+| `nfcType` | Radio technology or library: `nfca`, `isodep`, `corenfc`, `webnfc`, … |
+| `canTransceive` | APDU-level exchange — Android `IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange` |
+| `canTransceiveRaw` | Framing-level exchange — Android `NfcA.transceive`, PN532 `InCommunicateThru` |
+| `canLock` | Device can make a tag read-only |
+| `deviceType` | Free-form kind, e.g. `smartphone`, `pn532-serial`. Defaults to `smartphone` |
+| `supportedTagTypes` | Tag families this device handles, e.g. `["MIFARE Classic", "NTAG"]` |
+| `maxBaudRate` | Maximum baud rate in bps, for serial-attached readers |
+
+Capability is a set rather than a level: a PN532 reader can declare
+`canTransceive` and MIFARE Classic support that an iPhone cannot, while the
+iPhone declares NDEF abilities the reader lacks. Declare what is true and let
+the agent decide what it can use.
 
 **Response:**
 
@@ -129,10 +156,23 @@ Send when a tag is detected:
           "language": "en"
         }
       ]
+    },
+    "capabilities": {
+      "memorySize": 1024,
+      "maxNdefSize": 716,
+      "tagFamily": "MIFARE Classic",
+      "supportsNdef": true
     }
   }
 }
 ```
+
+`capabilities` (v1, optional) is what the device determined about this specific
+tag — see [Tag Capabilities](#tag-capabilities) for the field list. Omit it and
+the agent infers them from `type`, which is all a v0 device allows. Declared
+values win over inference, except that operations the bridge cannot yet route
+(`canWrite`, `canTransceive`, `canLock`) are reported as false whatever the
+device claims.
 
 #### Tag Removed
 

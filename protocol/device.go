@@ -3,10 +3,26 @@ package protocol
 import "time"
 
 // DeviceCapabilities defines the capabilities of a connected NFC device.
+//
+// The first three fields are the original v0 declaration. Everything below is
+// additive: a v0 device omits them and reads as all-false, which is what it
+// could actually do anyway.
 type DeviceCapabilities struct {
 	CanRead  bool   `json:"canRead"`
 	CanWrite bool   `json:"canWrite"`
 	NFCType  string `json:"nfcType"` // "nfca", "nfcb", "nfcf", "nfcv", "isodep", etc.
+
+	// CanTransceive is APDU-level exchange (Android IsoDep.transceive, iOS
+	// sendCommand, PN532 InDataExchange). CanTransceiveRaw is framing-level
+	// exchange (Android NfcA.transceive, PN532 InCommunicateThru) — a strictly
+	// rarer capability, which is why it is a separate bit.
+	CanTransceive    bool `json:"canTransceive,omitempty"`
+	CanTransceiveRaw bool `json:"canTransceiveRaw,omitempty"`
+	CanLock          bool `json:"canLock,omitempty"`
+
+	SupportedTagTypes []string `json:"supportedTagTypes,omitempty"` // e.g. ["MIFARE Classic", "NTAG"]
+	DeviceType        string   `json:"deviceType,omitempty"`        // e.g. "smartphone", "pn532-serial"
+	MaxBaudRate       int      `json:"maxBaudRate,omitempty"`
 }
 
 // DeviceRegistrationRequest is sent by a device to register with the server.
@@ -41,6 +57,10 @@ type DeviceTagData struct {
 	ScannedAt   time.Time         `json:"scannedAt"`   // Timestamp of scan
 	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
 	RawData     []byte            `json:"rawData"`     // Raw tag data (base64 encoded)
+
+	// Capabilities is what the device determined about this specific tag. When
+	// omitted the agent infers them from Type, which is all a v0 device allows.
+	Capabilities *TagCapabilities `json:"capabilities,omitempty"`
 }
 
 // DeviceHeartbeat is sent by a device periodically.

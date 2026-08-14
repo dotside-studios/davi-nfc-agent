@@ -9,11 +9,7 @@ import (
 )
 
 // DeviceCapabilities defines the capabilities of a smartphone NFC device.
-type DeviceCapabilities struct {
-	CanRead  bool   `json:"canRead"`
-	CanWrite bool   `json:"canWrite"`
-	NFCType  string `json:"nfcType"` // "nfca", "nfcb", "nfcf", "nfcv", "isodep", etc.
-}
+type DeviceCapabilities = protocol.DeviceCapabilities
 
 // DeviceRegistrationRequest is sent by mobile app to register as an NFC device.
 type DeviceRegistrationRequest struct {
@@ -48,6 +44,9 @@ type TagData struct {
 	ScannedAt   time.Time                  `json:"scannedAt"`   // Timestamp of scan
 	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
 	RawData     []byte                     `json:"rawData"`     // Raw tag data (base64 encoded)
+
+	// Capabilities as declared by the device for this tag, if it knows them.
+	Capabilities *protocol.TagCapabilities `json:"capabilities,omitempty"`
 }
 
 // DeviceHeartbeat is sent by mobile app periodically.
@@ -119,6 +118,7 @@ func ConvertTagData(data TagData) (nfc.Tag, error) {
 		rawData:      data.RawData,
 		scannedAt:    data.ScannedAt,
 		sourceDevice: data.DeviceID,
+		declaredCaps: data.Capabilities,
 	}
 
 	return tag, nil

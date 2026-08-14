@@ -15,11 +15,6 @@ func mockHandlerFunc(ctx context.Context, conn *websocket.Conn, req protocol.Web
 	return nil
 }
 
-// errorHandlerFunc is a mock that returns an error
-func errorHandlerFunc(ctx context.Context, conn *websocket.Conn, req protocol.WebSocketRequest) error {
-	return errors.New("test error")
-}
-
 func TestNewHandlerRegistry(t *testing.T) {
 	registry := NewHandlerRegistry()
 	if registry == nil {
@@ -69,7 +64,7 @@ func TestHandlerRegistry_Handle(t *testing.T) {
 
 func TestHandlerRegistry_Get(t *testing.T) {
 	registry := NewHandlerRegistry()
-	registry.Handle("test", mockHandlerFunc)
+	_ = registry.Handle("test", mockHandlerFunc)
 
 	t.Run("get existing handler", func(t *testing.T) {
 		retrieved, ok := registry.Get("test")
@@ -91,7 +86,7 @@ func TestHandlerRegistry_Get(t *testing.T) {
 
 func TestHandlerRegistry_Has(t *testing.T) {
 	registry := NewHandlerRegistry()
-	registry.Handle("test", mockHandlerFunc)
+	_ = registry.Handle("test", mockHandlerFunc)
 
 	t.Run("has existing handler", func(t *testing.T) {
 		if !registry.Has("test") {
@@ -117,9 +112,9 @@ func TestHandlerRegistry_MessageTypes(t *testing.T) {
 	})
 
 	t.Run("registry with handlers", func(t *testing.T) {
-		registry.Handle("type1", mockHandlerFunc)
-		registry.Handle("type2", mockHandlerFunc)
-		registry.Handle("type3", mockHandlerFunc)
+		_ = registry.Handle("type1", mockHandlerFunc)
+		_ = registry.Handle("type2", mockHandlerFunc)
+		_ = registry.Handle("type3", mockHandlerFunc)
 
 		types := registry.MessageTypes()
 		if len(types) != 3 {
@@ -148,7 +143,7 @@ func TestHandlerRegistry_ConcurrentAccess(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				registry.Handle(string(rune('a'+i)), mockHandlerFunc)
+				_ = registry.Handle(string(rune('a'+i)), mockHandlerFunc)
 			}(i)
 		}
 		wg.Wait()
@@ -173,7 +168,7 @@ func TestHandlerRegistry_ConcurrentAccess(t *testing.T) {
 			wg.Add(2)
 			go func(i int) {
 				defer wg.Done()
-				registry.Handle("concurrent"+string(rune('a'+i)), mockHandlerFunc)
+				_ = registry.Handle("concurrent"+string(rune('a'+i)), mockHandlerFunc)
 			}(i)
 			go func(i int) {
 				defer wg.Done()
@@ -193,7 +188,7 @@ func TestHandlerRegistry_HandleExecution(t *testing.T) {
 		return nil
 	}
 
-	registry.Handle("test", handler)
+	_ = registry.Handle("test", handler)
 
 	t.Run("execute handler", func(t *testing.T) {
 		h, ok := registry.Get("test")
@@ -217,7 +212,7 @@ func TestHandlerRegistry_HandleExecution(t *testing.T) {
 			return expectedErr
 		}
 
-		registry.Handle("error", errorHandler)
+		_ = registry.Handle("error", errorHandler)
 
 		h, _ := registry.Get("error")
 		err := h(context.Background(), nil, protocol.WebSocketRequest{})
@@ -294,7 +289,7 @@ func TestHandlerRegistry_StartLifecycleHandlers(t *testing.T) {
 
 	t.Run("start with no lifecycle handlers", func(t *testing.T) {
 		registry := NewHandlerRegistry()
-		registry.Handle("regular", mockHandlerFunc)
+		_ = registry.Handle("regular", mockHandlerFunc)
 
 		// Should not panic
 		ctx := context.Background()

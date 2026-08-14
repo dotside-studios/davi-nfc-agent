@@ -232,44 +232,6 @@ func parseGetVersionResponse(resp []byte) DetectedTagType {
 	}
 }
 
-// detectedTypeName returns human-readable name for detected tag type
-func detectedTypeName(tagType DetectedTagType) string {
-	switch tagType {
-	case DetectedClassic1K:
-		return "MIFARE Classic 1K"
-	case DetectedClassic4K:
-		return "MIFARE Classic 4K"
-	case DetectedMini:
-		return "MIFARE Mini"
-	case DetectedUltralight:
-		return "MIFARE Ultralight"
-	case DetectedUltralightC:
-		return "MIFARE Ultralight C"
-	case DetectedUltralightEV1:
-		return "MIFARE Ultralight EV1"
-	case DetectedNTAG213:
-		return "NTAG213"
-	case DetectedNTAG215:
-		return "NTAG215"
-	case DetectedNTAG216:
-		return "NTAG216"
-	case DetectedDESFire:
-		return "MIFARE DESFire"
-	case DetectedDESFireEV1:
-		return "MIFARE DESFire EV1"
-	case DetectedDESFireEV2:
-		return "MIFARE DESFire EV2"
-	case DetectedISO14443_4:
-		return "ISO14443-4"
-	case DetectedPlus2K:
-		return "MIFARE Plus 2K"
-	case DetectedPlus4K:
-		return "MIFARE Plus 4K"
-	default:
-		return "Unknown"
-	}
-}
-
 // detectedTypeNumeric returns numeric type code for detected tag type
 // These match the SAK values used for tag identification
 func detectedTypeNumeric(tagType DetectedTagType) int {

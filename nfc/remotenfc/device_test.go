@@ -63,7 +63,7 @@ func TestDeviceGetTags(t *testing.T) {
 	}
 
 	device := NewDevice("test-id", req)
-	defer device.Close()
+	defer func() { _ = device.Close() }()
 
 	// Test timeout (no tags sent)
 	tags, err := device.GetTags()
@@ -133,7 +133,7 @@ func TestDeviceIsHealthy(t *testing.T) {
 	}
 
 	device := NewDevice("test-id", req)
-	defer device.Close()
+	defer func() { _ = device.Close() }()
 
 	// Should succeed when active and recent
 	err := device.IsHealthy()
@@ -160,7 +160,7 @@ func TestDeviceUpdateLastSeen(t *testing.T) {
 	}
 
 	device := NewDevice("test-id", req)
-	defer device.Close()
+	defer func() { _ = device.Close() }()
 
 	firstSeen := device.LastSeen()
 	time.Sleep(10 * time.Millisecond)
@@ -181,7 +181,7 @@ func TestDeviceTransceive(t *testing.T) {
 	}
 
 	device := NewDevice("test-id", req)
-	defer device.Close()
+	defer func() { _ = device.Close() }()
 
 	// Transceive should not be supported
 	_, err := device.Transceive([]byte{0x01, 0x02})
@@ -198,7 +198,7 @@ func TestDeviceString(t *testing.T) {
 	}
 
 	device := NewDevice("test-id-123", req)
-	defer device.Close()
+	defer func() { _ = device.Close() }()
 
 	str := device.String()
 	expectedSubstr := "Test iPhone 12"

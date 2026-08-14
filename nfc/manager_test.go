@@ -125,7 +125,7 @@ func TestMockManager_CallLog(t *testing.T) {
 	manager := NewMockManager()
 	manager.ClearCallLog()
 
-	manager.ListDevices()
+	_, _ = manager.ListDevices()
 	device, _ := manager.OpenDevice("mock:usb:001")
 
 	callLog := manager.GetCallLog()
@@ -153,7 +153,7 @@ func TestMockManager_CallLog(t *testing.T) {
 		t.Fatal("Expected device to be MockDevice")
 	}
 	mockDevice.ClearCallLog()
-	mockDevice.GetTags()
+	_, _ = mockDevice.GetTags()
 
 	deviceCallLog := mockDevice.GetCallLog()
 	if len(deviceCallLog) != 1 || deviceCallLog[0] != "GetTags" {

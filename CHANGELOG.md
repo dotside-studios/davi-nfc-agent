@@ -112,8 +112,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reader's typed error was flattened to a string at the bridge before the
   client server saw it
 
+- Certificate generation silently ignored a failure to set `CAROOT`, and the
+  hosts cache ignored write errors, so a truncated cache could be read back as
+  a complete host list on the next start
+- Handlers in the TLS bootstrap server logged a certificate or profile as
+  "served" even when writing the response body had failed
+
 ### Security
 
+- `golang.org/x/text` and `golang.org/x/net` are updated past two
+  vulnerabilities reachable from certificate generation: an infinite loop on
+  invalid input in `x/text` (GO-2026-5970) and a failure to reject ASCII-only
+  Punycode labels in `x/net/idna` (GO-2026-5026)
 - The agent no longer installs a certificate authority into the system trust
   store by default. A CA in a trust store can sign for **any** name, not just
   this agent, so whoever holds its key can intercept that machine's traffic.

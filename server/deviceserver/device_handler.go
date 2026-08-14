@@ -120,7 +120,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	var deviceID string
 	reason := protocol.DisconnectDropped
 	defer func() {
-		conn.Close()
+		_ = conn.Close()
 		if deviceID != "" {
 			h.handleDeviceDisconnect(deviceID, reason)
 		}
@@ -310,7 +310,9 @@ func (h *DeviceHandler) sendRegistration(conn *server.SafeConn, device *remotenf
 
 	if err := conn.WriteJSON(resp); err != nil {
 		h.removeDeviceSession(deviceID)
-		h.manager.UnregisterDevice(deviceID)
+		if unregErr := h.manager.UnregisterDevice(deviceID); unregErr != nil {
+			log.Printf("[device] Failed to unregister %s after registration send error: %v", deviceID, unregErr)
+		}
 		return fmt.Errorf("failed to send registration response: %w", err)
 	}
 
@@ -437,7 +439,9 @@ func (h *DeviceHandler) handleDeviceHeartbeat(_ *server.SafeConn, deviceID strin
 		return fmt.Errorf("device ID mismatch")
 	}
 
-	h.manager.UpdateHeartbeat(deviceID)
+	if err := h.manager.UpdateHeartbeat(deviceID); err != nil {
+		return fmt.Errorf("failed to record heartbeat: %w", err)
+	}
 	return nil
 }
 
@@ -738,7 +742,9 @@ func (h *DeviceHandler) handleDeviceDisconnect(deviceID string, reason protocol.
 	h.clearActiveTag(deviceID, "")
 
 	if h.manager != nil {
-		h.manager.UnregisterDevice(deviceID)
+		if err := h.manager.UnregisterDevice(deviceID); err != nil {
+			log.Printf("[device] Failed to unregister %s on disconnect: %v", deviceID, err)
+		}
 	}
 
 	if reason.Expected() {

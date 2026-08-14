@@ -188,7 +188,7 @@ func TestWriteFailsFastWhenDeviceDisconnects(t *testing.T) {
 	go func() { bridge.WriteRequest <- msg }()
 
 	readDeviceWriteRequest(t, conn)
-	conn.Close()
+	_ = conn.Close()
 
 	select {
 	case resp := <-msg.ResponseCh:

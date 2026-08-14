@@ -4,6 +4,15 @@ Execution plan following from [device-bridge-protocols.md](device-bridge-protoco
 That document concluded: the protocol is at the right layer, and what is wrong
 with it is under-specification. This is the sequenced work.
 
+## Status
+
+Phases 1–3 are implemented. Phase 4 (pairing) and Phase 5 (reach) are not
+started.
+
+Two bugs surfaced while building and were fixed in passing: `ServerBridge.Close`
+closed channels producers could still be sending on, and `handleTagScanned`
+published a scan before registering the route a write would need.
+
 ## Diagnosis
 
 Reading the code, the defects are not scattered — they are four instances of one
@@ -32,7 +41,7 @@ Plus one wrong coupling and one stub:
 So the work is: fix the projection, remove the coupling, finish the stub, then
 add the one genuinely missing layer.
 
-## Phase 1 — Make the wire honest
+## Phase 1 — Make the wire honest ✅
 
 No new capability, no behavior change, fully backward-compatible. This is the
 foundation everything else needs, and it is the cheapest phase.
@@ -63,7 +72,7 @@ disconnect. This is MQTT's last-will idea implemented locally, not MQTT.
 `nfc/remotenfc/protocol.go`, `nfc/errors.go`,
 `server/deviceserver/device_handler.go`, plus `docs/api.md`, `client/`.
 
-## Phase 2 — Decouple events from transceive, finish the write path
+## Phase 2 — Decouple events from transceive, finish the write path ✅
 
 **2.1 Break the coupling** — *folded into Phase 3.1.* The intent was to let a
 remote device declare transceive. But `remotenfc.Device.Transceive` returns
@@ -92,7 +101,7 @@ declared in 1.2 instead of returning hard-coded `false`.
 phone starts working — and it exercises the request/response machinery Phase 3
 depends on.
 
-## Phase 3 — The command channel
+## Phase 3 — The command channel ✅
 
 **3.1** `deviceConnect` / `deviceDisconnect` (carrying ATR/ATQA/SAK) and
 `deviceTransceiveRequest` / `deviceTransceiveResponse` (base64 payload,
@@ -109,7 +118,7 @@ tag-in-field time, and iOS sessions time out. It exists for the operations that
 genuinely need it — DESFire, ISO-DEP applets, honest capability probing — not as
 the default read path.
 
-## Phase 4 — Identity and pairing
+## Phase 4 — Identity and pairing (not started)
 
 Replace the shared bearer secret with a per-device credential: agent-side
 pairing window (tray button, "accept new device for 60s"), short OOB code, PAKE,
@@ -118,7 +127,7 @@ firmware pins the **CA** — created once in `m.caDir` and reused — never the 
 which regenerates on every host IP change (`tls/manager.go`, `tls/netwatch.go`).
 Device list with revoke in the tray. Keep the shared secret as a legacy path.
 
-## Phase 5 — Reach (demand-driven, not scheduled)
+## Phase 5 — Reach (not started, demand-driven)
 
 - **Serial/USB transport** carrying the same envelope over COBS framing. The most
   common DIY topology, and the only path for the AVR tier. Physical attachment

@@ -6,8 +6,12 @@ with it is under-specification. This is the sequenced work.
 
 ## Status
 
-Phases 1–3 are implemented. Phase 4 (pairing) and Phase 5 (reach) are not
-started.
+Phases 1–4 are implemented. Phase 5 (reach) is not started.
+
+Phase 4 landed agent-side only: the agent issues per-device credentials and
+publishes its key pin, but no client verifies the pin or calls `/pair` yet, and
+neither the shared secret nor the loopback bypass has been withdrawn. It is
+additive — nothing is enforced that was not enforced before.
 
 Two bugs surfaced while building and were fixed in passing: `ServerBridge.Close`
 closed channels producers could still be sending on, and `handleTagScanned`
@@ -126,14 +130,14 @@ tag-in-field time, and iOS sessions time out. It exists for the operations that
 genuinely need it — DESFire, ISO-DEP applets, honest capability probing — not as
 the default read path.
 
-## Phase 4 — Identity and pairing (not started)
+## Phase 4 — Identity and pairing ✅
 
 Replace the shared bearer secret with a per-device credential: agent-side
 pairing window (tray button, "accept new device for 60s"), short OOB code,
 durable credential, device list with revoke in the tray. Keep the shared secret
 as a legacy path.
 
-### 4.0 First: stop installing a root CA system-wide
+### 4.0 First: stop installing a root CA system-wide ✅
 
 The agent currently generates a root CA and installs it into the host's system
 trust store on startup (`truststore.Install()` in `tls/manager.go`), and asks
@@ -185,7 +189,7 @@ it identifiably. Name constraints limiting it to the agent's own SANs are worth
 adding as defence in depth, but enforcement for locally-added roots is uneven
 across platforms, so do not rely on them.
 
-### 4.1 Pairing
+### 4.1 Pairing ✅
 
 Most of the primitive already exists: `tls/bootstrap.go` has a PIN, PIN
 rotation, PIN-gated routes, and a QR flow. Phase 4 largely repurposes it — hand

@@ -1,36 +1,30 @@
 import { useEffect, useState } from 'react'
 import { signOut } from './api'
-import { Dashboard } from './panels/Dashboard'
-import { Devices } from './panels/Devices'
-import { Live } from './panels/Live'
-import { Logs } from './panels/Logs'
-import { Origins } from './panels/Origins'
+import { Access } from './panels/Access'
+import { Activity } from './panels/Activity'
+import { Overview } from './panels/Overview'
 import { Security } from './panels/Security'
-import { Settings } from './panels/Settings'
 import { Tag } from './panels/Tag'
 import { useAction, useControlState, useControlStream } from './useControl'
 import { useTags } from './useTags'
 import { fmtDuration, modeLabel } from './format'
 import { Dot, Notice, Panel } from './ui'
 
-type TabId = 'dashboard' | 'live' | 'tag' | 'devices' | 'origins' | 'security' | 'logs' | 'settings'
+type TabId = 'overview' | 'tag' | 'activity' | 'access' | 'security'
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'live', label: 'Live' },
+  { id: 'overview', label: 'Overview' },
   { id: 'tag', label: 'Tag' },
-  { id: 'devices', label: 'Devices' },
-  { id: 'origins', label: 'Origins' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'access', label: 'Access' },
   { id: 'security', label: 'Security' },
-  { id: 'logs', label: 'Log' },
-  { id: 'settings', label: 'Settings' },
 ]
 
 /** Tab in the hash, so a reload lands back where it was. Not worth a router. */
 function useHashTab(): [TabId, (t: TabId) => void] {
   const read = (): TabId => {
     const raw = location.hash.replace(/^#\/?/, '')
-    return TABS.some((t) => t.id === raw) ? (raw as TabId) : 'dashboard'
+    return TABS.some((t) => t.id === raw) ? (raw as TabId) : 'overview'
   }
 
   const [tab, setTab] = useState<TabId>(read)
@@ -171,13 +165,13 @@ export default function App() {
             onClick={() => setTab(t.id)}
           >
             {t.label}
-            {t.id === 'devices' && state.devices.length > 0 ? (
+            {t.id === 'access' && state.devices.length > 0 ? (
               <span className="count"> ({state.devices.length})</span>
             ) : null}
-            {t.id === 'origins' && state.origins.blocked.length > 0 ? (
-              <span className="warn"> ({state.origins.blocked.length})</span>
+            {t.id === 'access' && state.origins.blocked.length > 0 ? (
+              <span className="warn"> · {state.origins.blocked.length} blocked</span>
             ) : null}
-            {t.id === 'live' && tags.events.length > 0 ? (
+            {t.id === 'activity' && tags.events.length > 0 ? (
               <span className="count"> ({tags.events.length})</span>
             ) : null}
           </button>
@@ -185,26 +179,37 @@ export default function App() {
       </nav>
 
       <main>
-        {state.origins.allowAny && tab !== 'origins' ? (
+        {state.origins.allowAny && tab !== 'access' ? (
           <Notice kind="err">
             <b>Origin checking is off for this session.</b> Any page the operator opens can drive
             this reader.{' '}
-            <button type="button" className="link" onClick={() => setTab('origins')}>
+            <button type="button" className="link" onClick={() => setTab('access')}>
               review
             </button>
           </Notice>
         ) : null}
 
-        {tab === 'dashboard' ? <Dashboard state={state} tagLink={tags.link} /> : null}
-        {tab === 'live' ? (
-          <Live events={tags.events} link={tags.link} onClear={tags.clearEvents} />
+        {tab === 'overview' ? (
+          <Overview
+            state={state}
+            tagLink={tags.link}
+            events={tags.events}
+            logs={stream.logs}
+            onOpenTag={() => setTab('tag')}
+          />
         ) : null}
         {tab === 'tag' ? <Tag tags={tags} writable={writable} /> : null}
-        {tab === 'devices' ? <Devices state={state} /> : null}
-        {tab === 'origins' ? <Origins state={state} /> : null}
+        {tab === 'activity' ? (
+          <Activity
+            events={tags.events}
+            logs={stream.logs}
+            tagLink={tags.link}
+            onClearEvents={tags.clearEvents}
+            onClearLogs={stream.clearLogs}
+          />
+        ) : null}
+        {tab === 'access' ? <Access state={state} /> : null}
         {tab === 'security' ? <Security state={state} /> : null}
-        {tab === 'logs' ? <Logs logs={stream.logs} onClear={stream.clearLogs} /> : null}
-        {tab === 'settings' ? <Settings state={state} /> : null}
       </main>
 
       <div className="statusbar">

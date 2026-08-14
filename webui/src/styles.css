@@ -205,7 +205,7 @@ main {
    row is as tall as its tallest cell, which leaves a ragged band of white under
    the short ones. Columns pack them and balance the height instead. */
 .cols {
-  columns: 360px;
+  columns: 420px;
   column-gap: 8px;
 }
 .cols.wide {
@@ -221,6 +221,19 @@ main {
   margin-bottom: 8px;
   /* Without this a panel can be split across a column break mid-table. */
   break-inside: avoid;
+}
+
+/* Two full-height panes side by side, for the event and log streams. Falls to
+   a stack below the breakpoint, where each still gets its own scroll. */
+.split {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.split > * {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* A panel that claims the leftover height instead of shrink-wrapping, so a log
@@ -391,6 +404,8 @@ table.grid th.mono {
   border: 1px solid var(--border-soft);
   padding: 1px 4px;
   overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .notice {
@@ -489,6 +504,10 @@ table.grid th.mono {
   .kv {
     grid-template-columns: minmax(0, max-content) 1fr;
     gap: 2px 6px;
+  }
+  /* Two full-height panes do not fit; stack them and give each half the room. */
+  .split {
+    flex-direction: column;
   }
   .topbar {
     gap: 6px;

@@ -15,14 +15,14 @@ ends up in shell history or browser autocomplete is already useless. Sessions
 last 12 hours.
 
 There is no way in other than the tray. That is deliberate — see
-[Access](#access) below.
+[Who can open it](#who-can-open-it) below.
 
 > **On a self-signed certificate**, the browser shows its usual warning the
 > first time and you click through. This is the one browser client that works on
 > a fresh install without `-install-ca`: a page visit can be accepted manually,
 > whereas a bare `wss://` connection to an untrusted certificate fails outright.
 
-## Access
+## Who can open it
 
 The console is privileged. It rotates the API secret, revokes device
 credentials, edits the origin allowlist and can lock a tag irreversibly. Three
@@ -45,15 +45,13 @@ permissive CORS headers the client endpoints carry.
 Use **Security → sign out all** to end every console session at once, including
 your own.
 
-## Panels
+## Tabs
 
-**Dashboard** — agent status, URLs, addresses, certificate expiry and the names
-it covers, pairing PIN, and a device summary. Everything the tray shows, at once
-and selectable.
-
-**Live** — scans, writes, locks and errors as they happen, filterable by kind,
-pausable, exportable as NDJSON. The tray only ever shows the card currently on
-the reader, so a tag presented and taken away otherwise leaves no trace.
+**Overview** — the page an operator works from. The controls that actually get
+changed sit here rather than behind a settings tab: start/stop, reader
+selection, mode, card-type filter, port, restart and quit. Alongside them is the
+state needed to decide whether to change anything — server URLs, certificate
+expiry and the names it covers, access summary, and the last few events.
 
 **Tag** — inspector and NDEF composer.
 
@@ -68,24 +66,19 @@ the reader, so a tag presented and taken away otherwise leaves no trace.
 The console writes over the ordinary client endpoint, exactly as an application
 would, so there is one implementation of the write path.
 
-**Devices** — paired devices with platform, pairing time, last seen, and whether
-they are connected right now. Each row revokes on its own; the tray can only
-revoke all of them, which makes removing one lost phone cost every other phone
-its pairing.
+**Activity** — tag events on the left, agent log on the right, both filterable
+and both filling the window. They are read together in practice: a failed write
+and the line explaining it arrive at the same moment. Events export as NDJSON,
+the log downloads as text.
 
-**Origins** — the allowlist, plus every origin refused since the agent started,
-each with a one-click **allow**. The tray offers a blocked origin only while
-that menu is open.
+**Access** — who may connect. Paired devices with platform, pairing time, last
+seen and whether they are connected right now, each revocable on its own; the
+paired-device policy; the browser allowlist; and every origin refused since
+startup, each with a one-click **allow**.
 
 **Security** — API secret, pairing PIN, public key pin, CA status and
 fingerprint, full certificate detail, and warnings when the certificate does not
 cover an address the agent is reachable on.
-
-**Log** — the agent's log output, filterable by level and text, downloadable.
-See below.
-
-**Settings** — reader mode, card-type filter, reader selection and port, all
-written to `settings.json`.
 
 ## Logs
 
@@ -95,7 +88,7 @@ every certificate warning, refused origin and reader failure was previously
 discarded as it was produced.
 
 The agent now also keeps the last 5000 lines in memory. They are visible under
-**Log**, streamed live, and downloadable as text for a bug report. Severity is
+**Activity**, streamed live, and downloadable as text for a bug report. Severity is
 inferred from the message text — good enough to filter on, not something to rely
 on otherwise.
 
@@ -164,7 +157,7 @@ SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
 
 ## API
 
-The console's endpoints, all under the gate described in [Access](#access).
+The console's endpoints, all under the gate described in [Who can open it](#who-can-open-it).
 They are not a public API and carry no compatibility guarantee.
 
 | Route | Purpose |

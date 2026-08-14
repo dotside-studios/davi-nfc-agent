@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Control Center.** A web console served by the agent itself at its own root,
-  covering what neither the tray nor the flags could do. Opened from the tray's
+  covering what neither the tray nor the flags could do. Five tabs: Overview,
+  Tag, Activity, Access and Security. The reader controls — start/stop, device,
+  mode, card filter, port — sit on Overview rather than behind a settings tab,
+  so the page an operator lands on is the page they work from. Opened from the
+  tray's
   **Open Control Center**, which mints a single-use token and hands it to the
   browser. Being same-origin, it is also the one browser client that works on a
   fresh install without `-install-ca` — a page visit can be accepted manually,

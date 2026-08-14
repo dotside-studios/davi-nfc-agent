@@ -359,13 +359,16 @@ func (h *DeviceHandler) handleTagScanned(conn *server.SafeConn, deviceID string,
 		Capabilities: tagData.Capabilities,
 	}
 
+	// Route before publishing: a client reacting to the tagData broadcast with an
+	// immediate write must find the device already registered as holding the tag.
+	h.setActiveTag(deviceID, tagData.UID)
+
 	if err := h.manager.SendTagData(deviceID, phoneTagData); err != nil {
 		log.Printf("[device] Failed to send tag data: %v", err)
+		h.clearActiveTag(deviceID, tagData.UID)
 		h.sendTagError(conn, req.ID, err)
 		return err
 	}
-
-	h.setActiveTag(deviceID, tagData.UID)
 
 	log.Printf("[device] Tag scanned: device=%s, UID=%s, Type=%s", deviceID, tagData.UID, tagData.Type)
 	return nil

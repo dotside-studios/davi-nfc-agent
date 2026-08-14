@@ -26,6 +26,12 @@ func (s *SystrayApp) setupDevicesMenu() {
 		s.deviceSlots = append(s.deviceSlots, &deviceSlot{item: item})
 	}
 
+	s.mRequirePaired = s.mDevicesMenu.AddSubMenuItemCheckbox(
+		"Require pairing",
+		"Admit only devices that have paired. The shared secret and loopback bypass stop admitting devices; browser consoles are unaffected.",
+		false,
+	)
+
 	s.mRevokeAllDevices = s.mDevicesMenu.AddSubMenuItem(
 		"Revoke all devices",
 		"Every paired device must pair again. Use when the machine changes hands.",
@@ -72,6 +78,36 @@ func (s *SystrayApp) refreshDevicesMenu() {
 		s.mDevicesMenu.SetTitle(fmt.Sprintf("Paired Devices (%d)", len(devices)))
 		s.mRevokeAllDevices.Show()
 	}
+
+	if s.agent.RequirePairedDevice {
+		s.mRequirePaired.Check()
+	} else {
+		s.mRequirePaired.Uncheck()
+	}
+}
+
+// handleRequirePaired toggles the paired-device requirement live, so it can be
+// tried against a real device without restarting the agent.
+func (s *SystrayApp) handleRequirePaired() {
+	on := !s.mRequirePaired.Checked()
+
+	if on && s.agent.Devices != nil && s.agent.Devices.Count() == 0 {
+		// Turning this on with nothing paired locks out every device, which is
+		// unlikely to be what the operator meant from this menu.
+		log.Printf("[systray] Not requiring pairing: no devices are paired, so every device would be refused")
+		s.mRequirePaired.Uncheck()
+		return
+	}
+
+	s.agent.SetRequirePairedDevice(on)
+
+	if on {
+		log.Printf("[systray] Requiring paired devices; the shared secret no longer admits one")
+	} else {
+		log.Printf("[systray] No longer requiring paired devices")
+	}
+
+	s.refreshDevicesMenu()
 }
 
 // handleDeviceRevokeSelection polls the device slots, matching how the other

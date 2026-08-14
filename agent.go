@@ -68,6 +68,11 @@ type Agent struct {
 	// Devices holds the paired devices and their per-device credentials.
 	Devices *DeviceRegistry
 
+	// RequirePairedDevice admits only devices holding a paired credential,
+	// withdrawing the shared secret and loopback bypass for device
+	// connections. Browser clients are unaffected.
+	RequirePairedDevice bool
+
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
 	KeyFile    string       // Path to TLS private key file
@@ -282,6 +287,8 @@ func (a *Agent) startServers() error {
 		OriginPolicy:     a.originPolicy(),
 		PublicKeyPin:     a.PublicKeyPin,
 		TokenVerifier:    a.tokenVerifier(),
+
+		RequirePairedDevice: a.RequirePairedDevice,
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
@@ -376,6 +383,15 @@ func (a *Agent) CurrentDevicePath() string {
 // originPolicy returns the live allowlist as an origin policy, or nil to fall
 // back to the static AllowedOrigins list. Returning a typed nil would satisfy
 // the interface and defeat that fallback, so the check is explicit.
+// SetRequirePairedDevice changes the paired-device requirement on the running
+// device server, so the policy can be tried without a restart.
+func (a *Agent) SetRequirePairedDevice(on bool) {
+	a.RequirePairedDevice = on
+	if a.DeviceServer != nil {
+		a.DeviceServer.SetRequirePairedDevice(on)
+	}
+}
+
 // tokenVerifier returns the device registry as a token verifier, or nil when
 // there is none. As with originPolicy, a typed nil would satisfy the interface
 // and defeat the caller's nil check.

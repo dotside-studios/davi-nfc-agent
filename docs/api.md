@@ -51,6 +51,23 @@ once, which is what per-device tokens exist to avoid.
 
 Wrong PINs lock pairing after five attempts until the agent restarts.
 
+#### Requiring pairing
+
+By default a device may also present the shared API secret, and a device
+connecting over loopback needs no credential at all. Both remain so that
+upgrading strands nothing.
+
+`-require-paired-devices` (or **Require pairing** in the tray, or
+`DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws both: only a credential issued at
+pairing admits a device. Turn it on once the devices you care about have paired
+— with none paired, every device connection is refused.
+
+**Browser consoles are unaffected.** A browser has no way to pair, and is gated
+by the origin allowlist instead. This setting governs the device endpoint only.
+
+The tray toggle takes effect immediately, so the policy can be tried against a
+real device without restarting.
+
 ### Connecting
 
 Connect via WebSocket with device mode:

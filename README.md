@@ -50,6 +50,7 @@ See the [Installation Guide](docs/installation.md) for platform-specific setup a
 ./davi-nfc-agent -device-port 9480     # Custom agent server port (default 9470, serves both devices and clients)
 ./davi-nfc-agent -api-secret mysecret  # Set the API authentication secret
 ./davi-nfc-agent -allowed-origins app.example.com  # Let a hosted web console connect
+./davi-nfc-agent -require-paired-devices  # Admit only devices that have paired
 ./davi-nfc-agent -install-ca           # Trust this agent in browsers (installs a local CA)
 ./davi-nfc-agent -auto-tls=false       # Disable automatic TLS certificate management
 ./davi-nfc-agent -cert cert.pem -key key.pem  # Use your own TLS certificate

@@ -77,6 +77,29 @@ func CheckAuth(w http.ResponseWriter, r *http.Request, wantSecret string, verifi
 	return true
 }
 
+// CheckPairedDevice admits only a device holding a credential issued at
+// pairing. Neither the shared secret nor the loopback bypass applies.
+//
+// This is the strict counterpart to CheckAuth, for device connections once the
+// devices that matter have paired. It is deliberately not used for browser
+// clients: a browser has no way to pair, and is gated by the origin allowlist
+// instead.
+func CheckPairedDevice(w http.ResponseWriter, r *http.Request, verifier TokenVerifier) bool {
+	if verifier == nil {
+		// Nothing can be verified, so nothing can be admitted. Failing closed
+		// is the only safe reading of "require a paired device".
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+
+	if _, ok := verifier.VerifyToken(presentedCredential(r)); ok {
+		return true
+	}
+
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	return false
+}
+
 // presentedCredential extracts the credential from the query string or an
 // Authorization header.
 func presentedCredential(r *http.Request) string {

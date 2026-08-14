@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -34,6 +35,21 @@ type Server struct {
 
 	// deviceHandler serves remote devices; nil when none are configured.
 	deviceHandler *DeviceHandler
+
+	// requirePaired is read on every upgrade and settable at runtime, so the
+	// policy can be tried without restarting the agent.
+	requirePaired atomic.Bool
+}
+
+// SetRequirePairedDevice turns the paired-device requirement on or off while
+// the agent runs.
+func (s *Server) SetRequirePairedDevice(on bool) {
+	s.requirePaired.Store(on)
+}
+
+// RequirePairedDevice reports whether only paired devices are admitted.
+func (s *Server) RequirePairedDevice() bool {
+	return s.requirePaired.Load()
 }
 
 // New creates a new device server instance.
@@ -47,6 +63,8 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		},
 		handlerRegistry: server.NewHandlerRegistry(),
 	}
+
+	s.requirePaired.Store(config.RequirePairedDevice)
 
 	// Register NFC reader handlers (hardware NFC)
 	if config.Reader != nil {
@@ -152,7 +170,12 @@ func (s *Server) Stop() {
 
 // handleWebSocket handles WebSocket connections from devices.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if !server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier) {
+	if s.requirePaired.Load() {
+		if !server.CheckPairedDevice(w, r, s.config.TokenVerifier) {
+			log.Printf("[device] Connection rejected from %s: no paired-device credential", r.RemoteAddr)
+			return
+		}
+	} else if !server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier) {
 		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}

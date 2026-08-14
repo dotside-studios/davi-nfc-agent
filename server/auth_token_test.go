@@ -108,3 +108,43 @@ func TestCheckAPISecretUnchanged(t *testing.T) {
 		t.Error("a wrong secret was accepted")
 	}
 }
+
+func TestCheckPairedDeviceAdmitsOnlyTokens(t *testing.T) {
+	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
+
+	w, r := authReq(t, "/ws?secret=device-token", "192.168.1.20:5000")
+	if !CheckPairedDevice(w, r, verifier) {
+		t.Error("a paired device was rejected")
+	}
+}
+
+// Strict mode withdraws the shared secret: holding it is no longer enough.
+func TestCheckPairedDeviceRejectsSharedSecret(t *testing.T) {
+	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
+
+	w, r := authReq(t, "/ws?secret=shared-secret", "192.168.1.20:5000")
+	if CheckPairedDevice(w, r, verifier) {
+		t.Error("the shared secret still admitted a device under strict mode")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+// And it withdraws the loopback bypass, which is the wider of the two doors.
+func TestCheckPairedDeviceRejectsLoopback(t *testing.T) {
+	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
+
+	w, r := authReq(t, "/ws", "127.0.0.1:5000")
+	if CheckPairedDevice(w, r, verifier) {
+		t.Error("loopback bypassed the paired-device requirement")
+	}
+}
+
+// With nothing able to verify a token, strict mode fails closed.
+func TestCheckPairedDeviceFailsClosedWithoutVerifier(t *testing.T) {
+	w, r := authReq(t, "/ws?secret=anything", "127.0.0.1:5000")
+	if CheckPairedDevice(w, r, nil) {
+		t.Error("strict mode admitted a request with no way to verify it")
+	}
+}

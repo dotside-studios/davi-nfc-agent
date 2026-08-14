@@ -42,6 +42,7 @@ var (
 	configDirFlag      string
 	allowedOriginsFlag string
 	installCAFlag      bool
+	requirePairedFlag  bool
 )
 
 func main() {
@@ -54,6 +55,7 @@ func main() {
 	flag.StringVar(&certFileFlag, "cert", "", "Path to TLS certificate file (enables HTTPS/WSS)")
 	flag.StringVar(&keyFileFlag, "key", "", "Path to TLS private key file (enables HTTPS/WSS)")
 	flag.BoolVar(&autoTLSFlag, "auto-tls", true, "Automatically generate and manage TLS certificates")
+	flag.BoolVar(&requirePairedFlag, "require-paired-devices", false, "Admit only devices that have paired, withdrawing the shared secret and loopback bypass for device connections. Browser clients are unaffected")
 	flag.BoolVar(&installCAFlag, "install-ca", false, "Install a local certificate authority into the system trust store so browsers trust this agent. Not needed for phones, readers, or an externally provisioned certificate")
 	flag.StringVar(&configDirFlag, "config-dir", "", "Config directory (default: platform-specific)")
 	flag.StringVar(&allowedOriginsFlag, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
@@ -176,6 +178,14 @@ func main() {
 	agent.ConfigDir = configDir
 	agent.PublicKeyPin = agentPublicKeyPin
 	agent.Devices = devices
+	agent.RequirePairedDevice = requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
+
+	if agent.RequirePairedDevice {
+		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		if devices.Count() == 0 {
+			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
+		}
+	}
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration

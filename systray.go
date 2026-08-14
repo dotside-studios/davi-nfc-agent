@@ -100,6 +100,7 @@ type SystrayApp struct {
 	// Paired device menu items
 	mDevicesMenu      *systray.MenuItem
 	mRevokeAllDevices *systray.MenuItem
+	mRequirePaired    *systray.MenuItem
 	deviceSlots       []*deviceSlot
 
 	// Origin allowlist menu items
@@ -408,6 +409,8 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.handleOriginAllowAny()
 		case <-s.mRevokeAllDevices.ClickedCh:
 			s.handleRevokeAllDevices()
+		case <-s.mRequirePaired.ClickedCh:
+			s.handleRequirePaired()
 		case <-mQuit.ClickedCh:
 			systray.Quit()
 			return

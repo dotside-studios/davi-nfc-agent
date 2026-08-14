@@ -33,6 +33,12 @@ type Config struct {
 	// secret.
 	TokenVerifier server.TokenVerifier
 
+	// RequirePairedDevice admits only devices holding a credential issued at
+	// pairing, withdrawing both the shared secret and the loopback bypass for
+	// device connections. Browser clients are unaffected -- a browser cannot
+	// pair, and is gated by the origin allowlist.
+	RequirePairedDevice bool
+
 	// PublicKeyPin is reported to devices so they can recognize this agent on
 	// later connections without a certificate authority. Empty when the agent
 	// is not using a certificate it generated itself.

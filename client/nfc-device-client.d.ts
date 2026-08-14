@@ -229,9 +229,33 @@ export interface WriteRequestEvent {
   deviceID: string;
 
   /**
-   * NDEF message to write
+   * NDEF message to write, as records. Provided for APIs like Web NFC that
+   * only accept records; prefer `ndefBytes` where the device can write raw.
    */
   ndefMessage: NDEFMessageProtocol | null;
+
+  /**
+   * The same message already encoded, base64 in transit. Authoritative where
+   * it and `ndefMessage` disagree.
+   */
+  ndefBytes?: string;
+
+  /**
+   * UID of the tag the agent expects to be in the field
+   */
+  tagUID?: string;
+
+  /**
+   * Make the tag permanently read-only after a successful write
+   */
+  lock?: boolean;
+
+  /**
+   * Identifies the logical write. If this key was already applied, report the
+   * previous outcome instead of writing again — the same request can arrive
+   * twice when a response is lost to a dropped connection.
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -481,8 +505,10 @@ export class NFCDeviceClient {
    * @param requestID - The request ID from the write request
    * @param success - Whether the write was successful
    * @param error - Error message if unsuccessful
+   * @param errorCode - Wire error code (e.g. 'READ_ONLY', 'CAPACITY_EXCEEDED',
+   *   'TAG_REMOVED') so the agent can classify the failure
    */
-  respondToWrite(requestID: string, success: boolean, error?: string): Promise<void>;
+  respondToWrite(requestID: string, success: boolean, error?: string, errorCode?: string): Promise<void>;
 
   /**
    * Get the assigned device ID

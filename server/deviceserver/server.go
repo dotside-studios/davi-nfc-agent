@@ -31,6 +31,9 @@ type Server struct {
 	// Device connections (phones, etc.)
 	devices    map[*websocket.Conn]string // conn -> deviceID
 	devicesMux sync.RWMutex
+
+	// deviceHandler serves remote devices; nil when none are configured.
+	deviceHandler *DeviceHandler
 }
 
 // New creates a new device server instance.
@@ -53,8 +56,8 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 
 	// Register device handler (external devices like phones)
 	if config.DeviceManager != nil {
-		deviceHandler := NewDeviceHandler(config.DeviceManager, bridge, config.AllowedOrigins)
-		deviceHandler.Register(s)
+		s.deviceHandler = NewDeviceHandler(config.DeviceManager, bridge, config.AllowedOrigins)
+		s.deviceHandler.Register(s)
 	}
 
 	return s
@@ -219,13 +222,24 @@ func (s *Server) handleWriteRequests() {
 }
 
 // executeWriteRequest executes a write request from the client server.
+//
+// The hardware reader keeps priority while it actually holds a card, so mixed
+// setups behave as they always have. Otherwise the write goes to whichever
+// remote device is currently holding a tag.
 func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	reader := s.config.Reader
+
+	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+		if s.writeViaDevice(msg) {
+			return
+		}
+	}
+
 	if reader == nil {
 		msg.ResponseCh <- server.WriteResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
-			Error:     "No NFC reader available",
+			Error:     "No NFC reader or device holding a tag",
 		}
 		return
 	}
@@ -263,6 +277,67 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 		Success:   true,
 		Payload:   result,
 	}
+}
+
+// writeViaDevice routes a write to the remote device holding a tag. It reports
+// whether it handled the request; false means no device was available and the
+// caller should fall back to the hardware reader.
+func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
+	if s.deviceHandler == nil {
+		return false
+	}
+
+	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	if !ok {
+		return false
+	}
+
+	// Encode here so the device receives exactly the message the hardware path
+	// would have written, rather than re-deriving it from records.
+	ndefMsg, err := server.BuildNDEFMessage(msg.Request)
+	if err != nil {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return true
+	}
+
+	ndefBytes, err := ndefMsg.Encode()
+	if err != nil {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return true
+	}
+
+	resp, err := s.deviceHandler.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+		RequestID:      msg.RequestID,
+		TagUID:         uid,
+		NDEFMessage:    server.BuildNDEFInput(msg.Request),
+		NDEFBytes:      ndefBytes,
+		Lock:           msg.Request.Lock,
+		IdempotencyKey: msg.IdempotencyKey,
+	})
+	if err != nil {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		return true
+	}
+
+	msg.ResponseCh <- server.WriteResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   resp.Success,
+		Error:     resp.Error,
+		Payload:   map[string]any{"uid": uid, "deviceID": deviceID},
+	}
+	return true
 }
 
 // handleLockRequests listens for make-read-only requests from the client server.

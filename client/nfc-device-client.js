@@ -413,7 +413,11 @@ class NFCDeviceClient {
         this._emit('writeRequest', {
           requestID: payload.requestID,
           deviceID: payload.deviceID,
-          ndefMessage: payload.ndefMessage
+          ndefMessage: payload.ndefMessage,
+          ndefBytes: payload.ndefBytes,
+          tagUID: payload.tagUID,
+          lock: payload.lock === true,
+          idempotencyKey: payload.idempotencyKey
         });
         break;
       case 'error':
@@ -551,8 +555,11 @@ class NFCDeviceClient {
    * @param {string} requestID - The request ID from the write request
    * @param {boolean} success - Whether the write was successful
    * @param {string} [error] - Error message if unsuccessful
+   * @param {string} [errorCode] - Wire error code, e.g. 'READ_ONLY',
+   *   'CAPACITY_EXCEEDED', 'TAG_REMOVED'. Lets the agent classify the failure
+   *   instead of parsing the message.
    */
-  async respondToWrite(requestID, success, error = '') {
+  async respondToWrite(requestID, success, error = '', errorCode = '') {
     if (!this.connected) {
       throw new Error('Not connected to server');
     }
@@ -562,7 +569,8 @@ class NFCDeviceClient {
       payload: {
         requestID: requestID,
         success: success,
-        error: error
+        error: error,
+        ...(errorCode ? { errorCode } : {})
       }
     };
 

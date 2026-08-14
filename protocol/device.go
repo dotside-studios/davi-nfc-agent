@@ -76,16 +76,31 @@ type DeviceTagRemovedData struct {
 	RemovedAt time.Time `json:"removedAt"` // Timestamp of removal
 }
 
-// DeviceWriteRequest is sent by server to a device for writing (future feature).
+// DeviceWriteRequest is sent by the agent to a device to write a tag.
 type DeviceWriteRequest struct {
 	RequestID   string            `json:"requestID"`   // Unique request ID for correlation
 	DeviceID    string            `json:"deviceID"`    // Target device
-	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Data to write
+	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Data to write, as records
+	TagUID      string            `json:"tagUID,omitempty"`
+	Lock        bool              `json:"lock,omitempty"` // Make read-only after writing
+
+	// NDEFBytes is the same message already encoded, and is authoritative where
+	// the two disagree. A device that can write raw NDEF should prefer it; the
+	// record form exists for APIs like Web NFC that only accept records and
+	// cannot express every record type faithfully.
+	NDEFBytes []byte `json:"ndefBytes,omitempty"`
+
+	// IdempotencyKey identifies the logical write. A device that has already
+	// applied this key must report the previous outcome rather than write
+	// again — the same request can arrive twice if a response is lost to a
+	// dropped connection.
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
-// DeviceWriteResponse is sent by a device after a write operation (future feature).
+// DeviceWriteResponse is sent by a device after a write operation.
 type DeviceWriteResponse struct {
-	RequestID string `json:"requestID"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
+	RequestID string    `json:"requestID"`
+	Success   bool      `json:"success"`
+	Error     string    `json:"error,omitempty"`
+	ErrorCode ErrorCode `json:"errorCode,omitempty"` // Preferred over parsing Error
 }

@@ -225,24 +225,32 @@ Keep connection alive:
 
 #### Write Response
 
-Respond to a write request from the server:
+Respond to a write request from the server. Required — the agent holds the
+client's request open until this arrives, the device disconnects, or 20 seconds
+pass:
 
 ```json
 {
   "type": "deviceWriteResponse",
   "payload": {
     "requestID": "req_xyz789",
-    "success": true,
-    "error": ""
+    "success": false,
+    "error": "tag is read-only",
+    "errorCode": "READ_ONLY"
   }
 }
 ```
+
+`errorCode` is optional but preferred — it lets the agent classify the failure
+instead of parsing `error`. Use any code from [NFC errors](#nfc-errors).
 
 ### Messages to Device
 
 #### Write Request
 
-Server requests the device to write data to a tag:
+The agent asks the device to write the tag it is currently holding. A write is
+routed to a device when no hardware reader has a card present and that device
+reported the most recent scan.
 
 ```json
 {
@@ -250,10 +258,14 @@ Server requests the device to write data to a tag:
   "payload": {
     "requestID": "req_xyz789",
     "deviceID": "dev_abc123",
+    "tagUID": "04:A1:B2:C3",
+    "lock": false,
+    "idempotencyKey": "req_xyz789",
+    "ndefBytes": "0QEOVAJlbkhlbGxvLCBORkMh",
     "ndefMessage": {
       "records": [
         {
-          "type": "text",
+          "recordType": "text",
           "content": "Hello!",
           "language": "en"
         }
@@ -262,6 +274,19 @@ Server requests the device to write data to a tag:
   }
 }
 ```
+
+| Field | Description |
+|-------|-------------|
+| `ndefBytes` | The encoded NDEF message, base64 in transit. **Authoritative** where it and `ndefMessage` disagree — prefer it if the device can write raw NDEF |
+| `ndefMessage` | The same message as records, for APIs like Web NFC that only accept records. Cannot express every record type faithfully |
+| `tagUID` | UID the agent expects to be in the field. Report `TAG_REMOVED` if a different tag is present |
+| `lock` | Make the tag permanently read-only after a successful write. Irreversible |
+| `idempotencyKey` | Identifies the logical write |
+
+**On `idempotencyKey`:** a device that has already applied a given key must
+report the previous outcome rather than write again. The same request can arrive
+twice — the agent sends a write, the device applies it, and the response is lost
+to a dropped connection. Without the check, the retry writes a second time.
 
 ### mDNS Discovery
 

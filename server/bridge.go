@@ -36,6 +36,10 @@ type WriteRequestMessage struct {
 	// Request contains the actual write data
 	Request WriteRequest
 
+	// IdempotencyKey identifies the logical write, so a device that already
+	// applied it can report the previous outcome instead of writing twice.
+	IdempotencyKey string
+
 	// ResponseCh receives the write result (buffered, size 1)
 	ResponseCh chan WriteResponseMessage
 }

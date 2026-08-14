@@ -711,10 +711,72 @@ A bootstrap server runs on port 9472 to help devices trust the agent's certifica
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| `WRITE_FAILED` | Write operation failed |
-| `NO_CARD` | No card present on reader |
-| `READ_FAILED` | Failed to read card data |
-| `SESSION_LOCKED` | Another client holds the session |
-| `INVALID_REQUEST` | Malformed request |
+Errors arrive as a response with `success: false`, a human-readable `error`
+string, and a structured payload:
+
+```json
+{
+  "id": "req_1",
+  "type": "error",
+  "success": false,
+  "error": "data too large: 900 bytes exceeds tag NDEF capacity of 504 bytes",
+  "payload": {
+    "code": "CAPACITY_EXCEEDED",
+    "retryable": false,
+    "op": "WriteData",
+    "tagUID": "04:A1:B2:C3"
+  }
+}
+```
+
+`code` has always been present and its strings are stable. `retryable`, `op`,
+and `tagUID` are additive — a client reading only `code` is unaffected.
+
+**`retryable` is the field worth acting on.** It answers whether repeating the
+identical request could plausibly succeed. Combined with `code` it gives three
+distinct outcomes:
+
+| Condition | Meaning | What a client should do |
+|-----------|---------|-------------------------|
+| `retryable: true`, code ≠ `TAG_REMOVED` | Transient — I/O glitch, full queue, timeout | Retry, with backoff |
+| `retryable: true`, code = `TAG_REMOVED` | The tag left the field mid-operation | Ask the user to present the tag again |
+| `retryable: false` | Refused on its merits | Do not retry; surface it |
+
+### Protocol errors
+
+Raised by the bridge itself, before reaching a tag.
+
+| Code | Retryable | Description |
+|------|-----------|-------------|
+| `PARSE_ERROR` | no | Message was not valid JSON |
+| `INVALID_PAYLOAD` | no | Payload did not match the message type |
+| `INVALID_REQUEST` | no | Required field missing or invalid |
+| `INVALID_MESSAGE_TYPE` | no | Message type not valid at this point in the exchange |
+| `UNKNOWN_TYPE` | no | Unrecognized message type |
+| `INVALID_DEVICE` | no | Device ID did not match the connection |
+| `REGISTRATION_FAILED` | no | Device could not be registered |
+| `SESSION_LOCKED` | no | Another client holds the session |
+| `TAG_SEND_FAILED` | yes | Tag data could not be delivered internally |
+| `READ_ERROR` | yes | Failed to read from the connection |
+| `TIMEOUT` | yes | Operation timed out |
+| `DEVICE_GONE` | no | Target device disconnected |
+| `INTERNAL_ERROR` | yes | Unexpected agent-side failure |
+| `UNKNOWN_ERROR` | no | Unclassified — never advertised as retryable |
+
+### NFC errors
+
+Something happened at the tag. These mirror the agent's internal error codes.
+
+| Code | Retryable | Description |
+|------|-----------|-------------|
+| `NOT_SUPPORTED` | no | Tag or device does not support the operation |
+| `TAG_REMOVED` | yes | Tag left the field mid-operation |
+| `AUTH_FAILED` | no | Authentication failed — the same key will fail again |
+| `READ_FAILED` | yes | Read failed |
+| `WRITE_FAILED` | yes | Write failed |
+| `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
+| `TAG_NOT_CONNECTED` | yes | No tag connected |
+| `READ_ONLY` | no | Tag is locked |
+| `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
+| `INVALID_DATA` | no | Data was malformed |
+| `NO_CARD` | yes | No card present on reader |

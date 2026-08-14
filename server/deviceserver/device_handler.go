@@ -88,20 +88,20 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	messageType, message, err := conn.ReadMessage()
 	if err != nil {
 		log.Printf("[device] Failed to read registration message: %v", err)
-		h.sendError(conn, "", "READ_ERROR", "Failed to read message")
+		h.sendError(conn, "", protocol.ErrCodeReadError, "Failed to read message")
 		return
 	}
 
 	if messageType != websocket.TextMessage {
 		log.Printf("[device] Expected text message, got type %d", messageType)
-		h.sendError(conn, "", "INVALID_MESSAGE_TYPE", "Expected text message")
+		h.sendError(conn, "", protocol.ErrCodeInvalidMessageType, "Expected text message")
 		return
 	}
 
 	var wsRequest protocol.WebSocketRequest
 	if err := json.Unmarshal(message, &wsRequest); err != nil {
 		log.Printf("[device] Failed to parse registration message: %v", err)
-		h.sendError(conn, "", "PARSE_ERROR", "Invalid message format")
+		h.sendError(conn, "", protocol.ErrCodeParse, "Invalid message format")
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		err = h.handleRegisterDevice(r.Context(), conn, wsRequest)
 	default:
 		log.Printf("[device] Expected '%s' or '%s', got '%s'", protocol.WSTypeHello, protocol.WSTypeRegisterDevice, wsRequest.Type)
-		h.sendError(conn, wsRequest.ID, "INVALID_MESSAGE_TYPE", fmt.Sprintf("Expected '%s' or '%s' message", protocol.WSTypeHello, protocol.WSTypeRegisterDevice))
+		h.sendError(conn, wsRequest.ID, protocol.ErrCodeInvalidMessageType, fmt.Sprintf("Expected '%s' or '%s' message", protocol.WSTypeHello, protocol.WSTypeRegisterDevice))
 		return
 	}
 	if err != nil {
@@ -127,7 +127,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	deviceID = h.getDeviceIDFromConn(conn)
 	if deviceID == "" {
 		log.Printf("[device] Failed to get deviceID after registration")
-		h.sendError(conn, wsRequest.ID, "REGISTRATION_FAILED", "Failed to get device ID")
+		h.sendError(conn, wsRequest.ID, protocol.ErrCodeRegistrationFailed, "Failed to get device ID")
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			var wsRequest protocol.WebSocketRequest
 			if err := json.Unmarshal(message, &wsRequest); err != nil {
 				log.Printf("[device] Failed to parse message: %v", err)
-				h.sendError(conn, "", "PARSE_ERROR", "Invalid message format")
+				h.sendError(conn, "", protocol.ErrCodeParse, "Invalid message format")
 				continue
 			}
 
@@ -161,7 +161,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 				continue
 			default:
 				log.Printf("[device] Unknown message type: %s", wsRequest.Type)
-				h.sendError(conn, wsRequest.ID, "UNKNOWN_TYPE", fmt.Sprintf("Unknown message type: %s", wsRequest.Type))
+				h.sendError(conn, wsRequest.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", wsRequest.Type))
 				continue
 			}
 
@@ -177,7 +177,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 func (h *DeviceHandler) handleHello(_ context.Context, conn *server.SafeConn, req protocol.WebSocketRequest) error {
 	var hello protocol.HelloRequest
 	if err := decodePayload(req.Payload, &hello); err != nil {
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Invalid hello request format")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid hello request format")
 		return fmt.Errorf("failed to parse hello request: %w", err)
 	}
 
@@ -203,7 +203,7 @@ func (h *DeviceHandler) handleHello(_ context.Context, conn *server.SafeConn, re
 func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *server.SafeConn, req protocol.WebSocketRequest) error {
 	var regReq protocol.DeviceRegistrationRequest
 	if err := decodePayload(req.Payload, &regReq); err != nil {
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Invalid registration request format")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid registration request format")
 		return fmt.Errorf("failed to parse registration request: %w", err)
 	}
 
@@ -224,7 +224,7 @@ func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *server.Saf
 // the caller to send the response in whichever dialect it is speaking.
 func (h *DeviceHandler) register(conn *server.SafeConn, reqID string, regReq protocol.DeviceRegistrationRequest, version int) (*remotenfc.Device, protocol.DeviceRegistrationResponse, error) {
 	if regReq.DeviceName == "" {
-		h.sendError(conn, reqID, "INVALID_REQUEST", "Device name is required")
+		h.sendError(conn, reqID, protocol.ErrCodeInvalidRequest, "Device name is required")
 		return nil, protocol.DeviceRegistrationResponse{}, fmt.Errorf("device name is required")
 	}
 
@@ -237,7 +237,7 @@ func (h *DeviceHandler) register(conn *server.SafeConn, reqID string, regReq pro
 		Metadata:        regReq.Metadata,
 	})
 	if err != nil {
-		h.sendError(conn, reqID, "REGISTRATION_FAILED", err.Error())
+		h.sendError(conn, reqID, protocol.ErrCodeRegistrationFailed, err.Error())
 		return nil, protocol.DeviceRegistrationResponse{}, fmt.Errorf("failed to register device: %w", err)
 	}
 
@@ -281,20 +281,20 @@ func (h *DeviceHandler) handleTagScanned(conn *server.SafeConn, deviceID string,
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
 		log.Printf("[device] Failed to marshal tag data: %v", err)
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Failed to process payload")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Failed to process payload")
 		return err
 	}
 
 	var tagData protocol.DeviceTagData
 	if err := json.Unmarshal(payloadBytes, &tagData); err != nil {
 		log.Printf("[device] Failed to parse tag data: %v", err)
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Invalid tag data format")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid tag data format")
 		return err
 	}
 
 	// Validate deviceID matches
 	if tagData.DeviceID != "" && tagData.DeviceID != deviceID {
-		h.sendError(conn, req.ID, "INVALID_DEVICE", "Device ID mismatch")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidDevice, "Device ID mismatch")
 		return fmt.Errorf("device ID mismatch: expected %s, got %s", deviceID, tagData.DeviceID)
 	}
 	tagData.DeviceID = deviceID
@@ -314,7 +314,7 @@ func (h *DeviceHandler) handleTagScanned(conn *server.SafeConn, deviceID string,
 
 	if err := h.manager.SendTagData(deviceID, phoneTagData); err != nil {
 		log.Printf("[device] Failed to send tag data: %v", err)
-		h.sendError(conn, req.ID, "TAG_SEND_FAILED", err.Error())
+		h.sendTagError(conn, req.ID, err)
 		return err
 	}
 
@@ -327,20 +327,20 @@ func (h *DeviceHandler) handleTagRemoved(conn *server.SafeConn, deviceID string,
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
 		log.Printf("[device] Failed to marshal tag removed data: %v", err)
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Failed to process payload")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Failed to process payload")
 		return err
 	}
 
 	var removedData protocol.DeviceTagRemovedData
 	if err := json.Unmarshal(payloadBytes, &removedData); err != nil {
 		log.Printf("[device] Failed to parse tag removed data: %v", err)
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Invalid tag removed data format")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid tag removed data format")
 		return err
 	}
 
 	// Validate deviceID matches
 	if removedData.DeviceID != "" && removedData.DeviceID != deviceID {
-		h.sendError(conn, req.ID, "INVALID_DEVICE", "Device ID mismatch")
+		h.sendError(conn, req.ID, protocol.ErrCodeInvalidDevice, "Device ID mismatch")
 		return fmt.Errorf("device ID mismatch")
 	}
 	removedData.DeviceID = deviceID
@@ -354,7 +354,7 @@ func (h *DeviceHandler) handleTagRemoved(conn *server.SafeConn, deviceID string,
 
 	if err := h.manager.SendTagRemoved(deviceID, phoneRemovedData); err != nil {
 		log.Printf("[device] Failed to send tag removed: %v", err)
-		h.sendError(conn, req.ID, "TAG_SEND_FAILED", err.Error())
+		h.sendTagError(conn, req.ID, err)
 		return err
 	}
 
@@ -435,15 +435,29 @@ func (h *DeviceHandler) SendToDevice(deviceID string, message any) error {
 }
 
 // sendError sends an error response to a device.
-func (h *DeviceHandler) sendError(conn *server.SafeConn, requestID string, errorCode string, message string) {
+func (h *DeviceHandler) sendError(conn *server.SafeConn, requestID string, errorCode protocol.ErrorCode, message string) {
+	h.sendErrorPayload(conn, requestID, protocol.NewErrorPayload(errorCode), message)
+}
+
+// sendTagError reports a failure carrying tag data to the manager. A typed
+// NFCError keeps its code, operation, and tag; anything else is a transient
+// delivery failure, which is what TAG_SEND_FAILED has always meant.
+func (h *DeviceHandler) sendTagError(conn *server.SafeConn, requestID string, err error) {
+	payload := nfc.WireError(err)
+	if payload.Code == protocol.ErrCodeUnknownError {
+		payload = protocol.NewErrorPayload(protocol.ErrCodeTagSendFailed)
+	}
+
+	h.sendErrorPayload(conn, requestID, payload, err.Error())
+}
+
+func (h *DeviceHandler) sendErrorPayload(conn *server.SafeConn, requestID string, payload protocol.ErrorPayload, message string) {
 	response := protocol.WebSocketResponse{
 		ID:      requestID,
 		Type:    protocol.WSTypeError,
 		Success: false,
 		Error:   message,
-		Payload: map[string]any{
-			"code": errorCode,
-		},
+		Payload: payload,
 	}
 
 	if err := conn.WriteJSON(response); err != nil {

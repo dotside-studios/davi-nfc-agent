@@ -229,3 +229,81 @@ func TestFirstFrameMustBeHelloOrRegister(t *testing.T) {
 		t.Errorf("error code = %q, want INVALID_MESSAGE_TYPE", code)
 	}
 }
+
+// registerV1 completes a v1 handshake and returns the connection and device ID.
+func registerV1(t *testing.T, url string) (*websocket.Conn, string) {
+	t.Helper()
+
+	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeHello,
+		Payload: map[string]any{
+			"protocolVersion": protocol.DeviceProtocolV1,
+			"deviceName":      "Test Device",
+			"platform":        "android",
+		},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	_, payload := readResponse(t, conn)
+	deviceID, _ := payload["deviceID"].(string)
+	if deviceID == "" {
+		t.Fatal("registration returned no deviceID")
+	}
+	return conn, deviceID
+}
+
+// A tag scan the agent cannot parse is a permanent failure. Reporting it as
+// retryable invites a device to resend the same broken payload forever.
+func TestMalformedTagScanIsNotRetryable(t *testing.T) {
+	url := newDeviceTestServer(t)
+	conn, deviceID := registerV1(t, url)
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		ID:   "scan1",
+		Type: protocol.WSTypeTagScanned,
+		Payload: map[string]any{
+			"deviceID":   deviceID,
+			"uid":        "not a valid uid",
+			"technology": "ISO14443A",
+		},
+	}); err != nil {
+		t.Fatalf("write tagScanned: %v", err)
+	}
+
+	out, payload := readResponse(t, conn)
+
+	if out.Success {
+		t.Fatal("expected failure for an unparseable UID")
+	}
+	if code, _ := payload["code"].(string); code != string(protocol.ErrCodeInvalidData) {
+		t.Errorf("code = %q, want INVALID_DATA", code)
+	}
+	if retryable, _ := payload["retryable"].(bool); retryable {
+		t.Error("a malformed UID cannot be fixed by retrying")
+	}
+	if op, _ := payload["op"].(string); op != "ConvertTagData" {
+		t.Errorf("op = %q, want ConvertTagData", op)
+	}
+}
+
+// Errors raised by the bridge itself keep their original code strings so
+// existing clients continue to switch on them.
+func TestProtocolErrorsCarryRetryableFlag(t *testing.T) {
+	url := newDeviceTestServer(t)
+	conn, _ := registerV1(t, url)
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: "nonsense"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, payload := readResponse(t, conn)
+
+	if code, _ := payload["code"].(string); code != "UNKNOWN_TYPE" {
+		t.Errorf("code = %q, want UNKNOWN_TYPE", code)
+	}
+	if retryable, _ := payload["retryable"].(bool); retryable {
+		t.Error("an unknown message type will not become known on retry")
+	}
+}

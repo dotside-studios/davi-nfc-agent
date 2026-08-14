@@ -327,6 +327,23 @@ export interface DeviceErrorEvent {
   code?: string;
 
   /**
+   * Whether repeating the request could plausibly succeed. False means the
+   * request was refused on its merits — malformed input, an unsupported
+   * operation, a locked tag — and resending it only wastes a round trip.
+   */
+  retryable?: boolean;
+
+  /**
+   * Operation that failed, e.g. 'WriteData'
+   */
+  op?: string;
+
+  /**
+   * Tag involved in the failure, when there is one
+   */
+  tagUID?: string;
+
+  /**
    * Phase where error occurred
    */
   phase?: 'connection' | 'websocket' | 'registration' | 'reconnection';

@@ -417,7 +417,13 @@ class NFCDeviceClient {
         });
         break;
       case 'error':
-        this._emit('error', { error: new Error(error), code: payload?.code });
+        this._emit('error', {
+          error: new Error(error),
+          code: payload?.code,
+          retryable: payload?.retryable === true,
+          op: payload?.op,
+          tagUID: payload?.tagUID
+        });
         break;
       default:
         console.warn('Unknown message type:', type);

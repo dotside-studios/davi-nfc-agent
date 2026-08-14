@@ -83,6 +83,7 @@ export function Live({
         </>
       }
       flush
+      fill
     >
       {link !== 'open' ? (
         <div className="body">

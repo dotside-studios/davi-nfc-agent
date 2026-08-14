@@ -7,15 +7,18 @@ export function Panel({
   title,
   tools,
   flush,
+  fill,
   children,
 }: {
   title: ReactNode
   tools?: ReactNode
   flush?: boolean
+  /** Claim the leftover height instead of shrink-wrapping. */
+  fill?: boolean
   children: ReactNode
 }) {
   return (
-    <section className="panel">
+    <section className={fill ? 'panel fill' : 'panel'}>
       <h2>
         <span>{title}</span>
         <span className="spacer" />

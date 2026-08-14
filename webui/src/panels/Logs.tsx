@@ -76,6 +76,7 @@ export function Logs({ logs, onClear }: { logs: LogEntry[]; onClear: () => void 
         </>
       }
       flush
+      fill
     >
       {filtered.length === 0 ? (
         <Empty>

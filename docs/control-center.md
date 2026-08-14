@@ -151,6 +151,17 @@ The dev server proxies `/control` and `/ws`, so it drives a real agent rather
 than a mock. If `webui/dist` is missing entirely the agent still starts and
 serves its protocol; the root falls back to the plain-text banner.
 
+To drive the console without a reader — for screenshots, or to check a panel
+that needs paired devices and blocked origins to be interesting — there is a
+harness that serves the real control handler over a seeded agent and a stubbed
+tag feed. It is skipped unless `SCREENSHOT_ADDR` is set:
+
+```bash
+SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
+  go test -run TestScreenshotHarness -timeout 20m .
+# then open http://127.0.0.1:9911/control/session?token=$(cat /tmp/tok)
+```
+
 ## API
 
 The console's endpoints, all under the gate described in [Access](#access).

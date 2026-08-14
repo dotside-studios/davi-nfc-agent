@@ -130,6 +130,7 @@ textarea:focus {
   background: var(--bar);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .topbar .brand {
   font-weight: bold;
@@ -149,6 +150,7 @@ textarea:focus {
   background: var(--bg-inset);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  flex-shrink: 0;
 }
 .tabs button {
   font: 12px Arial, Helvetica, sans-serif;
@@ -178,6 +180,10 @@ main {
   flex: 1 1 auto;
   overflow: auto;
   padding: 8px;
+  /* A column so a panel marked .fill can claim the leftover height. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .statusbar {
@@ -190,25 +196,47 @@ main {
   color: var(--text-dim);
   font-size: 11px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 /* ---- panels ---- */
 
-/* Tile across the available width, stacking when it runs out. */
+/* Multi-column rather than grid: panels have very different heights, and a grid
+   row is as tall as its tallest cell, which leaves a ragged band of white under
+   the short ones. Columns pack them and balance the height instead. */
 .cols {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 8px;
-  align-items: start;
+  columns: 360px;
+  column-gap: 8px;
 }
 .cols.wide {
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  columns: 520px;
+}
+.cols > * {
+  break-inside: avoid;
 }
 
 .panel {
   border: 1px solid var(--border);
   background: var(--bg);
   margin-bottom: 8px;
+  /* Without this a panel can be split across a column break mid-table. */
+  break-inside: avoid;
+}
+
+/* A panel that claims the leftover height instead of shrink-wrapping, so a log
+   or event list uses the whole window rather than a fixed slice of it. */
+.panel.fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 0;
+}
+.panel.fill > .body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .panel > h2 {
   margin: 0;
@@ -410,15 +438,15 @@ table.grid th.mono {
 
 /* ---- log / event views ---- */
 
+/* Scrolls inside the panel so the filters stay visible while reading. */
 .logview {
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.4;
   background: var(--bg);
   overflow: auto;
-  /* Scrolls inside the panel so the filters stay visible while reading. */
-  max-height: calc(100vh - 210px);
-  min-height: 220px;
+  flex: 1 1 auto;
+  min-height: 120px;
 }
 .logrow {
   display: flex;
@@ -459,14 +487,8 @@ table.grid th.mono {
     grid-template-columns: 1fr;
   }
   .kv {
-    grid-template-columns: 1fr;
-    gap: 0 0;
-  }
-  .kv dt {
-    margin-top: 4px;
-  }
-  .kv dd {
-    margin-bottom: 2px;
+    grid-template-columns: minmax(0, max-content) 1fr;
+    gap: 2px 6px;
   }
   .topbar {
     gap: 6px;

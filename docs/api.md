@@ -174,6 +174,26 @@ values win over inference, except that operations the bridge cannot yet route
 (`canWrite`, `canTransceive`, `canLock`) are reported as false whatever the
 device claims.
 
+#### Goodbye
+
+Send before disconnecting deliberately (v1). The agent acknowledges with a
+normal WebSocket close and records a departure rather than a lost device:
+
+```json
+{
+  "type": "goodbye",
+  "payload": {
+    "deviceID": "dev_abc123",
+    "reason": "user stopped scanning"
+  }
+}
+```
+
+`reason` is optional and only reaches the agent's logs. Without a goodbye the
+agent classifies the disconnect from the close handshake: a normal or
+going-away close is still a clean departure, and anything else — an abrupt
+reset, a dead radio — is reported as a dropped device.
+
 #### Tag Removed
 
 Send when a tag leaves the reader:

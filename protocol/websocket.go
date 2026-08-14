@@ -13,6 +13,7 @@ const (
 const (
 	WSTypeHello                  = "hello"
 	WSTypeHelloResponse          = "helloResponse"
+	WSTypeGoodbye                = "goodbye"
 	WSTypeRegisterDevice         = "registerDevice"
 	WSTypeRegisterDeviceResponse = "registerDeviceResponse"
 	WSTypeTagScanned             = "tagScanned"

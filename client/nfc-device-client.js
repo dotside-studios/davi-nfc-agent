@@ -596,9 +596,25 @@ class NFCDeviceClient {
   /**
    * Disconnect from the server
    */
-  async disconnect() {
+  /**
+   * @param {string} [reason] - Why the device is leaving, for the agent's logs
+   */
+  async disconnect(reason) {
     this.intentionalDisconnect = true;
     this._stopHeartbeat();
+
+    // Tell the agent this is deliberate, so it reports a departure rather than
+    // a lost device. Best-effort: the close below stands on its own.
+    if (this.ws && this.connected && this.protocolVersion >= 1) {
+      try {
+        this._send({
+          type: 'goodbye',
+          payload: { deviceID: this.deviceID, ...(reason ? { reason } : {}) }
+        });
+      } catch (err) {
+        // Already gone; the close handles it.
+      }
+    }
 
     if (this.ws) {
       this.ws.close();
@@ -606,6 +622,7 @@ class NFCDeviceClient {
 
     this.connected = false;
     this.deviceID = null;
+    this.protocolVersion = 0;
     this.ws = null;
   }
 }

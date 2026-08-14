@@ -76,12 +76,13 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	log.Printf("[device] WebSocket connected from %s (subprotocol=%q)", r.RemoteAddr, wsConn.Subprotocol())
 
 	var deviceID string
+	reason := protocol.DisconnectDropped
 	defer func() {
 		conn.Close()
 		if deviceID != "" {
-			h.handleDeviceDisconnect(deviceID)
+			h.handleDeviceDisconnect(deviceID, reason)
 		}
-		log.Printf("[device] WebSocket disconnected: %s", deviceID)
+		log.Printf("[device] WebSocket disconnected: %s (%s)", deviceID, reason)
 	}()
 
 	// Wait for registerDevice message
@@ -135,6 +136,11 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
+			// A close handshake means the device meant to leave. Anything else
+			// — an abrupt TCP reset, a dead radio — is a drop.
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				reason = protocol.DisconnectClosed
+			}
 			break
 		}
 
@@ -156,6 +162,10 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 				handlerErr = h.handleTagRemoved(conn, deviceID, wsRequest)
 			case protocol.WSTypeDeviceHeartbeat:
 				handlerErr = h.handleDeviceHeartbeat(conn, deviceID, wsRequest)
+			case protocol.WSTypeGoodbye:
+				reason = protocol.DisconnectGoodbye
+				h.handleGoodbye(conn, deviceID, wsRequest)
+				return
 			case protocol.WSTypeDeviceWriteResponse:
 				log.Printf("[device] Write response received (not yet implemented)")
 				continue
@@ -382,15 +392,37 @@ func (h *DeviceHandler) handleDeviceHeartbeat(_ *server.SafeConn, deviceID strin
 	return nil
 }
 
-// handleDeviceDisconnect cleans up when device WebSocket closes.
-func (h *DeviceHandler) handleDeviceDisconnect(deviceID string) {
+// handleGoodbye acknowledges a device's announced departure with a close
+// handshake, so the device knows the agent heard it rather than timing out.
+func (h *DeviceHandler) handleGoodbye(conn *server.SafeConn, deviceID string, req protocol.WebSocketRequest) {
+	var goodbye protocol.GoodbyeRequest
+	if err := decodePayload(req.Payload, &goodbye); err != nil {
+		log.Printf("[device] Malformed goodbye from %s: %v", deviceID, err)
+	}
+
+	if goodbye.Reason != "" {
+		log.Printf("[device] Device %s said goodbye: %s", deviceID, goodbye.Reason)
+	}
+
+	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+	if err := conn.WriteMessage(websocket.CloseMessage, closeMsg); err != nil {
+		log.Printf("[device] Failed to acknowledge goodbye from %s: %v", deviceID, err)
+	}
+}
+
+// handleDeviceDisconnect cleans up when a device WebSocket closes.
+func (h *DeviceHandler) handleDeviceDisconnect(deviceID string, reason protocol.DisconnectReason) {
 	h.removeDeviceSession(deviceID)
 
 	if h.manager != nil {
 		h.manager.UnregisterDevice(deviceID)
 	}
 
-	log.Printf("[device] Device disconnected: %s", deviceID)
+	if reason.Expected() {
+		log.Printf("[device] Device disconnected: %s (%s)", deviceID, reason)
+	} else {
+		log.Printf("[device] Device lost: %s (no close handshake)", deviceID)
+	}
 }
 
 // addDeviceSession stores a WebSocket connection for a device.

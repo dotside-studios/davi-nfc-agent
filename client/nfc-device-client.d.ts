@@ -451,9 +451,11 @@ export class NFCDeviceClient {
   connect(): Promise<void>;
 
   /**
-   * Disconnect from the server
+   * Disconnect from the server. On protocol v1 this sends a `goodbye` first so
+   * the agent reports a deliberate departure rather than a lost device.
+   * @param reason Optional explanation recorded in the agent's logs
    */
-  disconnect(): Promise<void>;
+  disconnect(reason?: string): Promise<void>;
 
   /**
    * Send a tag scan event to the server. Call this when your NFC library detects a tag.

@@ -307,3 +307,38 @@ func TestProtocolErrorsCarryRetryableFlag(t *testing.T) {
 		t.Error("an unknown message type will not become known on retry")
 	}
 }
+
+// A goodbye must be acknowledged with a close handshake so the device knows the
+// agent heard it, and must unregister the device.
+func TestGoodbyeIsAcknowledged(t *testing.T) {
+	url := newDeviceTestServer(t)
+	conn, deviceID := registerV1(t, url)
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type:    protocol.WSTypeGoodbye,
+		Payload: map[string]any{"deviceID": deviceID, "reason": "user stopped scanning"},
+	}); err != nil {
+		t.Fatalf("write goodbye: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, err := conn.ReadMessage()
+	if err == nil {
+		t.Fatal("expected the connection to close after goodbye")
+	}
+	if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+		t.Errorf("close error = %v, want a normal closure", err)
+	}
+}
+
+func TestDisconnectReasonExpected(t *testing.T) {
+	if !protocol.DisconnectGoodbye.Expected() {
+		t.Error("goodbye should be an expected departure")
+	}
+	if !protocol.DisconnectClosed.Expected() {
+		t.Error("a clean close should be an expected departure")
+	}
+	if protocol.DisconnectDropped.Expected() {
+		t.Error("a dropped connection is not an expected departure")
+	}
+}

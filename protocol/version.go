@@ -54,3 +54,29 @@ type HelloResponse struct {
 	ProtocolVersion int `json:"protocolVersion"`
 	DeviceRegistrationResponse
 }
+
+// GoodbyeRequest is sent by a v1 device that is leaving deliberately, so the
+// agent can tell an intentional departure from a dropped connection.
+type GoodbyeRequest struct {
+	DeviceID string `json:"deviceID,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// DisconnectReason explains why a device's session ended.
+type DisconnectReason string
+
+const (
+	// DisconnectGoodbye means the device announced its departure.
+	DisconnectGoodbye DisconnectReason = "goodbye"
+	// DisconnectClosed means the connection closed cleanly without a goodbye.
+	DisconnectClosed DisconnectReason = "closed"
+	// DisconnectDropped means the connection went away without a close
+	// handshake — the device crashed, lost its radio, or was killed.
+	DisconnectDropped DisconnectReason = "dropped"
+)
+
+// Expected reports whether the device left on purpose. A dropped device may
+// well come back; one that said goodbye should not be waited on.
+func (r DisconnectReason) Expected() bool {
+	return r == DisconnectGoodbye || r == DisconnectClosed
+}

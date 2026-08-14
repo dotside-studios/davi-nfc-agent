@@ -44,37 +44,144 @@ func TestTagUsesDeclaredCapabilities(t *testing.T) {
 	}
 }
 
-// A device may declare more than the bridge can currently route. Operations
-// still go through the WebSocket protocol rather than the Tag interface, so the
-// operation bits must stay off or they drift from actual behavior.
-func TestTagDoesNotClaimUnroutedOperations(t *testing.T) {
-	tag, err := ConvertTagData(TagData{
-		UID:        "04:A1:B2:C3",
-		Technology: "ISO14443A",
-		Type:       "NTAG215",
-		Capabilities: &protocol.TagCapabilities{
-			CanWrite:      true,
-			CanTransceive: true,
-			CanLock:       true,
-		},
-	})
-	if err != nil {
-		t.Fatalf("ConvertTagData: %v", err)
+// stubWriter stands in for the device server's route back to a device.
+type stubWriter struct {
+	canWrite bool
+	canLock  bool
+	written  []byte
+	locked   bool
+	err      error
+}
+
+func (w *stubWriter) WriteTag(_, _ string, ndef []byte, _ nfc.WriteOptions) error {
+	if w.err != nil {
+		return w.err
 	}
+	w.written = ndef
+	return nil
+}
+
+func (w *stubWriter) LockTag(_, _ string) error {
+	if w.err != nil {
+		return w.err
+	}
+	w.locked = true
+	return nil
+}
+
+func (w *stubWriter) DeviceCanWrite(string) bool { return w.canWrite }
+func (w *stubWriter) DeviceCanLock(string) bool  { return w.canLock }
+
+func declaredTag(t *testing.T, caps *protocol.TagCapabilities, writer TagWriter) nfc.Tag {
+	t.Helper()
+
+	tag, err := ConvertTagDataWithWriter(TagData{
+		UID:          "04:A1:B2:C3",
+		Technology:   "ISO14443A",
+		Type:         "NTAG215",
+		Capabilities: caps,
+	}, writer)
+	if err != nil {
+		t.Fatalf("ConvertTagDataWithWriter: %v", err)
+	}
+	return tag
+}
+
+// A tag with no route back to its device cannot write, whatever it declared.
+func TestTagWithoutWriterIsReadOnly(t *testing.T) {
+	tag := declaredTag(t, &protocol.TagCapabilities{
+		CanWrite:      true,
+		CanTransceive: true,
+		CanLock:       true,
+	}, nil)
 
 	caps := nfc.GetTagCapabilities(tag)
 
 	if caps.CanWrite {
-		t.Error("CanWrite = true, want false while writes bypass the Tag interface")
+		t.Error("CanWrite = true with no route back to the device")
+	}
+	if caps.CanLock {
+		t.Error("CanLock = true with no route back to the device")
 	}
 	if caps.CanTransceive {
 		t.Error("CanTransceive = true, want false while there is no command channel")
 	}
-	if caps.CanLock {
-		t.Error("CanLock = true, want false while locking bypasses the Tag interface")
-	}
 	if !caps.CanRead {
 		t.Error("CanRead = false, want true")
+	}
+
+	if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {
+		t.Errorf("capability drift: %v", err)
+	}
+}
+
+func TestTagWritesThroughDevice(t *testing.T) {
+	writer := &stubWriter{canWrite: true, canLock: true}
+	tag := declaredTag(t, &protocol.TagCapabilities{CanWrite: true, CanLock: true}, writer)
+
+	caps := nfc.GetTagCapabilities(tag)
+	if !caps.CanWrite {
+		t.Error("CanWrite = false for a writable tag on a connected device")
+	}
+	if !caps.CanLock {
+		t.Error("CanLock = false for a lockable tag on a connected device")
+	}
+
+	if err := tag.WriteData([]byte{0xD1, 0x01, 0x01, 0x54}); err != nil {
+		t.Fatalf("WriteData: %v", err)
+	}
+	if len(writer.written) != 4 {
+		t.Errorf("device received %d bytes, want the encoded message", len(writer.written))
+	}
+
+	if err := tag.MakeReadOnly(); err != nil {
+		t.Fatalf("MakeReadOnly: %v", err)
+	}
+	if !writer.locked {
+		t.Error("MakeReadOnly did not reach the device")
+	}
+
+	if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {
+		t.Errorf("capability drift: %v", err)
+	}
+}
+
+// A tag whose device declared write support but has since gone away must stop
+// advertising it, and refuse the write rather than blocking on a dead session.
+func TestTagStopsClaimingWriteWhenDeviceGone(t *testing.T) {
+	writer := &stubWriter{canWrite: false, canLock: false}
+	tag := declaredTag(t, &protocol.TagCapabilities{CanWrite: true, CanLock: true}, writer)
+
+	caps := nfc.GetTagCapabilities(tag)
+	if caps.CanWrite || caps.CanLock {
+		t.Error("capabilities outlived the device session")
+	}
+
+	if err := tag.WriteData([]byte{0x00}); !nfc.IsNotSupportedError(err) {
+		t.Errorf("WriteData error = %v, want a not-supported error", err)
+	}
+	if err := tag.MakeReadOnly(); !nfc.IsNotSupportedError(err) {
+		t.Errorf("MakeReadOnly error = %v, want a not-supported error", err)
+	}
+
+	if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {
+		t.Errorf("capability drift: %v", err)
+	}
+}
+
+// A tag the device already reported as locked is not writable, even though the
+// device itself can write.
+func TestTagReadOnlyDeclarationWins(t *testing.T) {
+	writer := &stubWriter{canWrite: true, canLock: true}
+	tag := declaredTag(t, &protocol.TagCapabilities{
+		CanWrite:   true,
+		CanLock:    true,
+		IsReadOnly: true,
+	}, writer)
+
+	caps := nfc.GetTagCapabilities(tag)
+	if caps.CanWrite {
+		t.Error("CanWrite = true for a tag the device reported as read-only")
 	}
 
 	if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {

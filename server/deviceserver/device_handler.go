@@ -13,6 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -419,6 +420,95 @@ func (h *DeviceHandler) handleDeviceHeartbeat(_ *server.SafeConn, deviceID strin
 
 	h.manager.UpdateHeartbeat(deviceID)
 	return nil
+}
+
+// WriteTag implements remotenfc.TagWriter, letting a tag write through the
+// device holding it.
+func (h *DeviceHandler) WriteTag(deviceID, tagUID string, ndef []byte, opts nfc.WriteOptions) error {
+	id := uuid.NewString()
+
+	resp, err := h.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+		RequestID:      id,
+		TagUID:         tagUID,
+		NDEFBytes:      ndef,
+		Lock:           opts.Lock,
+		IdempotencyKey: id,
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return writeResponseError("WriteData", tagUID, resp)
+	}
+	return nil
+}
+
+// LockTag implements remotenfc.TagWriter.
+func (h *DeviceHandler) LockTag(deviceID, tagUID string) error {
+	id := uuid.NewString()
+
+	resp, err := h.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+		RequestID:      id,
+		TagUID:         tagUID,
+		Lock:           true,
+		IdempotencyKey: id,
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return writeResponseError("MakeReadOnly", tagUID, resp)
+	}
+	return nil
+}
+
+// DeviceCanWrite implements remotenfc.TagWriter.
+func (h *DeviceHandler) DeviceCanWrite(deviceID string) bool {
+	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanWrite })
+}
+
+// DeviceCanLock implements remotenfc.TagWriter.
+func (h *DeviceHandler) DeviceCanLock(deviceID string) bool {
+	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanLock })
+}
+
+// deviceDeclared reports whether a still-connected device declared a capability.
+func (h *DeviceHandler) deviceDeclared(deviceID string, want func(protocol.DeviceCapabilities) bool) bool {
+	if h.manager == nil {
+		return false
+	}
+
+	device, ok := h.manager.GetDevice(deviceID)
+	if !ok || !device.IsActive() {
+		return false
+	}
+
+	h.deviceSessionsMux.RLock()
+	_, connected := h.deviceSessions[deviceID]
+	h.deviceSessionsMux.RUnlock()
+
+	return connected && want(device.PhoneCapabilities())
+}
+
+// writeResponseError turns a device's refusal into a typed error, so the code
+// it reported survives instead of collapsing into a string.
+func writeResponseError(op, tagUID string, resp protocol.DeviceWriteResponse) error {
+	message := resp.Error
+	if message == "" {
+		message = "device reported the operation failed"
+	}
+
+	fallback := nfc.ErrCodeWriteFailed
+	if op == "MakeReadOnly" {
+		fallback = nfc.ErrCodeReadOnly
+	}
+
+	return &nfc.NFCError{
+		Code:    nfc.InternalErrorCode(resp.ErrorCode, fallback),
+		Op:      op,
+		TagUID:  tagUID,
+		Message: message,
+	}
 }
 
 // ActiveTagDevice returns the device currently holding a tag in its field.

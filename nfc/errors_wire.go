@@ -19,6 +19,19 @@ var wireErrorCodes = map[ErrorCode]protocol.ErrorCode{
 	ErrCodeInvalidData:      protocol.ErrCodeInvalidData,
 }
 
+// InternalErrorCode maps a wire code back to an internal one, for outcomes
+// reported by a remote device. Codes with no internal equivalent — protocol
+// faults, or a device sending something we do not know — fall back to the
+// caller's own notion of what failed.
+func InternalErrorCode(wire protocol.ErrorCode, fallback ErrorCode) ErrorCode {
+	for internal, mapped := range wireErrorCodes {
+		if mapped == wire {
+			return internal
+		}
+	}
+	return fallback
+}
+
 // WireError projects an error onto the wire taxonomy. An NFCError carries its
 // code, operation, and tag through; anything else lands on UNKNOWN_ERROR, which
 // is not retryable — an error we cannot classify is not one we should encourage

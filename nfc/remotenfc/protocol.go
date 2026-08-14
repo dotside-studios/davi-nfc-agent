@@ -76,8 +76,16 @@ type DeviceWriteResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// ConvertTagData converts mobile app tag data to internal nfc.Tag.
+// ConvertTagData converts mobile app tag data to internal nfc.Tag. The
+// resulting tag is read-only; use ConvertTagDataWithWriter to give it a route
+// back to the device for writes and locks.
 func ConvertTagData(data TagData) (nfc.Tag, error) {
+	return ConvertTagDataWithWriter(data, nil)
+}
+
+// ConvertTagDataWithWriter converts mobile app tag data to internal nfc.Tag,
+// wiring writes and locks back to the device that scanned it.
+func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
 	// Validate required fields. These are all malformed-input failures, so they
 	// are reported as InvalidData — repeating the same payload cannot fix them.
 	const op = "ConvertTagData"
@@ -121,6 +129,7 @@ func ConvertTagData(data TagData) (nfc.Tag, error) {
 		scannedAt:    data.ScannedAt,
 		sourceDevice: data.DeviceID,
 		declaredCaps: data.Capabilities,
+		writer:       writer,
 	}
 
 	return tag, nil

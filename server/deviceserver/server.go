@@ -58,6 +58,10 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 	if config.DeviceManager != nil {
 		s.deviceHandler = NewDeviceHandler(config.DeviceManager, bridge, config.AllowedOrigins)
 		s.deviceHandler.Register(s)
+
+		// Give tags produced by the manager a route back to their device, so
+		// they can report and perform writes rather than looking read-only.
+		config.DeviceManager.SetTagWriter(s.deviceHandler)
 	}
 
 	return s

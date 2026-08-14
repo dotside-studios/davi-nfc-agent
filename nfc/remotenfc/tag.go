@@ -11,9 +11,9 @@ import (
 
 // Tag wraps mobile app NFC data in the nfc.Tag interface.
 //
-// Smartphone tags are read-only (writes go through the WebSocket protocol, not
-// the Tag interface), so the connection, write, transceive, and lock methods are
-// inherited from nfc.BaseTag as no-ops / "not supported".
+// Writes and locks route back to the device holding the tag when it declared
+// support for them. Connection and transceive methods are inherited from
+// nfc.BaseTag as no-ops / "not supported".
 type Tag struct {
 	nfc.BaseTag
 
@@ -26,6 +26,7 @@ type Tag struct {
 	scannedAt    time.Time
 	sourceDevice string                    // Device ID that scanned this tag
 	declaredCaps *protocol.TagCapabilities // What the device reported, if anything
+	writer       TagWriter                 // Route to the holding device; nil when unavailable
 	mu           sync.RWMutex
 }
 
@@ -45,12 +46,12 @@ func (t *Tag) NumericType() int {
 	return 0
 }
 
-// Capabilities returns the capabilities of this smartphone tag, starting from
-// whatever the device declared for it.
+// Capabilities returns the capabilities of this smartphone tag, combining what
+// the device declared for the tag with what the bridge can actually route.
 //
-// The operation bits are forced off regardless of the declaration: writes and
-// transceives still route through the device WebSocket protocol rather than the
-// Tag interface, so claiming them here would be capability drift.
+// An operation is reported as available only when the tag supports it, the
+// device declared it, and the device is still connected — a capability that
+// outlives its session would be a promise the Tag cannot keep.
 func (t *Tag) Capabilities() nfc.TagCapabilities {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -71,11 +72,74 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	}
 
 	caps.CanRead = true
-	caps.CanWrite = false
+	caps.CanWrite = t.canWrite()
+	caps.CanLock = t.canLock()
+
+	// Raw exchange has no route to the device yet.
 	caps.CanTransceive = false
-	caps.CanLock = false
 
 	return caps
+}
+
+// canWrite reports whether a write would actually reach the tag. Callers must
+// hold at least a read lock.
+func (t *Tag) canWrite() bool {
+	if t.writer == nil || t.declaredCaps == nil || !t.declaredCaps.CanWrite {
+		return false
+	}
+	if t.declaredCaps.IsReadOnly {
+		return false
+	}
+	return t.writer.DeviceCanWrite(t.sourceDevice)
+}
+
+func (t *Tag) canLock() bool {
+	if t.writer == nil || t.declaredCaps == nil || !t.declaredCaps.CanLock {
+		return false
+	}
+	if t.declaredCaps.IsReadOnly {
+		return false
+	}
+	return t.writer.DeviceCanLock(t.sourceDevice)
+}
+
+// WriteData writes an encoded NDEF message to the tag through the device
+// holding it.
+func (t *Tag) WriteData(data []byte) error {
+	t.mu.RLock()
+	writer, deviceID, uid, ok := t.writer, t.sourceDevice, t.uid, t.canWrite()
+	t.mu.RUnlock()
+
+	if !ok {
+		return nfc.NewNotSupportedError("WriteData")
+	}
+	return writer.WriteTag(deviceID, uid, data, nfc.WriteOptions{Overwrite: true, Index: -1})
+}
+
+// IsWritable reports whether the tag can currently be written.
+func (t *Tag) IsWritable() (bool, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.canWrite(), nil
+}
+
+// CanMakeReadOnly reports whether the tag can be locked through its device.
+func (t *Tag) CanMakeReadOnly() (bool, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.canLock(), nil
+}
+
+// MakeReadOnly permanently locks the tag through the device holding it.
+func (t *Tag) MakeReadOnly() error {
+	t.mu.RLock()
+	writer, deviceID, uid, ok := t.writer, t.sourceDevice, t.uid, t.canLock()
+	t.mu.RUnlock()
+
+	if !ok {
+		return nfc.NewNotSupportedError("MakeReadOnly")
+	}
+	return writer.LockTag(deviceID, uid)
 }
 
 // ReadData returns the tag data (NDEF or raw).

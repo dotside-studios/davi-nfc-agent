@@ -21,6 +21,7 @@ type Manager struct {
 	closed            bool               // Whether Close() has been called
 	dataChan          chan nfc.NFCData   // Channel for broadcasting tag data to server
 	deviceChangeChan  chan struct{}      // Channel for device registration/unregistration events
+	tagWriter         TagWriter          // Route for writes back to devices; nil until wired
 }
 
 // NewManager creates a new smartphone manager.
@@ -157,7 +158,11 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	}
 
 	// Convert tag data to internal format
-	tag, err := ConvertTagData(tagData)
+	m.mu.RLock()
+	writer := m.tagWriter
+	m.mu.RUnlock()
+
+	tag, err := ConvertTagDataWithWriter(tagData, writer)
 	if err != nil {
 		return fmt.Errorf("failed to convert tag data: %w", err)
 	}
@@ -174,6 +179,14 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	device.UpdateLastSeen()
 
 	return nil
+}
+
+// SetTagWriter wires the route used to write and lock tags held by devices.
+// Tags produced after this call can report and perform those operations.
+func (m *Manager) SetTagWriter(writer TagWriter) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tagWriter = writer
 }
 
 // Data returns a channel that provides NFCData as tags are scanned.

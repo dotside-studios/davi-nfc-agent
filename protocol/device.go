@@ -97,6 +97,35 @@ type DeviceWriteRequest struct {
 	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
+// DeviceTransceiveRequest asks a device to exchange raw data with the tag it is
+// holding.
+//
+// There is deliberately no connect/disconnect pair around this: a tag session
+// is already delimited by the tagScanned and tagRemoved events, and on phones
+// the OS owns the session anyway.
+type DeviceTransceiveRequest struct {
+	RequestID string `json:"requestID"`
+	DeviceID  string `json:"deviceID"`
+	TagUID    string `json:"tagUID,omitempty"` // Report TAG_REMOVED if a different tag is present
+	Data      []byte `json:"data"`             // Command bytes, base64 in transit
+
+	// Raw selects framing-level exchange (Android NfcA.transceive, PN532
+	// InCommunicateThru) over APDU-level (IsoDep.transceive, InDataExchange).
+	Raw bool `json:"raw,omitempty"`
+
+	// TimeoutMS bounds this single exchange on the device.
+	TimeoutMS int `json:"timeoutMs,omitempty"`
+}
+
+// DeviceTransceiveResponse carries the tag's reply.
+type DeviceTransceiveResponse struct {
+	RequestID string    `json:"requestID"`
+	Success   bool      `json:"success"`
+	Data      []byte    `json:"data,omitempty"` // Response bytes, base64 in transit
+	Error     string    `json:"error,omitempty"`
+	ErrorCode ErrorCode `json:"errorCode,omitempty"`
+}
+
 // DeviceWriteResponse is sent by a device after a write operation.
 type DeviceWriteResponse struct {
 	RequestID string    `json:"requestID"`

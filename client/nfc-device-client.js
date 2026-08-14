@@ -107,6 +107,7 @@ class NFCDeviceClient {
     this.eventHandlers = {
       registered: [],
       writeRequest: [],
+      transceiveRequest: [],
       connected: [],
       disconnected: [],
       error: []
@@ -115,7 +116,7 @@ class NFCDeviceClient {
 
   /**
    * Registers an event handler
-   * @param {string} event - Event name: 'registered', 'writeRequest', 'connected', 'disconnected', 'error'
+   * @param {string} event - Event name: 'registered', 'writeRequest', 'transceiveRequest', 'connected', 'disconnected', 'error'
    * @param {Function} handler - Callback function
    */
   on(event, handler) {
@@ -420,6 +421,16 @@ class NFCDeviceClient {
           idempotencyKey: payload.idempotencyKey
         });
         break;
+      case 'deviceTransceiveRequest':
+        this._emit('transceiveRequest', {
+          requestID: payload.requestID,
+          deviceID: payload.deviceID,
+          tagUID: payload.tagUID,
+          data: payload.data,
+          raw: payload.raw === true,
+          timeoutMs: payload.timeoutMs
+        });
+        break;
       case 'error':
         this._emit('error', {
           error: new Error(error),
@@ -575,6 +586,31 @@ class NFCDeviceClient {
     };
 
     this._send(message);
+  }
+
+  /**
+   * Respond to a transceive request from the server.
+   * @param {string} requestID - The request ID from the transceive request
+   * @param {boolean} success - Whether the exchange succeeded
+   * @param {string} [data] - Base64 response bytes from the tag
+   * @param {string} [error] - Error message if unsuccessful
+   * @param {string} [errorCode] - Wire error code, e.g. 'TAG_REMOVED'
+   */
+  async respondToTransceive(requestID, success, data = '', error = '', errorCode = '') {
+    if (!this.connected) {
+      throw new Error('Not connected to server');
+    }
+
+    this._send({
+      type: 'deviceTransceiveResponse',
+      payload: {
+        requestID: requestID,
+        success: success,
+        ...(data ? { data } : {}),
+        ...(error ? { error } : {}),
+        ...(errorCode ? { errorCode } : {})
+      }
+    });
   }
 
   /**

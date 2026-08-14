@@ -288,6 +288,57 @@ report the previous outcome rather than write again. The same request can arrive
 twice — the agent sends a write, the device applies it, and the response is lost
 to a dropped connection. Without the check, the retry writes a second time.
 
+#### Transceive Request
+
+The agent asks the device to exchange raw data with the tag it is holding. Sent
+only to devices that declared `canTransceive`, and only for tags that support
+it — the NDEF path handles ordinary reads and writes.
+
+```json
+{
+  "type": "deviceTransceiveRequest",
+  "payload": {
+    "requestID": "req_abc",
+    "deviceID": "dev_abc123",
+    "tagUID": "04:A1:B2:C3",
+    "data": "AKQEAA==",
+    "raw": false,
+    "timeoutMs": 5000
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `data` | Command bytes, base64 in transit |
+| `raw` | `false` for APDU-level exchange (`IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange`); `true` for framing-level (`NfcA.transceive`, PN532 `InCommunicateThru`) |
+| `tagUID` | UID the agent expects in the field. Report `TAG_REMOVED` if a different tag is present |
+| `timeoutMs` | Bound for this single exchange |
+
+Respond with `deviceTransceiveResponse`:
+
+```json
+{
+  "type": "deviceTransceiveResponse",
+  "payload": {
+    "requestID": "req_abc",
+    "success": true,
+    "data": "kAA="
+  }
+}
+```
+
+There is no connect/disconnect pair around a transceive: a tag session is
+already delimited by `tagScanned` and `tagRemoved`, and on phones the OS owns
+the session.
+
+**This costs one network round trip per command.** Reading NDEF off a MIFARE
+Classic 1K is ~60 exchanges — seconds of tag-in-field time over WiFi, against a
+single message on the NDEF path. Use the command channel for what genuinely
+needs it (DESFire, ISO-DEP applets, capability probing), not as a general read
+path. iOS also enforces its own session timeouts, so long sequences are more
+likely to fail there.
+
 ### mDNS Discovery
 
 The agent advertises via mDNS/Bonjour:

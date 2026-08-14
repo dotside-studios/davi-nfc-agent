@@ -21,3 +21,16 @@ type TagWriter interface {
 	// still connected.
 	DeviceCanLock(deviceID string) bool
 }
+
+// TagTransceiver is an optional extension of TagWriter for devices that can
+// exchange raw data with a tag. Tags check for it at use, so a route that
+// cannot transceive simply reports the capability as absent.
+type TagTransceiver interface {
+	// TransceiveTag sends data to the tag the device holds and returns its
+	// reply. raw selects framing-level exchange over APDU-level.
+	TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error)
+
+	// DeviceCanTransceive reports whether the device declared APDU-level
+	// exchange and is still connected.
+	DeviceCanTransceive(deviceID string) bool
+}

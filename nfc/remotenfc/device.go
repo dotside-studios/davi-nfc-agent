@@ -115,7 +115,19 @@ func (d *Device) SupportsEvents() bool {
 	return true
 }
 
-// Transceive is not directly applicable for smartphones.
+// SupportsTransceive reports device-level transceive, which remains
+// unsupported (implements nfc.DeviceTransceiver).
+//
+// A device may well declare CanTransceive, but that capability is exercised
+// against a specific tag and is reported by remotenfc.Tag. Device-level
+// transceive has no tag to address, so declaring it here would promise
+// something Transceive below cannot do.
+func (d *Device) SupportsTransceive() bool {
+	return false
+}
+
+// Transceive is not directly applicable for smartphones. Raw exchange with a
+// scanned tag goes through remotenfc.Tag.Transceive.
 func (d *Device) Transceive(txData []byte) ([]byte, error) {
 	return nil, nfc.NewNotSupportedError("Transceive")
 }

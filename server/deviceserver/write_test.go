@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -254,5 +255,158 @@ func TestTagRemovalClearsWriteTarget(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("write request was neither routed nor refused")
+	}
+}
+
+// awaitTag returns the tag the agent built from a device's scan, which is what
+// internal consumers operate on.
+func awaitTag(t *testing.T, bridge *server.ServerBridge) nfc.Tag {
+	t.Helper()
+
+	select {
+	case data := <-bridge.TagData:
+		if data.Card == nil {
+			t.Fatal("bridge delivered no card")
+		}
+		return data.Card.GetUnderlyingTag()
+	case <-time.After(3 * time.Second):
+		t.Fatal("scanned tag never reached the bridge")
+		return nil
+	}
+}
+
+// scanCapableTag reports a tag whose device declared write and transceive, and
+// returns the resulting Tag.
+func scanCapableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, deviceID string) nfc.Tag {
+	t.Helper()
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeTagScanned,
+		Payload: map[string]any{
+			"deviceID":   deviceID,
+			"uid":        "04:A1:B2:C3",
+			"technology": "ISO14443A",
+			"type":       "Type4",
+			"capabilities": map[string]any{
+				"canTransceive": true,
+				"canWrite":      true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("write tagScanned: %v", err)
+	}
+
+	return awaitTag(t, bridge)
+}
+
+func TestTransceiveRoundTrip(t *testing.T) {
+	url, bridge := newWriteTestServer(t)
+
+	conn, deviceID := registerCapableV1(t, url)
+	tag := scanCapableTag(t, conn, bridge, deviceID)
+
+	if !nfc.GetTagCapabilities(tag).CanTransceive {
+		t.Fatal("tag does not report transceive despite device and tag declaring it")
+	}
+
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		data, err := tag.Transceive([]byte{0x00, 0xA4, 0x04, 0x00})
+		done <- result{data, err}
+	}()
+
+	// The device receives the exchange and answers it.
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var req protocol.WebSocketRequest
+	for {
+		if err := conn.ReadJSON(&req); err != nil {
+			t.Fatalf("read device message: %v", err)
+		}
+		if req.Type == protocol.WSTypeDeviceTransceiveRequest {
+			break
+		}
+	}
+
+	if raw, _ := req.Payload["raw"].(bool); raw {
+		t.Error("Tag.Transceive requested raw framing, want APDU-level")
+	}
+	if got, _ := req.Payload["tagUID"].(string); got != "04:A1:B2:C3" {
+		t.Errorf("tagUID = %q, want the scanned UID", got)
+	}
+
+	requestID, _ := req.Payload["requestID"].(string)
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeDeviceTransceiveResponse,
+		Payload: map[string]any{
+			"requestID": requestID,
+			"success":   true,
+			// 0x9000 — ISO 7816 success.
+			"data": []byte{0x90, 0x00},
+		},
+	}); err != nil {
+		t.Fatalf("write transceive response: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Transceive: %v", r.err)
+		}
+		if len(r.data) != 2 || r.data[0] != 0x90 || r.data[1] != 0x00 {
+			t.Errorf("response = %v, want 9000", r.data)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("transceive never completed")
+	}
+}
+
+// A device reporting a failure yields a typed error carrying the code it sent.
+func TestTransceiveFailureKeepsCode(t *testing.T) {
+	url, bridge := newWriteTestServer(t)
+
+	conn, deviceID := registerCapableV1(t, url)
+	tag := scanCapableTag(t, conn, bridge, deviceID)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := tag.Transceive([]byte{0x00})
+		done <- err
+	}()
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var req protocol.WebSocketRequest
+	for {
+		if err := conn.ReadJSON(&req); err != nil {
+			t.Fatalf("read device message: %v", err)
+		}
+		if req.Type == protocol.WSTypeDeviceTransceiveRequest {
+			break
+		}
+	}
+
+	requestID, _ := req.Payload["requestID"].(string)
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeDeviceTransceiveResponse,
+		Payload: map[string]any{
+			"requestID": requestID,
+			"success":   false,
+			"error":     "tag left the field",
+			"errorCode": string(protocol.ErrCodeTagRemoved),
+		},
+	}); err != nil {
+		t.Fatalf("write transceive response: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if !nfc.IsTagRemovedError(err) {
+			t.Errorf("error = %v, want the device's TAG_REMOVED to survive", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("transceive never completed")
 	}
 }

@@ -342,3 +342,34 @@ func TestDisconnectReasonExpected(t *testing.T) {
 		t.Error("a dropped connection is not an expected departure")
 	}
 }
+
+// registerCapableV1 registers a device declaring write and transceive support.
+func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
+	t.Helper()
+
+	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeHello,
+		Payload: map[string]any{
+			"protocolVersion": protocol.DeviceProtocolV1,
+			"deviceName":      "Capable Device",
+			"platform":        "android",
+			"capabilities": map[string]any{
+				"canRead":       true,
+				"canWrite":      true,
+				"canTransceive": true,
+				"canLock":       true,
+				"nfcType":       "nfca",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	_, payload := readResponse(t, conn)
+	deviceID, _ := payload["deviceID"].(string)
+	if deviceID == "" {
+		t.Fatal("registration returned no deviceID")
+	}
+	return conn, deviceID
+}

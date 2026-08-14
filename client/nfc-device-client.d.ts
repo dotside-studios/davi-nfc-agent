@@ -259,6 +259,42 @@ export interface WriteRequestEvent {
 }
 
 /**
+ * Raw exchange requested by the agent
+ */
+export interface TransceiveRequestEvent {
+  /**
+   * Unique request ID for correlation
+   */
+  requestID: string;
+
+  /**
+   * Target device ID
+   */
+  deviceID: string;
+
+  /**
+   * UID of the tag the agent expects to be in the field
+   */
+  tagUID?: string;
+
+  /**
+   * Command bytes to send to the tag, base64 in transit
+   */
+  data: string;
+
+  /**
+   * Framing-level exchange (NfcA.transceive) rather than APDU-level
+   * (IsoDep.transceive)
+   */
+  raw: boolean;
+
+  /**
+   * Bound for this single exchange, in milliseconds
+   */
+  timeoutMs?: number;
+}
+
+/**
  * Tag data for scan events
  */
 export interface DeviceTagData {
@@ -378,6 +414,7 @@ export interface DeviceErrorEvent {
  */
 export type RegisteredHandler = (event: RegisteredEvent) => void;
 export type WriteRequestHandler = (event: WriteRequestEvent) => void;
+export type TransceiveRequestHandler = (event: TransceiveRequestEvent) => void;
 export type DeviceConnectedHandler = (event: DeviceConnectedEvent) => void;
 export type DeviceDisconnectedHandler = () => void;
 export type DeviceErrorHandler = (error: DeviceErrorEvent) => void;
@@ -385,13 +422,14 @@ export type DeviceErrorHandler = (error: DeviceErrorEvent) => void;
 /**
  * Event name types
  */
-export type DeviceEventName = 'registered' | 'writeRequest' | 'connected' | 'disconnected' | 'error';
+export type DeviceEventName = 'registered' | 'writeRequest' | 'transceiveRequest' | 'connected' | 'disconnected' | 'error';
 
 /**
  * Event handler type map
  */
 export interface DeviceEventHandlerMap {
   registered: RegisteredHandler;
+  transceiveRequest: TransceiveRequestHandler;
   writeRequest: WriteRequestHandler;
   connected: DeviceConnectedHandler;
   disconnected: DeviceDisconnectedHandler;
@@ -509,6 +547,17 @@ export class NFCDeviceClient {
    *   'TAG_REMOVED') so the agent can classify the failure
    */
   respondToWrite(requestID: string, success: boolean, error?: string, errorCode?: string): Promise<void>;
+
+  /**
+   * Respond to a transceive request from the server
+   *
+   * @param requestID - The request ID from the transceive request
+   * @param success - Whether the exchange succeeded
+   * @param data - Base64 response bytes from the tag
+   * @param error - Error message if unsuccessful
+   * @param errorCode - Wire error code (e.g. 'TAG_REMOVED')
+   */
+  respondToTransceive(requestID: string, success: boolean, data?: string, error?: string, errorCode?: string): Promise<void>;
 
   /**
    * Get the assigned device ID

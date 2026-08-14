@@ -254,3 +254,94 @@ func TestDeviceCapabilityFallbacks(t *testing.T) {
 		t.Errorf("SupportedTagTypes = %v, want [corenfc]", got)
 	}
 }
+
+// transceivingWriter also routes raw exchanges.
+type transceivingWriter struct {
+	stubWriter
+	canTransceive bool
+	sent          []byte
+	raw           bool
+	reply         []byte
+}
+
+func (w *transceivingWriter) TransceiveTag(_, _ string, data []byte, raw bool) ([]byte, error) {
+	if w.err != nil {
+		return nil, w.err
+	}
+	w.sent = data
+	w.raw = raw
+	return w.reply, nil
+}
+
+func (w *transceivingWriter) DeviceCanTransceive(string) bool { return w.canTransceive }
+
+func TestTagTransceivesThroughDevice(t *testing.T) {
+	writer := &transceivingWriter{canTransceive: true, reply: []byte{0x90, 0x00}}
+	tag := declaredTag(t, &protocol.TagCapabilities{CanTransceive: true}, writer)
+
+	if !nfc.GetTagCapabilities(tag).CanTransceive {
+		t.Fatal("CanTransceive = false for a device that declared it")
+	}
+
+	resp, err := tag.Transceive([]byte{0x00, 0xA4, 0x04, 0x00})
+	if err != nil {
+		t.Fatalf("Transceive: %v", err)
+	}
+	if len(resp) != 2 || resp[0] != 0x90 {
+		t.Errorf("response = %v, want the device's reply", resp)
+	}
+	if len(writer.sent) != 4 {
+		t.Errorf("device received %v, want the command bytes", writer.sent)
+	}
+	if writer.raw {
+		t.Error("Tag.Transceive should request APDU-level exchange, not raw framing")
+	}
+}
+
+// A route with no transceive support reports the capability as absent rather
+// than failing at call time.
+func TestTagWithoutTransceiveRoute(t *testing.T) {
+	writer := &stubWriter{canWrite: true}
+	tag := declaredTag(t, &protocol.TagCapabilities{CanTransceive: true}, writer)
+
+	if nfc.GetTagCapabilities(tag).CanTransceive {
+		t.Error("CanTransceive = true for a route that cannot transceive")
+	}
+	if _, err := tag.Transceive([]byte{0x00}); !nfc.IsNotSupportedError(err) {
+		t.Errorf("Transceive error = %v, want a not-supported error", err)
+	}
+}
+
+// A device that declared transceive but has since disconnected must stop
+// advertising it.
+func TestTagTransceiveStopsWhenDeviceGone(t *testing.T) {
+	writer := &transceivingWriter{canTransceive: false}
+	tag := declaredTag(t, &protocol.TagCapabilities{CanTransceive: true}, writer)
+
+	if nfc.GetTagCapabilities(tag).CanTransceive {
+		t.Error("transceive capability outlived the device session")
+	}
+	if _, err := tag.Transceive([]byte{0x00}); !nfc.IsNotSupportedError(err) {
+		t.Errorf("Transceive error = %v, want a not-supported error", err)
+	}
+}
+
+// Device-level transceive stays unsupported, and says so explicitly rather
+// than relying on the event-based default.
+func TestDeviceLevelTransceiveUnsupported(t *testing.T) {
+	dev := NewDevice("dev3", DeviceRegistrationRequest{
+		DeviceName:   "Capable Reader",
+		Platform:     "android",
+		Capabilities: DeviceCapabilities{CanTransceive: true, NFCType: "nfca"},
+	})
+
+	if dev.SupportsTransceive() {
+		t.Error("SupportsTransceive = true but Device.Transceive cannot address a tag")
+	}
+	if caps := nfc.GetDeviceCapabilities(dev); caps.CanTransceive {
+		t.Error("device capabilities claim transceive")
+	}
+	if _, err := dev.Transceive([]byte{0x00}); !nfc.IsNotSupportedError(err) {
+		t.Errorf("Transceive error = %v, want a not-supported error", err)
+	}
+}

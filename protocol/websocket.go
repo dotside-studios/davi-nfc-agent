@@ -19,8 +19,10 @@ const (
 	WSTypeTagScanned             = "tagScanned"
 	WSTypeTagRemoved             = "tagRemoved"
 	WSTypeDeviceHeartbeat        = "deviceHeartbeat"
-	WSTypeDeviceWriteRequest     = "deviceWriteRequest"
-	WSTypeDeviceWriteResponse    = "deviceWriteResponse"
+	WSTypeDeviceWriteRequest      = "deviceWriteRequest"
+	WSTypeDeviceWriteResponse     = "deviceWriteResponse"
+	WSTypeDeviceTransceiveRequest = "deviceTransceiveRequest"
+	WSTypeDeviceTransceiveResponse = "deviceTransceiveResponse"
 )
 
 // WebSocketMessage is the generic message envelope for WebSocket communication.

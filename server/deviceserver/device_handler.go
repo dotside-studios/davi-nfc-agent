@@ -22,10 +22,21 @@ import (
 // waiting much longer than this reports a stale result.
 const DeviceWriteTimeout = 20 * time.Second
 
-// pendingWrite is an in-flight write awaiting a device's response.
-type pendingWrite struct {
+// DeviceTransceiveTimeout bounds a single raw exchange. It is far shorter than
+// a write because a transceive is one command round trip, and a sequence of
+// them has to fit inside the time a user holds a tag against the device.
+const DeviceTransceiveTimeout = 5 * time.Second
+
+// pendingRequest is an in-flight request awaiting a device's response. The
+// payload is carried untyped so writes and transceives share one waiter.
+type pendingRequest struct {
 	deviceID string
-	respCh   chan protocol.DeviceWriteResponse
+	respCh   chan pendingResult
+}
+
+type pendingResult struct {
+	payload map[string]any
+	err     error
 }
 
 // activeTag records which device currently holds a tag in its field, so a write
@@ -44,8 +55,8 @@ type DeviceHandler struct {
 	connToDeviceID    map[*server.SafeConn]string // reverse lookup: conn -> deviceID
 	upgrader          websocket.Upgrader
 
-	pendingWrites    map[string]pendingWrite // requestID -> waiter
-	pendingWritesMux sync.Mutex
+	pending    map[string]pendingRequest // requestID -> waiter
+	pendingMux sync.Mutex
 
 	active    activeTag
 	activeMux sync.RWMutex
@@ -59,7 +70,7 @@ func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, a
 		bridge:         bridge,
 		deviceSessions: make(map[string]*server.SafeConn),
 		connToDeviceID: make(map[*server.SafeConn]string),
-		pendingWrites:  make(map[string]pendingWrite),
+		pending:        make(map[string]pendingRequest),
 		upgrader: websocket.Upgrader{
 			CheckOrigin:  server.CheckOrigin(allowedOrigins),
 			Subprotocols: protocol.DeviceSubprotocols,
@@ -193,8 +204,8 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 				reason = protocol.DisconnectGoodbye
 				h.handleGoodbye(conn, deviceID, wsRequest)
 				return
-			case protocol.WSTypeDeviceWriteResponse:
-				handlerErr = h.handleWriteResponse(deviceID, wsRequest)
+			case protocol.WSTypeDeviceWriteResponse, protocol.WSTypeDeviceTransceiveResponse:
+				handlerErr = h.handleDeviceResponse(deviceID, wsRequest)
 			default:
 				log.Printf("[device] Unknown message type: %s", wsRequest.Type)
 				h.sendError(conn, wsRequest.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", wsRequest.Type))
@@ -462,6 +473,37 @@ func (h *DeviceHandler) LockTag(deviceID, tagUID string) error {
 	return nil
 }
 
+// TransceiveTag implements remotenfc.TagTransceiver.
+func (h *DeviceHandler) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+	resp, err := h.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
+		RequestID: uuid.NewString(),
+		TagUID:    tagUID,
+		Data:      data,
+		Raw:       raw,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.Success {
+		message := resp.Error
+		if message == "" {
+			message = "device reported the exchange failed"
+		}
+		return nil, &nfc.NFCError{
+			Code:    nfc.InternalErrorCode(resp.ErrorCode, nfc.ErrCodeTransceiveFailed),
+			Op:      "Transceive",
+			TagUID:  tagUID,
+			Message: message,
+		}
+	}
+	return resp.Data, nil
+}
+
+// DeviceCanTransceive implements remotenfc.TagTransceiver.
+func (h *DeviceHandler) DeviceCanTransceive(deviceID string) bool {
+	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanTransceive })
+}
+
 // DeviceCanWrite implements remotenfc.TagWriter.
 func (h *DeviceHandler) DeviceCanWrite(deviceID string) bool {
 	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanWrite })
@@ -543,87 +585,123 @@ func (h *DeviceHandler) clearActiveTag(deviceID, uid string) {
 	h.active = activeTag{}
 }
 
-// WriteToDevice asks a device to write a tag and waits for its outcome.
-func (h *DeviceHandler) WriteToDevice(deviceID string, req protocol.DeviceWriteRequest) (protocol.DeviceWriteResponse, error) {
-	respCh := make(chan protocol.DeviceWriteResponse, 1)
+// request sends a message to a device and waits for the matching response,
+// bounded by timeout. Writes and transceives share this path.
+func (h *DeviceHandler) request(deviceID, requestID, msgType string, payload any, timeout time.Duration) (map[string]any, error) {
+	respCh := make(chan pendingResult, 1)
 
-	h.pendingWritesMux.Lock()
-	h.pendingWrites[req.RequestID] = pendingWrite{deviceID: deviceID, respCh: respCh}
-	h.pendingWritesMux.Unlock()
+	h.pendingMux.Lock()
+	h.pending[requestID] = pendingRequest{deviceID: deviceID, respCh: respCh}
+	h.pendingMux.Unlock()
 
 	defer func() {
-		h.pendingWritesMux.Lock()
-		delete(h.pendingWrites, req.RequestID)
-		h.pendingWritesMux.Unlock()
+		h.pendingMux.Lock()
+		delete(h.pending, requestID)
+		h.pendingMux.Unlock()
 	}()
 
-	req.DeviceID = deviceID
 	if err := h.SendToDevice(deviceID, protocol.WebSocketMessage{
-		ID:      req.RequestID,
-		Type:    protocol.WSTypeDeviceWriteRequest,
-		Payload: req,
+		ID:      requestID,
+		Type:    msgType,
+		Payload: payload,
 	}); err != nil {
-		return protocol.DeviceWriteResponse{}, err
+		return nil, err
 	}
 
 	select {
-	case resp := <-respCh:
-		return resp, nil
-	case <-time.After(DeviceWriteTimeout):
-		return protocol.DeviceWriteResponse{}, fmt.Errorf("device %s did not respond within %s", deviceID, DeviceWriteTimeout)
+	case result := <-respCh:
+		return result.payload, result.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("device %s did not respond within %s", deviceID, timeout)
 	}
 }
 
-// handleWriteResponse delivers a device's write outcome to whoever is waiting.
-func (h *DeviceHandler) handleWriteResponse(deviceID string, req protocol.WebSocketRequest) error {
+// WriteToDevice asks a device to write a tag and waits for its outcome.
+func (h *DeviceHandler) WriteToDevice(deviceID string, req protocol.DeviceWriteRequest) (protocol.DeviceWriteResponse, error) {
+	req.DeviceID = deviceID
+
+	payload, err := h.request(deviceID, req.RequestID, protocol.WSTypeDeviceWriteRequest, req, DeviceWriteTimeout)
+	if err != nil {
+		return protocol.DeviceWriteResponse{}, err
+	}
+
 	var resp protocol.DeviceWriteResponse
-	if err := decodePayload(req.Payload, &resp); err != nil {
-		return fmt.Errorf("failed to parse write response: %w", err)
+	if err := decodePayload(payload, &resp); err != nil {
+		return protocol.DeviceWriteResponse{}, fmt.Errorf("failed to parse write response: %w", err)
+	}
+	return resp, nil
+}
+
+// TransceiveWithDevice sends a raw exchange to the tag a device is holding.
+func (h *DeviceHandler) TransceiveWithDevice(deviceID string, req protocol.DeviceTransceiveRequest) (protocol.DeviceTransceiveResponse, error) {
+	req.DeviceID = deviceID
+	if req.TimeoutMS == 0 {
+		req.TimeoutMS = int(DeviceTransceiveTimeout / time.Millisecond)
 	}
 
-	if resp.RequestID == "" {
-		resp.RequestID = req.ID
+	// Give the device a little longer than it was told to take, so a device that
+	// honors its own deadline reports a real error rather than racing ours.
+	timeout := time.Duration(req.TimeoutMS)*time.Millisecond + time.Second
+
+	payload, err := h.request(deviceID, req.RequestID, protocol.WSTypeDeviceTransceiveRequest, req, timeout)
+	if err != nil {
+		return protocol.DeviceTransceiveResponse{}, err
 	}
 
-	h.pendingWritesMux.Lock()
-	pending, ok := h.pendingWrites[resp.RequestID]
+	var resp protocol.DeviceTransceiveResponse
+	if err := decodePayload(payload, &resp); err != nil {
+		return protocol.DeviceTransceiveResponse{}, fmt.Errorf("failed to parse transceive response: %w", err)
+	}
+	return resp, nil
+}
+
+// handleDeviceResponse delivers a device's response to whoever is waiting.
+func (h *DeviceHandler) handleDeviceResponse(deviceID string, req protocol.WebSocketRequest) error {
+	requestID, _ := req.Payload["requestID"].(string)
+	if requestID == "" {
+		requestID = req.ID
+	}
+
+	h.pendingMux.Lock()
+	pending, ok := h.pending[requestID]
 	if ok {
-		delete(h.pendingWrites, resp.RequestID)
+		delete(h.pending, requestID)
 	}
-	h.pendingWritesMux.Unlock()
+	h.pendingMux.Unlock()
 
 	if !ok {
 		// Already timed out, or a response to a request we never sent.
-		log.Printf("[device] Unmatched write response from %s: %s", deviceID, resp.RequestID)
+		log.Printf("[device] Unmatched %s from %s: %s", req.Type, deviceID, requestID)
 		return nil
 	}
 
 	// A device may only answer for its own requests.
 	if pending.deviceID != deviceID {
-		return fmt.Errorf("write response for %s came from %s", pending.deviceID, deviceID)
+		return fmt.Errorf("response for %s came from %s", pending.deviceID, deviceID)
 	}
 
-	pending.respCh <- resp
+	pending.respCh <- pendingResult{payload: req.Payload}
 	return nil
 }
 
-// failPendingWrites releases waiters blocked on a device that has gone away,
+// failPendingRequests releases waiters blocked on a device that has gone away,
 // rather than making each of them wait out the full timeout.
-func (h *DeviceHandler) failPendingWrites(deviceID string) {
-	h.pendingWritesMux.Lock()
-	defer h.pendingWritesMux.Unlock()
+func (h *DeviceHandler) failPendingRequests(deviceID string) {
+	h.pendingMux.Lock()
+	defer h.pendingMux.Unlock()
 
-	for requestID, pending := range h.pendingWrites {
+	for requestID, pending := range h.pending {
 		if pending.deviceID != deviceID {
 			continue
 		}
-		pending.respCh <- protocol.DeviceWriteResponse{
-			RequestID: requestID,
-			Success:   false,
-			Error:     "device disconnected before reporting the write outcome",
-			ErrorCode: protocol.ErrCodeDeviceGone,
+		pending.respCh <- pendingResult{
+			err: &nfc.NFCError{
+				Code:    nfc.ErrCodeTagNotConnected,
+				Op:      "request",
+				Message: "device disconnected before reporting the outcome",
+			},
 		}
-		delete(h.pendingWrites, requestID)
+		delete(h.pending, requestID)
 	}
 }
 
@@ -648,7 +726,7 @@ func (h *DeviceHandler) handleGoodbye(conn *server.SafeConn, deviceID string, re
 // handleDeviceDisconnect cleans up when a device WebSocket closes.
 func (h *DeviceHandler) handleDeviceDisconnect(deviceID string, reason protocol.DisconnectReason) {
 	h.removeDeviceSession(deviceID)
-	h.failPendingWrites(deviceID)
+	h.failPendingRequests(deviceID)
 	h.clearActiveTag(deviceID, "")
 
 	if h.manager != nil {

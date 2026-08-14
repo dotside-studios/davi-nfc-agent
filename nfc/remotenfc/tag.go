@@ -74,9 +74,7 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	caps.CanRead = true
 	caps.CanWrite = t.canWrite()
 	caps.CanLock = t.canLock()
-
-	// Raw exchange has no route to the device yet.
-	caps.CanTransceive = false
+	caps.CanTransceive = t.canTransceive()
 
 	return caps
 }
@@ -101,6 +99,36 @@ func (t *Tag) canLock() bool {
 		return false
 	}
 	return t.writer.DeviceCanLock(t.sourceDevice)
+}
+
+// canTransceive reports whether a raw exchange would reach the tag. Callers
+// must hold at least a read lock.
+func (t *Tag) canTransceive() bool {
+	if t.declaredCaps == nil || !t.declaredCaps.CanTransceive {
+		return false
+	}
+
+	tr, ok := t.writer.(TagTransceiver)
+	if !ok {
+		return false
+	}
+	return tr.DeviceCanTransceive(t.sourceDevice)
+}
+
+// Transceive exchanges raw data with the tag through the device holding it.
+//
+// This is one network round trip per command. A chatty sequence spends the
+// whole time the user is holding the tag against the device, so prefer the NDEF
+// path where it will do.
+func (t *Tag) Transceive(data []byte) ([]byte, error) {
+	t.mu.RLock()
+	writer, deviceID, uid, ok := t.writer, t.sourceDevice, t.uid, t.canTransceive()
+	t.mu.RUnlock()
+
+	if !ok {
+		return nil, nfc.NewNotSupportedError("Transceive")
+	}
+	return writer.(TagTransceiver).TransceiveTag(deviceID, uid, data, false)
 }
 
 // WriteData writes an encoded NDEF message to the tag through the device

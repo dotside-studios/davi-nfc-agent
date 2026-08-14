@@ -19,10 +19,11 @@ model.**
 
 Plus one wrong coupling and one stub:
 
-- **`nfc/capabilities.go:115-119`** — `SupportsEvents() == true` forces
-  `CanPoll: false` *and* `CanTransceive: false`. Since `remotenfc.Device`
-  returns `SupportsEvents() == true`, no remote device can ever declare
-  transceive, however capable it is. A PN532 and an iPhone are pinned to the
+- **`nfc/capabilities.go:115-124`** — `SupportsEvents() == true` defaults
+  `CanPoll` *and* `CanTransceive` to false. The `DeviceTransceiver` interface
+  does override the latter, so this is a default rather than a rule; the gap is
+  that `remotenfc.Device` does not implement it, and a capability declared over
+  the wire never reaches this code. A PN532 and an iPhone therefore land in the
   same tier as a Web NFC browser.
 - **`server/deviceserver/device_handler.go`** — `WSTypeDeviceWriteResponse`
   handling is `log.Printf("Write response received (not yet implemented)")`.
@@ -64,11 +65,17 @@ disconnect. This is MQTT's last-will idea implemented locally, not MQTT.
 
 ## Phase 2 — Decouple events from transceive, finish the write path
 
-**2.1 Break the coupling** at `nfc/capabilities.go:115-119`. `SupportsEvents()`
-should imply `CanPoll: false` only. Let `DeviceTransceiver` be authoritative for
-`CanTransceive` and default event devices to false only when they do not
-declare. Small change, and it is the precondition for Phase 3 meaning anything.
-`AssertCapabilitiesConsistent` should grow a matching check.
+**2.1 Break the coupling** — *folded into Phase 3.1.* The intent was to let a
+remote device declare transceive. But `remotenfc.Device.Transceive` returns
+`NotSupported` until the command channel exists, so declaring the capability
+first would only produce capability drift — the exact fault
+`AssertCapabilitiesConsistent` exists to catch. The declaration and the routing
+have to land together, so `remotenfc.Device` gains `DeviceTransceiver` in 3.1.
+
+The event-based default in `BuildDeviceCapabilities` is left alone: it is
+documented behavior that external implementers rely on
+(`docs/extending-nfc-support.md`), and `DeviceTransceiver` already overrides it
+for any device that wants to.
 
 **2.2 Finish `deviceWriteRequest`/`deviceWriteResponse`.** Route
 `bridge.WriteRequest` to the owning device session, correlate the response by

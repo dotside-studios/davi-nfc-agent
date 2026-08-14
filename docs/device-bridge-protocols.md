@@ -189,9 +189,129 @@ Cheap once T1 exists, because the semantics already match.
 **T4 — off-LAN relay,** only if a real requirement appears: CTAP-hybrid-shaped
 QR + tunnel, with proximity evidence, rather than an open port.
 
+See §4 for how this plan lands on embedded/DIY readers — the ordering shifts
+slightly there, and T2's credential choice changes.
+
 Explicitly not adopting: NCI (not reachable from app code on either mobile
 platform), CCID/USB-IP (wrong layer, no phone path), LLCP/SNEP (dead), Bluetooth
 SAP (SIM access, unrelated).
+
+## 4. Applicability to embedded / DIY readers (Arduino, ESP32)
+
+Everything above was framed around phones, but the same bridge is the natural
+home for handmade readers — an ESP32 with a PN532, a Pico W with a PN5180, an
+AVR with an RC522. The design holds, with three adjustments. In one respect the
+fit is *better* than phones: a PN532 can do things iOS cannot.
+
+### 4.1 Two integration paths exist today, and they are not equal
+
+- **In-process Go device** (`docs/extending-nfc-support.md`): implement
+  `Manager`/`Device`/`Tag`, register with `MultiManager`. Full capability
+  surface — `Transceive`, `WriteData`, `MakeReadOnly`, `TagCapabilities`,
+  `DeviceCapabilities`, `SupportsTransceive()`, `SupportsEvents()`. The doc
+  already sketches a serial PN532 device. Cost: the reader must hang off the
+  agent host, and adding one means recompiling the agent.
+- **Wire protocol device** (`?mode=device`): no recompile, works over the
+  network — but lands in the `remotenfc.Tag` tier, i.e. `CanWrite: false`,
+  `CanTransceive: false`, `CanLock: false`.
+
+So the T1 command channel is what unifies them: it is the difference between a
+DIY reader being a first-class device and being a UID-and-NDEF firehose.
+
+### 4.2 The wire capability model is far poorer than the internal one
+
+Internally we model capability properly — `nfc.TagCapabilities` and
+`nfc.DeviceCapabilities` carry `CanTransceive`, `CanPoll`, `SupportedTagTypes`,
+`MaxBaudRate`, `SupportsEvents`, `SupportsNDEF`, plus
+`AssertCapabilitiesConsistent` to stop the two sources of truth from drifting.
+
+On the wire, a device announces three fields:
+`{canRead, canWrite, nfcType}` (`nfc/remotenfc/protocol.go`).
+
+Phones nearly get away with that because they cluster into a couple of profiles.
+DIY readers do not — they scatter across the space, which makes the gap
+obvious. The T0 "capability-first frame" should therefore mean *project the
+existing internal structs onto the wire*, not invent a new vocabulary.
+
+### 4.3 Capability is a set, not a level
+
+| | UID / ATQA / SAK | NDEF | ISO-DEP APDU | MIFARE Classic crypto1 | Raw framing |
+|---|---|---|---|---|---|
+| MFRC522 / RC522 | yes | via firmware | no (no T=CL layer in common libs) | yes, in hardware | limited |
+| PN532 | yes | via firmware | yes (`InDataExchange`) | yes, in chip | yes (`InCommunicateThru`) |
+| PN5180 | yes (+ ISO 15693) | via firmware | yes | yes | yes |
+| iOS Core NFC | partial | yes | entitlement + declared AIDs | **no** | no |
+| Android reader mode | yes | yes | yes | yes | yes |
+| Web NFC | no | yes | no | no | no |
+
+A €4 PN532 outranks an iPhone on raw capability and is beaten by it on the NDEF
+abstraction. There is no ordering here that a "device level" enum could
+capture — which is the argument for negotiated capability sets, and for a
+separate bit for raw framing (`InCommunicateThru`-class) distinct from APDU
+transceive.
+
+### 4.4 What actually changes in the plan
+
+**TLS-PSK moves from "one option" to the preferred one (T2).** X.509 chain
+validation costs flash and RAM on an MCU; PSK ciphersuites in mbedTLS cost very
+little, and TR-03112-6 already specifies exactly that. Note the interaction with
+our auto-TLS: the CA in `m.caDir` is created once and reused, while leaf certs
+are regenerated whenever the host's IPs change (`tls/manager.go`,
+`tls/netwatch.go`). A device that pins the **CA** survives that; a device that
+pins the leaf SPKI breaks the next time the agent changes network. Firmware must
+be told to pin the CA.
+
+**Pairing must work without a screen or keypad.** The phone flow (agent shows a
+code, user types it into the phone) inverts for an Arduino. Needs: an
+agent-side pairing window (tray button, "accept new device for 60s"), with the
+device's key provisioned at flash time or through a captive-portal/serial
+config step. Same primitive, opposite direction.
+
+**A serial/USB transport should carry the same envelope.** The most common
+handmade-reader topology is a board plugged into the host, not one on WiFi. Over
+USB CDC the entire TLS/pairing/discovery layer collapses — physical attachment
+*is* the authentication — so the message envelope should be framing-agnostic
+(COBS or SLIP over serial, WebSocket over TCP). This also rescues the AVR tier,
+which cannot realistically run TLS + JSON + WebSocket in 2 KB of RAM.
+
+**Discovery needs a floor below mDNS.** ESP32 has a real mDNS stack; smaller
+targets do not. Static endpoint config, or a UDP broadcast beacon, as a fallback.
+
+### 4.5 Protocols worth adopting specifically for this class
+
+- **VPCD** gets considerably more attractive here than it was for phones. A
+  2-byte big-endian length prefix plus one-byte control codes is roughly fifty
+  lines of firmware — no JSON parser, no TLS, no WebSocket handshake. For a
+  constrained board it is the single cheapest way to be a davi device, and it
+  reuses the same agent-side code path as the phone apps. Consider promoting
+  T3 ahead of T2 if DIY readers become a priority.
+- **USB CCID** is the zero-work path: an MCU that presents as a CCID device
+  shows up as an ordinary PC/SC reader, and our existing `device_pcsc.go` path
+  consumes it with no davi-specific protocol at all. vsmartcard ships a CCID
+  emulator to build against. Worth documenting rather than implementing.
+- **MQTT** solves one thing better than we do: Last Will and Testament gives
+  broker-side death detection, which is strictly better than our 10s
+  heartbeat / 30s timeout, and MQTT 5 session expiry plus QoS 1 handles flaky
+  WiFi. Client footprint is a few KB. Cost is a broker dependency.
+- **CoAP (RFC 7252) + DTLS, with Observe (RFC 7641)** is the standards-track
+  answer for constrained devices — UDP, small, and Observe is exactly our event
+  stream. Heavier to implement agent-side and rarer in the field; worth knowing,
+  probably not worth building.
+- **ESPHome** already ships PN532 and RC522 components with its own native API
+  (protobuf + Noise). A compatibility target if consumer/Home-Assistant setups
+  matter, not a protocol to copy.
+- **Wiegand** is the incumbent in the physical-access world and what many
+  handmade badge readers emit. Not a transport for us — but it is the thing a
+  DIY device would be bridging *from*, so a device profile that only ever
+  reports a UID needs to remain first-class.
+
+### 4.6 Board tiers
+
+| Tier | Examples | Viable today |
+|---|---|---|
+| Full | ESP32 / ESP32-S3, Pico W, RP2040 + W5500 | Current protocol as-is — WiFi, mbedTLS, ArduinoJson, WebSocket, mDNS all available |
+| Tight | ESP8266 | Works; TLS is the pinch point — PSK helps materially |
+| Constrained | AVR Uno/Nano/Mega | Not over TLS+JSON+WS. Needs the serial transport, a VPCD-style binary path, or a gateway |
 
 ## References
 

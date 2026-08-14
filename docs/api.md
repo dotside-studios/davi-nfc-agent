@@ -23,6 +23,32 @@ Connect via WebSocket with device mode:
 wss://[host]:9470/ws?mode=device
 ```
 
+Device mode can equally be signalled with an `X-Device-Mode: true` header;
+either is sufficient. Without one, the same path serves the [Client API](#client-api).
+
+The scheme is `wss://` whenever the agent holds a certificate, which it does by
+default — `-auto-tls` generates and persists one. A device that hardcodes `ws://`
+cannot reach a default agent. Read `tls` from the [mDNS TXT records](#mdns-discovery)
+rather than assuming, and see [TLS & Certificates](#tls--certificates) for
+trusting the generated CA.
+
+#### Authentication
+
+The agent generates and persists an API secret on first run, so authentication
+is on by default. Pass it as `?secret=<value>` or `Authorization: Bearer <value>`:
+
+```
+wss://[host]:9470/ws?mode=device&secret=<value>
+```
+
+The secret is checked **before** the WebSocket upgrade, so a bad or missing one
+surfaces as HTTP `401 Unauthorized` on the handshake rather than as a close
+frame or an `error` message.
+
+Two cases skip the check: requests from loopback (`127.0.0.0/8`, `::1`), and an
+agent explicitly run with an empty `-api-secret`. Neither applies to a phone on
+the LAN — it must send the secret.
+
 ### Device Registration
 
 After connecting, register the device:
@@ -165,8 +191,25 @@ The agent advertises via mDNS/Bonjour:
 
 - **Service Type**: `_nfc-device._tcp`
 - **Domain**: `local.`
+- **Port**: the unified agent port (default 9470)
 
 Devices can discover the agent on the local network without knowing the IP address.
+
+TXT records:
+
+| Key | Value | Use |
+|-----|-------|-----|
+| `version` | `1.0` | TXT record schema version |
+| `protocol` | `websocket` | Wire protocol — not the URL scheme |
+| `path` | `/ws` | Client endpoint |
+| `device_path` | `/ws?mode=device` | Device endpoint, discriminator included |
+| `tls` | `true` \| `false` | Whether to dial `wss://` or `ws://` |
+| `type` | `agent` | Distinguishes the unified agent from the pre-1.0.4 device server |
+
+A device should build its URL from `tls`, the resolved address, the port, and
+`device_path`. Older agents advertise neither `tls` nor `device_path`: absent
+`tls`, try `wss://` first and fall back to `ws://`; absent `device_path`, use
+`path` and append `?mode=device`.
 
 ---
 
@@ -627,6 +670,10 @@ A bootstrap server runs on port 9472 to help devices trust the agent's certifica
 
 ## Error Codes
 
+Carried as `payload.code` on an `error` message.
+
+### Client API
+
 | Code | Description |
 |------|-------------|
 | `WRITE_FAILED` | Write operation failed |
@@ -634,3 +681,23 @@ A bootstrap server runs on port 9472 to help devices trust the agent's certifica
 | `READ_FAILED` | Failed to read card data |
 | `SESSION_LOCKED` | Another client holds the session |
 | `INVALID_REQUEST` | Malformed request |
+
+### Device API
+
+A failed API secret is not in this table — it is rejected before the upgrade, as
+HTTP `401`. See [Authentication](#authentication).
+
+Errors raised before registration completes close the connection; the device
+should reconnect and register again.
+
+| Code | Phase | Description |
+|------|-------|-------------|
+| `READ_ERROR` | registration | The registration frame could not be read |
+| `INVALID_MESSAGE_TYPE` | registration | Not a text frame, or not `registerDevice` as the first message |
+| `PARSE_ERROR` | registration | Registration frame was not valid JSON |
+| `INVALID_PAYLOAD` | registration | Registration payload did not match the schema |
+| `INVALID_REQUEST` | registration | Registration frame was structurally invalid |
+| `REGISTRATION_FAILED` | registration | Rejected — empty `deviceName`, or `platform` outside `ios` \| `android` \| `web` |
+| `INVALID_DEVICE` | steady state | `deviceID` in the payload does not match the registered device |
+| `TAG_SEND_FAILED` | steady state | Agent could not forward the scanned tag |
+| `UNKNOWN_TYPE` | steady state | Unrecognised message `type`; the connection stays open |

@@ -28,6 +28,11 @@ type Manager struct {
 	hostsFile  string
 	logger     *log.Logger
 
+	// useCA selects the local certificate authority over a self-signed leaf.
+	// Off by default: installing a CA grants it authority over every name, not
+	// just this agent, so it is something the operator opts into.
+	useCA bool
+
 	// Network change watching. mu guards the three fields below.
 	mu                sync.Mutex
 	networkChangeChan chan struct{}
@@ -51,9 +56,24 @@ func NewManager(configDir string) *Manager {
 	}
 }
 
+// UseCA selects the local certificate authority instead of a self-signed leaf,
+// installing it into the system trust store on the next generation. Browsers
+// require this (or an externally provisioned certificate); native devices do
+// not, because they pin the agent's public key instead.
+func (m *Manager) UseCA(on bool) {
+	m.useCA = on
+}
+
+// CAInstalled reports whether this agent has previously created a local CA.
+// An install that already has one keeps using it, so enabling the self-signed
+// default does not break a browser console that was working.
+func (m *Manager) CAInstalled() bool {
+	_, err := os.Stat(m.caCertFile)
+	return err == nil
+}
+
 // EnsureCertificates checks and generates certificates as needed.
 // Returns cert and key file paths, or error.
-// Installs CA if not already trusted (may prompt user for password).
 func (m *Manager) EnsureCertificates() (certFile, keyFile string, err error) {
 	// Ensure TLS directory exists with restrictive permissions.
 	if err := os.MkdirAll(m.tlsDir, 0700); err != nil {
@@ -84,7 +104,7 @@ func (m *Manager) EnsureCertificates() (certFile, keyFile string, err error) {
 	}
 
 	if needsRegeneration {
-		if err := m.generateCertificates(hosts); err != nil {
+		if err := m.generate(hosts); err != nil {
 			return "", "", err
 		}
 	} else {
@@ -165,6 +185,29 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 	// Re-apply restrictive ACL on Windows where the mode bits are advisory.
 	if err := secureFile(m.hostsFile); err != nil {
 		m.logger.Printf("Warning: failed to lock down hosts file permissions: %v", err)
+	}
+	return nil
+}
+
+// generate issues certificates by whichever route is configured.
+//
+// The CA route is used only when asked for, or when this install already has a
+// CA — an operator whose browser console works today should not lose it to a
+// changed default.
+func (m *Manager) generate(hosts []string) error {
+	if m.useCA || m.CAInstalled() {
+		return m.generateCertificates(hosts)
+	}
+
+	m.logger.Printf("Generating self-signed certificate for hosts: %v", hosts)
+	if err := m.generateSelfSigned(hosts); err != nil {
+		return err
+	}
+	if err := m.writeCachedHosts(hosts); err != nil {
+		m.logger.Printf("Warning: failed to cache hosts: %v", err)
+	}
+	if pin, err := m.PublicKeyPin(); err == nil {
+		m.logger.Printf("Agent public key pin: %s", pin)
 	}
 	return nil
 }

@@ -1,6 +1,9 @@
 package server
 
-import "github.com/dotside-studios/davi-nfc-agent/nfc"
+import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
+)
 
 // ServerBridge facilitates communication between Device and Client servers.
 // All channels are buffered to prevent blocking.
@@ -36,6 +39,10 @@ type WriteRequestMessage struct {
 	// Request contains the actual write data
 	Request WriteRequest
 
+	// IdempotencyKey identifies the logical write, so a device that already
+	// applied it can report the previous outcome instead of writing twice.
+	IdempotencyKey string
+
 	// ResponseCh receives the write result (buffered, size 1)
 	ResponseCh chan WriteResponseMessage
 }
@@ -50,6 +57,10 @@ type WriteResponseMessage struct {
 
 	// Error contains error message if Success is false
 	Error string
+
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
 
 	// Payload contains additional response data
 	Payload any
@@ -78,6 +89,10 @@ type LockResponseMessage struct {
 	// Error contains error message if Success is false
 	Error string
 
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
+
 	// Payload contains additional response data
 	Payload any
 }
@@ -105,6 +120,10 @@ type CapabilitiesResponseMessage struct {
 	// Error contains error message if Success is false
 	Error string
 
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
+
 	// Payload contains the tag capabilities (*nfc.TagCapabilities)
 	Payload any
 }
@@ -121,14 +140,14 @@ func NewServerBridge() *ServerBridge {
 	}
 }
 
-// Close signals the bridge to stop and closes all channels.
+// Close signals the bridge to stop.
+//
+// Only done is closed. Closing the data channels would race any producer
+// already inside a send — the select on done cannot prevent that, and the
+// losing goroutine panics on send to a closed channel. Consumers all exit on
+// their own context instead, so the channels are simply abandoned.
 func (b *ServerBridge) Close() {
 	close(b.done)
-	close(b.TagData)
-	close(b.WriteRequest)
-	close(b.LockRequest)
-	close(b.CapabilitiesRequest)
-	close(b.DeviceStatus)
 }
 
 // Done returns a channel that's closed when the bridge is shutting down.

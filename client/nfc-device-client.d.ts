@@ -54,6 +54,42 @@ export interface NFCDeviceClientOptions {
   nfcType?: string;
 
   /**
+   * Device supports APDU-level exchange (IsoDep.transceive, sendCommand,
+   * PN532 InDataExchange). Sent only when the agent speaks protocol v1.
+   * @default false
+   */
+  canTransceive?: boolean;
+
+  /**
+   * Device supports framing-level exchange (NfcA.transceive,
+   * PN532 InCommunicateThru).
+   * @default false
+   */
+  canTransceiveRaw?: boolean;
+
+  /**
+   * Device can make a tag read-only
+   * @default false
+   */
+  canLock?: boolean;
+
+  /**
+   * Kind of device, e.g. 'smartphone', 'pn532-serial'
+   * @default 'smartphone'
+   */
+  deviceType?: string;
+
+  /**
+   * Tag families this device handles, e.g. ['MIFARE Classic', 'NTAG']
+   */
+  supportedTagTypes?: string[];
+
+  /**
+   * Maximum baud rate in bps, for serial-attached readers
+   */
+  maxBaudRate?: number;
+
+  /**
    * Automatically send heartbeats
    * @default true
    */
@@ -106,6 +142,21 @@ export interface RegisteredEvent {
    * Server information
    */
   serverInfo: ServerInfo;
+
+  /**
+   * Negotiated bridge protocol version. 0 means the agent predates versioning.
+   */
+  protocolVersion: number;
+}
+
+/**
+ * Connection event payload
+ */
+export interface DeviceConnectedEvent {
+  /**
+   * Bridge protocol version implied by the negotiated WebSocket subprotocol.
+   */
+  protocolVersion: number;
 }
 
 /**
@@ -178,9 +229,69 @@ export interface WriteRequestEvent {
   deviceID: string;
 
   /**
-   * NDEF message to write
+   * NDEF message to write, as records. Provided for APIs like Web NFC that
+   * only accept records; prefer `ndefBytes` where the device can write raw.
    */
   ndefMessage: NDEFMessageProtocol | null;
+
+  /**
+   * The same message already encoded, base64 in transit. Authoritative where
+   * it and `ndefMessage` disagree.
+   */
+  ndefBytes?: string;
+
+  /**
+   * UID of the tag the agent expects to be in the field
+   */
+  tagUID?: string;
+
+  /**
+   * Make the tag permanently read-only after a successful write
+   */
+  lock?: boolean;
+
+  /**
+   * Identifies the logical write. If this key was already applied, report the
+   * previous outcome instead of writing again — the same request can arrive
+   * twice when a response is lost to a dropped connection.
+   */
+  idempotencyKey?: string;
+}
+
+/**
+ * Raw exchange requested by the agent
+ */
+export interface TransceiveRequestEvent {
+  /**
+   * Unique request ID for correlation
+   */
+  requestID: string;
+
+  /**
+   * Target device ID
+   */
+  deviceID: string;
+
+  /**
+   * UID of the tag the agent expects to be in the field
+   */
+  tagUID?: string;
+
+  /**
+   * Command bytes to send to the tag, base64 in transit
+   */
+  data: string;
+
+  /**
+   * Framing-level exchange (NfcA.transceive) rather than APDU-level
+   * (IsoDep.transceive)
+   */
+  raw: boolean;
+
+  /**
+   * Bound for this single exchange, in milliseconds
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -223,6 +334,42 @@ export interface DeviceTagData {
    * Raw tag data (base64 encoded)
    */
   rawData?: string | null;
+
+  /**
+   * What this tag supports, if the device knows. Omitted, the agent infers it
+   * from `type`. Requires protocol v1.
+   */
+  capabilities?: TagCapabilities;
+}
+
+/**
+ * Capabilities of a scanned tag
+ */
+export interface TagCapabilities {
+  canRead?: boolean;
+  canWrite?: boolean;
+  canTransceive?: boolean;
+  canLock?: boolean;
+  isReadOnly?: boolean;
+
+  /** Total memory in bytes */
+  memorySize?: number;
+
+  /** Maximum NDEF message size in bytes */
+  maxNdefSize?: number;
+
+  /** e.g. 'ISO14443A' */
+  technology?: string;
+
+  /** e.g. 'MIFARE Classic', 'NTAG' */
+  tagFamily?: string;
+
+  supportsNdef?: boolean;
+  supportsCrypto?: boolean;
+  supportsAuthentication?: boolean;
+
+  /** Simple password protection (NTAG PWD/PACK/AUTH0) */
+  supportsPassword?: boolean;
 }
 
 /**
@@ -240,6 +387,23 @@ export interface DeviceErrorEvent {
   code?: string;
 
   /**
+   * Whether repeating the request could plausibly succeed. False means the
+   * request was refused on its merits — malformed input, an unsupported
+   * operation, a locked tag — and resending it only wastes a round trip.
+   */
+  retryable?: boolean;
+
+  /**
+   * Operation that failed, e.g. 'WriteData'
+   */
+  op?: string;
+
+  /**
+   * Tag involved in the failure, when there is one
+   */
+  tagUID?: string;
+
+  /**
    * Phase where error occurred
    */
   phase?: 'connection' | 'websocket' | 'registration' | 'reconnection';
@@ -250,20 +414,22 @@ export interface DeviceErrorEvent {
  */
 export type RegisteredHandler = (event: RegisteredEvent) => void;
 export type WriteRequestHandler = (event: WriteRequestEvent) => void;
-export type DeviceConnectedHandler = () => void;
+export type TransceiveRequestHandler = (event: TransceiveRequestEvent) => void;
+export type DeviceConnectedHandler = (event: DeviceConnectedEvent) => void;
 export type DeviceDisconnectedHandler = () => void;
 export type DeviceErrorHandler = (error: DeviceErrorEvent) => void;
 
 /**
  * Event name types
  */
-export type DeviceEventName = 'registered' | 'writeRequest' | 'connected' | 'disconnected' | 'error';
+export type DeviceEventName = 'registered' | 'writeRequest' | 'transceiveRequest' | 'connected' | 'disconnected' | 'error';
 
 /**
  * Event handler type map
  */
 export interface DeviceEventHandlerMap {
   registered: RegisteredHandler;
+  transceiveRequest: TransceiveRequestHandler;
   writeRequest: WriteRequestHandler;
   connected: DeviceConnectedHandler;
   disconnected: DeviceDisconnectedHandler;
@@ -347,9 +513,11 @@ export class NFCDeviceClient {
   connect(): Promise<void>;
 
   /**
-   * Disconnect from the server
+   * Disconnect from the server. On protocol v1 this sends a `goodbye` first so
+   * the agent reports a deliberate departure rather than a lost device.
+   * @param reason Optional explanation recorded in the agent's logs
    */
-  disconnect(): Promise<void>;
+  disconnect(reason?: string): Promise<void>;
 
   /**
    * Send a tag scan event to the server. Call this when your NFC library detects a tag.
@@ -375,8 +543,21 @@ export class NFCDeviceClient {
    * @param requestID - The request ID from the write request
    * @param success - Whether the write was successful
    * @param error - Error message if unsuccessful
+   * @param errorCode - Wire error code (e.g. 'READ_ONLY', 'CAPACITY_EXCEEDED',
+   *   'TAG_REMOVED') so the agent can classify the failure
    */
-  respondToWrite(requestID: string, success: boolean, error?: string): Promise<void>;
+  respondToWrite(requestID: string, success: boolean, error?: string, errorCode?: string): Promise<void>;
+
+  /**
+   * Respond to a transceive request from the server
+   *
+   * @param requestID - The request ID from the transceive request
+   * @param success - Whether the exchange succeeded
+   * @param data - Base64 response bytes from the tag
+   * @param error - Error message if unsuccessful
+   * @param errorCode - Wire error code (e.g. 'TAG_REMOVED')
+   */
+  respondToTransceive(requestID: string, success: boolean, data?: string, error?: string, errorCode?: string): Promise<void>;
 
   /**
    * Get the assigned device ID

@@ -39,6 +39,18 @@ type Agent struct {
 	APISecret        string
 	ConfigDir        string // Config directory; used for persisting the API secret
 
+	// AllowedOrigins extends the same-origin policy on both WebSocket
+	// endpoints. A browser page served from anywhere other than the agent's
+	// own host:port — which is every hosted console — needs its origin listed
+	// here, or the upgrade is rejected as cross-site.
+	//
+	// Ignored when Origins is set, which is the normal path.
+	AllowedOrigins []string
+
+	// Origins is the live allowlist. Unlike AllowedOrigins it can be changed
+	// while the agent runs, and reports rejections so they can be surfaced.
+	Origins *OriginStore
+
 	// Server architecture. The device and client endpoints are served from a
 	// single listener (UnifiedServer) on DevicePort. DeviceServer and
 	// ClientServer hold the device/client logic; the unified server fronts
@@ -48,6 +60,18 @@ type Agent struct {
 	DeviceServer  *deviceserver.Server
 	ClientServer  *clientserver.Server
 	DevicePort    int // Single agent server port. Default: 9470
+
+	// PublicKeyPin identifies this agent to devices across certificate
+	// reissues, so they need no certificate authority to recognize it.
+	PublicKeyPin string
+
+	// Devices holds the paired devices and their per-device credentials.
+	Devices *DeviceRegistry
+
+	// RequirePairedDevice admits only devices holding a paired credential,
+	// withdrawing the shared secret and loopback bypass for device
+	// connections. Browser clients are unaffected.
+	RequirePairedDevice bool
 
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
@@ -259,11 +283,20 @@ func (a *Agent) startServers() error {
 		DeviceManager:    deviceManager,
 		APISecret:        a.APISecret,
 		AllowedCardTypes: a.AllowedCardTypes,
+		AllowedOrigins:   a.AllowedOrigins,
+		OriginPolicy:     a.originPolicy(),
+		PublicKeyPin:     a.PublicKeyPin,
+		TokenVerifier:    a.tokenVerifier(),
+
+		RequirePairedDevice: a.RequirePairedDevice,
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret: a.APISecret,
+		APISecret:      a.APISecret,
+		AllowedOrigins: a.AllowedOrigins,
+		OriginPolicy:   a.originPolicy(),
+		TokenVerifier:  a.tokenVerifier(),
 	}, a.Bridge)
 
 	// Single listener fronts both the device and client handlers.
@@ -345,4 +378,33 @@ func (a *Agent) CurrentDevicePath() string {
 		return a.devicePath // Return stored path if reader not started
 	}
 	return a.Reader.DevicePath()
+}
+
+// originPolicy returns the live allowlist as an origin policy, or nil to fall
+// back to the static AllowedOrigins list. Returning a typed nil would satisfy
+// the interface and defeat that fallback, so the check is explicit.
+// SetRequirePairedDevice changes the paired-device requirement on the running
+// device server, so the policy can be tried without a restart.
+func (a *Agent) SetRequirePairedDevice(on bool) {
+	a.RequirePairedDevice = on
+	if a.DeviceServer != nil {
+		a.DeviceServer.SetRequirePairedDevice(on)
+	}
+}
+
+// tokenVerifier returns the device registry as a token verifier, or nil when
+// there is none. As with originPolicy, a typed nil would satisfy the interface
+// and defeat the caller's nil check.
+func (a *Agent) tokenVerifier() server.TokenVerifier {
+	if a.Devices == nil {
+		return nil
+	}
+	return a.Devices
+}
+
+func (a *Agent) originPolicy() server.OriginPolicy {
+	if a.Origins == nil {
+		return nil
+	}
+	return a.Origins
 }

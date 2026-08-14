@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -31,6 +32,24 @@ type Server struct {
 	// Device connections (phones, etc.)
 	devices    map[*websocket.Conn]string // conn -> deviceID
 	devicesMux sync.RWMutex
+
+	// deviceHandler serves remote devices; nil when none are configured.
+	deviceHandler *DeviceHandler
+
+	// requirePaired is read on every upgrade and settable at runtime, so the
+	// policy can be tried without restarting the agent.
+	requirePaired atomic.Bool
+}
+
+// SetRequirePairedDevice turns the paired-device requirement on or off while
+// the agent runs.
+func (s *Server) SetRequirePairedDevice(on bool) {
+	s.requirePaired.Store(on)
+}
+
+// RequirePairedDevice reports whether only paired devices are admitted.
+func (s *Server) RequirePairedDevice() bool {
+	return s.requirePaired.Load()
 }
 
 // New creates a new device server instance.
@@ -40,10 +59,12 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		bridge:  bridge,
 		devices: make(map[*websocket.Conn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: server.CheckOrigin(config.AllowedOrigins),
+			CheckOrigin: originChecker(config),
 		},
 		handlerRegistry: server.NewHandlerRegistry(),
 	}
+
+	s.requirePaired.Store(config.RequirePairedDevice)
 
 	// Register NFC reader handlers (hardware NFC)
 	if config.Reader != nil {
@@ -53,8 +74,12 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 
 	// Register device handler (external devices like phones)
 	if config.DeviceManager != nil {
-		deviceHandler := NewDeviceHandler(config.DeviceManager, bridge, config.AllowedOrigins)
-		deviceHandler.Register(s)
+		s.deviceHandler = NewDeviceHandler(config.DeviceManager, bridge, config)
+		s.deviceHandler.Register(s)
+
+		// Give tags produced by the manager a route back to their device, so
+		// they can report and perform writes rather than looking read-only.
+		config.DeviceManager.SetTagWriter(s.deviceHandler)
 	}
 
 	return s
@@ -145,7 +170,12 @@ func (s *Server) Stop() {
 
 // handleWebSocket handles WebSocket connections from devices.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if !server.CheckAPISecret(w, r, s.config.APISecret) {
+	if s.requirePaired.Load() {
+		if !server.CheckPairedDevice(w, r, s.config.TokenVerifier) {
+			log.Printf("[device] Connection rejected from %s: no paired-device credential", r.RemoteAddr)
+			return
+		}
+	} else if !server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier) {
 		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}
@@ -219,13 +249,25 @@ func (s *Server) handleWriteRequests() {
 }
 
 // executeWriteRequest executes a write request from the client server.
+//
+// The hardware reader keeps priority while it actually holds a card, so mixed
+// setups behave as they always have. Otherwise the write goes to whichever
+// remote device is currently holding a tag.
 func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	reader := s.config.Reader
+
+	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+		if s.writeViaDevice(msg) {
+			return
+		}
+	}
+
 	if reader == nil {
 		msg.ResponseCh <- server.WriteResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
-			Error:     "No NFC reader available",
+			Error:     "No NFC reader or device holding a tag",
+			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
 	}
@@ -237,6 +279,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: protocol.ErrCodeInvalidRequest,
 		}
 		return
 	}
@@ -254,6 +297,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeWriteFailed),
 		}
 		return
 	}
@@ -263,6 +307,71 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 		Success:   true,
 		Payload:   result,
 	}
+}
+
+// writeViaDevice routes a write to the remote device holding a tag. It reports
+// whether it handled the request; false means no device was available and the
+// caller should fall back to the hardware reader.
+func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
+	if s.deviceHandler == nil {
+		return false
+	}
+
+	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	if !ok {
+		return false
+	}
+
+	// Encode here so the device receives exactly the message the hardware path
+	// would have written, rather than re-deriving it from records.
+	ndefMsg, err := server.BuildNDEFMessage(msg.Request)
+	if err != nil {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
+		}
+		return true
+	}
+
+	ndefBytes, err := ndefMsg.Encode()
+	if err != nil {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
+		}
+		return true
+	}
+
+	resp, err := s.deviceHandler.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+		RequestID:      msg.RequestID,
+		TagUID:         uid,
+		NDEFMessage:    server.BuildNDEFInput(msg.Request),
+		NDEFBytes:      ndefBytes,
+		Lock:           msg.Request.Lock,
+		IdempotencyKey: msg.IdempotencyKey,
+	})
+	if err != nil {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
+		}
+		return true
+	}
+
+	msg.ResponseCh <- server.WriteResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   resp.Success,
+		Error:     resp.Error,
+		ErrorCode: resp.ErrorCode,
+		Payload:   map[string]any{"uid": uid, "deviceID": deviceID},
+	}
+	return true
 }
 
 // handleLockRequests listens for make-read-only requests from the client server.
@@ -288,6 +397,7 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     "No NFC reader available",
+			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
 	}
@@ -298,6 +408,7 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeLockFailed),
 		}
 		return
 	}
@@ -332,6 +443,7 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     "No NFC reader available",
+			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
 	}
@@ -342,6 +454,7 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeCapabilitiesFailed),
 		}
 		return
 	}
@@ -351,4 +464,22 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 		Success:   true,
 		Payload:   caps,
 	}
+}
+
+// operationErrorCode classifies a reader failure, falling back to the
+// operation's own label when the error carries no code of its own.
+func operationErrorCode(err error, fallback protocol.ErrorCode) protocol.ErrorCode {
+	if payload := nfc.WireError(err); payload.Code != protocol.ErrCodeUnknownError {
+		return payload.Code
+	}
+	return fallback
+}
+
+// originChecker prefers an explicit policy over the static allowlist, so the
+// tray can admit an origin without restarting the listener.
+func originChecker(config Config) func(r *http.Request) bool {
+	if config.OriginPolicy != nil {
+		return server.CheckOriginPolicy(config.OriginPolicy)
+	}
+	return server.CheckOrigin(config.AllowedOrigins)
 }

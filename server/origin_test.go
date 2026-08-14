@@ -49,3 +49,66 @@ func httpReq(t *testing.T, host, origin string) *http.Request {
 	}
 	return r
 }
+
+// fakePolicy records what the checker asked and refused.
+type fakePolicy struct {
+	allow   map[string]bool
+	blocked []string
+}
+
+func (p *fakePolicy) Allowed(origin string) bool { return p.allow[origin] }
+func (p *fakePolicy) RecordBlocked(origin string) {
+	p.blocked = append(p.blocked, origin)
+}
+
+func TestCheckOriginPolicy(t *testing.T) {
+	policy := &fakePolicy{allow: map[string]bool{"console.example": true}}
+	fn := CheckOriginPolicy(policy)
+
+	if !fn(httpReq(t, "kiosk:9470", "https://console.example")) {
+		t.Error("an allowed origin was refused")
+	}
+	if fn(httpReq(t, "kiosk:9470", "https://evil.example")) {
+		t.Error("an unlisted origin was admitted")
+	}
+
+	// Same-host and native clients bypass the policy entirely.
+	if !fn(httpReq(t, "kiosk:9470", "http://kiosk:9470")) {
+		t.Error("same-host origin was refused")
+	}
+	if !fn(httpReq(t, "kiosk:9470", "")) {
+		t.Error("a native client with no Origin was refused")
+	}
+
+	if len(policy.blocked) != 1 || policy.blocked[0] != "evil.example" {
+		t.Errorf("blocked = %v, want [evil.example]", policy.blocked)
+	}
+}
+
+// A refused origin must be admitted once allowed, without restarting the
+// listener — that is the whole point of a policy over a static list.
+func TestCheckOriginPolicyPicksUpChanges(t *testing.T) {
+	policy := &fakePolicy{allow: map[string]bool{}}
+	fn := CheckOriginPolicy(policy)
+
+	if fn(httpReq(t, "kiosk:9470", "https://console.example")) {
+		t.Fatal("origin was admitted before being allowed")
+	}
+
+	policy.allow["console.example"] = true
+
+	if !fn(httpReq(t, "kiosk:9470", "https://console.example")) {
+		t.Error("origin still refused after being allowed")
+	}
+}
+
+func TestCheckOriginPolicyNilFallsBack(t *testing.T) {
+	fn := CheckOriginPolicy(nil)
+
+	if !fn(httpReq(t, "kiosk:9470", "http://kiosk:9470")) {
+		t.Error("same-host origin refused by the nil-policy fallback")
+	}
+	if fn(httpReq(t, "kiosk:9470", "https://evil.example")) {
+		t.Error("nil policy admitted a foreign origin")
+	}
+}

@@ -32,6 +32,37 @@ func IsLoopbackRequest(r *http.Request) bool {
 //
 // If wantSecret is empty, no auth is performed (legacy mode).
 func CheckAPISecret(w http.ResponseWriter, r *http.Request, wantSecret string) bool {
+	return CheckAuth(w, r, wantSecret, nil)
+}
+
+// TokenVerifier recognizes per-device credentials issued at pairing.
+//
+// It exists so a device can be revoked on its own: the shared secret is
+// all-or-nothing, and rotating it to remove one phone logs out every other
+// device at the same time.
+type TokenVerifier interface {
+	// VerifyToken reports whether a presented token belongs to a paired
+	// device, returning its ID for logging.
+	VerifyToken(token string) (deviceID string, ok bool)
+}
+
+// CheckAuth enforces credentials on a connection, accepting either a
+// per-device token or the shared API secret.
+//
+// Returns true if the request should proceed; if false the response has
+// already been written. The credential is read from query (?secret=) and
+// Authorization: Bearer.
+func CheckAuth(w http.ResponseWriter, r *http.Request, wantSecret string, verifier TokenVerifier) bool {
+	presented := presentedCredential(r)
+
+	// A paired device is admitted on its own credential, whatever the shared
+	// secret is set to — that is what makes per-device revocation meaningful.
+	if verifier != nil && presented != "" {
+		if _, ok := verifier.VerifyToken(presented); ok {
+			return true
+		}
+	}
+
 	if wantSecret == "" {
 		return true
 	}
@@ -39,16 +70,44 @@ func CheckAPISecret(w http.ResponseWriter, r *http.Request, wantSecret string) b
 		return true
 	}
 
-	got := r.URL.Query().Get("secret")
-	if got == "" {
-		if h := r.Header.Get("Authorization"); len(h) > 7 && h[:7] == "Bearer " {
-			got = h[7:]
-		}
-	}
-
-	if subtle.ConstantTimeCompare([]byte(got), []byte(wantSecret)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(wantSecret)) != 1 {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false
 	}
 	return true
+}
+
+// CheckPairedDevice admits only a device holding a credential issued at
+// pairing. Neither the shared secret nor the loopback bypass applies.
+//
+// This is the strict counterpart to CheckAuth, for device connections once the
+// devices that matter have paired. It is deliberately not used for browser
+// clients: a browser has no way to pair, and is gated by the origin allowlist
+// instead.
+func CheckPairedDevice(w http.ResponseWriter, r *http.Request, verifier TokenVerifier) bool {
+	if verifier == nil {
+		// Nothing can be verified, so nothing can be admitted. Failing closed
+		// is the only safe reading of "require a paired device".
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+
+	if _, ok := verifier.VerifyToken(presentedCredential(r)); ok {
+		return true
+	}
+
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	return false
+}
+
+// presentedCredential extracts the credential from the query string or an
+// Authorization header.
+func presentedCredential(r *http.Request) string {
+	if got := r.URL.Query().Get("secret"); got != "" {
+		return got
+	}
+	if h := r.Header.Get("Authorization"); len(h) > 7 && h[:7] == "Bearer " {
+		return h[7:]
+	}
+	return ""
 }

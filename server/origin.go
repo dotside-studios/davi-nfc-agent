@@ -38,11 +38,37 @@ func CheckOrigin(extraAllowed []string) func(r *http.Request) bool {
 		allowed[e] = struct{}{}
 	}
 
-	return func(r *http.Request) bool {
+	return checkOrigin(func(host string) bool {
 		if allowAny {
 			return true
 		}
+		_, ok := allowed[host]
+		return ok
+	}, nil)
+}
 
+// OriginPolicy decides whether a browser origin may connect, and is told when
+// one is refused so the caller can surface it. A rejected upgrade is otherwise
+// indistinguishable to the operator from a stopped agent.
+type OriginPolicy interface {
+	Allowed(origin string) bool
+	RecordBlocked(origin string)
+}
+
+// CheckOriginPolicy returns an origin checker backed by a policy. The empty and
+// same-host cases behave exactly as CheckOrigin; the policy decides the rest.
+func CheckOriginPolicy(policy OriginPolicy) func(r *http.Request) bool {
+	if policy == nil {
+		return CheckOrigin(nil)
+	}
+	return checkOrigin(policy.Allowed, policy.RecordBlocked)
+}
+
+// checkOrigin holds the rules shared by both constructors: no Origin means a
+// native client, same-host is always fine, and anything else is the caller's
+// decision.
+func checkOrigin(allowed func(host string) bool, onReject func(origin string)) func(r *http.Request) bool {
+	return func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
 			// No Origin header — almost certainly a native client.
@@ -52,6 +78,9 @@ func CheckOrigin(extraAllowed []string) func(r *http.Request) bool {
 
 		u, err := url.Parse(origin)
 		if err != nil {
+			if onReject != nil {
+				onReject(origin)
+			}
 			return false
 		}
 
@@ -61,9 +90,12 @@ func CheckOrigin(extraAllowed []string) func(r *http.Request) bool {
 			return true
 		}
 
-		// Allowlist match.
-		if _, ok := allowed[u.Host]; ok {
+		if allowed(u.Host) {
 			return true
+		}
+
+		if onReject != nil {
+			onReject(u.Host)
 		}
 		return false
 	}

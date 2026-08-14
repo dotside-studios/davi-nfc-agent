@@ -3,10 +3,26 @@ package protocol
 import "time"
 
 // DeviceCapabilities defines the capabilities of a connected NFC device.
+//
+// The first three fields are the original v0 declaration. Everything below is
+// additive: a v0 device omits them and reads as all-false, which is what it
+// could actually do anyway.
 type DeviceCapabilities struct {
 	CanRead  bool   `json:"canRead"`
 	CanWrite bool   `json:"canWrite"`
 	NFCType  string `json:"nfcType"` // "nfca", "nfcb", "nfcf", "nfcv", "isodep", etc.
+
+	// CanTransceive is APDU-level exchange (Android IsoDep.transceive, iOS
+	// sendCommand, PN532 InDataExchange). CanTransceiveRaw is framing-level
+	// exchange (Android NfcA.transceive, PN532 InCommunicateThru) — a strictly
+	// rarer capability, which is why it is a separate bit.
+	CanTransceive    bool `json:"canTransceive,omitempty"`
+	CanTransceiveRaw bool `json:"canTransceiveRaw,omitempty"`
+	CanLock          bool `json:"canLock,omitempty"`
+
+	SupportedTagTypes []string `json:"supportedTagTypes,omitempty"` // e.g. ["MIFARE Classic", "NTAG"]
+	DeviceType        string   `json:"deviceType,omitempty"`        // e.g. "smartphone", "pn532-serial"
+	MaxBaudRate       int      `json:"maxBaudRate,omitempty"`
 }
 
 // DeviceRegistrationRequest is sent by a device to register with the server.
@@ -29,6 +45,14 @@ type DeviceRegistrationResponse struct {
 type ServerInfo struct {
 	Version      string   `json:"version"`
 	SupportedNFC []string `json:"supportedNFC"` // ["mifare", "desfire", etc.]
+
+	// PublicKeyPin identifies this agent across certificate reissues, as
+	// "sha256/<base64>" over the SubjectPublicKeyInfo. A device records it when
+	// pairing and compares it on later connections, which is how it recognizes
+	// the agent without a certificate authority.
+	//
+	// Empty when the agent runs without its own generated certificate.
+	PublicKeyPin string `json:"publicKeyPin,omitempty"`
 }
 
 // DeviceTagData is sent by a device when a tag is scanned.
@@ -41,6 +65,10 @@ type DeviceTagData struct {
 	ScannedAt   time.Time         `json:"scannedAt"`   // Timestamp of scan
 	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
 	RawData     []byte            `json:"rawData"`     // Raw tag data (base64 encoded)
+
+	// Capabilities is what the device determined about this specific tag. When
+	// omitted the agent infers them from Type, which is all a v0 device allows.
+	Capabilities *TagCapabilities `json:"capabilities,omitempty"`
 }
 
 // DeviceHeartbeat is sent by a device periodically.
@@ -56,16 +84,60 @@ type DeviceTagRemovedData struct {
 	RemovedAt time.Time `json:"removedAt"` // Timestamp of removal
 }
 
-// DeviceWriteRequest is sent by server to a device for writing (future feature).
+// DeviceWriteRequest is sent by the agent to a device to write a tag.
 type DeviceWriteRequest struct {
 	RequestID   string            `json:"requestID"`   // Unique request ID for correlation
 	DeviceID    string            `json:"deviceID"`    // Target device
-	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Data to write
+	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Data to write, as records
+	TagUID      string            `json:"tagUID,omitempty"`
+	Lock        bool              `json:"lock,omitempty"` // Make read-only after writing
+
+	// NDEFBytes is the same message already encoded, and is authoritative where
+	// the two disagree. A device that can write raw NDEF should prefer it; the
+	// record form exists for APIs like Web NFC that only accept records and
+	// cannot express every record type faithfully.
+	NDEFBytes []byte `json:"ndefBytes,omitempty"`
+
+	// IdempotencyKey identifies the logical write. A device that has already
+	// applied this key must report the previous outcome rather than write
+	// again — the same request can arrive twice if a response is lost to a
+	// dropped connection.
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
-// DeviceWriteResponse is sent by a device after a write operation (future feature).
-type DeviceWriteResponse struct {
+// DeviceTransceiveRequest asks a device to exchange raw data with the tag it is
+// holding.
+//
+// There is deliberately no connect/disconnect pair around this: a tag session
+// is already delimited by the tagScanned and tagRemoved events, and on phones
+// the OS owns the session anyway.
+type DeviceTransceiveRequest struct {
 	RequestID string `json:"requestID"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
+	DeviceID  string `json:"deviceID"`
+	TagUID    string `json:"tagUID,omitempty"` // Report TAG_REMOVED if a different tag is present
+	Data      []byte `json:"data"`             // Command bytes, base64 in transit
+
+	// Raw selects framing-level exchange (Android NfcA.transceive, PN532
+	// InCommunicateThru) over APDU-level (IsoDep.transceive, InDataExchange).
+	Raw bool `json:"raw,omitempty"`
+
+	// TimeoutMS bounds this single exchange on the device.
+	TimeoutMS int `json:"timeoutMs,omitempty"`
+}
+
+// DeviceTransceiveResponse carries the tag's reply.
+type DeviceTransceiveResponse struct {
+	RequestID string    `json:"requestID"`
+	Success   bool      `json:"success"`
+	Data      []byte    `json:"data,omitempty"` // Response bytes, base64 in transit
+	Error     string    `json:"error,omitempty"`
+	ErrorCode ErrorCode `json:"errorCode,omitempty"`
+}
+
+// DeviceWriteResponse is sent by a device after a write operation.
+type DeviceWriteResponse struct {
+	RequestID string    `json:"requestID"`
+	Success   bool      `json:"success"`
+	Error     string    `json:"error,omitempty"`
+	ErrorCode ErrorCode `json:"errorCode,omitempty"` // Preferred over parsing Error
 }

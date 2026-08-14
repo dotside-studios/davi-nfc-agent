@@ -97,6 +97,17 @@ type SystrayApp struct {
 	mReadMode      *systray.MenuItem
 	mWriteMode     *systray.MenuItem
 
+	// Paired device menu items
+	mDevicesMenu      *systray.MenuItem
+	mRevokeAllDevices *systray.MenuItem
+	mRequirePaired    *systray.MenuItem
+	deviceSlots       []*deviceSlot
+
+	// Origin allowlist menu items
+	mOriginsMenu    *systray.MenuItem
+	mOriginAllowAny *systray.MenuItem
+	originSlots     []*originSlot
+
 	// Card filter menu items
 	mCardFilterMenu *systray.MenuItem
 	mFilterAll      *systray.MenuItem
@@ -128,6 +139,8 @@ func (s *SystrayApp) onReady() {
 	s.autoStartAgent()
 	s.startCardInfoUpdater()
 	s.startServerRestartListener()
+	s.startOriginWatcher()
+	s.startDeviceWatcher()
 	s.startEventHandler()
 }
 
@@ -217,6 +230,14 @@ func (s *SystrayApp) setupUI() {
 			cardType: cardType,
 		}
 	}
+
+	systray.AddSeparator()
+
+	// Paired devices section
+	s.setupDevicesMenu()
+
+	// Origin allowlist section
+	s.setupOriginsMenu()
 
 	systray.AddSeparator()
 
@@ -384,6 +405,12 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.handleModeSwitch(nfc.ModeWriteOnly, "Write Only")
 		case <-s.mFilterAll.ClickedCh:
 			s.handleFilterAll()
+		case <-s.mOriginAllowAny.ClickedCh:
+			s.handleOriginAllowAny()
+		case <-s.mRevokeAllDevices.ClickedCh:
+			s.handleRevokeAllDevices()
+		case <-s.mRequirePaired.ClickedCh:
+			s.handleRequirePaired()
 		case <-mQuit.ClickedCh:
 			systray.Quit()
 			return
@@ -394,6 +421,12 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 
 		// Handle device selection
 		s.handleDeviceSelection()
+
+		// Handle origin allow/revoke
+		s.handleOriginSelection()
+
+		// Handle paired device revocation
+		s.handleDeviceRevokeSelection()
 	}
 }
 

@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,15 +31,18 @@ const (
 
 var (
 	// CLI flags
-	versionFlag       bool
-	devicePathFlag    string
-	devicePortFlag    int
-	bootstrapPortFlag int
-	apiSecretFlag     string
-	certFileFlag      string
-	keyFileFlag       string
-	autoTLSFlag       bool
-	configDirFlag     string
+	versionFlag        bool
+	devicePathFlag     string
+	devicePortFlag     int
+	bootstrapPortFlag  int
+	apiSecretFlag      string
+	certFileFlag       string
+	keyFileFlag        string
+	autoTLSFlag        bool
+	configDirFlag      string
+	allowedOriginsFlag string
+	installCAFlag      bool
+	requirePairedFlag  bool
 )
 
 func main() {
@@ -50,7 +55,10 @@ func main() {
 	flag.StringVar(&certFileFlag, "cert", "", "Path to TLS certificate file (enables HTTPS/WSS)")
 	flag.StringVar(&keyFileFlag, "key", "", "Path to TLS private key file (enables HTTPS/WSS)")
 	flag.BoolVar(&autoTLSFlag, "auto-tls", true, "Automatically generate and manage TLS certificates")
+	flag.BoolVar(&requirePairedFlag, "require-paired-devices", false, "Admit only devices that have paired, withdrawing the shared secret and loopback bypass for device connections. Browser clients are unaffected")
+	flag.BoolVar(&installCAFlag, "install-ca", false, "Install a local certificate authority into the system trust store so browsers trust this agent. Not needed for phones, readers, or an externally provisioned certificate")
 	flag.StringVar(&configDirFlag, "config-dir", "", "Config directory (default: platform-specific)")
+	flag.StringVar(&allowedOriginsFlag, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
 	flag.Parse()
 
 	// Handle --version flag
@@ -70,8 +78,10 @@ func main() {
 
 	// Initialize auto-TLS if enabled (and no manual cert/key provided)
 	var tlsMgr *tls.Manager
+	var agentPublicKeyPin string
 	if autoTLSFlag && certFileFlag == "" && keyFileFlag == "" {
 		tlsMgr = tls.NewManager(configDir)
+		tlsMgr.UseCA(installCAFlag)
 		certFile, keyFile, err := tlsMgr.EnsureCertificates()
 		if err != nil {
 			log.Printf("Warning: Auto-TLS failed: %v (running without TLS)", err)
@@ -79,6 +89,13 @@ func main() {
 		} else {
 			certFileFlag = certFile
 			keyFileFlag = keyFile
+
+			// Native devices authenticate the agent by this value rather than
+			// by a trust store, so log it where a first run will show it.
+			if pin, err := tlsMgr.PublicKeyPin(); err == nil {
+				log.Printf("Agent public key pin: %s", pin)
+				agentPublicKeyPin = pin
+			}
 		}
 	}
 
@@ -98,10 +115,28 @@ func main() {
 		}
 	}
 
-	// Start CA bootstrap server if auto-TLS is enabled
+	// Load the paired-device registry. Each device gets its own credential, so
+	// one can be revoked without logging out the rest.
+	devices, err := NewDeviceRegistry(configDir)
+	if err != nil {
+		log.Printf("Warning: failed to load paired devices: %v", err)
+		devices, _ = NewDeviceRegistry("")
+	}
+
+	// Start the pairing/bootstrap server. It runs whenever pairing is possible,
+	// not only under auto-TLS: an agent using an externally provisioned
+	// certificate has no CA to hand out but still has devices to pair, and
+	// coupling the two left that deployment with no way to authenticate one.
 	var bootstrapServer *tls.BootstrapServer
-	if tlsMgr != nil && bootstrapPortFlag > 0 {
-		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
+	if bootstrapPortFlag > 0 {
+		// tlsMgr may be nil here; the CA endpoints report that there is nothing
+		// to install and the pairing endpoint works regardless.
+		var caReader *tls.Manager
+		if tlsMgr != nil {
+			caReader = tlsMgr
+		}
+		bootstrapServer = tls.NewBootstrapServer(caReader, bootstrapPortFlag)
+		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), devicePortFlag)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)
 		}
@@ -120,7 +155,37 @@ func main() {
 	agent := NewAgent(manager)
 	agent.DevicePort = devicePortFlag
 	agent.APISecret = apiSecretFlag
+
+	// The allowlist persists in the config dir and starts with the first-party
+	// consoles, so the shipped console connects on a fresh install. Anything
+	// passed on the command line is added to it.
+	origins, err := NewOriginStore(configDir)
+	if err != nil {
+		log.Printf("Warning: failed to load origin allowlist: %v", err)
+		origins, _ = NewOriginStore("")
+	}
+	for _, origin := range parseAllowedOrigins(allowedOriginsFlag) {
+		if origin == "*" {
+			log.Printf("Warning: -allowed-origins \"*\" disables the origin check; any site the operator visits can drive the reader")
+			origins.SessionAllowAny(true)
+			continue
+		}
+		if err := origins.Allow(origin); err != nil {
+			log.Printf("Warning: failed to allow origin %q: %v", origin, err)
+		}
+	}
+	agent.Origins = origins
 	agent.ConfigDir = configDir
+	agent.PublicKeyPin = agentPublicKeyPin
+	agent.Devices = devices
+	agent.RequirePairedDevice = requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
+
+	if agent.RequirePairedDevice {
+		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		if devices.Count() == 0 {
+			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
+		}
+	}
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration
@@ -151,4 +216,39 @@ func getDefaultConfigDir() string {
 		configDir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(configDir, buildinfo.DirName)
+}
+
+// parseAllowedOrigins turns the comma-separated flag (or DAVI_NFC_ALLOWED_ORIGINS)
+// into the host:port list CheckOrigin matches against.
+//
+// Full URLs are accepted and reduced to their host:port, because that is what
+// people paste and the alternative is a silently ignored entry: an origin that
+// does not match is indistinguishable from one that was never configured.
+func parseAllowedOrigins(flagValue string) []string {
+	raw := flagValue
+	if raw == "" {
+		raw = os.Getenv("DAVI_NFC_ALLOWED_ORIGINS")
+	}
+	if raw == "" {
+		return nil
+	}
+
+	var origins []string
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if entry == "*" {
+			origins = append(origins, entry)
+			continue
+		}
+		if strings.Contains(entry, "://") {
+			if u, err := url.Parse(entry); err == nil && u.Host != "" {
+				entry = u.Host
+			}
+		}
+		origins = append(origins, strings.TrimSuffix(entry, "/"))
+	}
+	return origins
 }

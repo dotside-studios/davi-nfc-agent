@@ -121,10 +121,19 @@ func main() {
 		devices, _ = NewDeviceRegistry("")
 	}
 
-	// Start CA bootstrap server if auto-TLS is enabled
+	// Start the pairing/bootstrap server. It runs whenever pairing is possible,
+	// not only under auto-TLS: an agent using an externally provisioned
+	// certificate has no CA to hand out but still has devices to pair, and
+	// coupling the two left that deployment with no way to authenticate one.
 	var bootstrapServer *tls.BootstrapServer
-	if tlsMgr != nil && bootstrapPortFlag > 0 {
-		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
+	if bootstrapPortFlag > 0 {
+		// tlsMgr may be nil here; the CA endpoints report that there is nothing
+		// to install and the pairing endpoint works regardless.
+		var caReader *tls.Manager
+		if tlsMgr != nil {
+			caReader = tlsMgr
+		}
+		bootstrapServer = tls.NewBootstrapServer(caReader, bootstrapPortFlag)
 		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), devicePortFlag)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)

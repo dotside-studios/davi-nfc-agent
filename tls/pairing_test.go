@@ -145,3 +145,36 @@ func TestPairLocksAfterRepeatedWrongPIN(t *testing.T) {
 		t.Error("a credential was issued after lockout")
 	}
 }
+
+// An agent using an externally provisioned certificate has no CA to hand out,
+// but must still be able to pair devices — otherwise the deployment that avoids
+// installing a CA has no way to authenticate one.
+func TestPairWorksWithoutCA(t *testing.T) {
+	s := NewBootstrapServer(nil, 0)
+	issuer := &stubIssuer{}
+	s.SetPairingIssuer(issuer, 9470)
+
+	r := httptest.NewRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
+	w := httptest.NewRecorder()
+	s.handlePair(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if issuer.calls != 1 {
+		t.Errorf("issuer calls = %d, want 1", issuer.calls)
+	}
+}
+
+// With no CA, the install endpoints say so rather than crashing.
+func TestCAEndpointsWithoutCA(t *testing.T) {
+	s := NewBootstrapServer(nil, 0)
+
+	r := httptest.NewRequest(http.MethodGet, "/ca.pem?pin="+s.PIN(), nil)
+	w := httptest.NewRecorder()
+	s.handleRawCA(w, r)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("status = %d, want 501", w.Code)
+	}
+}

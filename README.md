@@ -39,7 +39,9 @@ go build .
 ./davi-nfc-agent
 ```
 
-See the [Installation Guide](docs/installation.md) for platform-specific setup and troubleshooting.
+See the [Installation Guide](docs/installation.md) for platform-specific setup
+and troubleshooting, and [Setting up an iOS or Android device](docs/device-setup.md)
+for pairing a phone.
 
 ### Command-line Options
 
@@ -113,6 +115,9 @@ Record it when pairing and compare it on every later connection. **It survives
 certificate reissues**, which happen whenever the host's addresses change, so a
 device that pins it keeps working when the machine moves network. Pin this
 value, never the certificate.
+
+[Setting up an iOS or Android device](docs/device-setup.md) covers the pairing
+flow and the trust-evaluation code for both platforms.
 
 Browsers cannot pin, so they need a certificate they already trust. Two ways:
 

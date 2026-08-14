@@ -834,27 +834,38 @@ report `"type": "agent"`.
 
 ## TLS & Certificates
 
-The agent uses auto-generated TLS certificates for secure WebSocket connections.
+The agent serves `wss://` with a self-signed certificate generated from a key it
+creates once and keeps. Nothing is installed into any trust store by default.
 
-### CA Bootstrap Server
+### Native devices — pin the key
 
-A bootstrap server runs on port 9472 to help devices trust the agent's certificate:
+Phones, readers and other native clients **should not install a certificate
+authority**. They verify the agent by pinning its public key, reported as
+`serverInfo.publicKeyPin` at registration and handed out at pairing. The pin
+survives certificate reissues, which happen whenever the host's addresses
+change.
 
-1. Open `http://[agent-ip]:9472` in a browser
-2. Download the CA certificate
-3. Install on your device
+See [Setting up an iOS or Android device](device-setup.md) for the pairing flow
+and the trust-evaluation code, including the two ways it commonly goes wrong.
 
-### Installing the CA Certificate
+### Browsers — provide a certificate, or install a CA
 
-**iOS:**
-- Settings > Profile Downloaded > Install
+A browser cannot pin, so it needs a certificate it already trusts:
 
-**Android:**
-- Settings > Security > Install certificate
+1. **Provide one** — point `-cert` / `-key` at a certificate for a name you
+   control that resolves to the agent. Nothing is installed, and the browser
+   trusts it because a public CA issued it.
+2. **`-install-ca`** — creates a local certificate authority and installs it in
+   the system trust store. A CA there can sign for **any** name, not just this
+   agent, so prefer option 1 where you can arrange it.
 
-**Browsers:**
-- Import into browser's certificate store, or
-- Use the JavaScript client which handles this automatically
+With `-install-ca`, the bootstrap server on port 9472 serves the root
+certificate for installation, PIN-gated.
+
+Browsers also need their origin allowed — see
+[Connecting from a web console](../README.md#connecting-from-a-web-console). A
+trusted certificate and an allowed origin are separate requirements, and a
+failure of either looks the same from the page.
 
 ---
 

@@ -188,14 +188,6 @@ func (s *Server) Stop() {
 // device service type (_nfc-device._tcp) so existing device clients continue to
 // discover the agent, now on the single unified port.
 func (s *Server) startMDNS() error {
-	// tls tells a discovering device whether to dial ws:// or wss:// without
-	// having to probe both; device_path is the ready-made device endpoint, so
-	// a device need not know to add the mode discriminator itself.
-	tls := "false"
-	if s.config.TLSEnabled() {
-		tls = "true"
-	}
-
 	var err error
 	s.mdnsServer, err = zeroconf.Register(
 		server.MDNSDeviceServiceName,
@@ -207,8 +199,6 @@ func (s *Server) startMDNS() error {
 			"protocol=websocket",
 			"path=/ws",
 			"type=agent",
-			"tls=" + tls,
-			"device_path=/ws?mode=device",
 		},
 		nil,
 	)

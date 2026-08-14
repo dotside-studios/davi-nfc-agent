@@ -129,11 +129,72 @@ the default read path.
 ## Phase 4 — Identity and pairing (not started)
 
 Replace the shared bearer secret with a per-device credential: agent-side
-pairing window (tray button, "accept new device for 60s"), short OOB code, PAKE,
-durable credential. Prefer PSK over X.509 for the MCU tier, and document that
-firmware pins the **CA** — created once in `m.caDir` and reused — never the leaf,
-which regenerates on every host IP change (`tls/manager.go`, `tls/netwatch.go`).
-Device list with revoke in the tray. Keep the shared secret as a legacy path.
+pairing window (tray button, "accept new device for 60s"), short OOB code,
+durable credential, device list with revoke in the tray. Keep the shared secret
+as a legacy path.
+
+### 4.0 First: stop installing a root CA system-wide
+
+The agent currently generates a root CA and installs it into the host's system
+trust store on startup (`truststore.Install()` in `tls/manager.go`), and asks
+every paired phone to install it too (`tls/bootstrap.go` serves an Apple
+`.mobileconfig` and an Android cert page).
+
+**A root CA in a trust store signs anything.** It is not scoped to this agent:
+whoever holds `rootCA-key.pem` can mint a valid certificate for any domain and
+intercept that machine's traffic. mkcert, which this is built on, documents
+itself as a development tool for exactly this reason. On iOS, enabling Full
+Trust for a CA is an all-or-nothing system-wide grant; on Android a user CA is
+distrusted by apps by default, so the install is simultaneously invasive and
+often ineffective. The per-install CA does mean there is no single key whose
+theft compromises every user — that is the only thing limiting the blast
+radius.
+
+The CA exists solely because browsers demand WebPKI-shaped trust. Native
+devices never needed it. So split trust by consumer:
+
+**Native devices (phones, MCUs, custom clients) — no CA at all.** Serve a
+self-signed leaf and have devices pin its SPKI hash, learned during pairing.
+Because the pairing code carries the fingerprint, this is authenticated
+trust-on-first-use rather than blind TOFU. No trust store, no prompts, no
+system-wide grant. This is the SSH and CTAP-hybrid model.
+
+*Prerequisite:* the agent's keypair must be stable. `MakeCert` calls
+`generateKey` on every invocation, so today the leaf key is replaced whenever
+the host's IPs change and any pin would break. Generate the agent keypair once,
+persist it, and reissue only the certificate when SANs change — SPKI survives
+reissuance as long as the key does. This is a small change worth landing before
+pairing, since pinning depends on it.
+
+**Browsers — the CA is the wrong tool.** Two workable options:
+
+- *Same-machine only:* serve the frontend from `http://localhost` and skip TLS
+  entirely; loopback is a secure context. Note Chrome 142 fully enforces
+  Private Network Access, so an `https://davi.social` page reaching a local
+  agent is gated on the new Local Network Access permission rather than
+  silently allowed.
+- *LAN or hosted frontend:* a publicly-trusted wildcard for a domain Davi
+  controls, resolving to the agent's address — the `*.plex.direct` pattern.
+  Zero install, works from an HTTPS page, no trust-store changes. Costs DNS
+  infrastructure, and the key ships to clients so treat it as public and
+  rotatable.
+
+**If the CA stays as a fallback,** make it opt-in rather than automatic on
+startup, expose `truststore.Uninstall()` in the tray and on uninstall, and name
+it identifiably. Name constraints limiting it to the agent's own SANs are worth
+adding as defence in depth, but enforcement for locally-added roots is uneven
+across platforms, so do not rely on them.
+
+### 4.1 Pairing
+
+Most of the primitive already exists: `tls/bootstrap.go` has a PIN, PIN
+rotation, PIN-gated routes, and a QR flow. Phase 4 largely repurposes it — hand
+out `{host, port, spkiHash, deviceToken}` instead of a CA to install, which
+deletes the `.mobileconfig` and Android cert paths rather than adding to them.
+
+For the MCU tier this supersedes the earlier note preferring PSK: pinning an
+SPKI hash is a 32-byte comparison, cheaper than both X.509 path building and
+PSK key management, and it leaves no symmetric secret on the agent per device.
 
 ## Phase 5 — Reach (not started, demand-driven)
 

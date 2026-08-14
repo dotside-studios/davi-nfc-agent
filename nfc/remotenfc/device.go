@@ -15,6 +15,7 @@ type Device struct {
 	deviceName   string             // Human-readable name (e.g., "iPhone 12 Pro")
 	platform     string             // "ios" or "android"
 	appVersion   string             // Mobile app version
+	protoVersion int                // Negotiated bridge protocol version
 	isActive     bool               // Whether device is connected
 	tagChannel   chan []nfc.Tag     // Channel to receive tags from smartphone
 	closeChannel chan struct{}      // Signal to close device
@@ -32,6 +33,7 @@ func NewDevice(deviceID string, req DeviceRegistrationRequest) *Device {
 		deviceName:   req.DeviceName,
 		platform:     req.Platform,
 		appVersion:   req.AppVersion,
+		protoVersion: req.ProtocolVersion,
 		isActive:     true,
 		tagChannel:   make(chan []nfc.Tag, TagChannelBuffer),
 		closeChannel: make(chan struct{}),
@@ -186,6 +188,11 @@ func (d *Device) Platform() string {
 // AppVersion returns the mobile app version.
 func (d *Device) AppVersion() string {
 	return d.appVersion
+}
+
+// ProtocolVersion returns the bridge protocol version negotiated at registration.
+func (d *Device) ProtocolVersion() int {
+	return d.protoVersion
 }
 
 // PhoneCapabilities returns the smartphone-specific device capabilities.

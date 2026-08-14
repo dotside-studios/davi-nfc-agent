@@ -1,0 +1,231 @@
+package deviceserver_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
+	"github.com/gorilla/websocket"
+)
+
+func newDeviceTestServer(t *testing.T) string {
+	t.Helper()
+
+	bridge := server.NewServerBridge()
+	deviceMgr := remotenfc.NewManager(30 * time.Second)
+
+	dev := deviceserver.New(deviceserver.Config{DeviceManager: deviceMgr}, bridge)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	dev.StartBackground(ctx)
+
+	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
+
+	t.Cleanup(func() {
+		ts.Close()
+		cancel()
+		bridge.Close()
+		deviceMgr.Close()
+	})
+
+	return "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
+}
+
+func dialDevice(t *testing.T, url string, subprotocols []string) (*websocket.Conn, string) {
+	t.Helper()
+
+	dialer := websocket.Dialer{Subprotocols: subprotocols}
+	conn, resp, err := dialer.Dial(url, nil)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("dial failed: %v (status %d)", err, status)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	return conn, conn.Subprotocol()
+}
+
+func readResponse(t *testing.T, conn *websocket.Conn) (protocol.WebSocketResponse, map[string]any) {
+	t.Helper()
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var out protocol.WebSocketResponse
+	if err := conn.ReadJSON(&out); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+
+	payload, ok := out.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected payload shape: %#v", out.Payload)
+	}
+	return out, payload
+}
+
+func TestHelloHandshakeNegotiatesV1(t *testing.T) {
+	url := newDeviceTestServer(t)
+
+	conn, negotiated := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if negotiated != protocol.SubprotocolDeviceV1 {
+		t.Errorf("negotiated subprotocol = %q, want %q", negotiated, protocol.SubprotocolDeviceV1)
+	}
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		ID:   "h1",
+		Type: protocol.WSTypeHello,
+		Payload: map[string]any{
+			"protocolVersion": protocol.DeviceProtocolV1,
+			"deviceName":      "Test Device",
+			"platform":        "android",
+		},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	out, payload := readResponse(t, conn)
+
+	if out.Type != protocol.WSTypeHelloResponse {
+		t.Errorf("response type = %q, want %q", out.Type, protocol.WSTypeHelloResponse)
+	}
+	if !out.Success {
+		t.Errorf("response success = false, error = %q", out.Error)
+	}
+	if got := payload["protocolVersion"]; got != float64(protocol.DeviceProtocolV1) {
+		t.Errorf("protocolVersion = %v, want %d", got, protocol.DeviceProtocolV1)
+	}
+	if id, _ := payload["deviceID"].(string); id == "" {
+		t.Error("helloResponse carried no deviceID")
+	}
+}
+
+// A device declaring a version we do not implement is answered at our maximum
+// rather than refused.
+func TestHelloClampsFutureVersion(t *testing.T) {
+	url := newDeviceTestServer(t)
+
+	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeHello,
+		Payload: map[string]any{
+			"protocolVersion": 99,
+			"deviceName":      "Future Device",
+			"platform":        "android",
+		},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	_, payload := readResponse(t, conn)
+	if got := payload["protocolVersion"]; got != float64(protocol.DeviceProtocolMax) {
+		t.Errorf("protocolVersion = %v, want %d", got, protocol.DeviceProtocolMax)
+	}
+}
+
+// The first frame decides the dialect, so hello works even from a device that
+// never offered a subprotocol.
+func TestHelloWithoutSubprotocolOffer(t *testing.T) {
+	url := newDeviceTestServer(t)
+
+	conn, negotiated := dialDevice(t, url, nil)
+	if negotiated != "" {
+		t.Errorf("negotiated subprotocol = %q, want empty", negotiated)
+	}
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type:    protocol.WSTypeHello,
+		Payload: map[string]any{"deviceName": "Bare Device", "platform": "ios"},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	out, payload := readResponse(t, conn)
+	if out.Type != protocol.WSTypeHelloResponse {
+		t.Errorf("response type = %q, want %q", out.Type, protocol.WSTypeHelloResponse)
+	}
+	if got := payload["protocolVersion"]; got != float64(protocol.DeviceProtocolV1) {
+		t.Errorf("protocolVersion = %v, want %d", got, protocol.DeviceProtocolV1)
+	}
+}
+
+// Devices predating versioning must see a byte-identical exchange: no
+// subprotocol, registerDeviceResponse, and no protocolVersion field.
+func TestLegacyRegisterDeviceUnchanged(t *testing.T) {
+	url := newDeviceTestServer(t)
+
+	conn, negotiated := dialDevice(t, url, nil)
+	if negotiated != "" {
+		t.Errorf("negotiated subprotocol = %q, want empty", negotiated)
+	}
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		ID:   "r1",
+		Type: protocol.WSTypeRegisterDevice,
+		Payload: map[string]any{
+			"deviceName": "Legacy Device",
+			"platform":   "ios",
+		},
+	}); err != nil {
+		t.Fatalf("write registerDevice: %v", err)
+	}
+
+	out, payload := readResponse(t, conn)
+
+	if out.Type != protocol.WSTypeRegisterDeviceResponse {
+		t.Errorf("response type = %q, want %q", out.Type, protocol.WSTypeRegisterDeviceResponse)
+	}
+	if out.ID != "r1" {
+		t.Errorf("response ID = %q, want r1", out.ID)
+	}
+	if id, _ := payload["deviceID"].(string); id == "" {
+		t.Error("registerDeviceResponse carried no deviceID")
+	}
+	if _, ok := payload["protocolVersion"]; ok {
+		t.Error("legacy response must not carry protocolVersion")
+	}
+}
+
+func TestRegistrationRequiresDeviceName(t *testing.T) {
+	url := newDeviceTestServer(t)
+
+	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type:    protocol.WSTypeHello,
+		Payload: map[string]any{"protocolVersion": 1},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	out, payload := readResponse(t, conn)
+	if out.Success {
+		t.Error("expected failure for missing device name")
+	}
+	if code, _ := payload["code"].(string); code != "INVALID_REQUEST" {
+		t.Errorf("error code = %q, want INVALID_REQUEST", code)
+	}
+}
+
+func TestFirstFrameMustBeHelloOrRegister(t *testing.T) {
+	url := newDeviceTestServer(t)
+
+	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: "tagScanned"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	out, payload := readResponse(t, conn)
+	if out.Success {
+		t.Error("expected failure for out-of-order first frame")
+	}
+	if code, _ := payload["code"].(string); code != "INVALID_MESSAGE_TYPE" {
+		t.Errorf("error code = %q, want INVALID_MESSAGE_TYPE", code)
+	}
+}

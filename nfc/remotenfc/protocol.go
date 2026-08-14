@@ -17,11 +17,12 @@ type DeviceCapabilities struct {
 
 // DeviceRegistrationRequest is sent by mobile app to register as an NFC device.
 type DeviceRegistrationRequest struct {
-	DeviceName   string             `json:"deviceName"`   // e.g., "John's iPhone 12"
-	Platform     string             `json:"platform"`     // "ios" or "android"
-	AppVersion   string             `json:"appVersion"`   // e.g., "1.0.0"
-	Capabilities DeviceCapabilities `json:"capabilities"` // Device capabilities
-	Metadata     map[string]string  `json:"metadata"`     // Optional metadata
+	DeviceName      string             `json:"deviceName"`      // e.g., "John's iPhone 12"
+	Platform        string             `json:"platform"`        // "ios" or "android"
+	AppVersion      string             `json:"appVersion"`      // e.g., "1.0.0"
+	ProtocolVersion int                `json:"protocolVersion"` // Negotiated bridge protocol version
+	Capabilities    DeviceCapabilities `json:"capabilities"`    // Device capabilities
+	Metadata        map[string]string  `json:"metadata"`        // Optional metadata
 }
 
 // DeviceRegistrationResponse is sent by server after successful registration.

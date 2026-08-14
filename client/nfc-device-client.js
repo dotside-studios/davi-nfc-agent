@@ -41,6 +41,13 @@
  *   ndefMessage: { records: [...] }
  * });
  */
+
+/**
+ * WebSocket subprotocol offered during the upgrade. An agent that echoes it back
+ * supports the hello handshake; one that does not is treated as protocol v0.
+ */
+const DEVICE_SUBPROTOCOL_V1 = 'davi-nfc-device.v1';
+
 class NFCDeviceClient {
   /**
    * Creates a new NFC Device client instance
@@ -75,6 +82,7 @@ class NFCDeviceClient {
     this.ws = null;
     this.deviceID = null;
     this.serverInfo = null;
+    this.protocolVersion = 0;
     this.connected = false;
     this.intentionalDisconnect = false;
     this.reconnectAttempts = 0;
@@ -163,12 +171,17 @@ class NFCDeviceClient {
       }
       wsUrl += '?mode=device';
 
-      this.ws = new WebSocketClass(wsUrl);
+      this.ws = new WebSocketClass(wsUrl, [DEVICE_SUBPROTOCOL_V1]);
 
       this.ws.onopen = async () => {
         this.connected = true;
         this.reconnectAttempts = 0;
-        this._emit('connected', {});
+
+        // An agent that echoes the subprotocol speaks the hello handshake;
+        // anything else is a pre-versioning agent that only knows registerDevice.
+        this.protocolVersion = this.ws.protocol === DEVICE_SUBPROTOCOL_V1 ? 1 : 0;
+
+        this._emit('connected', { protocolVersion: this.protocolVersion });
 
         // Auto-register after connection
         try {
@@ -195,6 +208,7 @@ class NFCDeviceClient {
       this.ws.onclose = () => {
         this.connected = false;
         this.deviceID = null;
+        this.protocolVersion = 0;
         this._stopHeartbeat();
         this._emit('disconnected', {});
 
@@ -292,8 +306,9 @@ class NFCDeviceClient {
 
       const message = {
         id: requestId,
-        type: 'registerDevice',
+        type: this.protocolVersion >= 1 ? 'hello' : 'registerDevice',
         payload: {
+          ...(this.protocolVersion >= 1 ? { protocolVersion: this.protocolVersion } : {}),
           deviceName: this.deviceName,
           platform: this.platform,
           appVersion: this.appVersion,
@@ -329,7 +344,7 @@ class NFCDeviceClient {
     const { id, type, payload, success, error } = message;
 
     // Handle registration response
-    if (type === 'registerDeviceResponse') {
+    if (type === 'helloResponse' || type === 'registerDeviceResponse') {
       if (id && this._pendingRequests[id]) {
         const { resolve, reject } = this._pendingRequests[id];
         delete this._pendingRequests[id];
@@ -337,8 +352,15 @@ class NFCDeviceClient {
         if (success) {
           this.deviceID = payload.deviceID;
           this.serverInfo = payload.serverInfo;
+          if (typeof payload.protocolVersion === 'number') {
+            this.protocolVersion = payload.protocolVersion;
+          }
           this._startHeartbeat();
-          this._emit('registered', { deviceID: this.deviceID, serverInfo: this.serverInfo });
+          this._emit('registered', {
+            deviceID: this.deviceID,
+            serverInfo: this.serverInfo,
+            protocolVersion: this.protocolVersion
+          });
           resolve(payload);
         } else {
           reject(new Error(error || 'Registration failed'));

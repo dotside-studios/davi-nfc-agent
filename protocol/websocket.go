@@ -11,6 +11,8 @@ const (
 
 // WebSocket message type constants for device communication
 const (
+	WSTypeHello                  = "hello"
+	WSTypeHelloResponse          = "helloResponse"
 	WSTypeRegisterDevice         = "registerDevice"
 	WSTypeRegisterDeviceResponse = "registerDeviceResponse"
 	WSTypeTagScanned             = "tagScanned"

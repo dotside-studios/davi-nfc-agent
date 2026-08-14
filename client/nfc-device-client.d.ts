@@ -106,6 +106,21 @@ export interface RegisteredEvent {
    * Server information
    */
   serverInfo: ServerInfo;
+
+  /**
+   * Negotiated bridge protocol version. 0 means the agent predates versioning.
+   */
+  protocolVersion: number;
+}
+
+/**
+ * Connection event payload
+ */
+export interface DeviceConnectedEvent {
+  /**
+   * Bridge protocol version implied by the negotiated WebSocket subprotocol.
+   */
+  protocolVersion: number;
 }
 
 /**
@@ -250,7 +265,7 @@ export interface DeviceErrorEvent {
  */
 export type RegisteredHandler = (event: RegisteredEvent) => void;
 export type WriteRequestHandler = (event: WriteRequestEvent) => void;
-export type DeviceConnectedHandler = () => void;
+export type DeviceConnectedHandler = (event: DeviceConnectedEvent) => void;
 export type DeviceDisconnectedHandler = () => void;
 export type DeviceErrorHandler = (error: DeviceErrorEvent) => void;
 

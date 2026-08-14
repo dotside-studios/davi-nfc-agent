@@ -34,7 +34,8 @@ func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, a
 		deviceSessions: make(map[string]*server.SafeConn),
 		connToDeviceID: make(map[*server.SafeConn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: server.CheckOrigin(allowedOrigins),
+			CheckOrigin:  server.CheckOrigin(allowedOrigins),
+			Subprotocols: protocol.DeviceSubprotocols,
 		},
 	}
 }
@@ -72,7 +73,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	// Wrap in SafeConn to prevent concurrent write panics
 	conn := server.NewSafeConn(wsConn)
 
-	log.Printf("[device] WebSocket connected from %s", r.RemoteAddr)
+	log.Printf("[device] WebSocket connected from %s (subprotocol=%q)", r.RemoteAddr, wsConn.Subprotocol())
 
 	var deviceID string
 	defer func() {
@@ -104,14 +105,20 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if wsRequest.Type != protocol.WSTypeRegisterDevice {
-		log.Printf("[device] Expected '%s', got '%s'", protocol.WSTypeRegisterDevice, wsRequest.Type)
-		h.sendError(conn, wsRequest.ID, "INVALID_MESSAGE_TYPE", fmt.Sprintf("Expected '%s' message", protocol.WSTypeRegisterDevice))
+	// The first frame's type selects the dialect: hello is v1, registerDevice is
+	// the legacy v0 exchange. The negotiated subprotocol is advisory — a device
+	// that never offered one still gets served whichever it actually speaks.
+	switch wsRequest.Type {
+	case protocol.WSTypeHello:
+		err = h.handleHello(r.Context(), conn, wsRequest)
+	case protocol.WSTypeRegisterDevice:
+		err = h.handleRegisterDevice(r.Context(), conn, wsRequest)
+	default:
+		log.Printf("[device] Expected '%s' or '%s', got '%s'", protocol.WSTypeHello, protocol.WSTypeRegisterDevice, wsRequest.Type)
+		h.sendError(conn, wsRequest.ID, "INVALID_MESSAGE_TYPE", fmt.Sprintf("Expected '%s' or '%s' message", protocol.WSTypeHello, protocol.WSTypeRegisterDevice))
 		return
 	}
-
-	// Handle device registration
-	if err = h.handleRegisterDevice(r.Context(), conn, wsRequest); err != nil {
+	if err != nil {
 		log.Printf("[device] Registration failed: %v", err)
 		return
 	}
@@ -165,76 +172,112 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleRegisterDevice processes a device registration request.
-func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *server.SafeConn, req protocol.WebSocketRequest) error {
-	// Parse DeviceRegistrationRequest from payload
-	payloadBytes, err := json.Marshal(req.Payload)
-	if err != nil {
-		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Failed to process payload")
-		return fmt.Errorf("failed to marshal payload: %w", err)
+// handleHello processes a v1 hello frame, which carries the protocol version
+// alongside the registration payload.
+func (h *DeviceHandler) handleHello(_ context.Context, conn *server.SafeConn, req protocol.WebSocketRequest) error {
+	var hello protocol.HelloRequest
+	if err := decodePayload(req.Payload, &hello); err != nil {
+		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Invalid hello request format")
+		return fmt.Errorf("failed to parse hello request: %w", err)
 	}
 
+	version := protocol.NegotiateDeviceVersion(hello.ProtocolVersion)
+
+	device, regResp, err := h.register(conn, req.ID, hello.DeviceRegistrationRequest, version)
+	if err != nil {
+		return err
+	}
+
+	return h.sendRegistration(conn, device, protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    protocol.WSTypeHelloResponse,
+		Success: true,
+		Payload: protocol.HelloResponse{
+			ProtocolVersion:            version,
+			DeviceRegistrationResponse: regResp,
+		},
+	})
+}
+
+// handleRegisterDevice processes a legacy v0 registration request.
+func (h *DeviceHandler) handleRegisterDevice(_ context.Context, conn *server.SafeConn, req protocol.WebSocketRequest) error {
 	var regReq protocol.DeviceRegistrationRequest
-	if err := json.Unmarshal(payloadBytes, &regReq); err != nil {
+	if err := decodePayload(req.Payload, &regReq); err != nil {
 		h.sendError(conn, req.ID, "INVALID_PAYLOAD", "Invalid registration request format")
 		return fmt.Errorf("failed to parse registration request: %w", err)
 	}
 
-	// Validate request
-	if regReq.DeviceName == "" {
-		h.sendError(conn, req.ID, "INVALID_REQUEST", "Device name is required")
-		return fmt.Errorf("device name is required")
+	device, regResp, err := h.register(conn, req.ID, regReq, protocol.DeviceProtocolV0)
+	if err != nil {
+		return err
 	}
 
-	// Convert protocol type to remotenfc type for registration
-	phoneReq := remotenfc.DeviceRegistrationRequest{
-		DeviceName: regReq.DeviceName,
-		Platform:   regReq.Platform,
-		AppVersion: regReq.AppVersion,
+	return h.sendRegistration(conn, device, protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    protocol.WSTypeRegisterDeviceResponse,
+		Success: true,
+		Payload: regResp,
+	})
+}
+
+// register validates the registration payload and registers the device, leaving
+// the caller to send the response in whichever dialect it is speaking.
+func (h *DeviceHandler) register(conn *server.SafeConn, reqID string, regReq protocol.DeviceRegistrationRequest, version int) (*remotenfc.Device, protocol.DeviceRegistrationResponse, error) {
+	if regReq.DeviceName == "" {
+		h.sendError(conn, reqID, "INVALID_REQUEST", "Device name is required")
+		return nil, protocol.DeviceRegistrationResponse{}, fmt.Errorf("device name is required")
+	}
+
+	device, err := h.manager.RegisterDevice(remotenfc.DeviceRegistrationRequest{
+		DeviceName:      regReq.DeviceName,
+		Platform:        regReq.Platform,
+		AppVersion:      regReq.AppVersion,
+		ProtocolVersion: version,
 		Capabilities: remotenfc.DeviceCapabilities{
 			CanRead:  regReq.Capabilities.CanRead,
 			CanWrite: regReq.Capabilities.CanWrite,
 			NFCType:  regReq.Capabilities.NFCType,
 		},
 		Metadata: regReq.Metadata,
-	}
-
-	// Register device
-	device, err := h.manager.RegisterDevice(phoneReq)
+	})
 	if err != nil {
-		h.sendError(conn, req.ID, "REGISTRATION_FAILED", err.Error())
-		return fmt.Errorf("failed to register device: %w", err)
+		h.sendError(conn, reqID, "REGISTRATION_FAILED", err.Error())
+		return nil, protocol.DeviceRegistrationResponse{}, fmt.Errorf("failed to register device: %w", err)
 	}
 
+	h.addDeviceSession(device.DeviceID(), conn)
+
+	return device, protocol.DeviceRegistrationResponse{
+		DeviceID:     device.DeviceID(),
+		SessionToken: "",
+		ServerInfo: protocol.ServerInfo{
+			Version:      "1.0.0",
+			SupportedNFC: []string{"mifare", "desfire", "type4", "ultralight"},
+		},
+	}, nil
+}
+
+func (h *DeviceHandler) sendRegistration(conn *server.SafeConn, device *remotenfc.Device, resp protocol.WebSocketResponse) error {
 	deviceID := device.DeviceID()
 
-	// Store WebSocket connection
-	h.addDeviceSession(deviceID, conn)
-
-	// Send registration response
-	response := protocol.WebSocketResponse{
-		ID:      req.ID,
-		Type:    protocol.WSTypeRegisterDeviceResponse,
-		Success: true,
-		Payload: protocol.DeviceRegistrationResponse{
-			DeviceID:     deviceID,
-			SessionToken: "",
-			ServerInfo: protocol.ServerInfo{
-				Version:      "1.0.0",
-				SupportedNFC: []string{"mifare", "desfire", "type4", "ultralight"},
-			},
-		},
-	}
-
-	if err := conn.WriteJSON(response); err != nil {
+	if err := conn.WriteJSON(resp); err != nil {
 		h.removeDeviceSession(deviceID)
 		h.manager.UnregisterDevice(deviceID)
 		return fmt.Errorf("failed to send registration response: %w", err)
 	}
 
-	log.Printf("[device] Device registered: %s (%s)", device.String(), deviceID)
+	log.Printf("[device] Device registered: %s (%s, protocol v%d)", device.String(), deviceID, device.ProtocolVersion())
 
 	return nil
+}
+
+// decodePayload re-marshals a decoded payload map into a concrete type.
+func decodePayload(payload map[string]any, target any) error {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	return json.Unmarshal(payloadBytes, target)
 }
 
 // handleTagScanned processes a tag scan event from a device.

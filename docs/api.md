@@ -23,14 +23,26 @@ Connect via WebSocket with device mode:
 wss://[host]:9470/ws?mode=device
 ```
 
+Offer the `davi-nfc-device.v1` subprotocol during the upgrade. If the agent
+echoes it back, it supports the `hello` handshake below. If it echoes nothing,
+it predates versioning — fall back to [Legacy Registration](#legacy-registration-v0).
+
+```javascript
+const ws = new WebSocket('wss://host:9470/ws?mode=device', ['davi-nfc-device.v1']);
+const version = ws.protocol === 'davi-nfc-device.v1' ? 1 : 0;
+```
+
 ### Device Registration
 
-After connecting, register the device:
+Send `hello` as the first frame. It carries the protocol version alongside the
+registration fields, so setup costs one round trip:
 
 ```json
 {
-  "type": "registerDevice",
+  "id": "req_1",
+  "type": "hello",
   "payload": {
+    "protocolVersion": 1,
     "deviceName": "My Device",
     "platform": "ios",
     "appVersion": "1.0.0",
@@ -46,13 +58,15 @@ After connecting, register the device:
 }
 ```
 
-**Registration Response:**
+**Response:**
 
 ```json
 {
-  "type": "registerDeviceResponse",
+  "id": "req_1",
+  "type": "helloResponse",
   "success": true,
   "payload": {
+    "protocolVersion": 1,
     "deviceID": "dev_abc123",
     "serverInfo": {
       "version": "1.0.0",
@@ -61,6 +75,36 @@ After connecting, register the device:
   }
 }
 ```
+
+`protocolVersion` in the response is what both sides will speak. It is never
+higher than the version the device asked for: a device declaring a version newer
+than the agent implements is answered at the agent's maximum rather than
+refused. Devices should read this field rather than assume their request was
+honoured.
+
+`platform` must be `ios`, `android`, or `web`.
+
+### Legacy Registration (v0)
+
+Devices predating versioning send `registerDevice` as the first frame and get
+`registerDeviceResponse` back. This exchange is unchanged and remains supported;
+the payload is identical to `hello` minus `protocolVersion`.
+
+```json
+{
+  "type": "registerDevice",
+  "payload": {
+    "deviceName": "My Device",
+    "platform": "ios",
+    "appVersion": "1.0.0",
+    "capabilities": { "canRead": true, "canWrite": false, "nfcType": "corenfc" }
+  }
+}
+```
+
+The first frame's type selects the dialect, so the subprotocol offer is a hint
+rather than a commitment — a device that offers nothing but sends `hello` is
+still served at v1.
 
 ### Messages from Device
 

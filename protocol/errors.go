@@ -19,6 +19,14 @@ const (
 	ErrCodeReadError          ErrorCode = "READ_ERROR"
 )
 
+// Client-facing operation failures. These strings predate the taxonomy too.
+const (
+	ErrCodeLockFailed         ErrorCode = "LOCK_FAILED"
+	ErrCodeCapabilitiesFailed ErrorCode = "CAPABILITIES_FAILED"
+	ErrCodeSessionLocked      ErrorCode = "SESSION_LOCKED"
+	ErrCodeNoCard             ErrorCode = "NO_CARD"
+)
+
 // Protocol errors added with the taxonomy.
 const (
 	ErrCodeTimeout      ErrorCode = "TIMEOUT"
@@ -63,6 +71,7 @@ var retryableCodes = map[ErrorCode]bool{
 	ErrCodeTagNotConnected:  true,
 	ErrCodeTagSendFailed:    true,
 	ErrCodeReadError:        true,
+	ErrCodeNoCard:           true,
 	ErrCodeTimeout:          true,
 	ErrCodeInternal:         true,
 }

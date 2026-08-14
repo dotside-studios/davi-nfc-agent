@@ -244,6 +244,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     "No NFC reader or device holding a tag",
+			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
 	}
@@ -255,6 +256,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: protocol.ErrCodeInvalidRequest,
 		}
 		return
 	}
@@ -272,6 +274,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeWriteFailed),
 		}
 		return
 	}
@@ -304,6 +307,7 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
 		}
 		return true
 	}
@@ -314,6 +318,7 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
 		}
 		return true
 	}
@@ -331,6 +336,7 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
 		}
 		return true
 	}
@@ -339,6 +345,7 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
 		RequestID: msg.RequestID,
 		Success:   resp.Success,
 		Error:     resp.Error,
+		ErrorCode: resp.ErrorCode,
 		Payload:   map[string]any{"uid": uid, "deviceID": deviceID},
 	}
 	return true
@@ -367,6 +374,7 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     "No NFC reader available",
+			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
 	}
@@ -377,6 +385,7 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeLockFailed),
 		}
 		return
 	}
@@ -411,6 +420,7 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     "No NFC reader available",
+			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
 	}
@@ -421,6 +431,7 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 			RequestID: msg.RequestID,
 			Success:   false,
 			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeCapabilitiesFailed),
 		}
 		return
 	}
@@ -430,4 +441,13 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 		Success:   true,
 		Payload:   caps,
 	}
+}
+
+// operationErrorCode classifies a reader failure, falling back to the
+// operation's own label when the error carries no code of its own.
+func operationErrorCode(err error, fallback protocol.ErrorCode) protocol.ErrorCode {
+	if payload := nfc.WireError(err); payload.Code != protocol.ErrCodeUnknownError {
+		return payload.Code
+	}
+	return fallback
 }

@@ -1,6 +1,9 @@
 package server
 
-import "github.com/dotside-studios/davi-nfc-agent/nfc"
+import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
+)
 
 // ServerBridge facilitates communication between Device and Client servers.
 // All channels are buffered to prevent blocking.
@@ -55,6 +58,10 @@ type WriteResponseMessage struct {
 	// Error contains error message if Success is false
 	Error string
 
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
+
 	// Payload contains additional response data
 	Payload any
 }
@@ -82,6 +89,10 @@ type LockResponseMessage struct {
 	// Error contains error message if Success is false
 	Error string
 
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
+
 	// Payload contains additional response data
 	Payload any
 }
@@ -108,6 +119,10 @@ type CapabilitiesResponseMessage struct {
 
 	// Error contains error message if Success is false
 	Error string
+
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
 
 	// Payload contains the tag capabilities (*nfc.TagCapabilities)
 	Payload any

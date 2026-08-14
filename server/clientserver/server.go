@@ -144,7 +144,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		var req protocol.WebSocketRequest
 		if err := json.Unmarshal(message, &req); err != nil {
 			log.Printf("[client] Failed to parse message: %v", err)
-			s.sendErrorResponse(conn, "", "PARSE_ERROR", "Invalid message format")
+			s.sendErrorResponse(conn, "", protocol.ErrCodeParse, "Invalid message format")
 			continue
 		}
 
@@ -158,7 +158,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.handleCapabilitiesRequest(conn, clientID, req)
 		default:
 			log.Printf("[client] Unknown message type: %s", req.Type)
-			s.sendErrorResponse(conn, req.ID, "UNKNOWN_TYPE", fmt.Sprintf("Unknown message type: %s", req.Type))
+			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
 		}
 	}
 }
@@ -169,14 +169,14 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err != nil {
 		log.Printf("[client] Failed to marshal write request payload: %v", err)
-		s.sendErrorResponse(conn, req.ID, "INVALID_PAYLOAD", "Invalid write request payload")
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid write request payload")
 		return
 	}
 
 	var writeReq server.WriteRequest
 	if err := json.Unmarshal(payloadBytes, &writeReq); err != nil {
 		log.Printf("[client] Failed to parse write request: %v", err)
-		s.sendErrorResponse(conn, req.ID, "INVALID_WRITE_REQUEST", "Failed to parse write request")
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Failed to parse write request")
 		return
 	}
 
@@ -197,7 +197,7 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 	response, err := s.bridge.SendWriteRequest(msg)
 	if err != nil {
 		log.Printf("[client] Write request failed: %v", err)
-		s.sendErrorResponse(conn, req.ID, "WRITE_FAILED", err.Error())
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeWriteFailed, err)
 		return
 	}
 
@@ -224,9 +224,7 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 		wsResponse.Payload = payload
 	} else {
 		wsResponse.Error = response.Error
-		wsResponse.Payload = map[string]interface{}{
-			"code": "WRITE_FAILED",
-		}
+		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeWriteFailed)
 	}
 
 	if err := conn.WriteJSON(wsResponse); err != nil {
@@ -251,7 +249,7 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 	response, err := s.bridge.SendLockRequest(msg)
 	if err != nil {
 		log.Printf("[client] Lock request failed: %v", err)
-		s.sendErrorResponse(conn, req.ID, "LOCK_FAILED", err.Error())
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeLockFailed, err)
 		return
 	}
 
@@ -272,9 +270,7 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 		wsResponse.Payload = payload
 	} else {
 		wsResponse.Error = response.Error
-		wsResponse.Payload = map[string]interface{}{
-			"code": "LOCK_FAILED",
-		}
+		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeLockFailed)
 	}
 
 	if err := conn.WriteJSON(wsResponse); err != nil {
@@ -299,7 +295,7 @@ func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID strin
 	response, err := s.bridge.SendCapabilitiesRequest(msg)
 	if err != nil {
 		log.Printf("[client] Capabilities request failed: %v", err)
-		s.sendErrorResponse(conn, req.ID, "CAPABILITIES_FAILED", err.Error())
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeCapabilitiesFailed, err)
 		return
 	}
 
@@ -314,9 +310,7 @@ func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID strin
 		}
 	} else {
 		wsResponse.Error = response.Error
-		wsResponse.Payload = map[string]interface{}{
-			"code": "CAPABILITIES_FAILED",
-		}
+		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeCapabilitiesFailed)
 	}
 
 	if err := conn.WriteJSON(wsResponse); err != nil {
@@ -448,18 +442,48 @@ func (s *Server) broadcastDeviceStatus(status nfc.DeviceStatus) {
 }
 
 // sendErrorResponse sends an error response to a WebSocket client.
-func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, errorCode string, message string) {
+func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, errorCode protocol.ErrorCode, message string) {
 	response := protocol.WebSocketResponse{
 		ID:      requestID,
 		Type:    server.WSMessageTypeError,
 		Success: false,
 		Error:   message,
-		Payload: map[string]interface{}{
-			"code": errorCode,
-		},
+		Payload: protocol.NewErrorPayload(errorCode),
 	}
 
 	if err := conn.WriteJSON(response); err != nil {
 		log.Printf("[client] Failed to send error response: %v", err)
 	}
+}
+
+// sendOperationError reports a failed tag operation, keeping the code the
+// underlying NFCError carried rather than flattening every failure to one
+// per-operation label. A client can then tell "present the tag again" from
+// "this tag is locked".
+func (s *Server) sendOperationError(conn *server.SafeConn, requestID string, fallback protocol.ErrorCode, err error) {
+	payload := nfc.WireError(err)
+	if payload.Code == protocol.ErrCodeUnknownError {
+		payload = protocol.NewErrorPayload(fallback)
+	}
+
+	response := protocol.WebSocketResponse{
+		ID:      requestID,
+		Type:    server.WSMessageTypeError,
+		Success: false,
+		Error:   err.Error(),
+		Payload: payload,
+	}
+
+	if writeErr := conn.WriteJSON(response); writeErr != nil {
+		log.Printf("[client] Failed to send error response: %v", writeErr)
+	}
+}
+
+// errorPayloadOrDefault builds the error payload for an operation the reader or
+// device refused, preferring the code it reported over the generic one.
+func errorPayloadOrDefault(code, fallback protocol.ErrorCode) protocol.ErrorPayload {
+	if code == "" {
+		code = fallback
+	}
+	return protocol.NewErrorPayload(code)
 }

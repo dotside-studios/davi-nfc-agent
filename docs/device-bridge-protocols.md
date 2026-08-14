@@ -313,6 +313,85 @@ targets do not. Static endpoint config, or a UDP broadcast beacon, as a fallback
 | Tight | ESP8266 | Works; TLS is the pinch point — PSK helps materially |
 | Constrained | AVR Uno/Nano/Mega | Not over TLS+JSON+WS. Needs the serial transport, a VPCD-style binary path, or a gateway |
 
+## 5. Verdict: keep the protocol, finish the design
+
+The survey above could be misread as "adopt several of these." It shouldn't be.
+Our protocol is at the right layer and should stay. What is wrong with it is
+that it is under-specified, not that it is custom.
+
+### 5.1 Why our layer is the right one
+
+**Round trips.** This is the decisive argument. Every APDU-level protocol
+(VPCD, CCID, remote IFD, NFCGate) relays one card command per network round
+trip. Reading NDEF off a MIFARE Classic 1K is roughly 16 authentications plus
+~48 block reads — call it 60+ exchanges. Locally that is single-digit
+milliseconds each; over WiFi at 20–50 ms it is 1–3 seconds of tag-in-field time,
+and NTAG/Ultralight are dozens of reads too. Our protocol does the tag stack at
+the edge and sends one message. NFCGate's own documentation flags the same
+problem from the other side: relayed traffic breaks anything with timing checks.
+
+**The edge already has the tag stack, and sometimes you cannot bypass it.**
+Android, iOS, and PN532 firmware all implement tag handling locally. An
+APDU-relay design discards that and re-implements it agent-side against network
+latency — effectively running `nfc/tag_*.go` over a socket. Worse, it does not
+even work uniformly: iOS exposes no MIFARE Classic crypto1 at all, so for the
+most common tag type on the largest phone platform there is nothing to relay.
+NDEF-at-the-edge works everywhere precisely because the OS does the crypto
+locally.
+
+**Concurrency and push.** We are multi-device by construction — `MultiManager`,
+a `deviceID` per connection, phones and hardware readers live simultaneously.
+VPCD is one emulator per port; TR-03112-6 explicitly *rejects* additional
+connections while one is active. And tag arrival is an event, not a poll: a
+phone surfaces a tag when the user taps it. PC/SC models "I hold an exclusive
+session and drive a transaction," which is the wrong default for our workload.
+
+**One model, both directions.** The bridge and the client API share the same
+tag/NDEF vocabulary. Swapping the bridge for an APDU protocol would not remove a
+translation layer, it would add one.
+
+### 5.2 What "better design" actually means
+
+None of the real defects are consequences of being custom. They are the boring
+things mature protocols specify and we skipped:
+
+- **Version negotiation** — none at all. Add it first; everything else needs it.
+- **Capability declaration** — three booleans on the wire against a much richer
+  internal model (§4.2).
+- **A command channel** — the T1 omission. Note this is a *missing layer*, not a
+  wrong one: an optional sub-channel for devices that can do more, not a
+  replacement for NDEF-level messages.
+- **Device identity** — a shared bearer secret in a query string, no per-device
+  credential, no revocation.
+- **Error taxonomy** — ad-hoc string codes, no distinction between "retry this",
+  "the tag left the field", and "this device will never support that".
+- **Liveness** — a 10s/30s heartbeat where MQTT's Last Will gives immediate
+  death detection. Worth implementing the idea, not adopting the broker.
+- **Reconnect/resume** — undefined. A phone whose radio drops mid-write leaves
+  the request in limbo; there is no idempotency key and no replay.
+- **Backpressure** — `TagChannelBuffer = 10` and then behavior is unspecified.
+
+### 5.3 The rule to follow
+
+Borrow **design decisions**, not wire formats. From TR-03112-6: version-first
+handshake, context handle, OOB code to durable credential, PSK over X.509.
+From PC/SC: the verb vocabulary for the optional command sub-channel. From
+JSON-RPC: correlation and error discipline. From MQTT: last-will semantics.
+
+Foreign protocols belong at the **edge, as adapters** — VPCD and USB CCID exist
+in the plan so devices too small to afford our protocol still work, and so
+other PC/SC software can consume a davi-bridged reader. That is a compat shim,
+not a migration.
+
+### 5.4 The honest counterargument
+
+Custom protocols rediscover other people's mistakes, and we already have: no
+versioning, weak auth, no resume are exactly the classics. The mitigation is not
+to abandon ours but to stop improvising the parts that are already specified
+elsewhere — §5.3 is that list. It is worth re-testing the assumption if the
+product ever centres on ISO-DEP applet transactions rather than NDEF payloads,
+because that is the workload the APDU-level protocols are actually shaped for.
+
 ## References
 
 - [vsmartcard / vpcd — Virtual PC/SC Driver](https://frankmorgner.github.io/vsmartcard/virtualsmartcard/README.html) and [wire protocol notes](https://deepwiki.com/frankmorgner/vsmartcard/2.1-vpcd:-virtual-pcsc-driver)

@@ -156,7 +156,7 @@ func (m *Manager) readCachedHosts() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var hosts []string
 	scanner := bufio.NewScanner(file)
@@ -176,10 +176,12 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	for _, host := range hosts {
-		fmt.Fprintln(file, host)
+		if _, err := fmt.Fprintln(file, host); err != nil {
+			return fmt.Errorf("failed to write hosts cache: %w", err)
+		}
 	}
 
 	// Re-apply restrictive ACL on Windows where the mode bits are advisory.
@@ -221,7 +223,9 @@ func (m *Manager) generateCertificates(hosts []string) error {
 	if err := secureDir(m.caDir); err != nil {
 		m.logger.Printf("Warning: failed to lock down CA directory permissions: %v", err)
 	}
-	os.Setenv("CAROOT", m.caDir)
+	if err := os.Setenv("CAROOT", m.caDir); err != nil {
+		return fmt.Errorf("failed to set CAROOT: %w", err)
+	}
 
 	// Initialize truststore library (creates CA if needed)
 	ml, err := truststore.NewLib()

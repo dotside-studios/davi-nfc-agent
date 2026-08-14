@@ -1,8 +1,6 @@
 module github.com/dotside-studios/davi-nfc-agent
 
-go 1.24.0
-
-toolchain go1.24.2
+go 1.25.0
 
 require (
 	fyne.io/systray v1.11.0
@@ -10,15 +8,15 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/jittering/truststore v1.4.4-lib
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 )
 
 require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/miekg/dns v1.1.27 // indirect
-	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
-	golang.org/x/crypto v0.44.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	howett.net/plist v1.0.0 // indirect
 	software.sslmate.com/src/go-pkcs12 v0.2.0 // indirect
 )
@@ -26,5 +24,5 @@ require (
 require (
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/uuid v1.6.0
-	golang.org/x/sys v0.38.0
+	golang.org/x/sys v0.45.0
 )

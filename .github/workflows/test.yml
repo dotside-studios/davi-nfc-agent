@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.13'
 
       - name: Install PC/SC library
         run: |
@@ -24,14 +24,15 @@ jobs:
           sudo apt-get install -y libpcsclite-dev
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          args: --timeout=5m
-          # Only fail on issues introduced by the PR's diff. The repository has
-          # pre-existing lint debt; gating on new-only keeps the bar at "don't
-          # add more" without blocking on the historical backlog.
-          only-new-issues: true
+          # Pinned rather than `latest`: the version must be built with a Go
+          # release at least as new as the `go` directive in go.mod, or it
+          # refuses to load the package graph at all.
+          version: v2.5.0
+          # The default caps (50 per linter, 3 per identical message) hide
+          # repeat offenders; report every issue so regressions are visible.
+          args: --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
 
   test:
     runs-on: ubuntu-latest
@@ -43,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.13'
 
       - name: Install PC/SC library
         run: |
@@ -77,7 +78,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.13'
 
       - name: Install PC/SC library
         run: |

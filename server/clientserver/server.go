@@ -124,7 +124,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[client] Client connected: %s (total: %d)", clientID[:8], s.clientCount())
 
 	defer func() {
-		conn.Close()
+		_ = conn.Close()
 		s.clientsMux.Lock()
 		delete(s.clients, conn)
 		s.clientsMux.Unlock()

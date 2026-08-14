@@ -189,8 +189,8 @@ func TestMultiManagerOpenDeviceWithPrefix(t *testing.T) {
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1", "device2"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device3", "device4"}}
 
-	mm.AddManager("hardware", mock1)
-	mm.AddManager("smartphone", mock2)
+	_ = mm.AddManager("hardware", mock1)
+	_ = mm.AddManager("smartphone", mock2)
 
 	// Open device with explicit manager prefix
 	device, err := mm.OpenDevice("hardware:device1")
@@ -237,8 +237,8 @@ func TestMultiManagerOpenDeviceWithColonInDeviceID(t *testing.T) {
 	mock1 := &mockManager{name: "mock1", devices: []string{"acr122_usb:001:003", "pn532_uart:/dev/ttyUSB0"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"phone123"}}
 
-	mm.AddManager("hardware", mock1)
-	mm.AddManager("smartphone", mock2)
+	_ = mm.AddManager("hardware", mock1)
+	_ = mm.AddManager("smartphone", mock2)
 
 	// Open device with colon in ID - "acr122_usb" is NOT a registered manager,
 	// so it should fall through and try all managers with the full device string
@@ -283,8 +283,8 @@ func TestMultiManagerOpenDeviceWithoutPrefix(t *testing.T) {
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
 
-	mm.AddManager("first", mock1)
-	mm.AddManager("second", mock2)
+	_ = mm.AddManager("first", mock1)
+	_ = mm.AddManager("second", mock2)
 
 	// Open device without prefix (should try in order)
 	device, err := mm.OpenDevice("device1")
@@ -319,8 +319,8 @@ func TestMultiManagerOpenDeviceFallback(t *testing.T) {
 	// Second manager has it
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2", "target"}}
 
-	mm.AddManager("first", mock1)
-	mm.AddManager("second", mock2)
+	_ = mm.AddManager("first", mock1)
+	_ = mm.AddManager("second", mock2)
 
 	// Open device without prefix - should fallback to second manager
 	device, err := mm.OpenDevice("target")
@@ -341,8 +341,8 @@ func TestMultiManagerListDevices(t *testing.T) {
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1", "device2"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device3"}}
 
-	mm.AddManager("hardware", mock1)
-	mm.AddManager("smartphone", mock2)
+	_ = mm.AddManager("hardware", mock1)
+	_ = mm.AddManager("smartphone", mock2)
 
 	// List all devices
 	devices, err := mm.ListDevices()
@@ -377,8 +377,8 @@ func TestMultiManagerListDevicesWithErrors(t *testing.T) {
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}, failList: true}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
 
-	mm.AddManager("failing", mock1)
-	mm.AddManager("working", mock2)
+	_ = mm.AddManager("failing", mock1)
+	_ = mm.AddManager("working", mock2)
 
 	// Should still return devices from working manager
 	devices, err := mm.ListDevices()
@@ -417,9 +417,9 @@ func TestMultiManagerGetManagerNames(t *testing.T) {
 	mock2 := &mockManager{name: "mock2"}
 	mock3 := &mockManager{name: "mock3"}
 
-	mm.AddManager("first", mock1)
-	mm.AddManager("second", mock2)
-	mm.AddManager("third", mock3)
+	_ = mm.AddManager("first", mock1)
+	_ = mm.AddManager("second", mock2)
+	_ = mm.AddManager("third", mock3)
 
 	names := mm.GetManagerNames()
 
@@ -443,8 +443,8 @@ func TestMultiManagerEmptyDeviceString(t *testing.T) {
 	}
 	mock2 := &mockManager{name: "mock2", devices: []string{"other-device"}}
 
-	mm.AddManager("first", mock1)
-	mm.AddManager("second", mock2)
+	_ = mm.AddManager("first", mock1)
+	_ = mm.AddManager("second", mock2)
 
 	// Open with empty string (should try first manager with empty string)
 	device, err := mm.OpenDevice("")

@@ -865,12 +865,12 @@ func pipeStringToCommand(path string, args []string, text string) error {
 		return err
 	}
 	if _, err := io.WriteString(stdin, text); err != nil {
-		stdin.Close()
-		cmd.Wait()
+		_ = stdin.Close()
+		_ = cmd.Wait()
 		return err
 	}
 	if err := stdin.Close(); err != nil {
-		cmd.Wait()
+		_ = cmd.Wait()
 		return err
 	}
 	return cmd.Wait()

@@ -11,9 +11,8 @@ import (
 
 // pcscManager implements Manager using PC/SC via ebfe/scard
 type pcscManager struct {
-	ctx       *scard.Context
-	ctxMu     sync.Mutex
-	lastCheck time.Time
+	ctx   *scard.Context
+	ctxMu sync.Mutex
 }
 
 // newPCSCManager creates a new PC/SC manager
@@ -32,8 +31,9 @@ func (m *pcscManager) ensureContext() error {
 		if err == nil {
 			return nil
 		}
-		// Context is invalid, release it
-		m.ctx.Release()
+		// Context is invalid, release it; the release error is moot because
+		// we replace the context below either way.
+		_ = m.ctx.Release()
 		m.ctx = nil
 	}
 
@@ -108,7 +108,7 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 	// Create device wrapper
 	dev, err := newPCSCDevice(ctx, card, readerName)
 	if err != nil {
-		card.Disconnect(scard.LeaveCard)
+		_ = card.Disconnect(scard.LeaveCard)
 		return nil, fmt.Errorf("failed to initialize device: %w", err)
 	}
 

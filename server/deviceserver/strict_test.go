@@ -56,7 +56,7 @@ func dialStatus(t *testing.T, url string) int {
 
 	conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
 	if err == nil {
-		conn.Close()
+		_ = conn.Close()
 		return http.StatusSwitchingProtocols
 	}
 	if resp == nil {

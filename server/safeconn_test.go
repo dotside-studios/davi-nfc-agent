@@ -45,11 +45,11 @@ func TestSafeConnConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	// Wait for server to be ready
 	<-serverReady
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	// Wrap the server connection in SafeConn
 	safeConn := NewSafeConn(serverConn)
@@ -112,7 +112,7 @@ func TestSafeConnWriteMessage(t *testing.T) {
 			t.Errorf("Failed to upgrade: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Keep reading messages from client
 		for {
@@ -130,7 +130,7 @@ func TestSafeConnWriteMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	// Wrap the CLIENT connection in SafeConn (client writes to server)
 	safeConn := NewSafeConn(clientConn)
@@ -166,7 +166,7 @@ func TestSafeConnReadMessage(t *testing.T) {
 			t.Errorf("Failed to upgrade: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		close(serverReady)
 
 		// Send a message to the client
@@ -181,7 +181,7 @@ func TestSafeConnReadMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	<-serverReady
 

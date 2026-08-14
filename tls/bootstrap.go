@@ -159,7 +159,7 @@ func (s *BootstrapServer) Stop() {
 	if s.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		s.httpServer.Shutdown(ctx)
+		_ = s.httpServer.Shutdown(ctx)
 	}
 }
 
@@ -245,7 +245,10 @@ func (s *BootstrapServer) handleAppleProfile(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/x-apple-aspen-config")
 	w.Header().Set("Content-Disposition", `attachment; filename="davi-nfc-ca.mobileconfig"`)
-	w.Write(profile)
+	if _, err := w.Write(profile); err != nil {
+		s.logger.Printf("Failed to send Apple profile to %s: %v", r.RemoteAddr, err)
+		return
+	}
 	s.logger.Printf("Apple profile served to %s", r.RemoteAddr)
 }
 
@@ -265,7 +268,10 @@ func (s *BootstrapServer) handleAndroidCert(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
 	w.Header().Set("Content-Disposition", `attachment; filename="davi-nfc-ca.crt"`)
-	w.Write(der)
+	if _, err := w.Write(der); err != nil {
+		s.logger.Printf("Failed to send Android cert to %s: %v", r.RemoteAddr, err)
+		return
+	}
 	s.logger.Printf("Android cert served to %s", r.RemoteAddr)
 }
 
@@ -287,7 +293,9 @@ func (s *BootstrapServer) handleQR(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Write(png)
+	if _, err := w.Write(png); err != nil {
+		s.logger.Printf("Failed to send QR code to %s: %v", r.RemoteAddr, err)
+	}
 }
 
 // handleRawCA serves the raw .pem for legacy clients that can't use
@@ -311,7 +319,10 @@ func (s *BootstrapServer) handleRawCA(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-pem-file")
 	w.Header().Set("Content-Disposition", `attachment; filename="davi-nfc-ca.pem"`)
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write(caCert)
+	if _, err := w.Write(caCert); err != nil {
+		s.logger.Printf("Failed to send raw CA to %s: %v", r.RemoteAddr, err)
+		return
+	}
 	s.logger.Printf("Raw CA served to %s", r.RemoteAddr)
 }
 
@@ -489,5 +500,7 @@ button[disabled] { background: #ccc; cursor: not-allowed; }
 </html>`, appName, caName, caName, caName, fingerprint)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		s.logger.Printf("Failed to send install page: %v", err)
+	}
 }

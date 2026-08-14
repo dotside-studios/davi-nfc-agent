@@ -41,6 +41,7 @@ var (
 	autoTLSFlag        bool
 	configDirFlag      string
 	allowedOriginsFlag string
+	installCAFlag      bool
 )
 
 func main() {
@@ -53,6 +54,7 @@ func main() {
 	flag.StringVar(&certFileFlag, "cert", "", "Path to TLS certificate file (enables HTTPS/WSS)")
 	flag.StringVar(&keyFileFlag, "key", "", "Path to TLS private key file (enables HTTPS/WSS)")
 	flag.BoolVar(&autoTLSFlag, "auto-tls", true, "Automatically generate and manage TLS certificates")
+	flag.BoolVar(&installCAFlag, "install-ca", false, "Install a local certificate authority into the system trust store so browsers trust this agent. Not needed for phones, readers, or an externally provisioned certificate")
 	flag.StringVar(&configDirFlag, "config-dir", "", "Config directory (default: platform-specific)")
 	flag.StringVar(&allowedOriginsFlag, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
 	flag.Parse()
@@ -74,8 +76,10 @@ func main() {
 
 	// Initialize auto-TLS if enabled (and no manual cert/key provided)
 	var tlsMgr *tls.Manager
+	var agentPublicKeyPin string
 	if autoTLSFlag && certFileFlag == "" && keyFileFlag == "" {
 		tlsMgr = tls.NewManager(configDir)
+		tlsMgr.UseCA(installCAFlag)
 		certFile, keyFile, err := tlsMgr.EnsureCertificates()
 		if err != nil {
 			log.Printf("Warning: Auto-TLS failed: %v (running without TLS)", err)
@@ -83,6 +87,13 @@ func main() {
 		} else {
 			certFileFlag = certFile
 			keyFileFlag = keyFile
+
+			// Native devices authenticate the agent by this value rather than
+			// by a trust store, so log it where a first run will show it.
+			if pin, err := tlsMgr.PublicKeyPin(); err == nil {
+				log.Printf("Agent public key pin: %s", pin)
+				agentPublicKeyPin = pin
+			}
 		}
 	}
 
@@ -145,6 +156,7 @@ func main() {
 	}
 	agent.Origins = origins
 	agent.ConfigDir = configDir
+	agent.PublicKeyPin = agentPublicKeyPin
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration

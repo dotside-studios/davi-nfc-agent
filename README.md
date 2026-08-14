@@ -11,7 +11,7 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 - **Tag Locking & Erase**: Make tags read-only or wipe them back to an empty NDEF message
 - **Tag Capabilities**: Memory size, usable capacity, and write/lock/password support reported with every scan
 - **Real-time WebSocket**: Instant tag data broadcasting
-- **Secure by Default**: Automatic TLS (WSS) with a CA bootstrap server, plus optional API-secret authentication
+- **Secure by Default**: Automatic TLS (WSS) with key pinning for devices, an origin allowlist for browsers, plus optional API-secret authentication
 - **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
 - **Cross-platform**: Linux, macOS, Windows
 - **System Tray UI**: Device management and status
@@ -49,6 +49,7 @@ See the [Installation Guide](docs/installation.md) for platform-specific setup a
 ./davi-nfc-agent -device-port 9480     # Custom agent server port (default 9470, serves both devices and clients)
 ./davi-nfc-agent -api-secret mysecret  # Set the API authentication secret
 ./davi-nfc-agent -allowed-origins app.example.com  # Let a hosted web console connect
+./davi-nfc-agent -install-ca           # Trust this agent in browsers (installs a local CA)
 ./davi-nfc-agent -auto-tls=false       # Disable automatic TLS certificate management
 ./davi-nfc-agent -cert cert.pem -key key.pem  # Use your own TLS certificate
 ./davi-nfc-agent -config-dir ./config  # Override the config directory
@@ -89,7 +90,42 @@ write and permanently lock cards.
 > A trusted certificate is a separate requirement. The origin allowlist decides
 > *who may connect*; TLS decides whether the browser will open the connection at
 > all. A `wss://` connection to an untrusted certificate fails outright — unlike
-> a page visit, there is no warning to click through.
+> a page visit, there is no warning to click through. See
+> [How devices trust the agent](#how-devices-trust-the-agent).
+
+### How devices trust the agent
+
+By default the agent serves a **self-signed certificate** using a key it
+generates once and keeps. Nothing is added to any trust store.
+
+Phones, readers and other native clients authenticate the agent by **pinning its
+public key** rather than by trusting an authority. The pin is reported in the
+registration response as `serverInfo.publicKeyPin`, logged at startup, and takes
+the form `sha256/<base64>` over the SubjectPublicKeyInfo:
+
+```
+Agent public key pin: sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+```
+
+Record it when pairing and compare it on every later connection. **It survives
+certificate reissues**, which happen whenever the host's addresses change, so a
+device that pins it keeps working when the machine moves network. Pin this
+value, never the certificate.
+
+Browsers cannot pin, so they need a certificate they already trust. Two ways:
+
+1. **Provide one** — point `-cert` / `-key` at a certificate for a name you
+   control that resolves to the agent. Nothing is installed, and the browser
+   trusts it because a public CA issued it. This is the option that scales.
+2. **`-install-ca`** — creates a local certificate authority and installs it in
+   the system trust store, which is what makes a browser accept the agent's own
+   certificate.
+
+> A certificate authority in a trust store can sign for **any** name, not just
+> this agent. Whoever holds its key can intercept that machine's traffic, so
+> option 1 is preferable wherever you can arrange it. An install that already
+> has a CA keeps using it, so upgrading changes nothing for a console that
+> works today.
 
 By default the agent generates and persists a TLS certificate and an API secret
 under a platform-specific config directory, so paired devices keep working
@@ -99,7 +135,7 @@ across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
 
 The agent runs a single server on one port that fills both roles, plus a bootstrap helper:
 - **Agent Server** (port 9470): Serves both NFC devices (readers and smartphones, via `/ws?mode=device`) and client applications (via `/ws`) on the same port. The port is configurable via `-device-port`.
-- **CA Bootstrap Server** (port 9472): Serves the TLS root certificate for device setup (auto-TLS only)
+- **CA Bootstrap Server** (port 9472): Serves the root certificate for device setup, when a local CA is in use (`-install-ca`)
 
 ### JavaScript / TypeScript
 

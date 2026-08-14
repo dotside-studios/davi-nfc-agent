@@ -28,6 +28,11 @@ type Config struct {
 	// AllowedOrigins and is told about rejections.
 	OriginPolicy server.OriginPolicy
 
+	// PublicKeyPin is reported to devices so they can recognize this agent on
+	// later connections without a certificate authority. Empty when the agent
+	// is not using a certificate it generated itself.
+	PublicKeyPin string
+
 	// AllowedCardTypes limits which card types are accepted
 	AllowedCardTypes map[string]bool
 }

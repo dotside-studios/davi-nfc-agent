@@ -45,6 +45,14 @@ type DeviceRegistrationResponse struct {
 type ServerInfo struct {
 	Version      string   `json:"version"`
 	SupportedNFC []string `json:"supportedNFC"` // ["mifare", "desfire", etc.]
+
+	// PublicKeyPin identifies this agent across certificate reissues, as
+	// "sha256/<base64>" over the SubjectPublicKeyInfo. A device records it when
+	// pairing and compares it on later connections, which is how it recognizes
+	// the agent without a certificate authority.
+	//
+	// Empty when the agent runs without its own generated certificate.
+	PublicKeyPin string `json:"publicKeyPin,omitempty"`
 }
 
 // DeviceTagData is sent by a device when a tag is scanned.

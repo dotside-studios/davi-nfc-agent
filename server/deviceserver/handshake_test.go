@@ -373,3 +373,77 @@ func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
 	}
 	return conn, deviceID
 }
+
+// A device learns the agent's key pin during the handshake it already performs,
+// so it can recognize the same agent later without a certificate authority.
+func TestHelloReportsPublicKeyPin(t *testing.T) {
+	bridge := server.NewServerBridge()
+	deviceMgr := remotenfc.NewManager(30 * time.Second)
+
+	const pin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	dev := deviceserver.New(deviceserver.Config{
+		DeviceManager: deviceMgr,
+		PublicKeyPin:  pin,
+	}, bridge)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	dev.StartBackground(ctx)
+	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
+	t.Cleanup(func() {
+		ts.Close()
+		cancel()
+		bridge.Close()
+		deviceMgr.Close()
+	})
+
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
+	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeHello,
+		Payload: map[string]any{
+			"protocolVersion": protocol.DeviceProtocolV1,
+			"deviceName":      "Pinning Device",
+			"platform":        "android",
+		},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	_, payload := readResponse(t, conn)
+	info, ok := payload["serverInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("no serverInfo in response: %#v", payload)
+	}
+	if got, _ := info["publicKeyPin"].(string); got != pin {
+		t.Errorf("publicKeyPin = %q, want %q", got, pin)
+	}
+}
+
+// An agent with no certificate of its own has no pin to report, and must omit
+// the field rather than send an empty one a device might record.
+func TestHelloOmitsAbsentPin(t *testing.T) {
+	url := newDeviceTestServer(t)
+	conn, _ := registerV1(t, url)
+	_ = conn
+
+	// registerV1 already read the response; re-register on a fresh connection
+	// to inspect the payload.
+	conn2, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	if err := conn2.WriteJSON(protocol.WebSocketRequest{
+		Type: protocol.WSTypeHello,
+		Payload: map[string]any{
+			"protocolVersion": protocol.DeviceProtocolV1,
+			"deviceName":      "Unpinned Device",
+			"platform":        "ios",
+		},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	_, payload := readResponse(t, conn2)
+	info, _ := payload["serverInfo"].(map[string]any)
+	if _, present := info["publicKeyPin"]; present {
+		t.Error("publicKeyPin present when the agent has no certificate of its own")
+	}
+}

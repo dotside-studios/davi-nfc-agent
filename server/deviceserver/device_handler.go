@@ -55,6 +55,9 @@ type DeviceHandler struct {
 	connToDeviceID    map[*server.SafeConn]string // reverse lookup: conn -> deviceID
 	upgrader          websocket.Upgrader
 
+	// publicKeyPin lets a device recognize this agent on later connections.
+	publicKeyPin string
+
 	pending    map[string]pendingRequest // requestID -> waiter
 	pendingMux sync.Mutex
 
@@ -68,6 +71,7 @@ func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, c
 	return &DeviceHandler{
 		manager:        manager,
 		bridge:         bridge,
+		publicKeyPin:   config.PublicKeyPin,
 		deviceSessions: make(map[string]*server.SafeConn),
 		connToDeviceID: make(map[*server.SafeConn]string),
 		pending:        make(map[string]pendingRequest),
@@ -296,6 +300,7 @@ func (h *DeviceHandler) register(conn *server.SafeConn, reqID string, regReq pro
 		ServerInfo: protocol.ServerInfo{
 			Version:      "1.0.0",
 			SupportedNFC: []string{"mifare", "desfire", "type4", "ultralight"},
+			PublicKeyPin: h.publicKeyPin,
 		},
 	}, nil
 }

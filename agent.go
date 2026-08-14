@@ -61,6 +61,10 @@ type Agent struct {
 	ClientServer  *clientserver.Server
 	DevicePort    int // Single agent server port. Default: 9470
 
+	// PublicKeyPin identifies this agent to devices across certificate
+	// reissues, so they need no certificate authority to recognize it.
+	PublicKeyPin string
+
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
 	KeyFile    string       // Path to TLS private key file
@@ -273,6 +277,7 @@ func (a *Agent) startServers() error {
 		AllowedCardTypes: a.AllowedCardTypes,
 		AllowedOrigins:   a.AllowedOrigins,
 		OriginPolicy:     a.originPolicy(),
+		PublicKeyPin:     a.PublicKeyPin,
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)

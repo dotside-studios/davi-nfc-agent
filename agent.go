@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -67,6 +68,9 @@ type Agent struct {
 
 	// Devices holds the paired devices and their per-device credentials.
 	Devices *DeviceRegistry
+
+	// Control serves the control center's privileged API. Nil disables it.
+	Control *ControlServer
 
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
@@ -299,11 +303,18 @@ func (a *Agent) startServers() error {
 		TokenVerifier:  a.tokenVerifier(),
 	}, a.Bridge)
 
-	// Single listener fronts both the device and client handlers.
+	// Single listener fronts the device, client, control and console handlers.
+	var controlHandler http.Handler
+	if a.Control != nil {
+		controlHandler = a.Control.Handler()
+	}
+
 	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:     a.DevicePort,
-		CertFile: a.CertFile,
-		KeyFile:  a.KeyFile,
+		Port:           a.DevicePort,
+		CertFile:       a.CertFile,
+		KeyFile:        a.KeyFile,
+		ControlHandler: controlHandler,
+		UIHandler:      webUIHandler(),
 	}, a.DeviceServer, a.ClientServer)
 
 	go func() {

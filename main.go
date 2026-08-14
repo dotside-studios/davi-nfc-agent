@@ -6,6 +6,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"fyne.io/systray"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
@@ -66,6 +68,12 @@ func main() {
 		fmt.Println(buildinfo.BuildInfo())
 		os.Exit(0)
 	}
+
+	// Capture log output in memory before anything else logs. Started from a
+	// desktop launcher there is no stderr to read, so without this the agent's
+	// diagnostics are discarded as they are produced.
+	logRing := logbuf.New(logbuf.DefaultCapacity)
+	log.SetOutput(io.MultiWriter(os.Stderr, logRing))
 
 	log.Printf("Starting %s %s", buildinfo.Name, buildinfo.FullVersion())
 
@@ -202,9 +210,49 @@ func main() {
 		systray.Quit()
 	}()
 
+	// Load persisted preferences. Explicit flags still win: something that
+	// passed -device meant it for this run.
+	settings, err := NewSettingsStore(configDir)
+	if err != nil {
+		log.Printf("Warning: failed to load settings: %v", err)
+		settings, _ = NewSettingsStore("")
+	}
+	stored := settings.Get()
+
+	if devicePathFlag == "" {
+		devicePathFlag = stored.DevicePath
+	}
+	if !isFlagSet("device-port") && stored.Port > 0 {
+		agent.DevicePort = stored.Port
+	}
+	if !requirePairedFlag && os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") != "1" && stored.RequirePairedDevice {
+		agent.RequirePairedDevice = true
+	}
+	stored.Apply(agent)
+
+	control := NewControlServer(agent, NewControlAuth(), settings, logRing, bootstrapServer, bootstrapPortFlag)
+	agent.Control = control
+
+	// Redraw the console whenever something changes it from elsewhere.
+	origins.OnChange(control.NotifyChange)
+	devices.OnChange(control.NotifyChange)
+
 	// Create and run systray app
 	app := NewSystrayApp(agent, devicePathFlag, bootstrapPortFlag, bootstrapServer)
+	app.AttachControl(control, settings)
 	app.Run()
+}
+
+// isFlagSet reports whether a flag was given on the command line, as opposed to
+// holding its default. A stored port must not override an explicit -device-port.
+func isFlagSet(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 // getDefaultConfigDir returns the platform-specific config directory.

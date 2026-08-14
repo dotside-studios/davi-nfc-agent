@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Control Center.** A web console served by the agent itself at its own root,
+  covering what neither the tray nor the flags could do. Opened from the tray's
+  **Open Control Center**, which mints a single-use token and hands it to the
+  browser. Being same-origin, it is also the one browser client that works on a
+  fresh install without `-install-ca` — a page visit can be accepted manually,
+  where a bare `wss://` to an untrusted certificate fails outright. Built with
+  Vite and React; `webui/dist` is committed and embedded, so `go build .` still
+  needs nothing but Go. See [Control Center](docs/control-center.md)
+- **The agent's log is readable.** Log output went to stderr and nowhere else,
+  so an agent started from a desktop launcher discarded every certificate
+  warning, refused origin and reader failure as it produced it. The last 5000
+  lines are now kept in memory, streamed live to the console, filterable by
+  level and text, and downloadable for a bug report. Nothing is written to disk
+- **NDEF composer and tag inspector.** Writing a tag by hand previously meant
+  being a client application: the agent's support for smart posters, vCards,
+  MIME, geo, Android Application Records and fully raw records was unreachable
+  without writing code against the WebSocket protocol. The console composes any
+  of them, sizes the message against the tag's reported capacity as it is
+  typed, and can erase or permanently lock. It writes over the ordinary client
+  endpoint, so there remains one implementation of the write path
+- **Live event feed.** Scans, writes, locks and errors as they happen,
+  filterable, pausable and exportable as NDJSON. The tray only ever showed the
+  card currently on the reader, so a tag presented and taken away left no trace
+- **Per-device revocation.** Paired devices are listed with platform, pairing
+  time, last seen and whether they are connected, and each can be revoked on
+  its own. The tray's only option was to revoke every device, which made
+  removing one lost phone cost every other phone its pairing
+- **Settings persist.** Reader mode, card-type filter, reader selection, port
+  and the paired-device requirement are written to `settings.json` in the
+  config directory. Mode and filter previously lived only in the tray's menu
+  state and were lost on every launch; device and port could only be set with a
+  flag, and so had to be repeated in whatever started the agent. An explicit
+  flag still wins, and no file is written until something is deliberately saved
+- **Certificate and origin diagnostics.** The console reports certificate
+  expiry, issuer and the names it actually covers, and warns when the agent is
+  reachable on an address the certificate omits — previously indistinguishable
+  from the agent being down, since a browser reports both as a failed
+  connection. Origins refused since startup accumulate with a one-click
+  **allow**, where the tray offered a blocked origin only while its menu was open
 - **Device protocol versioning.** Devices offer the `davi-nfc-device.v1`
   WebSocket subprotocol and send a `hello` first frame carrying the protocol
   version alongside registration, so setup costs one round trip. The response
@@ -114,6 +153,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The Control Center's API is gated independently of the client and device
+  endpoints. Every request must arrive over loopback, declare the agent's own
+  origin, and carry a session cookie minted by the tray; the routes are served
+  without the permissive CORS headers the client endpoints carry. The origin
+  allowlist is deliberately not consulted — an entry there authorises a console
+  to read tags and must never confer the ability to revoke a device or rotate
+  the secret. Loopback is determined from `RemoteAddr`, never from a forwarding
+  header
 - The agent no longer installs a certificate authority into the system trust
   store by default. A CA in a trust store can sign for **any** name, not just
   this agent, so whoever holds its key can intercept that machine's traffic.

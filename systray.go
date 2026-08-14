@@ -65,6 +65,8 @@ type SystrayApp struct {
 	initialDevice string
 	bootstrapPort int
 	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
+	control       *ControlServer       // nil if the console is not built in
+	settings      *SettingsStore
 
 	// Menu items
 	mStatus     *systray.MenuItem
@@ -112,6 +114,9 @@ type SystrayApp struct {
 	mCardFilterMenu *systray.MenuItem
 	mFilterAll      *systray.MenuItem
 	cardTypeFilters map[string]*cardTypeFilterItem // Maps card type to filter item
+
+	// Control center
+	mControlCenter *systray.MenuItem
 }
 
 // NewSystrayApp creates a new systray application. bootstrap may be nil
@@ -125,6 +130,75 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 		bootstrap:       bootstrap,
 		deviceMenuItems: make(map[string]*systray.MenuItem),
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
+	}
+}
+
+// AttachControl wires the control center to the tray, so an action taken in one
+// runs through the same code as the other.
+func (s *SystrayApp) AttachControl(control *ControlServer, settings *SettingsStore) {
+	s.control = control
+	s.settings = settings
+
+	control.OnStart = func() error { return s.agent.Start(s.agent.CurrentDevicePath()) }
+	control.OnStop = func() { s.handleStopAgent() }
+	control.OnQuit = func() { systray.Quit() }
+	control.OnSelectDevice = func(devicePath string) error {
+		s.switchDevice(devicePath)
+		return nil
+	}
+	control.OnSettings = func(next Settings) { s.syncSettingsToMenu(next) }
+}
+
+// syncSettingsToMenu reflects a settings change made in the console.
+func (s *SystrayApp) syncSettingsToMenu(next Settings) {
+	if s.mModeMenu == nil {
+		return
+	}
+
+	modeName := "Read/Write"
+	switch next.Mode {
+	case ModeReadOnly:
+		modeName = "Read Only"
+	case ModeWriteOnly:
+		modeName = "Write Only"
+	}
+	s.mModeMenu.SetTitle("Mode: " + modeName)
+
+	s.mReadWriteMode.Uncheck()
+	s.mReadMode.Uncheck()
+	s.mWriteMode.Uncheck()
+	switch next.Mode {
+	case ModeReadOnly:
+		s.mReadMode.Check()
+	case ModeWriteOnly:
+		s.mWriteMode.Check()
+	default:
+		s.mReadWriteMode.Check()
+	}
+
+	selected := make(map[string]bool, len(next.CardTypes))
+	for _, t := range next.CardTypes {
+		selected[t] = true
+	}
+	for cardType, filter := range s.cardTypeFilters {
+		if selected[cardType] {
+			filter.menuItem.Check()
+		} else {
+			filter.menuItem.Uncheck()
+		}
+	}
+	if len(next.CardTypes) == 0 {
+		s.mFilterAll.Check()
+	} else {
+		s.mFilterAll.Uncheck()
+	}
+
+	if s.mRequirePaired != nil {
+		if next.RequirePairedDevice {
+			s.mRequirePaired.Check()
+		} else {
+			s.mRequirePaired.Uncheck()
+		}
 	}
 }
 
@@ -241,6 +315,10 @@ func (s *SystrayApp) setupUI() {
 
 	systray.AddSeparator()
 
+	s.setupControlMenu()
+
+	systray.AddSeparator()
+
 	// Agent control section
 	s.mStart = systray.AddMenuItem("Start Agent", "Start the NFC agent")
 	s.mStop = systray.AddMenuItem("Stop Agent", "Stop the NFC agent")
@@ -343,6 +421,8 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.handleStopAgent()
 		case <-mRefreshDevices.ClickedCh:
 			s.updateDeviceList()
+		case <-s.mControlCenter.ClickedCh:
+			s.handleOpenControlCenter()
 		case <-s.mCopyDeviceURL.ClickedCh:
 			if url := s.getDeviceURL(); url != "" {
 				if err := copyToClipboard(url); err != nil {

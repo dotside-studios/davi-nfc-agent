@@ -97,6 +97,11 @@ type SystrayApp struct {
 	mReadMode      *systray.MenuItem
 	mWriteMode     *systray.MenuItem
 
+	// Origin allowlist menu items
+	mOriginsMenu    *systray.MenuItem
+	mOriginAllowAny *systray.MenuItem
+	originSlots     []*originSlot
+
 	// Card filter menu items
 	mCardFilterMenu *systray.MenuItem
 	mFilterAll      *systray.MenuItem
@@ -128,6 +133,7 @@ func (s *SystrayApp) onReady() {
 	s.autoStartAgent()
 	s.startCardInfoUpdater()
 	s.startServerRestartListener()
+	s.startOriginWatcher()
 	s.startEventHandler()
 }
 
@@ -217,6 +223,11 @@ func (s *SystrayApp) setupUI() {
 			cardType: cardType,
 		}
 	}
+
+	systray.AddSeparator()
+
+	// Origin allowlist section
+	s.setupOriginsMenu()
 
 	systray.AddSeparator()
 
@@ -384,6 +395,8 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.handleModeSwitch(nfc.ModeWriteOnly, "Write Only")
 		case <-s.mFilterAll.ClickedCh:
 			s.handleFilterAll()
+		case <-s.mOriginAllowAny.ClickedCh:
+			s.handleOriginAllowAny()
 		case <-mQuit.ClickedCh:
 			systray.Quit()
 			return
@@ -394,6 +407,9 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 
 		// Handle device selection
 		s.handleDeviceSelection()
+
+		// Handle origin allow/revoke
+		s.handleOriginSelection()
 	}
 }
 

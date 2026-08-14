@@ -62,9 +62,9 @@ type DeviceHandler struct {
 	activeMux sync.RWMutex
 }
 
-// NewDeviceHandler creates a new device handler. allowedOrigins extends
-// the default same-origin policy on the device WebSocket upgrade.
-func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, allowedOrigins []string) *DeviceHandler {
+// NewDeviceHandler creates a new device handler. The config supplies the origin
+// policy applied to the device WebSocket upgrade.
+func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, config Config) *DeviceHandler {
 	return &DeviceHandler{
 		manager:        manager,
 		bridge:         bridge,
@@ -72,7 +72,7 @@ func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, a
 		connToDeviceID: make(map[*server.SafeConn]string),
 		pending:        make(map[string]pendingRequest),
 		upgrader: websocket.Upgrader{
-			CheckOrigin:  server.CheckOrigin(allowedOrigins),
+			CheckOrigin:  originChecker(config),
 			Subprotocols: protocol.DeviceSubprotocols,
 		},
 	}

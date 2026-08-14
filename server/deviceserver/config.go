@@ -3,6 +3,7 @@ package deviceserver
 import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // Config holds configuration for the device handling logic. The HTTP listener
@@ -22,6 +23,10 @@ type Config struct {
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]
 	// to disable origin checking entirely (NOT recommended).
 	AllowedOrigins []string
+
+	// OriginPolicy, when set, decides origin admission instead of
+	// AllowedOrigins and is told about rejections.
+	OriginPolicy server.OriginPolicy
 
 	// AllowedCardTypes limits which card types are accepted
 	AllowedCardTypes map[string]bool

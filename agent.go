@@ -43,7 +43,13 @@ type Agent struct {
 	// endpoints. A browser page served from anywhere other than the agent's
 	// own host:port — which is every hosted console — needs its origin listed
 	// here, or the upgrade is rejected as cross-site.
+	//
+	// Ignored when Origins is set, which is the normal path.
 	AllowedOrigins []string
+
+	// Origins is the live allowlist. Unlike AllowedOrigins it can be changed
+	// while the agent runs, and reports rejections so they can be surfaced.
+	Origins *OriginStore
 
 	// Server architecture. The device and client endpoints are served from a
 	// single listener (UnifiedServer) on DevicePort. DeviceServer and
@@ -266,12 +272,14 @@ func (a *Agent) startServers() error {
 		APISecret:        a.APISecret,
 		AllowedCardTypes: a.AllowedCardTypes,
 		AllowedOrigins:   a.AllowedOrigins,
+		OriginPolicy:     a.originPolicy(),
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.APISecret,
 		AllowedOrigins: a.AllowedOrigins,
+		OriginPolicy:   a.originPolicy(),
 	}, a.Bridge)
 
 	// Single listener fronts both the device and client handlers.
@@ -353,4 +361,14 @@ func (a *Agent) CurrentDevicePath() string {
 		return a.devicePath // Return stored path if reader not started
 	}
 	return a.Reader.DevicePath()
+}
+
+// originPolicy returns the live allowlist as an origin policy, or nil to fall
+// back to the static AllowedOrigins list. Returning a typed nil would satisfy
+// the interface and defeat that fallback, so the check is explicit.
+func (a *Agent) originPolicy() server.OriginPolicy {
+	if a.Origins == nil {
+		return nil
+	}
+	return a.Origins
 }

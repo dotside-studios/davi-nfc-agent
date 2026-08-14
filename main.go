@@ -124,7 +124,26 @@ func main() {
 	agent := NewAgent(manager)
 	agent.DevicePort = devicePortFlag
 	agent.APISecret = apiSecretFlag
-	agent.AllowedOrigins = parseAllowedOrigins(allowedOriginsFlag)
+
+	// The allowlist persists in the config dir and starts with the first-party
+	// consoles, so the shipped console connects on a fresh install. Anything
+	// passed on the command line is added to it.
+	origins, err := NewOriginStore(configDir)
+	if err != nil {
+		log.Printf("Warning: failed to load origin allowlist: %v", err)
+		origins, _ = NewOriginStore("")
+	}
+	for _, origin := range parseAllowedOrigins(allowedOriginsFlag) {
+		if origin == "*" {
+			log.Printf("Warning: -allowed-origins \"*\" disables the origin check; any site the operator visits can drive the reader")
+			origins.SessionAllowAny(true)
+			continue
+		}
+		if err := origins.Allow(origin); err != nil {
+			log.Printf("Warning: failed to allow origin %q: %v", origin, err)
+		}
+	}
+	agent.Origins = origins
 	agent.ConfigDir = configDir
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag

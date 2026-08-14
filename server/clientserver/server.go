@@ -43,7 +43,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		bridge:  bridge,
 		clients: make(map[*server.SafeConn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: server.CheckOrigin(config.AllowedOrigins),
+			CheckOrigin: originChecker(config),
 		},
 	}
 }
@@ -486,4 +486,13 @@ func errorPayloadOrDefault(code, fallback protocol.ErrorCode) protocol.ErrorPayl
 		code = fallback
 	}
 	return protocol.NewErrorPayload(code)
+}
+
+// originChecker prefers an explicit policy over the static allowlist, so the
+// tray can admit an origin without restarting the listener.
+func originChecker(config Config) func(r *http.Request) bool {
+	if config.OriginPolicy != nil {
+		return server.CheckOriginPolicy(config.OriginPolicy)
+	}
+	return server.CheckOrigin(config.AllowedOrigins)
 }

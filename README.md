@@ -57,18 +57,39 @@ See the [Installation Guide](docs/installation.md) for platform-specific setup a
 ### Connecting from a web console
 
 The agent only accepts WebSocket upgrades whose `Origin` matches its own
-host:port — otherwise any site the operator visits could drive the reader. A web
-console served from anywhere else, which is every hosted one, must be listed:
+host:port — otherwise any site the operator visits could drive the reader,
+including permanently locking cards. A console served from anywhere else, which
+is every hosted one, must be allowed.
+
+**The Davi consoles are allowed out of the box**, so nothing needs configuring
+for them. The allowlist lives in `allowed-origins.json` in the config directory
+and is managed from the tray under **Allowed Origins**, which lists what is
+permitted and lets you revoke any of it.
+
+**When a page is refused, the tray offers it.** The blocked origin appears as
+*"Allow example.com"* — one click admits it and persists the choice, no restart.
+That is the intended way to add a console.
+
+To preload one instead, at first run or for an unattended install:
 
 ```bash
-./davi-nfc-agent -allowed-origins "order.davi.social,localhost:3002"
+./davi-nfc-agent -allowed-origins "console.example.com,localhost:3002"
 # or
-DAVI_NFC_ALLOWED_ORIGINS="order.davi.social" ./davi-nfc-agent
+DAVI_NFC_ALLOWED_ORIGINS="console.example.com" ./davi-nfc-agent
 ```
 
 Entries are matched on host:port. Full URLs are accepted and reduced, so
-`https://order.davi.social` and `order.davi.social` are equivalent. `*` disables
-the check entirely and is not recommended — it lets any site connect.
+`https://console.example.com` and `console.example.com` are equivalent.
+
+**Allow any origin (this session)** in the tray turns the check off until the
+agent restarts. It is deliberately never persisted, and it is not a way to skip
+configuring an origin — while it is on, any page the operator opens can read,
+write and permanently lock cards.
+
+> A trusted certificate is a separate requirement. The origin allowlist decides
+> *who may connect*; TLS decides whether the browser will open the connection at
+> all. A `wss://` connection to an untrusted certificate fails outright — unlike
+> a page visit, there is no warning to click through.
 
 By default the agent generates and persists a TLS certificate and an API secret
 under a platform-specific config directory, so paired devices keep working

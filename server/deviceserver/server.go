@@ -43,7 +43,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		bridge:  bridge,
 		devices: make(map[*websocket.Conn]string),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: server.CheckOrigin(config.AllowedOrigins),
+			CheckOrigin: originChecker(config),
 		},
 		handlerRegistry: server.NewHandlerRegistry(),
 	}
@@ -56,7 +56,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 
 	// Register device handler (external devices like phones)
 	if config.DeviceManager != nil {
-		s.deviceHandler = NewDeviceHandler(config.DeviceManager, bridge, config.AllowedOrigins)
+		s.deviceHandler = NewDeviceHandler(config.DeviceManager, bridge, config)
 		s.deviceHandler.Register(s)
 
 		// Give tags produced by the manager a route back to their device, so
@@ -450,4 +450,13 @@ func operationErrorCode(err error, fallback protocol.ErrorCode) protocol.ErrorCo
 		return payload.Code
 	}
 	return fallback
+}
+
+// originChecker prefers an explicit policy over the static allowlist, so the
+// tray can admit an origin without restarting the listener.
+func originChecker(config Config) func(r *http.Request) bool {
+	if config.OriginPolicy != nil {
+		return server.CheckOriginPolicy(config.OriginPolicy)
+	}
+	return server.CheckOrigin(config.AllowedOrigins)
 }

@@ -27,6 +27,9 @@ import (
 
 // caReader is the subset of *Manager that BootstrapServer needs. Carved
 // out so tests can supply a fake without spinning up truststore.
+//
+// It may be nil: an agent using an externally provisioned certificate has no CA
+// to hand out, but still needs this server to pair devices.
 type caReader interface {
 	ReadCACert() ([]byte, error)
 	GetCAFingerprint() (string, error)
@@ -56,6 +59,12 @@ type BootstrapServer struct {
 	pinMu  sync.RWMutex
 	pin    string
 	failed atomic.Int32
+
+	// Pairing is optional: the bootstrap server runs without an issuer when the
+	// agent has no device registry.
+	pairMu     sync.RWMutex
+	pairIssuer PairingIssuer
+	agentPort  int
 }
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
@@ -108,6 +117,7 @@ func (s *BootstrapServer) Start() error {
 	mux.HandleFunc("/install/ios", s.handleAppleProfile)
 	mux.HandleFunc("/install/android", s.handleAndroidCert)
 	mux.HandleFunc("/qr.png", s.handleQR)
+	mux.HandleFunc("/pair", s.handlePair)
 	mux.HandleFunc("/ca.pem", s.handleRawCA)
 	mux.HandleFunc("/ca.crt", s.handleRawCA)
 
@@ -129,8 +139,10 @@ func (s *BootstrapServer) Start() error {
 		}
 	}
 
-	if fingerprint, err := s.manager.GetCAFingerprint(); err == nil {
-		s.logger.Printf("CA fingerprint (SHA-256): %s", fingerprint)
+	if s.manager != nil {
+		if fingerprint, err := s.manager.GetCAFingerprint(); err == nil {
+			s.logger.Printf("CA fingerprint (SHA-256): %s", fingerprint)
+		}
 	}
 
 	go func() {
@@ -285,6 +297,11 @@ func (s *BootstrapServer) handleRawCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.manager == nil {
+		http.Error(w, "This agent has no certificate authority to install.", http.StatusNotImplemented)
+		return
+	}
+
 	caCert, err := s.manager.ReadCACert()
 	if err != nil {
 		http.Error(w, "CA certificate not found", http.StatusNotFound)
@@ -300,6 +317,10 @@ func (s *BootstrapServer) handleRawCA(w http.ResponseWriter, r *http.Request) {
 
 // derCA decodes the manager's PEM-encoded CA into raw DER.
 func (s *BootstrapServer) derCA() ([]byte, error) {
+	if s.manager == nil {
+		return nil, fmt.Errorf("no certificate authority configured")
+	}
+
 	pemBytes, err := s.manager.ReadCACert()
 	if err != nil {
 		return nil, err
@@ -384,7 +405,10 @@ func (s *BootstrapServer) buildAppleProfile() ([]byte, error) {
 func (s *BootstrapServer) serveInstallPage(w http.ResponseWriter) {
 	appName := buildinfo.DisplayName
 	caName := appName + " NFC CA"
-	fingerprint, _ := s.manager.GetCAFingerprint()
+	var fingerprint string
+	if s.manager != nil {
+		fingerprint, _ = s.manager.GetCAFingerprint()
+	}
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">

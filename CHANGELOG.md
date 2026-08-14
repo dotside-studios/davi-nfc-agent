@@ -7,8 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Device protocol versioning.** Devices offer the `davi-nfc-device.v1`
+  WebSocket subprotocol and send a `hello` first frame carrying the protocol
+  version alongside registration, so setup costs one round trip. The response
+  reports the version both sides will speak, clamped to what the agent
+  implements rather than refused when a device asks for something newer.
+  Devices that offer nothing still send `registerDevice` and get a
+  byte-identical exchange back
+- **Full capability declaration on the wire.** Devices can declare APDU
+  transceive, raw framing, lock support, device type, supported tag families
+  and baud rate; tag scans can carry the capabilities the device determined for
+  that specific tag. All additions are `omitempty`, so a device declaring
+  nothing extra sends exactly the previous object
+- **Classified errors.** Error payloads carry `retryable`, plus the failing
+  operation and tag. Combined with `code` this distinguishes "retry with
+  backoff" from "ask the user to present the tag again" from "stop". Covers
+  both the device and client endpoints; existing code strings are unchanged
+- **`goodbye` frame.** A device can announce a deliberate departure, which the
+  agent acknowledges with a close handshake. Silent disconnects are classified
+  from the WebSocket close code, so a clean shutdown is no longer
+  indistinguishable from a dead radio
+- **Writing to tags held by remote devices.** A write is routed to the device
+  reporting the most recent scan whenever no hardware reader has a card
+  present, correlated by request ID and bounded by a 20s timeout. A device that
+  disconnects mid-write releases its waiters immediately rather than making
+  each wait out the timeout. Carries an idempotency key so a device can
+  recognize a write it already applied after a lost response
+- **Transceive command channel.** `deviceTransceiveRequest`/`Response` let the
+  agent exchange raw data with a tag a device is holding, with separate
+  declarations for APDU-level and framing-level exchange. Costs one network
+  round trip per command, so it is for what genuinely needs it — DESFire,
+  ISO-DEP applets, capability probing — not as a general read path
+- **Origin allowlist with first-party defaults**, persisted to
+  `allowed-origins.json` and managed from the tray. A refused origin is offered
+  as a one-click *"Allow …"*, which persists without a restart. Preload with
+  `-allowed-origins` or `DAVI_NFC_ALLOWED_ORIGINS`
+- **Public key pinning.** The agent reports `serverInfo.publicKeyPin` and logs
+  it at startup. Devices record it when pairing and compare it on later
+  connections, recognizing the agent without any certificate authority. It
+  survives certificate reissues, which happen whenever the host's addresses
+  change
+- **Per-device pairing.** `POST /pair` on the bootstrap server exchanges the
+  kiosk PIN for a credential belonging to one device, returned alongside the
+  agent's key pin. Tokens are stored hashed and shown once. The tray lists
+  paired devices and revokes them individually, or all at once
+- **`-require-paired-devices`** (also `DAVI_NFC_REQUIRE_PAIRED_DEVICES`, and a
+  tray toggle that applies immediately): admits only devices holding a paired
+  credential, withdrawing both the shared secret and the loopback bypass for
+  device connections. Browser consoles are unaffected
+
 ### Changed
 
+- **Self-signed certificates by default; the local CA is now opt-in.** The
+  agent previously created a certificate authority and installed it into the
+  system trust store on startup. It now serves a self-signed certificate from a
+  key it generates once and keeps, touching no trust store. Use `-install-ca`
+  for browsers that cannot pin and have no externally provisioned certificate,
+  or point `-cert`/`-key` at one you provide. **An install that already has a
+  CA keeps using it**, so a browser console working today is unaffected
+- Tags held by remote devices now report `canWrite`, `canLock` and
+  `canTransceive` honestly, based on what the device declared *and* whether it
+  is still connected, instead of always reporting read-only
 - **Single-port architecture.** The device server (previously port 9470) and
   client server (previously port 9471) are now served from one listener on a
   single port (default 9470). NFC devices connect to `/ws?mode=device` (or with
@@ -22,6 +83,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `-client-port` flag. The client endpoint now shares the agent port; set
   the single port via `-device-port` (default 9470).
+
+### Fixed
+
+- **A hosted web console could not connect at all.** The WebSocket origin guard
+  rejects any `Origin` that is not the agent's own `host:port`, and
+  `AllowedOrigins` — the escape hatch built alongside it — was never populated:
+  no flag, no environment variable, and `agent.go` left it nil on both servers.
+  Every browser console was affected, since a page is by construction served
+  from somewhere other than the agent's port. The REST endpoints meanwhile
+  answered `Access-Control-Allow-Origin: *`, so the two halves of the same API
+  disagreed about who may call them
+- Pairing required auto-TLS. The endpoint lived on a server that only ran when
+  the agent managed its own certificates, so the deployment using an externally
+  provisioned certificate — the one that most needs per-device credentials —
+  had no way to pair
+- `ServerBridge.Close` closed channels that producers could still be sending
+  on, which panics the losing goroutine. Only the done channel is closed now;
+  consumers already exit on their own context
+- A tag scan was published to clients before the route a write needs was
+  registered, so a client reacting to `tagData` with an immediate write could
+  be told no device held a tag it had just been told about
+- Tag scans that fail to parse — a malformed UID, an undecodable NDEF message —
+  were reported as the transient `TAG_SEND_FAILED`, inviting a device to resend
+  a payload that can never be accepted. They are now `INVALID_DATA` and marked
+  permanent
+- A failed write reported `WRITE_FAILED` whatever went wrong, because the
+  reader's typed error was flattened to a string at the bridge before the
+  client server saw it
+
+### Security
+
+- The agent no longer installs a certificate authority into the system trust
+  store by default. A CA in a trust store can sign for **any** name, not just
+  this agent, so whoever holds its key can intercept that machine's traffic.
+  See *Changed* above for the replacement and the compatibility path
+- Per-device credentials replace a single shared secret as the recommended way
+  to authenticate a device, so removing one device no longer means rotating a
+  secret that logs out every other device at the same time
 
 ## [1.0.3] - 2026-06-29
 

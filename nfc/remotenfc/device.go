@@ -15,6 +15,7 @@ type Device struct {
 	deviceName   string             // Human-readable name (e.g., "iPhone 12 Pro")
 	platform     string             // "ios" or "android"
 	appVersion   string             // Mobile app version
+	protoVersion int                // Negotiated bridge protocol version
 	isActive     bool               // Whether device is connected
 	tagChannel   chan []nfc.Tag     // Channel to receive tags from smartphone
 	closeChannel chan struct{}      // Signal to close device
@@ -32,6 +33,7 @@ func NewDevice(deviceID string, req DeviceRegistrationRequest) *Device {
 		deviceName:   req.DeviceName,
 		platform:     req.Platform,
 		appVersion:   req.AppVersion,
+		protoVersion: req.ProtocolVersion,
 		isActive:     true,
 		tagChannel:   make(chan []nfc.Tag, TagChannelBuffer),
 		closeChannel: make(chan struct{}),
@@ -87,13 +89,24 @@ func (d *Device) Connection() string {
 
 // DeviceType returns the device type identifier (implements nfc.DeviceInfoProvider).
 func (d *Device) DeviceType() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.capabilities.DeviceType != "" {
+		return d.capabilities.DeviceType
+	}
 	return "smartphone"
 }
 
 // SupportedTagTypes returns the NFC types this device supports (implements nfc.DeviceInfoProvider).
+// A v0 device declares only its radio technology, which is all we can report.
 func (d *Device) SupportedTagTypes() []string {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
+	if len(d.capabilities.SupportedTagTypes) > 0 {
+		return append([]string(nil), d.capabilities.SupportedTagTypes...)
+	}
 	return []string{d.capabilities.NFCType}
 }
 
@@ -102,7 +115,19 @@ func (d *Device) SupportsEvents() bool {
 	return true
 }
 
-// Transceive is not directly applicable for smartphones.
+// SupportsTransceive reports device-level transceive, which remains
+// unsupported (implements nfc.DeviceTransceiver).
+//
+// A device may well declare CanTransceive, but that capability is exercised
+// against a specific tag and is reported by remotenfc.Tag. Device-level
+// transceive has no tag to address, so declaring it here would promise
+// something Transceive below cannot do.
+func (d *Device) SupportsTransceive() bool {
+	return false
+}
+
+// Transceive is not directly applicable for smartphones. Raw exchange with a
+// scanned tag goes through remotenfc.Tag.Transceive.
 func (d *Device) Transceive(txData []byte) ([]byte, error) {
 	return nil, nfc.NewNotSupportedError("Transceive")
 }
@@ -186,6 +211,11 @@ func (d *Device) Platform() string {
 // AppVersion returns the mobile app version.
 func (d *Device) AppVersion() string {
 	return d.appVersion
+}
+
+// ProtocolVersion returns the bridge protocol version negotiated at registration.
+func (d *Device) ProtocolVersion() int {
+	return d.protoVersion
 }
 
 // PhoneCapabilities returns the smartphone-specific device capabilities.

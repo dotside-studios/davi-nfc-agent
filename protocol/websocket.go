@@ -11,13 +11,18 @@ const (
 
 // WebSocket message type constants for device communication
 const (
+	WSTypeHello                  = "hello"
+	WSTypeHelloResponse          = "helloResponse"
+	WSTypeGoodbye                = "goodbye"
 	WSTypeRegisterDevice         = "registerDevice"
 	WSTypeRegisterDeviceResponse = "registerDeviceResponse"
 	WSTypeTagScanned             = "tagScanned"
 	WSTypeTagRemoved             = "tagRemoved"
 	WSTypeDeviceHeartbeat        = "deviceHeartbeat"
-	WSTypeDeviceWriteRequest     = "deviceWriteRequest"
-	WSTypeDeviceWriteResponse    = "deviceWriteResponse"
+	WSTypeDeviceWriteRequest      = "deviceWriteRequest"
+	WSTypeDeviceWriteResponse     = "deviceWriteResponse"
+	WSTypeDeviceTransceiveRequest = "deviceTransceiveRequest"
+	WSTypeDeviceTransceiveResponse = "deviceTransceiveResponse"
 )
 
 // WebSocketMessage is the generic message envelope for WebSocket communication.

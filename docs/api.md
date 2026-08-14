@@ -15,6 +15,59 @@ The agent server port is configurable via `-device-port` (default 9470).
 
 The device endpoint accepts connections from NFC devices that provide tag data.
 
+### Pairing
+
+A device authenticates with its own credential, obtained once by presenting the
+PIN shown on the kiosk (tray, logs, and the pairing QR):
+
+```
+POST http://[host]:9472/pair?pin=123456
+Content-Type: application/json
+
+{"deviceName": "Operator iPhone", "platform": "ios"}
+```
+
+```json
+{
+  "deviceID": "6f1c…",
+  "deviceToken": "kQ8x…",
+  "publicKeyPin": "sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+  "agentPort": 9470
+}
+```
+
+Store all three. `deviceToken` is presented on every later connection, as
+`?secret=` or `Authorization: Bearer`. `publicKeyPin` is how the device
+recognizes this agent again — see
+[How devices trust the agent](../README.md#how-devices-trust-the-agent).
+
+**The token is shown once.** The agent keeps only its hash, so a lost token
+means pairing again rather than looking it up.
+
+Each device holds its own credential, so one can be revoked from the tray under
+**Paired Devices** without disturbing the others. The shared API secret still
+works for devices configured with it, but rotating it logs out everything at
+once, which is what per-device tokens exist to avoid.
+
+Wrong PINs lock pairing after five attempts until the agent restarts.
+
+#### Requiring pairing
+
+By default a device may also present the shared API secret, and a device
+connecting over loopback needs no credential at all. Both remain so that
+upgrading strands nothing.
+
+`-require-paired-devices` (or **Require pairing** in the tray, or
+`DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws both: only a credential issued at
+pairing admits a device. Turn it on once the devices you care about have paired
+— with none paired, every device connection is refused.
+
+**Browser consoles are unaffected.** A browser has no way to pair, and is gated
+by the origin allowlist instead. This setting governs the device endpoint only.
+
+The tray toggle takes effect immediately, so the policy can be tried against a
+real device without restarting.
+
 ### Connecting
 
 Connect via WebSocket with device mode:
@@ -23,21 +76,38 @@ Connect via WebSocket with device mode:
 wss://[host]:9470/ws?mode=device
 ```
 
+Offer the `davi-nfc-device.v1` subprotocol during the upgrade. If the agent
+echoes it back, it supports the `hello` handshake below. If it echoes nothing,
+it predates versioning — fall back to [Legacy Registration](#legacy-registration-v0).
+
+```javascript
+const ws = new WebSocket('wss://host:9470/ws?mode=device', ['davi-nfc-device.v1']);
+const version = ws.protocol === 'davi-nfc-device.v1' ? 1 : 0;
+```
+
 ### Device Registration
 
-After connecting, register the device:
+Send `hello` as the first frame. It carries the protocol version alongside the
+registration fields, so setup costs one round trip:
 
 ```json
 {
-  "type": "registerDevice",
+  "id": "req_1",
+  "type": "hello",
   "payload": {
+    "protocolVersion": 1,
     "deviceName": "My Device",
     "platform": "ios",
     "appVersion": "1.0.0",
     "capabilities": {
       "canRead": true,
       "canWrite": false,
-      "nfcType": "corenfc"
+      "nfcType": "corenfc",
+      "canTransceive": false,
+      "canTransceiveRaw": false,
+      "canLock": false,
+      "deviceType": "smartphone",
+      "supportedTagTypes": ["NTAG", "MIFARE Ultralight"]
     },
     "metadata": {
       "userAgent": "..."
@@ -46,13 +116,37 @@ After connecting, register the device:
 }
 ```
 
-**Registration Response:**
+#### Device Capabilities
+
+`canRead`, `canWrite`, and `nfcType` are the original v0 declaration and are
+always sent. The rest are v1 additions — omit any that do not apply, and a
+device declaring nothing extra sends exactly the v0 object.
+
+| Field | Meaning |
+|-------|---------|
+| `canRead` / `canWrite` | Device can read / write NDEF |
+| `nfcType` | Radio technology or library: `nfca`, `isodep`, `corenfc`, `webnfc`, … |
+| `canTransceive` | APDU-level exchange — Android `IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange` |
+| `canTransceiveRaw` | Framing-level exchange — Android `NfcA.transceive`, PN532 `InCommunicateThru` |
+| `canLock` | Device can make a tag read-only |
+| `deviceType` | Free-form kind, e.g. `smartphone`, `pn532-serial`. Defaults to `smartphone` |
+| `supportedTagTypes` | Tag families this device handles, e.g. `["MIFARE Classic", "NTAG"]` |
+| `maxBaudRate` | Maximum baud rate in bps, for serial-attached readers |
+
+Capability is a set rather than a level: a PN532 reader can declare
+`canTransceive` and MIFARE Classic support that an iPhone cannot, while the
+iPhone declares NDEF abilities the reader lacks. Declare what is true and let
+the agent decide what it can use.
+
+**Response:**
 
 ```json
 {
-  "type": "registerDeviceResponse",
+  "id": "req_1",
+  "type": "helloResponse",
   "success": true,
   "payload": {
+    "protocolVersion": 1,
     "deviceID": "dev_abc123",
     "serverInfo": {
       "version": "1.0.0",
@@ -61,6 +155,36 @@ After connecting, register the device:
   }
 }
 ```
+
+`protocolVersion` in the response is what both sides will speak. It is never
+higher than the version the device asked for: a device declaring a version newer
+than the agent implements is answered at the agent's maximum rather than
+refused. Devices should read this field rather than assume their request was
+honoured.
+
+`platform` must be `ios`, `android`, or `web`.
+
+### Legacy Registration (v0)
+
+Devices predating versioning send `registerDevice` as the first frame and get
+`registerDeviceResponse` back. This exchange is unchanged and remains supported;
+the payload is identical to `hello` minus `protocolVersion`.
+
+```json
+{
+  "type": "registerDevice",
+  "payload": {
+    "deviceName": "My Device",
+    "platform": "ios",
+    "appVersion": "1.0.0",
+    "capabilities": { "canRead": true, "canWrite": false, "nfcType": "corenfc" }
+  }
+}
+```
+
+The first frame's type selects the dialect, so the subprotocol offer is a hint
+rather than a commitment — a device that offers nothing but sends `hello` is
+still served at v1.
 
 ### Messages from Device
 
@@ -85,10 +209,43 @@ Send when a tag is detected:
           "language": "en"
         }
       ]
+    },
+    "capabilities": {
+      "memorySize": 1024,
+      "maxNdefSize": 716,
+      "tagFamily": "MIFARE Classic",
+      "supportsNdef": true
     }
   }
 }
 ```
+
+`capabilities` (v1, optional) is what the device determined about this specific
+tag — see [Tag Capabilities](#tag-capabilities) for the field list. Omit it and
+the agent infers them from `type`, which is all a v0 device allows. Declared
+values win over inference, except that operations the bridge cannot yet route
+(`canWrite`, `canTransceive`, `canLock`) are reported as false whatever the
+device claims.
+
+#### Goodbye
+
+Send before disconnecting deliberately (v1). The agent acknowledges with a
+normal WebSocket close and records a departure rather than a lost device:
+
+```json
+{
+  "type": "goodbye",
+  "payload": {
+    "deviceID": "dev_abc123",
+    "reason": "user stopped scanning"
+  }
+}
+```
+
+`reason` is optional and only reaches the agent's logs. Without a goodbye the
+agent classifies the disconnect from the close handshake: a normal or
+going-away close is still a clean departure, and anything else — an abrupt
+reset, a dead radio — is reported as a dropped device.
 
 #### Tag Removed
 
@@ -121,24 +278,32 @@ Keep connection alive:
 
 #### Write Response
 
-Respond to a write request from the server:
+Respond to a write request from the server. Required — the agent holds the
+client's request open until this arrives, the device disconnects, or 20 seconds
+pass:
 
 ```json
 {
   "type": "deviceWriteResponse",
   "payload": {
     "requestID": "req_xyz789",
-    "success": true,
-    "error": ""
+    "success": false,
+    "error": "tag is read-only",
+    "errorCode": "READ_ONLY"
   }
 }
 ```
+
+`errorCode` is optional but preferred — it lets the agent classify the failure
+instead of parsing `error`. Use any code from [NFC errors](#nfc-errors).
 
 ### Messages to Device
 
 #### Write Request
 
-Server requests the device to write data to a tag:
+The agent asks the device to write the tag it is currently holding. A write is
+routed to a device when no hardware reader has a card present and that device
+reported the most recent scan.
 
 ```json
 {
@@ -146,10 +311,14 @@ Server requests the device to write data to a tag:
   "payload": {
     "requestID": "req_xyz789",
     "deviceID": "dev_abc123",
+    "tagUID": "04:A1:B2:C3",
+    "lock": false,
+    "idempotencyKey": "req_xyz789",
+    "ndefBytes": "0QEOVAJlbkhlbGxvLCBORkMh",
     "ndefMessage": {
       "records": [
         {
-          "type": "text",
+          "recordType": "text",
           "content": "Hello!",
           "language": "en"
         }
@@ -158,6 +327,70 @@ Server requests the device to write data to a tag:
   }
 }
 ```
+
+| Field | Description |
+|-------|-------------|
+| `ndefBytes` | The encoded NDEF message, base64 in transit. **Authoritative** where it and `ndefMessage` disagree — prefer it if the device can write raw NDEF |
+| `ndefMessage` | The same message as records, for APIs like Web NFC that only accept records. Cannot express every record type faithfully |
+| `tagUID` | UID the agent expects to be in the field. Report `TAG_REMOVED` if a different tag is present |
+| `lock` | Make the tag permanently read-only after a successful write. Irreversible |
+| `idempotencyKey` | Identifies the logical write |
+
+**On `idempotencyKey`:** a device that has already applied a given key must
+report the previous outcome rather than write again. The same request can arrive
+twice — the agent sends a write, the device applies it, and the response is lost
+to a dropped connection. Without the check, the retry writes a second time.
+
+#### Transceive Request
+
+The agent asks the device to exchange raw data with the tag it is holding. Sent
+only to devices that declared `canTransceive`, and only for tags that support
+it — the NDEF path handles ordinary reads and writes.
+
+```json
+{
+  "type": "deviceTransceiveRequest",
+  "payload": {
+    "requestID": "req_abc",
+    "deviceID": "dev_abc123",
+    "tagUID": "04:A1:B2:C3",
+    "data": "AKQEAA==",
+    "raw": false,
+    "timeoutMs": 5000
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `data` | Command bytes, base64 in transit |
+| `raw` | `false` for APDU-level exchange (`IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange`); `true` for framing-level (`NfcA.transceive`, PN532 `InCommunicateThru`) |
+| `tagUID` | UID the agent expects in the field. Report `TAG_REMOVED` if a different tag is present |
+| `timeoutMs` | Bound for this single exchange |
+
+Respond with `deviceTransceiveResponse`:
+
+```json
+{
+  "type": "deviceTransceiveResponse",
+  "payload": {
+    "requestID": "req_abc",
+    "success": true,
+    "data": "kAA="
+  }
+}
+```
+
+There is no connect/disconnect pair around a transceive: a tag session is
+already delimited by `tagScanned` and `tagRemoved`, and on phones the OS owns
+the session.
+
+**This costs one network round trip per command.** Reading NDEF off a MIFARE
+Classic 1K is ~60 exchanges — seconds of tag-in-field time over WiFi, against a
+single message on the NDEF path. Use the command channel for what genuinely
+needs it (DESFire, ISO-DEP applets, capability probing), not as a general read
+path. iOS also enforces its own session timeouts, so long sequences are more
+likely to fail there.
 
 ### mDNS Discovery
 
@@ -601,36 +834,109 @@ report `"type": "agent"`.
 
 ## TLS & Certificates
 
-The agent uses auto-generated TLS certificates for secure WebSocket connections.
+The agent serves `wss://` with a self-signed certificate generated from a key it
+creates once and keeps. Nothing is installed into any trust store by default.
 
-### CA Bootstrap Server
+### Native devices — pin the key
 
-A bootstrap server runs on port 9472 to help devices trust the agent's certificate:
+Phones, readers and other native clients **should not install a certificate
+authority**. They verify the agent by pinning its public key, reported as
+`serverInfo.publicKeyPin` at registration and handed out at pairing. The pin
+survives certificate reissues, which happen whenever the host's addresses
+change.
 
-1. Open `http://[agent-ip]:9472` in a browser
-2. Download the CA certificate
-3. Install on your device
+See [Setting up an iOS or Android device](device-setup.md) for the pairing flow
+and the trust-evaluation code, including the two ways it commonly goes wrong.
 
-### Installing the CA Certificate
+### Browsers — provide a certificate, or install a CA
 
-**iOS:**
-- Settings > Profile Downloaded > Install
+A browser cannot pin, so it needs a certificate it already trusts:
 
-**Android:**
-- Settings > Security > Install certificate
+1. **Provide one** — point `-cert` / `-key` at a certificate for a name you
+   control that resolves to the agent. Nothing is installed, and the browser
+   trusts it because a public CA issued it.
+2. **`-install-ca`** — creates a local certificate authority and installs it in
+   the system trust store. A CA there can sign for **any** name, not just this
+   agent, so prefer option 1 where you can arrange it.
 
-**Browsers:**
-- Import into browser's certificate store, or
-- Use the JavaScript client which handles this automatically
+With `-install-ca`, the bootstrap server on port 9472 serves the root
+certificate for installation, PIN-gated.
+
+Browsers also need their origin allowed — see
+[Connecting from a web console](../README.md#connecting-from-a-web-console). A
+trusted certificate and an allowed origin are separate requirements, and a
+failure of either looks the same from the page.
 
 ---
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| `WRITE_FAILED` | Write operation failed |
-| `NO_CARD` | No card present on reader |
-| `READ_FAILED` | Failed to read card data |
-| `SESSION_LOCKED` | Another client holds the session |
-| `INVALID_REQUEST` | Malformed request |
+Errors arrive as a response with `success: false`, a human-readable `error`
+string, and a structured payload:
+
+```json
+{
+  "id": "req_1",
+  "type": "error",
+  "success": false,
+  "error": "data too large: 900 bytes exceeds tag NDEF capacity of 504 bytes",
+  "payload": {
+    "code": "CAPACITY_EXCEEDED",
+    "retryable": false,
+    "op": "WriteData",
+    "tagUID": "04:A1:B2:C3"
+  }
+}
+```
+
+`code` has always been present and its strings are stable. `retryable`, `op`,
+and `tagUID` are additive — a client reading only `code` is unaffected.
+
+**`retryable` is the field worth acting on.** It answers whether repeating the
+identical request could plausibly succeed. Combined with `code` it gives three
+distinct outcomes:
+
+| Condition | Meaning | What a client should do |
+|-----------|---------|-------------------------|
+| `retryable: true`, code ≠ `TAG_REMOVED` | Transient — I/O glitch, full queue, timeout | Retry, with backoff |
+| `retryable: true`, code = `TAG_REMOVED` | The tag left the field mid-operation | Ask the user to present the tag again |
+| `retryable: false` | Refused on its merits | Do not retry; surface it |
+
+### Protocol errors
+
+Raised by the bridge itself, before reaching a tag.
+
+| Code | Retryable | Description |
+|------|-----------|-------------|
+| `PARSE_ERROR` | no | Message was not valid JSON |
+| `INVALID_PAYLOAD` | no | Payload did not match the message type |
+| `INVALID_REQUEST` | no | Required field missing or invalid |
+| `INVALID_MESSAGE_TYPE` | no | Message type not valid at this point in the exchange |
+| `UNKNOWN_TYPE` | no | Unrecognized message type |
+| `INVALID_DEVICE` | no | Device ID did not match the connection |
+| `REGISTRATION_FAILED` | no | Device could not be registered |
+| `SESSION_LOCKED` | no | Another client holds the session |
+| `TAG_SEND_FAILED` | yes | Tag data could not be delivered internally |
+| `READ_ERROR` | yes | Failed to read from the connection |
+| `TIMEOUT` | yes | Operation timed out |
+| `DEVICE_GONE` | no | Target device disconnected |
+| `INTERNAL_ERROR` | yes | Unexpected agent-side failure |
+| `UNKNOWN_ERROR` | no | Unclassified — never advertised as retryable |
+
+### NFC errors
+
+Something happened at the tag. These mirror the agent's internal error codes.
+
+| Code | Retryable | Description |
+|------|-----------|-------------|
+| `NOT_SUPPORTED` | no | Tag or device does not support the operation |
+| `TAG_REMOVED` | yes | Tag left the field mid-operation |
+| `AUTH_FAILED` | no | Authentication failed — the same key will fail again |
+| `READ_FAILED` | yes | Read failed |
+| `WRITE_FAILED` | yes | Write failed |
+| `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
+| `TAG_NOT_CONNECTED` | yes | No tag connected |
+| `READ_ONLY` | no | Tag is locked |
+| `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
+| `INVALID_DATA` | no | Data was malformed |
+| `NO_CARD` | yes | No card present on reader |

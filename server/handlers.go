@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // WriteRecord represents a single NDEF record in a write request. The Type
@@ -205,4 +206,29 @@ func HandleWriteRequest(reader *nfc.NFCReader, writeReq WriteRequest) (*nfc.Writ
 	log.Printf("WriteRequest: Successfully wrote NDEF message to card (verified=%v, attempts=%d)",
 		result.Verified, result.Attempts)
 	return result, nil
+}
+
+// BuildNDEFInput converts a write request into the record form sent to remote
+// devices. Smart poster titles have no representation here, which is why the
+// encoded bytes travel alongside and take precedence.
+func BuildNDEFInput(writeReq WriteRequest) *protocol.NDEFMessageInput {
+	if len(writeReq.Records) == 0 {
+		return nil
+	}
+
+	records := make([]protocol.NDEFRecordInput, 0, len(writeReq.Records))
+	for _, record := range writeReq.Records {
+		records = append(records, protocol.NDEFRecordInput{
+			RecordType: record.Type,
+			Content:    record.Content,
+			Language:   record.Language,
+			MimeType:   record.MimeType,
+			TNF:        record.TNF,
+			Type:       record.TypeBytes,
+			ID:         record.ID,
+			Payload:    record.Payload,
+		})
+	}
+
+	return &protocol.NDEFMessageInput{Records: records}
 }

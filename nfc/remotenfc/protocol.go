@@ -1,7 +1,6 @@
 package remotenfc
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -9,19 +8,16 @@ import (
 )
 
 // DeviceCapabilities defines the capabilities of a smartphone NFC device.
-type DeviceCapabilities struct {
-	CanRead  bool   `json:"canRead"`
-	CanWrite bool   `json:"canWrite"`
-	NFCType  string `json:"nfcType"` // "nfca", "nfcb", "nfcf", "nfcv", "isodep", etc.
-}
+type DeviceCapabilities = protocol.DeviceCapabilities
 
 // DeviceRegistrationRequest is sent by mobile app to register as an NFC device.
 type DeviceRegistrationRequest struct {
-	DeviceName   string             `json:"deviceName"`   // e.g., "John's iPhone 12"
-	Platform     string             `json:"platform"`     // "ios" or "android"
-	AppVersion   string             `json:"appVersion"`   // e.g., "1.0.0"
-	Capabilities DeviceCapabilities `json:"capabilities"` // Device capabilities
-	Metadata     map[string]string  `json:"metadata"`     // Optional metadata
+	DeviceName      string             `json:"deviceName"`      // e.g., "John's iPhone 12"
+	Platform        string             `json:"platform"`        // "ios" or "android"
+	AppVersion      string             `json:"appVersion"`      // e.g., "1.0.0"
+	ProtocolVersion int                `json:"protocolVersion"` // Negotiated bridge protocol version
+	Capabilities    DeviceCapabilities `json:"capabilities"`    // Device capabilities
+	Metadata        map[string]string  `json:"metadata"`        // Optional metadata
 }
 
 // DeviceRegistrationResponse is sent by server after successful registration.
@@ -47,6 +43,9 @@ type TagData struct {
 	ScannedAt   time.Time                  `json:"scannedAt"`   // Timestamp of scan
 	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
 	RawData     []byte                     `json:"rawData"`     // Raw tag data (base64 encoded)
+
+	// Capabilities as declared by the device for this tag, if it knows them.
+	Capabilities *protocol.TagCapabilities `json:"capabilities,omitempty"`
 }
 
 // DeviceHeartbeat is sent by mobile app periodically.
@@ -77,20 +76,31 @@ type DeviceWriteResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// ConvertTagData converts mobile app tag data to internal nfc.Tag.
+// ConvertTagData converts mobile app tag data to internal nfc.Tag. The
+// resulting tag is read-only; use ConvertTagDataWithWriter to give it a route
+// back to the device for writes and locks.
 func ConvertTagData(data TagData) (nfc.Tag, error) {
-	// Validate required fields
+	return ConvertTagDataWithWriter(data, nil)
+}
+
+// ConvertTagDataWithWriter converts mobile app tag data to internal nfc.Tag,
+// wiring writes and locks back to the device that scanned it.
+func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
+	// Validate required fields. These are all malformed-input failures, so they
+	// are reported as InvalidData — repeating the same payload cannot fix them.
+	const op = "ConvertTagData"
+
 	if data.UID == "" {
-		return nil, fmt.Errorf("tag UID is required")
+		return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag UID is required")
 	}
 	if data.Technology == "" {
-		return nil, fmt.Errorf("tag technology is required")
+		return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag technology is required")
 	}
 
 	// Normalize UID format
 	uid, err := protocol.ParseUID(data.UID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid UID format: %w", err)
+		return nil, nfc.WrapError(nfc.ErrCodeInvalidData, op, "invalid UID format", err)
 	}
 
 	// Parse NDEF message if present
@@ -99,12 +109,12 @@ func ConvertTagData(data TagData) (nfc.Tag, error) {
 	if data.NDEFMessage != nil {
 		ndefMsg, err = nfc.ConvertNDEFInput(data.NDEFMessage)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse NDEF message: %w", err)
+			return nil, wrapTagDataError(op, uid, "failed to parse NDEF message", err)
 		}
 		// Encode NDEF message to bytes
 		ndefData, err = ndefMsg.Encode()
 		if err != nil {
-			return nil, fmt.Errorf("failed to encode NDEF message: %w", err)
+			return nil, wrapTagDataError(op, uid, "failed to encode NDEF message", err)
 		}
 	}
 
@@ -118,7 +128,26 @@ func ConvertTagData(data TagData) (nfc.Tag, error) {
 		rawData:      data.RawData,
 		scannedAt:    data.ScannedAt,
 		sourceDevice: data.DeviceID,
+		declaredCaps: data.Capabilities,
+		writer:       writer,
 	}
 
 	return tag, nil
+}
+
+// wrapTagDataError preserves an underlying NFCError's code where there is one,
+// so a genuine encoding fault is not relabelled as bad device input.
+func wrapTagDataError(op, tagUID, message string, cause error) error {
+	code := nfc.GetErrorCode(cause)
+	if code == 0 {
+		code = nfc.ErrCodeInvalidData
+	}
+
+	return &nfc.NFCError{
+		Code:    code,
+		Op:      op,
+		TagUID:  tagUID,
+		Message: message,
+		Cause:   cause,
+	}
 }

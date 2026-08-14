@@ -41,6 +41,13 @@
  *   ndefMessage: { records: [...] }
  * });
  */
+
+/**
+ * WebSocket subprotocol offered during the upgrade. An agent that echoes it back
+ * supports the hello handshake; one that does not is treated as protocol v0.
+ */
+const DEVICE_SUBPROTOCOL_V1 = 'davi-nfc-device.v1';
+
 class NFCDeviceClient {
   /**
    * Creates a new NFC Device client instance
@@ -67,6 +74,14 @@ class NFCDeviceClient {
     this.canRead = options.canRead !== false;
     this.canWrite = options.canWrite || false;
     this.nfcType = options.nfcType || 'custom';
+
+    // Extended capabilities, sent only when the agent speaks v1 or later.
+    this.canTransceive = options.canTransceive || false;
+    this.canTransceiveRaw = options.canTransceiveRaw || false;
+    this.canLock = options.canLock || false;
+    this.deviceType = options.deviceType || '';
+    this.supportedTagTypes = options.supportedTagTypes || [];
+    this.maxBaudRate = options.maxBaudRate || 0;
     this.autoHeartbeat = options.autoHeartbeat !== false;
     this.heartbeatInterval = options.heartbeatInterval || 30000;
     this.autoReconnect = options.autoReconnect !== false;
@@ -75,6 +90,7 @@ class NFCDeviceClient {
     this.ws = null;
     this.deviceID = null;
     this.serverInfo = null;
+    this.protocolVersion = 0;
     this.connected = false;
     this.intentionalDisconnect = false;
     this.reconnectAttempts = 0;
@@ -91,6 +107,7 @@ class NFCDeviceClient {
     this.eventHandlers = {
       registered: [],
       writeRequest: [],
+      transceiveRequest: [],
       connected: [],
       disconnected: [],
       error: []
@@ -99,7 +116,7 @@ class NFCDeviceClient {
 
   /**
    * Registers an event handler
-   * @param {string} event - Event name: 'registered', 'writeRequest', 'connected', 'disconnected', 'error'
+   * @param {string} event - Event name: 'registered', 'writeRequest', 'transceiveRequest', 'connected', 'disconnected', 'error'
    * @param {Function} handler - Callback function
    */
   on(event, handler) {
@@ -163,12 +180,17 @@ class NFCDeviceClient {
       }
       wsUrl += '?mode=device';
 
-      this.ws = new WebSocketClass(wsUrl);
+      this.ws = new WebSocketClass(wsUrl, [DEVICE_SUBPROTOCOL_V1]);
 
       this.ws.onopen = async () => {
         this.connected = true;
         this.reconnectAttempts = 0;
-        this._emit('connected', {});
+
+        // An agent that echoes the subprotocol speaks the hello handshake;
+        // anything else is a pre-versioning agent that only knows registerDevice.
+        this.protocolVersion = this.ws.protocol === DEVICE_SUBPROTOCOL_V1 ? 1 : 0;
+
+        this._emit('connected', { protocolVersion: this.protocolVersion });
 
         // Auto-register after connection
         try {
@@ -195,6 +217,7 @@ class NFCDeviceClient {
       this.ws.onclose = () => {
         this.connected = false;
         this.deviceID = null;
+        this.protocolVersion = 0;
         this._stopHeartbeat();
         this._emit('disconnected', {});
 
@@ -292,15 +315,17 @@ class NFCDeviceClient {
 
       const message = {
         id: requestId,
-        type: 'registerDevice',
+        type: this.protocolVersion >= 1 ? 'hello' : 'registerDevice',
         payload: {
+          ...(this.protocolVersion >= 1 ? { protocolVersion: this.protocolVersion } : {}),
           deviceName: this.deviceName,
           platform: this.platform,
           appVersion: this.appVersion,
           capabilities: {
             canRead: this.canRead,
             canWrite: this.canWrite,
-            nfcType: this.nfcType
+            nfcType: this.nfcType,
+            ...(this.protocolVersion >= 1 ? this._extendedCapabilities() : {})
           },
           metadata: {
             userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'
@@ -310,6 +335,22 @@ class NFCDeviceClient {
 
       this._send(message);
     });
+  }
+
+  /**
+   * Builds the v1 capability additions, omitting anything left at its default so
+   * a device that declares nothing extra sends a v0-shaped object.
+   * @private
+   */
+  _extendedCapabilities() {
+    const caps = {};
+    if (this.canTransceive) caps.canTransceive = true;
+    if (this.canTransceiveRaw) caps.canTransceiveRaw = true;
+    if (this.canLock) caps.canLock = true;
+    if (this.deviceType) caps.deviceType = this.deviceType;
+    if (this.supportedTagTypes.length) caps.supportedTagTypes = this.supportedTagTypes;
+    if (this.maxBaudRate) caps.maxBaudRate = this.maxBaudRate;
+    return caps;
   }
 
   /**
@@ -329,7 +370,7 @@ class NFCDeviceClient {
     const { id, type, payload, success, error } = message;
 
     // Handle registration response
-    if (type === 'registerDeviceResponse') {
+    if (type === 'helloResponse' || type === 'registerDeviceResponse') {
       if (id && this._pendingRequests[id]) {
         const { resolve, reject } = this._pendingRequests[id];
         delete this._pendingRequests[id];
@@ -337,8 +378,15 @@ class NFCDeviceClient {
         if (success) {
           this.deviceID = payload.deviceID;
           this.serverInfo = payload.serverInfo;
+          if (typeof payload.protocolVersion === 'number') {
+            this.protocolVersion = payload.protocolVersion;
+          }
           this._startHeartbeat();
-          this._emit('registered', { deviceID: this.deviceID, serverInfo: this.serverInfo });
+          this._emit('registered', {
+            deviceID: this.deviceID,
+            serverInfo: this.serverInfo,
+            protocolVersion: this.protocolVersion
+          });
           resolve(payload);
         } else {
           reject(new Error(error || 'Registration failed'));
@@ -366,11 +414,31 @@ class NFCDeviceClient {
         this._emit('writeRequest', {
           requestID: payload.requestID,
           deviceID: payload.deviceID,
-          ndefMessage: payload.ndefMessage
+          ndefMessage: payload.ndefMessage,
+          ndefBytes: payload.ndefBytes,
+          tagUID: payload.tagUID,
+          lock: payload.lock === true,
+          idempotencyKey: payload.idempotencyKey
+        });
+        break;
+      case 'deviceTransceiveRequest':
+        this._emit('transceiveRequest', {
+          requestID: payload.requestID,
+          deviceID: payload.deviceID,
+          tagUID: payload.tagUID,
+          data: payload.data,
+          raw: payload.raw === true,
+          timeoutMs: payload.timeoutMs
         });
         break;
       case 'error':
-        this._emit('error', { error: new Error(error), code: payload?.code });
+        this._emit('error', {
+          error: new Error(error),
+          code: payload?.code,
+          retryable: payload?.retryable === true,
+          op: payload?.op,
+          tagUID: payload?.tagUID
+        });
         break;
       default:
         console.warn('Unknown message type:', type);
@@ -435,6 +503,9 @@ class NFCDeviceClient {
    * @param {string} [tagData.atr] - Answer to Reset data
    * @param {Object} [tagData.ndefMessage] - NDEF message with records array
    * @param {string} [tagData.rawData] - Raw tag data (base64 encoded)
+   * @param {Object} [tagData.capabilities] - What this tag supports, if the device
+   *   knows (memorySize, maxNdefSize, tagFamily, supportsPassword, ...). Omitted,
+   *   the agent infers them from `type`.
    * @returns {Promise<void>}
    */
   async scanTag(tagData) {
@@ -456,7 +527,8 @@ class NFCDeviceClient {
         atr: tagData.atr || '',
         scannedAt: tagData.scannedAt || new Date().toISOString(),
         ndefMessage: tagData.ndefMessage || null,
-        rawData: tagData.rawData || null
+        rawData: tagData.rawData || null,
+        ...(tagData.capabilities ? { capabilities: tagData.capabilities } : {})
       }
     };
 
@@ -494,8 +566,11 @@ class NFCDeviceClient {
    * @param {string} requestID - The request ID from the write request
    * @param {boolean} success - Whether the write was successful
    * @param {string} [error] - Error message if unsuccessful
+   * @param {string} [errorCode] - Wire error code, e.g. 'READ_ONLY',
+   *   'CAPACITY_EXCEEDED', 'TAG_REMOVED'. Lets the agent classify the failure
+   *   instead of parsing the message.
    */
-  async respondToWrite(requestID, success, error = '') {
+  async respondToWrite(requestID, success, error = '', errorCode = '') {
     if (!this.connected) {
       throw new Error('Not connected to server');
     }
@@ -505,11 +580,37 @@ class NFCDeviceClient {
       payload: {
         requestID: requestID,
         success: success,
-        error: error
+        error: error,
+        ...(errorCode ? { errorCode } : {})
       }
     };
 
     this._send(message);
+  }
+
+  /**
+   * Respond to a transceive request from the server.
+   * @param {string} requestID - The request ID from the transceive request
+   * @param {boolean} success - Whether the exchange succeeded
+   * @param {string} [data] - Base64 response bytes from the tag
+   * @param {string} [error] - Error message if unsuccessful
+   * @param {string} [errorCode] - Wire error code, e.g. 'TAG_REMOVED'
+   */
+  async respondToTransceive(requestID, success, data = '', error = '', errorCode = '') {
+    if (!this.connected) {
+      throw new Error('Not connected to server');
+    }
+
+    this._send({
+      type: 'deviceTransceiveResponse',
+      payload: {
+        requestID: requestID,
+        success: success,
+        ...(data ? { data } : {}),
+        ...(error ? { error } : {}),
+        ...(errorCode ? { errorCode } : {})
+      }
+    });
   }
 
   /**
@@ -539,9 +640,25 @@ class NFCDeviceClient {
   /**
    * Disconnect from the server
    */
-  async disconnect() {
+  /**
+   * @param {string} [reason] - Why the device is leaving, for the agent's logs
+   */
+  async disconnect(reason) {
     this.intentionalDisconnect = true;
     this._stopHeartbeat();
+
+    // Tell the agent this is deliberate, so it reports a departure rather than
+    // a lost device. Best-effort: the close below stands on its own.
+    if (this.ws && this.connected && this.protocolVersion >= 1) {
+      try {
+        this._send({
+          type: 'goodbye',
+          payload: { deviceID: this.deviceID, ...(reason ? { reason } : {}) }
+        });
+      } catch (err) {
+        // Already gone; the close handles it.
+      }
+    }
 
     if (this.ws) {
       this.ws.close();
@@ -549,6 +666,7 @@ class NFCDeviceClient {
 
     this.connected = false;
     this.deviceID = null;
+    this.protocolVersion = 0;
     this.ws = null;
   }
 }

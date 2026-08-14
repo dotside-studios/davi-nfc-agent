@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { signOut } from './api'
-import { Access } from './panels/Access'
 import { Activity } from './panels/Activity'
 import { Overview } from './panels/Overview'
 import { Security } from './panels/Security'
@@ -10,20 +9,19 @@ import { useTags } from './useTags'
 import { fmtDuration, modeLabel } from './format'
 import { Dot, Notice, Panel } from './ui'
 
-type TabId = 'overview' | 'tag' | 'activity' | 'access' | 'security'
+type TabId = 'overview' | 'tag' | 'activity' | 'security'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'tag', label: 'Tag' },
   { id: 'activity', label: 'Activity' },
-  { id: 'access', label: 'Access' },
   { id: 'security', label: 'Security' },
 ]
 
 /** Tab in the hash, so a reload lands back where it was. Not worth a router. */
 function useHashTab(): [TabId, (t: TabId) => void] {
   const read = (): TabId => {
-    const raw = location.hash.replace(/^#\/?/, '')
+    const raw = location.hash.replace(/^#\/?/, '').split('/')[0]
     return TABS.some((t) => t.id === raw) ? (raw as TabId) : 'overview'
   }
 
@@ -165,11 +163,8 @@ export default function App() {
             onClick={() => setTab(t.id)}
           >
             {t.label}
-            {t.id === 'access' && state.devices.length > 0 ? (
-              <span className="count"> ({state.devices.length})</span>
-            ) : null}
-            {t.id === 'access' && state.origins.blocked.length > 0 ? (
-              <span className="warn"> · {state.origins.blocked.length} blocked</span>
+            {t.id === 'security' && state.origins.blocked.length > 0 ? (
+              <span className="warn"> ({state.origins.blocked.length} blocked)</span>
             ) : null}
             {t.id === 'activity' && tags.events.length > 0 ? (
               <span className="count"> ({tags.events.length})</span>
@@ -179,11 +174,11 @@ export default function App() {
       </nav>
 
       <main>
-        {state.origins.allowAny && tab !== 'access' ? (
+        {state.origins.allowAny && tab !== 'security' ? (
           <Notice kind="err">
             <b>Origin checking is off for this session.</b> Any page the operator opens can drive
             this reader.{' '}
-            <button type="button" className="link" onClick={() => setTab('access')}>
+            <button type="button" className="link" onClick={() => setTab('security')}>
               review
             </button>
           </Notice>
@@ -209,7 +204,6 @@ export default function App() {
             onClearLogs={stream.clearLogs}
           />
         ) : null}
-        {tab === 'access' ? <Access state={state} /> : null}
         {tab === 'security' ? <Security state={state} /> : null}
       </main>
 

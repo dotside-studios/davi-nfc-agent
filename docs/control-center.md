@@ -76,14 +76,20 @@ and both filling the window. They are read together in practice: a failed write
 and the line explaining it arrive at the same moment. Events export as NDJSON,
 the log downloads as text.
 
-**Access** — who may connect. Paired devices with platform, pairing time, last
-seen and whether they are connected right now, each revocable on its own; the
-paired-device policy; the browser allowlist; and every origin refused since
-startup, each with a one-click **allow**.
+**Security** — who may reach this agent and with what credential, as sections
+down the side. Each is linkable: `#/security/origins`, `#/security/certificate`
+and so on.
 
-**Security** — API secret, pairing PIN, public key pin, CA status and
-fingerprint, full certificate detail, and warnings when the certificate does not
-cover an address the agent is reachable on.
+| Section | Holds |
+|---|---|
+| Paired devices | Platform, pairing time, last seen, whether connected now; revoke one or all; the paired-device policy |
+| Browser origins | The allowlist, every origin refused since startup with a one-click **allow**, and the session override |
+| Credentials | API secret, pairing PIN, open console sessions, and the rotations for each |
+| Device trust | Public key pin, local CA status and fingerprint |
+| Certificate | Expiry, issuer, fingerprint, the names it covers, and a warning when the agent is reachable on an address it omits |
+
+The reader and server settings are deliberately *not* here — they live on
+Overview, because those get turned while working and these do not.
 
 ## Logs
 

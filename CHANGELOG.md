@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Control Center.** A web console served by the agent itself at its own root,
-  covering what neither the tray nor the flags could do. Five tabs: Overview,
-  Tag, Activity, Access and Security. The reader controls — start/stop, device,
+  covering what neither the tray nor the flags could do. Four tabs: Overview,
+  Tag, Activity and Security. The reader controls — start/stop, device,
   mode, card filter, port — sit on Overview rather than behind a settings tab,
   so the page an operator lands on is the page they work from. Opened from the
   tray's

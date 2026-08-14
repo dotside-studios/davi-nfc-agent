@@ -58,7 +58,7 @@ export function Origins({ state }: { state: ControlState }) {
             <Empty>Nothing is allowed. Only pages served by this agent can connect.</Empty>
           ) : (
             <div className="tw">
-              <table className="grid">
+              <table className="grid compact">
                 <thead>
                   <tr>
                     <th>Origin</th>
@@ -91,7 +91,7 @@ export function Origins({ state }: { state: ControlState }) {
             <Empty>Nothing has been refused since the agent started.</Empty>
           ) : (
             <div className="tw">
-              <table className="grid">
+              <table className="grid compact">
                 <thead>
                   <tr>
                     <th>Origin</th>

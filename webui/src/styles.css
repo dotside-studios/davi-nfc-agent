@@ -229,6 +229,52 @@ main {
   min-width: 0;
 }
 
+/* A section list down the side with the chosen one beside it. Used where a tab
+   covers one subject in several parts that are each too small for a tab. */
+.sections {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.section-nav {
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.section-nav h3 {
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 12px;
+  background: var(--panel-head);
+  border-bottom: 1px solid var(--border);
+}
+.section-nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: 12px Arial, Helvetica, sans-serif;
+  padding: 3px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--link);
+  cursor: pointer;
+}
+.section-nav button:last-child {
+  border-bottom: 0;
+}
+.section-nav button:hover {
+  background: var(--bg-alt);
+}
+.section-nav button.active {
+  background: var(--panel-head);
+  color: var(--text);
+  font-weight: bold;
+}
+.section-body {
+  min-width: 0;
+}
+
 /* Two key/value lists abreast where a panel is wide enough to hold them. */
 .pair {
   display: grid;
@@ -327,6 +373,16 @@ table.grid {
   border-collapse: collapse;
   width: 100%;
   font-size: 11px;
+}
+/* For a table of one narrow column and an action: full width would strand the
+   action link a screen away from the row it belongs to. */
+table.grid.compact {
+  width: auto;
+  min-width: 340px;
+}
+table.grid.compact td:last-child,
+table.grid.compact th:last-child {
+  padding-left: 24px;
 }
 table.grid th {
   text-align: left;
@@ -529,7 +585,8 @@ table.grid th.mono {
   .cols {
     columns: 1;
   }
-  .overview {
+  .overview,
+  .sections {
     grid-template-columns: 1fr;
   }
   .kv {

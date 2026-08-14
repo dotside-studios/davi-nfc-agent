@@ -125,14 +125,14 @@ func NewServerBridge() *ServerBridge {
 	}
 }
 
-// Close signals the bridge to stop and closes all channels.
+// Close signals the bridge to stop.
+//
+// Only done is closed. Closing the data channels would race any producer
+// already inside a send — the select on done cannot prevent that, and the
+// losing goroutine panics on send to a closed channel. Consumers all exit on
+// their own context instead, so the channels are simply abandoned.
 func (b *ServerBridge) Close() {
 	close(b.done)
-	close(b.TagData)
-	close(b.WriteRequest)
-	close(b.LockRequest)
-	close(b.CapabilitiesRequest)
-	close(b.DeviceStatus)
 }
 
 // Done returns a channel that's closed when the bridge is shutting down.

@@ -65,8 +65,13 @@ aliases. Distinguish "retry this", "the tag left the field", and "this device
 will never support that" — today they are all opaque strings.
 
 **1.4 Clean-close semantics.** Distinguish a device saying goodbye from a device
-dropping off, so we are not waiting 30s on a heartbeat timeout for an intentional
-disconnect. This is MQTT's last-will idea implemented locally, not MQTT.
+dropping off. The original rationale here — avoiding a 30s heartbeat wait on an
+intentional disconnect — was wrong: socket close already unregisters
+immediately, and the inactivity sweeper only ever covered half-open connections
+where the socket survives but heartbeats stop. The real gap was that the agent
+could not tell the two apart at all, so both logged the same line and reported
+the same thing upward. Delivered as a `goodbye` frame plus close-code
+inspection.
 
 *Touches:* `protocol/websocket.go`, `protocol/device.go`,
 `nfc/remotenfc/protocol.go`, `nfc/errors.go`,
@@ -103,11 +108,14 @@ depends on.
 
 ## Phase 3 — The command channel ✅
 
-**3.1** `deviceConnect` / `deviceDisconnect` (carrying ATR/ATQA/SAK) and
-`deviceTransceiveRequest` / `deviceTransceiveResponse` (base64 payload,
+**3.1** `deviceTransceiveRequest` / `deviceTransceiveResponse` (base64 payload,
 per-exchange timeout). Two distinct capability bits, because they are genuinely
 different hardware features: APDU transceive (`InDataExchange`,
 `IsoDep.transceive`) and raw framing (`InCommunicateThru`, `NfcA.transceive`).
+
+The planned `deviceConnect` / `deviceDisconnect` pair was dropped: a tag session
+is already delimited by `tagScanned` and `tagRemoved`, and on phones the OS owns
+the session, so the pair would have been ceremony with no consumer.
 
 **3.2** `remotenfc.Tag.Transceive` on top, which lets remote devices reach the
 existing `nfc/tag_*.go` logic.

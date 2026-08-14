@@ -10,7 +10,7 @@ export function Security({ state }: { state: ControlState }) {
   const cert = security.cert
 
   return (
-    <div className="cols wide">
+    <div className="cols">
       <Panel title="Credentials">
         <KV>
           <Row label="API secret">

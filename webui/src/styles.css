@@ -203,16 +203,38 @@ main {
 
 /* Multi-column rather than grid: panels have very different heights, and a grid
    row is as tall as its tallest cell, which leaves a ragged band of white under
-   the short ones. Columns pack them and balance the height instead. */
+   the short ones. Columns pack them and balance the height instead.
+   
+   Capped at two: a third column makes each one narrow enough that content wraps
+   more than it packs, and spreads related panels far enough apart to read as
+   clutter rather than as organisation. */
 .cols {
-  columns: 420px;
+  columns: 2 480px;
   column-gap: 8px;
-}
-.cols.wide {
-  columns: 520px;
 }
 .cols > * {
   break-inside: avoid;
+}
+
+/* Overview: knobs and state on the left, what the reader is doing on the
+   right. The right side carries the tall content, so it gets the two thirds. */
+.overview {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) 2fr;
+  gap: 8px;
+  align-items: start;
+}
+.overview-side,
+.overview-main {
+  min-width: 0;
+}
+
+/* Two key/value lists abreast where a panel is wide enough to hold them. */
+.pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 4px 16px;
+  align-items: start;
 }
 
 .panel {
@@ -453,6 +475,13 @@ table.grid th.mono {
 
 /* ---- log / event views ---- */
 
+.logview.short {
+  flex: none;
+  max-height: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Scrolls inside the panel so the filters stay visible while reading. */
 .logview {
   font-family: var(--mono);
@@ -497,8 +526,10 @@ table.grid th.mono {
   main {
     padding: 4px;
   }
-  .cols,
-  .cols.wide {
+  .cols {
+    columns: 1;
+  }
+  .overview {
     grid-template-columns: 1fr;
   }
   .kv {

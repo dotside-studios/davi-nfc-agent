@@ -159,6 +159,16 @@ export interface WriteRecord {
   id?: string
 }
 
+/** A distinct tag seen by the reader, with how often it has come back. */
+export interface ScanRecord {
+  uid: string
+  type: string
+  text: string
+  count: number
+  firstAt: string
+  lastAt: string
+}
+
 /** One line in the live event feed. */
 export interface LiveEvent {
   id: number

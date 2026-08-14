@@ -29,7 +29,6 @@ export function Origins({ state }: { state: ControlState }) {
         </Notice>
       ) : null}
 
-      <div className="cols wide">
         <Panel title={`Allowed origins (${origins.allowed.length})`} flush>
           <div className="body">
             <div className="row">
@@ -115,7 +114,6 @@ export function Origins({ state }: { state: ControlState }) {
             </div>
           )}
         </Panel>
-      </div>
 
       <Panel title="Session override">
         <label className="row">

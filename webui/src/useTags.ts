@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { wsURL } from './api'
-import type { LiveEvent, TagCapabilities, TagData, WriteRecord } from './types'
+import type { LiveEvent, ScanRecord, TagCapabilities, TagData, WriteRecord } from './types'
 
 /**
  * The console's connection to the ordinary client endpoint. It speaks the same
@@ -10,6 +10,9 @@ import type { LiveEvent, TagCapabilities, TagData, WriteRecord } from './types'
  */
 
 const EVENT_LIMIT = 2000
+
+/** Distinct tags remembered. A provisioning run works through many. */
+const HISTORY_LIMIT = 100
 
 /** Bounds a tag operation, so a lost response cannot leave the composer
  *  disabled with no indication of why. */
@@ -28,6 +31,7 @@ export interface Tags {
   tag: TagData | null
   capabilities: TagCapabilities | null
   events: LiveEvent[]
+  history: ScanRecord[]
   clearEvents: () => void
   write: (records: WriteRecord[], lock?: boolean) => Promise<Record<string, unknown>>
   lock: () => Promise<Record<string, unknown>>
@@ -39,6 +43,7 @@ export function useTags(secret?: string): Tags {
   const [tag, setTag] = useState<TagData | null>(null)
   const [capabilities, setCapabilities] = useState<TagCapabilities | null>(null)
   const [events, setEvents] = useState<LiveEvent[]>([])
+  const [history, setHistory] = useState<ScanRecord[]>([])
 
   const socket = useRef<WebSocket | null>(null)
   const pending = useRef(new Map<string, Pending>())
@@ -53,6 +58,26 @@ export function useTags(secret?: string): Tags {
     setEvents((prev) => {
       const next = prev.concat(event)
       return next.length > EVENT_LIMIT ? next.slice(next.length - EVENT_LIMIT) : next
+    })
+  }, [])
+
+  // Keyed by UID, so re-presenting the same tag bumps a counter rather than
+  // adding a row — which is what makes the list readable during a run where
+  // one tag is tapped repeatedly.
+  const remember = useCallback((data: TagData) => {
+    if (!data.uid) return
+    setHistory((prev) => {
+      const rest = prev.filter((r) => r.uid !== data.uid)
+      const existing = prev.find((r) => r.uid === data.uid)
+      const record: ScanRecord = {
+        uid: data.uid,
+        type: data.type || existing?.type || '',
+        text: data.text || existing?.text || '',
+        count: (existing?.count ?? 0) + 1,
+        firstAt: existing?.firstAt ?? data.scannedAt,
+        lastAt: data.scannedAt,
+      }
+      return [record, ...rest].slice(0, HISTORY_LIMIT)
     })
   }, [])
 
@@ -111,6 +136,7 @@ export function useTags(secret?: string): Tags {
           }
           setTag(data)
           if (data.capabilities) setCapabilities(data.capabilities)
+          remember(data)
           push({
             kind: 'scan',
             summary: `${data.type || 'tag'} ${data.uid}`,
@@ -185,7 +211,7 @@ export function useTags(secret?: string): Tags {
       window.clearTimeout(timer.current)
       timer.current = window.setTimeout(connect, delay)
     }
-  }, [secret, push])
+  }, [secret, push, remember])
 
   useEffect(() => {
     stopped.current = false
@@ -227,7 +253,10 @@ export function useTags(secret?: string): Tags {
   )
   const lock = useCallback(() => send('lockRequest', {}), [send])
   const refreshCapabilities = useCallback(() => send('capabilitiesRequest', {}), [send])
-  const clearEvents = useCallback(() => setEvents([]), [])
+  const clearEvents = useCallback(() => {
+    setEvents([])
+    setHistory([])
+  }, [])
 
-  return { link, tag, capabilities, events, clearEvents, write, lock, refreshCapabilities }
+  return { link, tag, capabilities, events, history, clearEvents, write, lock, refreshCapabilities }
 }

@@ -14,7 +14,7 @@ export function Tag({ tags, writable }: { tags: Tags; writable: boolean }) {
   const { tag, capabilities } = tags
 
   return (
-    <div className="cols wide">
+    <div className="cols">
       <Inspector tags={tags} />
       <Composer tags={tags} writable={writable} />
       {tag ? <Records records={tag.message?.records} text={tag.text} /> : null}

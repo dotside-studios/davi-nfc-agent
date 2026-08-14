@@ -192,8 +192,9 @@ export default function App() {
         {tab === 'overview' ? (
           <Overview
             state={state}
+            tag={tags.tag}
             tagLink={tags.link}
-            events={tags.events}
+            history={tags.history}
             logs={stream.logs}
             onOpenTag={() => setTab('tag')}
           />

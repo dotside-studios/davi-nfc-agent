@@ -9,7 +9,7 @@ import { Origins } from './Origins'
  */
 export function Access({ state }: { state: ControlState }) {
   return (
-    <div className="cols wide">
+    <div className="cols">
       <Devices state={state} />
       <Origins state={state} />
     </div>

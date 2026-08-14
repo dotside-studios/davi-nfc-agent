@@ -47,11 +47,16 @@ your own.
 
 ## Tabs
 
-**Overview** — the page an operator works from. The controls that actually get
-changed sit here rather than behind a settings tab: start/stop, reader
-selection, mode, card-type filter, port, restart and quit. Alongside them is the
-state needed to decide whether to change anything — server URLs, certificate
-expiry and the names it covers, access summary, and the last few events.
+**Overview** — the page an operator works from, split a third to two thirds.
+
+The left third holds state and the knobs that get turned: start/stop, reader
+selection, mode, card-type filter, port, restart and quit, plus the server URLs
+and certificate summary needed to decide whether to turn any of them.
+
+The right two thirds hold what the reader is doing: the tag on it now with its
+capabilities and record list, the tail of the log, and every distinct tag seen
+this session with a scan count and when it was last presented. That history is
+in the console only — the agent does not persist it.
 
 **Tag** — inspector and NDEF composer.
 

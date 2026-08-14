@@ -147,27 +147,37 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	tag := map[string]any{
-		"uid":        "04A2B3C4D5E680",
-		"type":       "NTAG215",
-		"technology": "ISO14443-3A",
-		"scannedAt":  time.Now().Format(time.RFC3339),
-		"text":       "https://davi.social/t/9f2a1c",
-		"message": map[string]any{
-			"records": []map[string]any{
-				{"tnf": 1, "type": "U", "uri": "https://davi.social/t/9f2a1c", "payload": "A2Rhdmkuc29jaWFsL3QvOWYyYTFj"},
-				{"tnf": 1, "type": "T", "text": "Workshop bench 3", "language": "en", "payload": "AmVuV29ya3Nob3AgYmVuY2ggMw=="},
-				{"tnf": 4, "type": "android.com:pkg", "payload": "c29jaWFsLmRhdmkuYXBw"},
+	tag := func(uid, tagType, text string, memory, usable int) map[string]any {
+		return map[string]any{
+			"uid":        uid,
+			"type":       tagType,
+			"technology": "ISO14443-3A",
+			"scannedAt":  time.Now().Format(time.RFC3339),
+			"text":       text,
+			"message": map[string]any{
+				"records": []map[string]any{
+					{"tnf": 1, "type": "U", "uri": text, "payload": "A2Rhdmkuc29jaWFsL3QvOWYyYTFj"},
+					{"tnf": 1, "type": "T", "text": "Workshop bench 3", "language": "en", "payload": "AmVuV29ya3Nob3AgYmVuY2ggMw=="},
+					{"tnf": 4, "type": "android.com:pkg", "payload": "c29jaWFsLmRhdmkuYXBw"},
+				},
 			},
-		},
-		"capabilities": map[string]any{
-			"memorySize":          540,
-			"usableCapacity":      504,
-			"writable":            true,
-			"lockable":            true,
-			"passwordProtectable": true,
-			"readOnly":            false,
-		},
+			"capabilities": map[string]any{
+				"memorySize":          memory,
+				"usableCapacity":      usable,
+				"writable":            true,
+				"lockable":            true,
+				"passwordProtectable": true,
+				"readOnly":            false,
+			},
+		}
+	}
+
+	// Several distinct tags, so the history table looks like a real run.
+	tags := []map[string]any{
+		tag("04A2B3C4D5E680", "NTAG215", "https://davi.social/t/9f2a1c", 540, 504),
+		tag("04117BE2C15D91", "NTAG213", "https://davi.social/t/4b7e02", 180, 144),
+		tag("0453C9A17F2280", "MIFARE Classic 1K", "Bench 7 - calibration", 1024, 716),
+		tag("04E81D3B6A4400", "NTAG216", "https://davi.social/t/c30d55", 924, 888),
 	}
 
 	send := func(kind string, payload any) error {
@@ -176,7 +186,7 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	send("deviceStatus", map[string]any{"connected": true, "message": "Reader ready: ACS ACR1252U", "cardPresent": false})
-	send("tagData", tag)
+	send("tagData", tags[0])
 	send("deviceStatus", map[string]any{"connected": true, "message": "Tag present", "cardPresent": true})
 
 	go func() {
@@ -187,11 +197,11 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// A slow trickle so the Live feed has more than one line in it.
-	for i := 0; i < 40; i++ {
-		time.Sleep(4 * time.Second)
-		if i%3 == 0 {
-			if err := send("tagData", tag); err != nil {
+	// A slow trickle so the Live feed and the history both fill up.
+	for i := 0; i < 60; i++ {
+		time.Sleep(2 * time.Second)
+		if i%2 == 0 {
+			if err := send("tagData", tags[(i/2)%len(tags)]); err != nil {
 				return
 			}
 		} else if err := send("deviceStatus", map[string]any{"connected": true, "message": "Polling for tags", "cardPresent": true}); err != nil {

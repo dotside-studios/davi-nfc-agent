@@ -65,6 +65,9 @@ type Agent struct {
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
 
+	// Devices holds the paired devices and their per-device credentials.
+	Devices *DeviceRegistry
+
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
 	KeyFile    string       // Path to TLS private key file
@@ -278,6 +281,7 @@ func (a *Agent) startServers() error {
 		AllowedOrigins:   a.AllowedOrigins,
 		OriginPolicy:     a.originPolicy(),
 		PublicKeyPin:     a.PublicKeyPin,
+		TokenVerifier:    a.tokenVerifier(),
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
@@ -285,6 +289,7 @@ func (a *Agent) startServers() error {
 		APISecret:      a.APISecret,
 		AllowedOrigins: a.AllowedOrigins,
 		OriginPolicy:   a.originPolicy(),
+		TokenVerifier:  a.tokenVerifier(),
 	}, a.Bridge)
 
 	// Single listener fronts both the device and client handlers.
@@ -371,6 +376,16 @@ func (a *Agent) CurrentDevicePath() string {
 // originPolicy returns the live allowlist as an origin policy, or nil to fall
 // back to the static AllowedOrigins list. Returning a typed nil would satisfy
 // the interface and defeat that fallback, so the check is explicit.
+// tokenVerifier returns the device registry as a token verifier, or nil when
+// there is none. As with originPolicy, a typed nil would satisfy the interface
+// and defeat the caller's nil check.
+func (a *Agent) tokenVerifier() server.TokenVerifier {
+	if a.Devices == nil {
+		return nil
+	}
+	return a.Devices
+}
+
 func (a *Agent) originPolicy() server.OriginPolicy {
 	if a.Origins == nil {
 		return nil

@@ -15,6 +15,42 @@ The agent server port is configurable via `-device-port` (default 9470).
 
 The device endpoint accepts connections from NFC devices that provide tag data.
 
+### Pairing
+
+A device authenticates with its own credential, obtained once by presenting the
+PIN shown on the kiosk (tray, logs, and the pairing QR):
+
+```
+POST http://[host]:9472/pair?pin=123456
+Content-Type: application/json
+
+{"deviceName": "Operator iPhone", "platform": "ios"}
+```
+
+```json
+{
+  "deviceID": "6f1c…",
+  "deviceToken": "kQ8x…",
+  "publicKeyPin": "sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+  "agentPort": 9470
+}
+```
+
+Store all three. `deviceToken` is presented on every later connection, as
+`?secret=` or `Authorization: Bearer`. `publicKeyPin` is how the device
+recognizes this agent again — see
+[How devices trust the agent](../README.md#how-devices-trust-the-agent).
+
+**The token is shown once.** The agent keeps only its hash, so a lost token
+means pairing again rather than looking it up.
+
+Each device holds its own credential, so one can be revoked from the tray under
+**Paired Devices** without disturbing the others. The shared API secret still
+works for devices configured with it, but rotating it logs out everything at
+once, which is what per-device tokens exist to avoid.
+
+Wrong PINs lock pairing after five attempts until the agent restarts.
+
 ### Connecting
 
 Connect via WebSocket with device mode:

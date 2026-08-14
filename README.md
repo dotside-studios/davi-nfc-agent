@@ -12,6 +12,7 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 - **Tag Capabilities**: Memory size, usable capacity, and write/lock/password support reported with every scan
 - **Real-time WebSocket**: Instant tag data broadcasting
 - **Secure by Default**: Automatic TLS (WSS) with key pinning for devices, an origin allowlist for browsers, plus optional API-secret authentication
+- **Per-device Pairing**: each device gets its own revocable credential, issued against a PIN
 - **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
 - **Cross-platform**: Linux, macOS, Windows
 - **System Tray UI**: Device management and status

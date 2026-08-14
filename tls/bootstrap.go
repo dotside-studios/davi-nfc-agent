@@ -56,6 +56,12 @@ type BootstrapServer struct {
 	pinMu  sync.RWMutex
 	pin    string
 	failed atomic.Int32
+
+	// Pairing is optional: the bootstrap server runs without an issuer when the
+	// agent has no device registry.
+	pairMu     sync.RWMutex
+	pairIssuer PairingIssuer
+	agentPort  int
 }
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
@@ -108,6 +114,7 @@ func (s *BootstrapServer) Start() error {
 	mux.HandleFunc("/install/ios", s.handleAppleProfile)
 	mux.HandleFunc("/install/android", s.handleAndroidCert)
 	mux.HandleFunc("/qr.png", s.handleQR)
+	mux.HandleFunc("/pair", s.handlePair)
 	mux.HandleFunc("/ca.pem", s.handleRawCA)
 	mux.HandleFunc("/ca.crt", s.handleRawCA)
 

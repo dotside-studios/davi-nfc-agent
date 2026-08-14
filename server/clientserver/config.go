@@ -17,4 +17,9 @@ type Config struct {
 	// OriginPolicy, when set, decides origin admission instead of
 	// AllowedOrigins and is told about rejections.
 	OriginPolicy server.OriginPolicy
+
+	// TokenVerifier recognizes per-device credentials issued at pairing, so a
+	// device can be admitted -- and revoked -- independently of the shared
+	// secret.
+	TokenVerifier server.TokenVerifier
 }

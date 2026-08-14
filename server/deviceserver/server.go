@@ -152,7 +152,7 @@ func (s *Server) Stop() {
 
 // handleWebSocket handles WebSocket connections from devices.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if !server.CheckAPISecret(w, r, s.config.APISecret) {
+	if !server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier) {
 		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}

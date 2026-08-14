@@ -113,10 +113,19 @@ func main() {
 		}
 	}
 
+	// Load the paired-device registry. Each device gets its own credential, so
+	// one can be revoked without logging out the rest.
+	devices, err := NewDeviceRegistry(configDir)
+	if err != nil {
+		log.Printf("Warning: failed to load paired devices: %v", err)
+		devices, _ = NewDeviceRegistry("")
+	}
+
 	// Start CA bootstrap server if auto-TLS is enabled
 	var bootstrapServer *tls.BootstrapServer
 	if tlsMgr != nil && bootstrapPortFlag > 0 {
 		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
+		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), devicePortFlag)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)
 		}
@@ -157,6 +166,7 @@ func main() {
 	agent.Origins = origins
 	agent.ConfigDir = configDir
 	agent.PublicKeyPin = agentPublicKeyPin
+	agent.Devices = devices
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration

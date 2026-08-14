@@ -28,6 +28,11 @@ type Config struct {
 	// AllowedOrigins and is told about rejections.
 	OriginPolicy server.OriginPolicy
 
+	// TokenVerifier recognizes per-device credentials issued at pairing, so a
+	// device can be admitted -- and revoked -- independently of the shared
+	// secret.
+	TokenVerifier server.TokenVerifier
+
 	// PublicKeyPin is reported to devices so they can recognize this agent on
 	// later connections without a certificate authority. Empty when the agent
 	// is not using a certificate it generated itself.

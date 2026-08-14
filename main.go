@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,15 +31,16 @@ const (
 
 var (
 	// CLI flags
-	versionFlag       bool
-	devicePathFlag    string
-	devicePortFlag    int
-	bootstrapPortFlag int
-	apiSecretFlag     string
-	certFileFlag      string
-	keyFileFlag       string
-	autoTLSFlag       bool
-	configDirFlag     string
+	versionFlag        bool
+	devicePathFlag     string
+	devicePortFlag     int
+	bootstrapPortFlag  int
+	apiSecretFlag      string
+	certFileFlag       string
+	keyFileFlag        string
+	autoTLSFlag        bool
+	configDirFlag      string
+	allowedOriginsFlag string
 )
 
 func main() {
@@ -51,6 +54,7 @@ func main() {
 	flag.StringVar(&keyFileFlag, "key", "", "Path to TLS private key file (enables HTTPS/WSS)")
 	flag.BoolVar(&autoTLSFlag, "auto-tls", true, "Automatically generate and manage TLS certificates")
 	flag.StringVar(&configDirFlag, "config-dir", "", "Config directory (default: platform-specific)")
+	flag.StringVar(&allowedOriginsFlag, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
 	flag.Parse()
 
 	// Handle --version flag
@@ -120,6 +124,7 @@ func main() {
 	agent := NewAgent(manager)
 	agent.DevicePort = devicePortFlag
 	agent.APISecret = apiSecretFlag
+	agent.AllowedOrigins = parseAllowedOrigins(allowedOriginsFlag)
 	agent.ConfigDir = configDir
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
@@ -151,4 +156,39 @@ func getDefaultConfigDir() string {
 		configDir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(configDir, buildinfo.DirName)
+}
+
+// parseAllowedOrigins turns the comma-separated flag (or DAVI_NFC_ALLOWED_ORIGINS)
+// into the host:port list CheckOrigin matches against.
+//
+// Full URLs are accepted and reduced to their host:port, because that is what
+// people paste and the alternative is a silently ignored entry: an origin that
+// does not match is indistinguishable from one that was never configured.
+func parseAllowedOrigins(flagValue string) []string {
+	raw := flagValue
+	if raw == "" {
+		raw = os.Getenv("DAVI_NFC_ALLOWED_ORIGINS")
+	}
+	if raw == "" {
+		return nil
+	}
+
+	var origins []string
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if entry == "*" {
+			origins = append(origins, entry)
+			continue
+		}
+		if strings.Contains(entry, "://") {
+			if u, err := url.Parse(entry); err == nil && u.Host != "" {
+				entry = u.Host
+			}
+		}
+		origins = append(origins, strings.TrimSuffix(entry, "/"))
+	}
+	return origins
 }

@@ -39,6 +39,12 @@ type Agent struct {
 	APISecret        string
 	ConfigDir        string // Config directory; used for persisting the API secret
 
+	// AllowedOrigins extends the same-origin policy on both WebSocket
+	// endpoints. A browser page served from anywhere other than the agent's
+	// own host:port — which is every hosted console — needs its origin listed
+	// here, or the upgrade is rejected as cross-site.
+	AllowedOrigins []string
+
 	// Server architecture. The device and client endpoints are served from a
 	// single listener (UnifiedServer) on DevicePort. DeviceServer and
 	// ClientServer hold the device/client logic; the unified server fronts
@@ -259,11 +265,13 @@ func (a *Agent) startServers() error {
 		DeviceManager:    deviceManager,
 		APISecret:        a.APISecret,
 		AllowedCardTypes: a.AllowedCardTypes,
+		AllowedOrigins:   a.AllowedOrigins,
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret: a.APISecret,
+		APISecret:      a.APISecret,
+		AllowedOrigins: a.AllowedOrigins,
 	}, a.Bridge)
 
 	// Single listener fronts both the device and client handlers.

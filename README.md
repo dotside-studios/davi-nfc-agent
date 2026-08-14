@@ -48,10 +48,27 @@ See the [Installation Guide](docs/installation.md) for platform-specific setup a
 ./davi-nfc-agent -device "ACS ACR122U" # Use a specific PC/SC reader by name
 ./davi-nfc-agent -device-port 9480     # Custom agent server port (default 9470, serves both devices and clients)
 ./davi-nfc-agent -api-secret mysecret  # Set the API authentication secret
+./davi-nfc-agent -allowed-origins app.example.com  # Let a hosted web console connect
 ./davi-nfc-agent -auto-tls=false       # Disable automatic TLS certificate management
 ./davi-nfc-agent -cert cert.pem -key key.pem  # Use your own TLS certificate
 ./davi-nfc-agent -config-dir ./config  # Override the config directory
 ```
+
+### Connecting from a web console
+
+The agent only accepts WebSocket upgrades whose `Origin` matches its own
+host:port — otherwise any site the operator visits could drive the reader. A web
+console served from anywhere else, which is every hosted one, must be listed:
+
+```bash
+./davi-nfc-agent -allowed-origins "order.davi.social,localhost:3002"
+# or
+DAVI_NFC_ALLOWED_ORIGINS="order.davi.social" ./davi-nfc-agent
+```
+
+Entries are matched on host:port. Full URLs are accepted and reduced, so
+`https://order.davi.social` and `order.davi.social` are equivalent. `*` disables
+the check entirely and is not recommended — it lets any site connect.
 
 By default the agent generates and persists a TLS certificate and an API secret
 under a platform-specific config directory, so paired devices keep working

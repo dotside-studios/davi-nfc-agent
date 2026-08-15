@@ -526,6 +526,23 @@ func (h *DeviceHandler) DeviceCanLock(deviceID string) bool {
 	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanLock })
 }
 
+// DeviceMaxHoldMs reports how long a device can keep a tag available for work,
+// zero meaning open-ended — which is also the answer for a device that declared
+// nothing, and for one that is no longer connected. Callers should treat it as
+// advice about what is worth attempting rather than as permission.
+func (h *DeviceHandler) DeviceMaxHoldMs(deviceID string) int {
+	if h.manager == nil {
+		return 0
+	}
+
+	device, ok := h.manager.GetDevice(deviceID)
+	if !ok || !device.IsActive() {
+		return 0
+	}
+
+	return device.PhoneCapabilities().MaxHoldMs
+}
+
 // deviceDeclared reports whether a still-connected device declared a capability.
 func (h *DeviceHandler) deviceDeclared(deviceID string, want func(protocol.DeviceCapabilities) bool) bool {
 	if h.manager == nil {

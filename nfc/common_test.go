@@ -261,6 +261,13 @@ func TestIsDeviceClosedError(t *testing.T) {
 			expected: true,
 		},
 		{
+			// The smartphone device said this, the classifier looked for the
+			// other spelling, and so its closure was handled by nothing.
+			name:     "string match - device is closed",
+			err:      errors.New("getTags: error from device.GetTags: device is closed"),
+			expected: true,
+		},
+		{
 			name:     "unrelated error",
 			err:      errors.New("connection lost"),
 			expected: false,

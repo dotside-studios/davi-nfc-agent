@@ -138,7 +138,7 @@ func (d *Device) GetTags() ([]nfc.Tag, error) {
 	d.mu.RLock()
 	if !d.isActive {
 		d.mu.RUnlock()
-		return nil, fmt.Errorf("device is closed")
+		return nil, nfc.ErrDeviceClosed
 	}
 	d.mu.RUnlock()
 
@@ -147,14 +147,14 @@ func (d *Device) GetTags() ([]nfc.Tag, error) {
 	case tags, ok := <-d.tagChannel:
 		if !ok {
 			// Channel closed
-			return nil, fmt.Errorf("device is closed")
+			return nil, nfc.ErrDeviceClosed
 		}
 		return tags, nil
 	case <-time.After(GetTagsTimeout):
 		// Timeout - return empty slice (not error) for compatibility
 		return []nfc.Tag{}, nil
 	case <-d.closeChannel:
-		return nil, fmt.Errorf("device is closed")
+		return nil, nfc.ErrDeviceClosed
 	}
 }
 

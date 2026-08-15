@@ -174,8 +174,13 @@ func IsDeviceClosedError(err error) bool {
 	if errors.Is(err, ErrDeviceClosed) {
 		return true
 	}
-	// Fallback to string matching for legacy errors
-	return strings.Contains(err.Error(), "device closed")
+	// Fallback to string matching for legacy errors. Both spellings, because a
+	// classifier that recognizes only the one its own sentinel happens to use
+	// silently declines every error phrased the other way — which is what the
+	// smartphone device did, leaving its closure unhandled.
+	errStr := err.Error()
+	return strings.Contains(errStr, "device closed") ||
+		strings.Contains(errStr, "device is closed")
 }
 
 func IsIOError(err error) bool {

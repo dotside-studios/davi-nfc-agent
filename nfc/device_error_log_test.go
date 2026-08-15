@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -98,5 +99,66 @@ func TestHandleError_SaysNothingAboutAnAbsentCard(t *testing.T) {
 
 	if strings.Contains(out, "Device error:") {
 		t.Errorf("expected no fault reported for an absent card, got:\n%s", out)
+	}
+}
+
+// A reader that cannot be opened fails on every poll, and the poll loop is
+// continuous. A phone pinned as the reader never becomes openable at all, which
+// is how one wrong setting became the whole log.
+func TestPoll_ReportsAnUnopenableReaderOnce(t *testing.T) {
+	manager := NewMockManager()
+	manager.DevicesList = []string{"mock:usb:001"}
+	manager.OpenDeviceError = errors.New("device not found: mock:usb:001")
+
+	var reader *NFCReader
+	out := captureLog(t, func() {
+		var err error
+		reader, err = NewNFCReaderWithClock("mock:usb:001", manager, 5*time.Second, NewFakeClock(time.Now()))
+		if err != nil {
+			t.Fatalf("NewNFCReaderWithClock: %v", err)
+		}
+		for range 20 {
+			reader.doPoll()
+		}
+	})
+	defer reader.Close()
+
+	if got := countLines(out, "Connection attempt failed"); got > 1 {
+		t.Errorf("expected at most one report across 20 polls, got %d:\n%s", got, out)
+	}
+}
+
+// Once is once per reason, not once per run: a reader that comes back and fails
+// again later is worth hearing about both times.
+func TestPoll_ReportsAgainAfterTheReaderWorked(t *testing.T) {
+	manager := NewMockManager()
+	manager.DevicesList = []string{"mock:usb:001"}
+	manager.MockDevice = NewMockDevice()
+	manager.OpenDeviceError = errors.New("device not found: mock:usb:001")
+
+	reader, err := NewNFCReaderWithClock("mock:usb:001", manager, 5*time.Second, NewFakeClock(time.Now()))
+	if err != nil {
+		t.Fatalf("NewNFCReaderWithClock: %v", err)
+	}
+	defer reader.Close()
+
+	// Construction already tried to connect, and reported that. This test is
+	// about what the polls after it say.
+	reader.deviceManager.clearLastError()
+
+	out := captureLog(t, func() {
+		reader.doPoll()
+		reader.doPoll()
+
+		manager.OpenDeviceError = nil
+		reader.doPoll()
+
+		reader.deviceManager.Close()
+		manager.OpenDeviceError = errors.New("device not found: mock:usb:001")
+		reader.doPoll()
+	})
+
+	if got := countLines(out, "Connection attempt failed"); got != 2 {
+		t.Errorf("expected the fault reported on each side of a working reader, got %d:\n%s", got, out)
 	}
 }

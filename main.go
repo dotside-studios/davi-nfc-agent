@@ -23,6 +23,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -186,6 +187,8 @@ func main() {
 	agent.ConfigDir = configDir
 	agent.PublicKeyPin = agentPublicKeyPin
 	agent.Devices = devices
+	agent.Bootstrap = bootstrapServer
+	agent.BootstrapPort = bootstrapPortFlag
 	agent.RequirePairedDevice = requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
 
 	if agent.RequirePairedDevice {
@@ -212,12 +215,12 @@ func main() {
 
 	// Load persisted preferences. Explicit flags still win: something that
 	// passed -device meant it for this run.
-	settings, err := NewSettingsStore(configDir)
+	settingsStore, err := settings.New(configDir)
 	if err != nil {
 		log.Printf("Warning: failed to load settings: %v", err)
-		settings, _ = NewSettingsStore("")
+		settingsStore, _ = settings.New("")
 	}
-	stored := settings.Get()
+	stored := settingsStore.Get()
 
 	if devicePathFlag == "" {
 		devicePathFlag = stored.DevicePath
@@ -228,18 +231,18 @@ func main() {
 	if !requirePairedFlag && os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") != "1" && stored.RequirePairedDevice {
 		agent.RequirePairedDevice = true
 	}
-	stored.Apply(agent)
+	applySettings(agent, stored)
 
-	// Nil in a -tags nocontrol build, which is why everything below tolerates it.
-	control := setupControlCenter(agent, settings, logRing, bootstrapServer, bootstrapPortFlag)
+	// Nil in a -tags nowebui build, which is why everything below tolerates it.
+	console := setupConsole(agent, settingsStore, logRing)
 
 	// Redraw the console whenever something changes it from elsewhere.
-	origins.OnChange(control.NotifyChange)
-	devices.OnChange(control.NotifyChange)
+	origins.OnChange(console.NotifyChange)
+	devices.OnChange(console.NotifyChange)
 
 	// Create and run systray app
 	app := NewSystrayApp(agent, devicePathFlag, bootstrapPortFlag, bootstrapServer)
-	app.AttachControl(control, settings)
+	app.AttachConsole(console)
 	app.Run()
 }
 

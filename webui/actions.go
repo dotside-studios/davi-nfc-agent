@@ -1,43 +1,33 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
+
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // dispatch routes a console action to the code that performs it. Named actions
 // rather than REST verbs: most of these are operations, not resource edits.
-func (c *ControlServer) dispatch(req controlAction) (any, error) {
+func (c *Server) dispatch(req action) (any, error) {
 	switch req.Action {
 
 	// ---- agent lifecycle ----
 
 	case "agent.start":
-		if c.OnStart == nil {
-			return nil, errors.New("agent cannot be started from here")
-		}
-		return nil, c.OnStart()
+		return nil, c.host.StartAgent()
 
 	case "agent.stop":
-		if c.OnStop == nil {
-			return nil, errors.New("agent cannot be stopped from here")
-		}
-		c.OnStop()
+		c.host.StopAgent()
 		return nil, nil
 
 	case "agent.restartServers":
-		return nil, c.agent.RestartServers()
+		return nil, c.host.RestartServers()
 
 	case "agent.quit":
-		if c.OnQuit == nil {
-			return nil, errors.New("agent cannot be quit from here")
-		}
 		// Deferred so the response reaches the console before the process exits.
-		go c.OnQuit()
+		go c.host.QuitAgent()
 		return nil, nil
 
 	// ---- reader ----
@@ -49,13 +39,10 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if c.OnSelectDevice == nil {
-			return nil, errors.New("device cannot be changed from here")
-		}
-		if err := c.OnSelectDevice(params.DevicePath); err != nil {
+		if err := c.host.SelectDevice(params.DevicePath); err != nil {
 			return nil, err
 		}
-		_, err := c.settings.Update(func(s *Settings) { s.DevicePath = params.DevicePath })
+		_, err := c.host.SaveSettings(func(s *settings.Settings) { s.DevicePath = params.DevicePath })
 		return nil, err
 
 	case "reader.setMode":
@@ -66,11 +53,11 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 			return nil, err
 		}
 		switch params.Mode {
-		case ModeReadWrite, ModeReadOnly, ModeWriteOnly:
+		case settings.ModeReadWrite, settings.ModeReadOnly, settings.ModeWriteOnly:
 		default:
 			return nil, fmt.Errorf("unknown mode %q", params.Mode)
 		}
-		return nil, c.saveSettings(func(s *Settings) { s.Mode = params.Mode })
+		return nil, c.saveSettings(func(s *settings.Settings) { s.Mode = params.Mode })
 
 	case "reader.setCardTypes":
 		var params struct {
@@ -79,16 +66,16 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.saveSettings(func(s *Settings) { s.CardTypes = params.CardTypes })
+		return nil, c.saveSettings(func(s *settings.Settings) { s.CardTypes = params.CardTypes })
 
 	// ---- settings ----
 
 	case "settings.save":
-		var params Settings
+		var params settings.Settings
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.saveSettings(func(s *Settings) {
+		return nil, c.saveSettings(func(s *settings.Settings) {
 			port := params.Port
 			*s = params
 			s.Port = port
@@ -101,15 +88,9 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if c.agent.ClientServer == nil {
-			return nil, errors.New("agent is not running")
-		}
 		// A client is free to reconnect immediately; this ends the session it
 		// has, it does not bar it. Removing its origin is what bars it.
-		if !c.agent.ClientServer.Disconnect(params.ID) {
-			return nil, errors.New("no such client — it may have already disconnected")
-		}
-		return nil, nil
+		return nil, c.host.DisconnectClient(params.ID)
 
 	// ---- paired devices ----
 
@@ -120,16 +101,10 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if c.agent.Devices == nil {
-			return nil, errors.New("no device registry")
-		}
-		return nil, c.agent.Devices.Revoke(params.ID)
+		return nil, c.host.RevokeDevice(params.ID)
 
 	case "devices.revokeAll":
-		if c.agent.Devices == nil {
-			return nil, errors.New("no device registry")
-		}
-		return nil, c.agent.Devices.RevokeAll()
+		return nil, c.host.RevokeAllDevices()
 
 	case "devices.setRequirePaired":
 		var params struct {
@@ -139,7 +114,7 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 			return nil, err
 		}
 		// Persisted, unlike the tray's session-only version of this toggle.
-		return nil, c.saveSettings(func(s *Settings) { s.RequirePairedDevice = params.Enabled })
+		return nil, c.saveSettings(func(s *settings.Settings) { s.RequirePairedDevice = params.Enabled })
 
 	// ---- origins ----
 
@@ -150,10 +125,7 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if c.agent.Origins == nil {
-			return nil, errors.New("no origin store")
-		}
-		return nil, c.agent.Origins.Allow(params.Origin)
+		return nil, c.host.AllowOrigin(params.Origin)
 
 	case "origins.revoke":
 		var params struct {
@@ -162,10 +134,7 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if c.agent.Origins == nil {
-			return nil, errors.New("no origin store")
-		}
-		return nil, c.agent.Origins.Revoke(params.Origin)
+		return nil, c.host.RevokeOrigin(params.Origin)
 
 	case "origins.setAllowAny":
 		var params struct {
@@ -174,40 +143,35 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if c.agent.Origins == nil {
-			return nil, errors.New("no origin store")
-		}
 		if params.Enabled {
 			// Never persisted, matching the tray.
 			log.Printf("Warning: origin checking disabled for this session from the control center; any site the operator visits can drive the reader")
 		}
-		c.agent.Origins.SessionAllowAny(params.Enabled)
+		c.host.SetOriginCheckDisabled(params.Enabled)
 		return nil, nil
 
 	// ---- security ----
 
 	case "security.rotateAPISecret":
-		secret, err := c.agent.RotateAPISecret()
+		secret, err := c.host.RotateAPISecret()
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"apiSecret": secret}, nil
 
 	case "security.rotatePairingPIN":
-		if c.bootstrap == nil {
-			return nil, errors.New("pairing server is disabled")
+		pin, err := c.host.RotatePairingPIN()
+		if err != nil {
+			return nil, err
 		}
-		return map[string]any{"pin": c.bootstrap.RotatePIN()}, nil
+		return map[string]any{"pin": pin}, nil
 
 	case "security.regenerateCertificate":
-		if c.agent.TLSManager == nil {
-			return nil, errors.New("agent is not managing its own certificates")
-		}
-		if err := c.agent.TLSManager.RegenerateCertificates(); err != nil {
+		if err := c.host.RegenerateCertificate(); err != nil {
 			return nil, err
 		}
 		// Takes effect only on a fresh listener.
-		return nil, c.agent.RestartServers()
+		return nil, c.host.RestartServers()
 
 	case "security.revokeControlSessions":
 		// Includes the caller's own session, which is the point.
@@ -219,19 +183,10 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 	}
 }
 
-// saveSettings persists a change, applies it to the running agent and lets the
-// tray follow it.
-func (c *ControlServer) saveSettings(mutate func(*Settings)) error {
-	saved, err := c.settings.Update(mutate)
-	if err != nil {
-		return err
-	}
-
-	saved.Apply(c.agent)
-	if c.OnSettings != nil {
-		c.OnSettings(saved)
-	}
-	return nil
+// saveSettings persists a change; the host applies it to the running agent.
+func (c *Server) saveSettings(mutate func(*settings.Settings)) error {
+	_, err := c.host.SaveSettings(mutate)
+	return err
 }
 
 // decodeParams unpacks an action's parameters; absent params are not an error.

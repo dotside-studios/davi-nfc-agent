@@ -17,6 +17,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -65,8 +66,7 @@ type SystrayApp struct {
 	initialDevice string
 	bootstrapPort int
 	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
-	control       *ControlServer       // nil if the console is not built in
-	settings      *SettingsStore
+	console       *Console             // nil if the control center is not built in
 
 	// Menu items
 	mStatus     *systray.MenuItem
@@ -116,7 +116,7 @@ type SystrayApp struct {
 	cardTypeFilters map[string]*cardTypeFilterItem // Maps card type to filter item
 
 	// Control center
-	mControlCenter *systray.MenuItem
+	mConsole *systray.MenuItem
 }
 
 // NewSystrayApp creates a new systray application. bootstrap may be nil
@@ -134,16 +134,16 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 }
 
 // syncSettingsToMenu reflects a settings change made in the console.
-func (s *SystrayApp) syncSettingsToMenu(next Settings) {
+func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 	if s.mModeMenu == nil {
 		return
 	}
 
 	modeName := "Read/Write"
 	switch next.Mode {
-	case ModeReadOnly:
+	case settings.ModeReadOnly:
 		modeName = "Read Only"
-	case ModeWriteOnly:
+	case settings.ModeWriteOnly:
 		modeName = "Write Only"
 	}
 	s.mModeMenu.SetTitle("Mode: " + modeName)
@@ -152,9 +152,9 @@ func (s *SystrayApp) syncSettingsToMenu(next Settings) {
 	s.mReadMode.Uncheck()
 	s.mWriteMode.Uncheck()
 	switch next.Mode {
-	case ModeReadOnly:
+	case settings.ModeReadOnly:
 		s.mReadMode.Check()
-	case ModeWriteOnly:
+	case settings.ModeWriteOnly:
 		s.mWriteMode.Check()
 	default:
 		s.mReadWriteMode.Check()
@@ -185,6 +185,9 @@ func (s *SystrayApp) syncSettingsToMenu(next Settings) {
 		}
 	}
 }
+
+// Quit tears the tray down, which stops the agent on the way out.
+func (s *SystrayApp) Quit() { systray.Quit() }
 
 // Run starts the systray application
 func (s *SystrayApp) Run() {
@@ -299,7 +302,7 @@ func (s *SystrayApp) setupUI() {
 
 	systray.AddSeparator()
 
-	s.setupControlMenu()
+	s.setupConsoleMenu()
 
 	systray.AddSeparator()
 
@@ -400,8 +403,8 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 	// Nil in a build without the console, and a receive on a nil channel simply
 	// never fires — so this case costs nothing rather than needing a build tag.
 	var controlClicks <-chan struct{}
-	if s.mControlCenter != nil {
-		controlClicks = s.mControlCenter.ClickedCh
+	if s.mConsole != nil {
+		controlClicks = s.mConsole.ClickedCh
 	}
 
 	for {
@@ -413,7 +416,7 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 		case <-mRefreshDevices.ClickedCh:
 			s.updateDeviceList()
 		case <-controlClicks:
-			s.handleOpenControlCenter()
+			s.handleOpenConsole()
 		case <-s.mCopyDeviceURL.ClickedCh:
 			if url := s.getDeviceURL(); url != "" {
 				if err := copyToClipboard(url); err != nil {

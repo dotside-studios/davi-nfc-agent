@@ -1,4 +1,4 @@
 # Built and committed so `go build .` works without Node. Collapsed in diffs
 # and excluded from language stats — rebuild with `make webui`.
-webui/dist/** linguist-generated=true -diff
-webui/package-lock.json linguist-generated=true -diff
+webui/frontend/dist/** linguist-generated=true -diff
+webui/frontend/package-lock.json linguist-generated=true -diff

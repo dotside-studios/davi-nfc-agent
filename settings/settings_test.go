@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"encoding/json"
@@ -12,15 +12,15 @@ import (
 // An agent that has never had a preference changed should not acquire a
 // settings file merely by starting, so that "no file" keeps meaning
 // "nothing was ever configured here".
-func TestNewSettingsStoreDoesNotWriteOnLoad(t *testing.T) {
+func TestNewDoesNotWriteOnLoad(t *testing.T) {
 	dir := t.TempDir()
 
-	store, err := NewSettingsStore(dir)
+	store, err := New(dir)
 	if err != nil {
-		t.Fatalf("NewSettingsStore: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, settingsFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, fileName)); !os.IsNotExist(err) {
 		t.Errorf("settings file created on load; want none (err=%v)", err)
 	}
 	if got := store.Get().Mode; got != ModeReadWrite {
@@ -31,9 +31,9 @@ func TestNewSettingsStoreDoesNotWriteOnLoad(t *testing.T) {
 func TestSettingsRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
-	store, err := NewSettingsStore(dir)
+	store, err := New(dir)
 	if err != nil {
-		t.Fatalf("NewSettingsStore: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 
 	cardType := nfc.GetAllCardTypes()[0]
@@ -47,7 +47,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	reloaded, err := NewSettingsStore(dir)
+	reloaded, err := New(dir)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -74,14 +74,14 @@ func TestSettingsRoundTrip(t *testing.T) {
 // their defaults, not on the zero value.
 func TestPartialFileKeepsDefaults(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, settingsFileName)
+	path := filepath.Join(dir, fileName)
 	if err := os.WriteFile(path, []byte(`{"devicePath":"reader-1"}`), 0o600); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	store, err := NewSettingsStore(dir)
+	store, err := New(dir)
 	if err != nil {
-		t.Fatalf("NewSettingsStore: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 
 	got := store.Get()
@@ -94,7 +94,7 @@ func TestPartialFileKeepsDefaults(t *testing.T) {
 }
 
 func TestNormalizeRejectsUnknownValues(t *testing.T) {
-	got := normalizeSettings(Settings{
+	got := normalize(Settings{
 		Mode:      "sideways",
 		CardTypes: []string{"NotARealCardType"},
 		Port:      70000,
@@ -117,7 +117,7 @@ func TestNormalizeDeduplicatesAndSorts(t *testing.T) {
 		t.Skip("build supports fewer than two card types")
 	}
 
-	got := normalizeSettings(Settings{
+	got := normalize(Settings{
 		Mode:      ModeReadWrite,
 		CardTypes: []string{all[1], all[0], all[1]},
 	}).CardTypes
@@ -133,7 +133,7 @@ func TestNormalizeDeduplicatesAndSorts(t *testing.T) {
 // "every supported type" and "no filter" are the same policy. Collapsing them
 // keeps unfiltered a single representable state.
 func TestNormalizeCollapsesFullFilterToNone(t *testing.T) {
-	got := normalizeSettings(Settings{
+	got := normalize(Settings{
 		Mode:      ModeReadWrite,
 		CardTypes: nfc.GetAllCardTypes(),
 	})
@@ -144,9 +144,9 @@ func TestNormalizeCollapsesFullFilterToNone(t *testing.T) {
 
 func TestUpdateAppliesMutationAndPersists(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewSettingsStore(dir)
+	store, err := New(dir)
 	if err != nil {
-		t.Fatalf("NewSettingsStore: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 
 	var notified Settings
@@ -163,7 +163,7 @@ func TestUpdateAppliesMutationAndPersists(t *testing.T) {
 		t.Errorf("OnChange saw mode %q", notified.Mode)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, settingsFileName))
+	data, err := os.ReadFile(filepath.Join(dir, fileName))
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
@@ -187,41 +187,10 @@ func TestModeParseFormatRoundTrip(t *testing.T) {
 	}
 }
 
-// The running device server holds the very same map, so Apply has to mutate it
-// rather than swap in a replacement it would never see.
-func TestApplyMutatesCardTypeMapInPlace(t *testing.T) {
-	agent := NewAgent(nil)
-	shared := agent.AllowedCardTypes
-	agent.AllowCardType("StaleType")
-
-	cardType := nfc.GetAllCardTypes()[0]
-	Settings{Mode: ModeReadWrite, CardTypes: []string{cardType}}.Apply(agent)
-
-	// shared still refers to the map handed out at construction, so observing
-	// the change through it is what proves Apply did not swap in a new one.
-	if _, stale := shared["StaleType"]; stale {
-		t.Error("Apply left the stale entry in the shared map")
-	}
-	if !shared[cardType] {
-		t.Errorf("Apply did not write %q into the shared map", cardType)
-	}
-}
-
-func TestApplyWithNoFilterAllowsEverything(t *testing.T) {
-	agent := NewAgent(nil)
-	Settings{Mode: ModeReadWrite}.Apply(agent)
-
-	for _, cardType := range nfc.GetAllCardTypes() {
-		if !agent.IsCardTypeAllowed(cardType) {
-			t.Errorf("card type %q not allowed under an empty filter", cardType)
-		}
-	}
-}
-
 func TestInMemoryStoreWhenConfigDirUnset(t *testing.T) {
-	store, err := NewSettingsStore("")
+	store, err := New("")
 	if err != nil {
-		t.Fatalf("NewSettingsStore(\"\"): %v", err)
+		t.Fatalf("New(\"\"): %v", err)
 	}
 	if err := store.Save(Settings{Mode: ModeReadOnly}); err != nil {
 		t.Fatalf("Save on in-memory store: %v", err)

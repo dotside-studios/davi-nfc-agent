@@ -1,6 +1,4 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"embed"
@@ -10,16 +8,15 @@ import (
 	"strings"
 )
 
-// The console's built assets are compiled into the binary. dist/ is committed
-// so `go build .` works without Node; rebuild it with `make webui`.
+// The console's built assets are compiled into the binary. frontend/dist is
+// committed so `go build .` works without Node; rebuild it with `make webui`.
 //
-//go:embed all:webui/dist
-var webUIFS embed.FS
+//go:embed all:frontend/dist
+var frontendFS embed.FS
 
-// webUIHandler serves the console, or nil if no build is embedded — in which
-// case the root falls back to the banner it has always shown.
-func webUIHandler() http.Handler {
-	dist, err := fs.Sub(webUIFS, "webui/dist")
+// Console serves the built console, or nil if no build is embedded.
+func Console() http.Handler {
+	dist, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		return nil
 	}

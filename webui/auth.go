@@ -1,6 +1,4 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"crypto/rand"
@@ -24,26 +22,26 @@ import (
 // rotate the secret.
 
 const (
-	controlCookieName = "davi_nfc_control"
+	cookieName = "davi_nfc_control"
 
 	// A handoff token only has to survive the browser launching.
-	controlTokenTTL = 2 * time.Minute
+	handoffTTL = 2 * time.Minute
 
-	controlSessionTTL = 12 * time.Hour
+	sessionTTL = 12 * time.Hour
 )
 
-// ControlAuth mints and verifies the credentials for the control surface.
+// Auth mints and verifies the credentials for the control surface.
 // Handoff tokens are single-use: the tray puts one in the URL it opens and the
 // console exchanges it for a session cookie, so a leaked URL is already spent.
-type ControlAuth struct {
+type Auth struct {
 	mu       sync.Mutex
 	handoff  map[string]time.Time
 	sessions map[string]time.Time
 }
 
-// NewControlAuth returns an empty credential store.
-func NewControlAuth() *ControlAuth {
-	return &ControlAuth{
+// NewAuth returns an empty credential store.
+func NewAuth() *Auth {
+	return &Auth{
 		handoff:  make(map[string]time.Time),
 		sessions: make(map[string]time.Time),
 	}
@@ -51,7 +49,7 @@ func NewControlAuth() *ControlAuth {
 
 // MintHandoff issues a single-use token for the tray to place in the console
 // URL it opens.
-func (a *ControlAuth) MintHandoff() (string, error) {
+func (a *Auth) MintHandoff() (string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return "", err
@@ -60,13 +58,13 @@ func (a *ControlAuth) MintHandoff() (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.expireLocked()
-	a.handoff[token] = time.Now().Add(controlTokenTTL)
+	a.handoff[token] = time.Now().Add(handoffTTL)
 	return token, nil
 }
 
 // RedeemHandoff exchanges a handoff token for a session token, consuming it.
 // A token that is unknown, already redeemed or expired returns false.
-func (a *ControlAuth) RedeemHandoff(token string) (string, bool) {
+func (a *Auth) RedeemHandoff(token string) (string, bool) {
 	if token == "" {
 		return "", false
 	}
@@ -92,12 +90,12 @@ func (a *ControlAuth) RedeemHandoff(token string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	a.sessions[session] = time.Now().Add(controlSessionTTL)
+	a.sessions[session] = time.Now().Add(sessionTTL)
 	return session, true
 }
 
 // ValidSession reports whether a session token is current.
-func (a *ControlAuth) ValidSession(token string) bool {
+func (a *Auth) ValidSession(token string) bool {
 	if token == "" {
 		return false
 	}
@@ -115,14 +113,14 @@ func (a *ControlAuth) ValidSession(token string) bool {
 }
 
 // RevokeSession ends one session, used when the console signs out.
-func (a *ControlAuth) RevokeSession(token string) {
+func (a *Auth) RevokeSession(token string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.sessions, token)
 }
 
 // RevokeAll ends every session and discards unclaimed tokens.
-func (a *ControlAuth) RevokeAll() {
+func (a *Auth) RevokeAll() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.handoff = make(map[string]time.Time)
@@ -130,7 +128,7 @@ func (a *ControlAuth) RevokeAll() {
 }
 
 // SessionCount returns the number of live sessions, for display.
-func (a *ControlAuth) SessionCount() int {
+func (a *Auth) SessionCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.expireLocked()
@@ -138,7 +136,7 @@ func (a *ControlAuth) SessionCount() int {
 }
 
 // expireLocked drops timed-out tokens. Caller holds the lock.
-func (a *ControlAuth) expireLocked() {
+func (a *Auth) expireLocked() {
 	now := time.Now()
 	for token, expiry := range a.handoff {
 		if now.After(expiry) {
@@ -192,9 +190,9 @@ func isSameOriginRequest(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// authorizeControlRequest returns the reason a request is refused, or "" if it
+// authorize returns the reason a request is refused, or "" if it
 // is authorised.
-func (a *ControlAuth) authorizeControlRequest(r *http.Request) string {
+func (a *Auth) authorize(r *http.Request) string {
 	if !isLoopbackRequest(r) {
 		return "not loopback"
 	}
@@ -202,7 +200,7 @@ func (a *ControlAuth) authorizeControlRequest(r *http.Request) string {
 		return "cross-origin"
 	}
 
-	cookie, err := r.Cookie(controlCookieName)
+	cookie, err := r.Cookie(cookieName)
 	if err != nil || !a.ValidSession(cookie.Value) {
 		return "no valid session"
 	}

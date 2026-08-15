@@ -1,6 +1,4 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"net/http"
@@ -10,7 +8,7 @@ import (
 )
 
 func TestHandoffIsSingleUse(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 
 	token, err := auth.MintHandoff()
 	if err != nil {
@@ -33,7 +31,7 @@ func TestHandoffIsSingleUse(t *testing.T) {
 }
 
 func TestRedeemRejectsUnknownToken(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 	if _, ok := auth.RedeemHandoff("not-a-real-token"); ok {
 		t.Error("unknown token was redeemed")
 	}
@@ -43,7 +41,7 @@ func TestRedeemRejectsUnknownToken(t *testing.T) {
 }
 
 func TestSessionValidity(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 
 	token, _ := auth.MintHandoff()
 	session, _ := auth.RedeemHandoff(token)
@@ -65,7 +63,7 @@ func TestSessionValidity(t *testing.T) {
 }
 
 func TestRevokeAllClearsSessionsAndHandoffs(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 
 	unclaimed, _ := auth.MintHandoff()
 	claimed, _ := auth.MintHandoff()
@@ -85,7 +83,7 @@ func TestRevokeAllClearsSessionsAndHandoffs(t *testing.T) {
 }
 
 func TestExpiredTokensAreRejected(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 
 	token, _ := auth.MintHandoff()
 	session, _ := auth.RedeemHandoff(token)
@@ -93,7 +91,7 @@ func TestExpiredTokensAreRejected(t *testing.T) {
 	// Reach past the clock rather than sleeping for the real TTL.
 	auth.mu.Lock()
 	for k := range auth.sessions {
-		auth.sessions[k] = auth.sessions[k].Add(-controlSessionTTL - time.Hour)
+		auth.sessions[k] = auth.sessions[k].Add(-sessionTTL - time.Hour)
 	}
 	auth.mu.Unlock()
 
@@ -103,12 +101,12 @@ func TestExpiredTokensAreRejected(t *testing.T) {
 }
 
 func TestExpiredHandoffIsRejected(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 	token, _ := auth.MintHandoff()
 
 	auth.mu.Lock()
 	for k := range auth.handoff {
-		auth.handoff[k] = auth.handoff[k].Add(-controlTokenTTL - time.Hour)
+		auth.handoff[k] = auth.handoff[k].Add(-handoffTTL - time.Hour)
 	}
 	auth.mu.Unlock()
 
@@ -188,7 +186,7 @@ func TestIsSameOriginRequest(t *testing.T) {
 }
 
 func TestAuthorizeControlRequest(t *testing.T) {
-	auth := NewControlAuth()
+	auth := NewAuth()
 	token, _ := auth.MintHandoff()
 	session, _ := auth.RedeemHandoff(token)
 
@@ -197,17 +195,17 @@ func TestAuthorizeControlRequest(t *testing.T) {
 		r.RemoteAddr = "127.0.0.1:5555"
 		r.Host = "localhost:9470"
 		r.Header.Set("Origin", "https://localhost:9470")
-		r.AddCookie(&http.Cookie{Name: controlCookieName, Value: session})
+		r.AddCookie(&http.Cookie{Name: cookieName, Value: session})
 		return r
 	}
 
-	if reason := auth.authorizeControlRequest(newRequest()); reason != "" {
+	if reason := auth.authorize(newRequest()); reason != "" {
 		t.Fatalf("valid request refused: %s", reason)
 	}
 
 	remote := newRequest()
 	remote.RemoteAddr = "192.168.1.20:5555"
-	if reason := auth.authorizeControlRequest(remote); reason != "not loopback" {
+	if reason := auth.authorize(remote); reason != "not loopback" {
 		t.Errorf("off-host request: got %q, want %q", reason, "not loopback")
 	}
 
@@ -215,20 +213,20 @@ func TestAuthorizeControlRequest(t *testing.T) {
 	// loopback plus a valid cookie is not sufficient on its own.
 	crossSite := newRequest()
 	crossSite.Header.Set("Origin", "https://evil.example.com")
-	if reason := auth.authorizeControlRequest(crossSite); reason != "cross-origin" {
+	if reason := auth.authorize(crossSite); reason != "cross-origin" {
 		t.Errorf("cross-site request: got %q, want %q", reason, "cross-origin")
 	}
 
 	noCookie := httptest.NewRequest(http.MethodGet, "/control/state", nil)
 	noCookie.RemoteAddr = "127.0.0.1:5555"
 	noCookie.Host = "localhost:9470"
-	if reason := auth.authorizeControlRequest(noCookie); reason != "no valid session" {
+	if reason := auth.authorize(noCookie); reason != "no valid session" {
 		t.Errorf("cookieless request: got %q, want %q", reason, "no valid session")
 	}
 
 	stale := newRequest()
 	auth.RevokeSession(session)
-	if reason := auth.authorizeControlRequest(stale); reason != "no valid session" {
+	if reason := auth.authorize(stale); reason != "no valid session" {
 		t.Errorf("revoked session: got %q, want %q", reason, "no valid session")
 	}
 }

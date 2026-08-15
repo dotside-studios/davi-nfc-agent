@@ -143,12 +143,13 @@ and origin allowlist keep their own.
 
 ## Building
 
-`webui/dist` is committed and embedded with `go:embed`, so `go build .` works
-with no Node installed. After changing anything under `webui/src`:
+`webui/frontend/dist` is committed and embedded with `go:embed`, so `go build .`
+works with no Node installed. After changing anything under
+`webui/frontend/src`:
 
 ```bash
 make webui     # npm install && npm run build
-git add webui/dist
+git add webui/frontend/dist
 ```
 
 For hot reload against a running agent:
@@ -159,46 +160,66 @@ VITE_AGENT=https://localhost:9480 make webui-dev
 ```
 
 The dev server proxies `/control` and `/ws`, so it drives a real agent rather
-than a mock. If `webui/dist` is missing entirely the agent still starts and
-serves its protocol; the root falls back to the plain-text banner.
+than a mock. If `webui/frontend/dist` is missing entirely the agent still starts
+and serves its protocol; the root falls back to the plain-text banner.
 
 To drive the console without a reader — for screenshots, or to check a panel
 that needs paired devices and blocked origins to be interesting — there is a
-harness that serves the real control handler over a seeded agent and a stubbed
+harness that serves the real control handler over a seeded host and a stubbed
 tag feed. It is skipped unless `SCREENSHOT_ADDR` is set:
 
 ```bash
 SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
-  go test -run TestScreenshotHarness -timeout 20m .
+  go test -run TestScreenshotHarness -timeout 20m ./webui/
 # then open http://127.0.0.1:9911/control/session?token=$(cat /tmp/tok)
 ```
 
 ## Leaving it out
 
-`go build -tags nocontrol .` produces an agent without the control center: no
-`/control` routes, no privileged API, no tray entry, and no `webui/dist` in the
-binary. Roughly 560 KB smaller, and the console's strings are absent entirely.
+The console is its own package. `webui/` holds the whole thing — the gate, the
+routes, the state snapshot, the dispatcher, and the frontend it embeds:
+
+```
+webui/
+  webui.go            the Host interface, the package's only view of the agent
+  auth.go             the three-check gate
+  server.go           routes, the live socket
+  state.go            the state snapshot
+  actions.go          the action dispatcher
+  embed.go            go:embed of frontend/dist
+  frontend/           the Vite + React console
+    src/
+    dist/             built and committed
+```
+
+Nothing in `webui` imports the agent. It declares the ~35 methods it needs as
+`webui.Host`, and `webui_host.go` in `package main` implements them — so the
+console's entire reach into the agent is readable in one file, and its tests run
+against a fake host with no hardware behind them.
+
+`go build -tags nowebui .` produces an agent without the control center: no
+`/control` routes, no privileged API, no tray entry, and no frontend in the
+binary. Roughly 820 KB smaller, and the console's strings are absent entirely.
 
 ```bash
-make build-nocontrol
-make test-nocontrol     # the suite under the same tag
+make build-nowebui
+make test-nowebui     # the suite under the same tag
 ```
 
-Everything console-specific lives in files carrying `//go:build !nocontrol`:
+Only three files in `package main` carry `//go:build !nowebui`:
 
 ```
-control_auth.go       the three-check gate
-control_server.go     routes, the live socket
-control_state.go      the state snapshot
-control_actions.go    the action dispatcher
-control_enabled.go    the one wiring entry point
-systray_control.go    the tray entry
-webui.go              go:embed of webui/dist
+webui_enabled.go      the one wiring entry point
+webui_host.go         the Host implementation
+systray_console.go    the tray entry
 ```
 
-`control_disabled.go` supplies the stubs under the opposite tag. Call sites in
-`agent.go`, `main.go` and `systray.go` hold a nil `*ControlServer` and tolerate
-it, so none of them needs a build tag of its own.
+`webui_disabled.go` supplies the stubs under the opposite tag. Call sites in
+`agent.go`, `main.go` and `systray.go` hold a nil `*Console` and tolerate it, so
+none of them needs a build tag of its own.
+
+Dropping the console from a custom build is therefore a tag, not a patch — and
+deleting `webui/` outright leaves only those four files to remove.
 
 **The agent's protocol is unaffected.** Raw tag exchanges, settings
 persistence and the log ring stay in either build — each is reachable without

@@ -1,34 +1,33 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
-// ControlState is the whole picture the console renders from. Sent as a
+// State is the whole picture the console renders from. Sent as a
 // snapshot rather than deltas, so the console can never show a half-applied
 // combination of settings.
-type ControlState struct {
-	Agent    AgentInfo                 `json:"agent"`
-	Reader   ReaderInfo                `json:"reader"`
-	Server   ServerInfo                `json:"server"`
-	Security SecurityInfo              `json:"security"`
-	Settings Settings                  `json:"settings"`
-	Devices  []DeviceInfo              `json:"devices"`
-	Clients  []clientserver.ClientInfo `json:"clients"`
-	Origins  OriginsInfo               `json:"origins"`
-	Capture  CaptureInfo               `json:"capture"`
+type State struct {
+	Agent    AgentInfo         `json:"agent"`
+	Reader   ReaderInfo        `json:"reader"`
+	Server   ServerInfo        `json:"server"`
+	Security SecurityInfo      `json:"security"`
+	Settings settings.Settings `json:"settings"`
+	Devices  []DeviceInfo      `json:"devices"`
+	Clients  []Client          `json:"clients"`
+	Origins  OriginsInfo       `json:"origins"`
+	Capture  CaptureInfo       `json:"capture"`
 }
 
 // AgentInfo covers identity and lifecycle.
@@ -119,22 +118,20 @@ type CaptureInfo struct {
 	LogSeq     int `json:"logSeq"`
 }
 
-// buildState assembles the snapshot from live objects.
-func (c *ControlServer) buildState() ControlState {
-	agent := c.agent
-
-	state := ControlState{
+// buildState assembles the snapshot from the host.
+func (c *Server) buildState() State {
+	state := State{
 		Agent: AgentInfo{
-			Name:      buildinfo.Name,
-			Version:   buildinfo.FullVersion(),
-			Dev:       buildinfo.IsDev(),
-			Running:   agent.Reader != nil,
+			Name:      c.name,
+			Version:   c.version,
+			Dev:       c.dev,
+			Running:   c.host.Running(),
 			StartedAt: c.startedAt,
 			UptimeSec: int64(time.Since(c.startedAt).Seconds()),
-			ConfigDir: agent.ConfigDir,
-			Platform:  platformName(),
+			ConfigDir: c.host.ConfigDir(),
+			Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 		},
-		Settings: c.settings.Get(),
+		Settings: c.host.Settings(),
 	}
 
 	state.Reader = c.buildReaderInfo()
@@ -155,112 +152,71 @@ func (c *ControlServer) buildState() ControlState {
 	return state
 }
 
-func (c *ControlServer) buildReaderInfo() ReaderInfo {
-	agent := c.agent
-
+func (c *Server) buildReaderInfo() ReaderInfo {
 	info := ReaderInfo{
-		Mode:         FormatMode(nfc.ModeReadWrite),
-		DevicePath:   agent.CurrentDevicePath(),
-		AllCardTypes: nfc.GetAllCardTypes(),
+		Mode:         c.host.ReaderMode(),
+		DevicePath:   c.host.DevicePath(),
+		Available:    orEmpty(c.host.AvailableDevices()),
+		AllCardTypes: orEmpty(c.host.AllCardTypes()),
 	}
 
-	if agent.Reader != nil {
-		info.Mode = FormatMode(agent.Reader.GetMode())
-	}
-
-	if agent.Manager != nil {
-		if devices, err := agent.Manager.ListDevices(); err == nil {
-			info.Available = devices
-		}
-	}
-	if info.Available == nil {
-		info.Available = []string{}
-	}
-
-	if agent.ClientServer != nil {
-		if card := agent.ClientServer.GetLastCard(); card != nil {
-			info.CardPresent = true
-			info.CardUID = card.UID
-			info.CardType = card.Type
-		}
-	}
-
-	if mgr := c.remoteManager(); mgr != nil {
-		info.RemoteDevices = mgr.GetDeviceCount()
-		info.RemoteActive = mgr.GetActiveDeviceCount()
-	}
-
+	info.CardUID, info.CardType, info.CardPresent = c.host.CurrentCard()
+	info.RemoteDevices, info.RemoteActive = c.host.RemoteDevices()
 	return info
 }
 
-func (c *ControlServer) buildServerInfo() ServerInfo {
-	agent := c.agent
-	secure := agent.CertFile != "" && agent.KeyFile != ""
+func (c *Server) buildServerInfo() ServerInfo {
+	secure := c.host.TLSEnabled()
+	port := c.host.Port()
 
-	scheme := "ws"
-	httpScheme := "http"
+	scheme, httpScheme := "ws", "http"
 	if secure {
-		scheme = "wss"
-		httpScheme = "https"
+		scheme, httpScheme = "wss", "https"
 	}
 
 	info := ServerInfo{
-		Port:          agent.DevicePort,
-		BootstrapPort: c.bootstrapPort,
+		Port:          port,
+		BootstrapPort: c.host.BootstrapPort(),
 		TLS:           secure,
-		LocalIPs:      getLocalIPs(),
-		ClientURL:     fmt.Sprintf("%s://%s/ws", scheme, hostPort("localhost", agent.DevicePort)),
-		DeviceURL:     fmt.Sprintf("%s://%s/ws?mode=device", scheme, hostPort("localhost", agent.DevicePort)),
-	}
-	if info.LocalIPs == nil {
-		info.LocalIPs = []string{}
+		LocalIPs:      orEmpty(c.host.LocalIPs()),
+		Clients:       c.host.ClientCount(),
+		ClientURL:     fmt.Sprintf("%s://%s/ws", scheme, net.JoinHostPort("localhost", strconv.Itoa(port))),
+		DeviceURL:     fmt.Sprintf("%s://%s/ws?mode=device", scheme, net.JoinHostPort("localhost", strconv.Itoa(port))),
 	}
 
 	// Must name an address a phone can reach, so not loopback.
-	if c.bootstrap != nil && c.bootstrapPort > 0 {
+	if bp := c.host.BootstrapPort(); bp > 0 {
 		host := "localhost"
 		if ips := info.LocalIPs; len(ips) > 0 {
 			host = ips[0]
 		}
-		if pin := c.bootstrap.PIN(); pin != "" {
-			info.PairingURL = fmt.Sprintf("%s://%s/pair?pin=%s", httpScheme, hostPort(host, c.bootstrapPort), pin)
-		} else {
-			info.PairingURL = fmt.Sprintf("%s://%s/pair", httpScheme, hostPort(host, c.bootstrapPort))
+		info.PairingURL = fmt.Sprintf("%s://%s/pair", httpScheme, net.JoinHostPort(host, strconv.Itoa(bp)))
+		if pin := c.host.PairingPIN(); pin != "" {
+			info.PairingURL += "?pin=" + pin
 		}
-	}
-
-	if agent.ClientServer != nil {
-		info.Clients = agent.ClientServer.ClientCount()
 	}
 
 	return info
 }
 
-func (c *ControlServer) buildSecurityInfo() SecurityInfo {
-	agent := c.agent
-
+func (c *Server) buildSecurityInfo() SecurityInfo {
 	info := SecurityInfo{
-		APISecret:           agent.APISecret,
-		PublicKeyPin:        agent.PublicKeyPin,
-		RequirePairedDevice: agent.RequirePairedDevice,
+		APISecret:           c.host.APISecret(),
+		PairingPIN:          c.host.PairingPIN(),
+		PublicKeyPin:        c.host.PublicKeyPin(),
+		RequirePairedDevice: c.host.RequirePairedDevice(),
+		CAInstalled:         c.host.CAInstalled(),
 		ControlSessions:     c.auth.SessionCount(),
 	}
 
-	if c.bootstrap != nil {
-		info.PairingPIN = c.bootstrap.PIN()
-	}
-
-	if agent.TLSManager != nil {
-		info.CAInstalled = agent.TLSManager.CAInstalled()
-		if info.CAInstalled {
-			if fp, err := agent.TLSManager.GetCAFingerprint(); err == nil {
-				info.CAFingerprint = fp
-			}
+	if info.CAInstalled {
+		if fp, err := c.host.CAFingerprint(); err == nil {
+			info.CAFingerprint = fp
 		}
 	}
 
-	if agent.CertFile != "" {
-		if cert, err := readCertInfo(agent.CertFile); err == nil {
+	if path := c.host.CertFile(); path != "" {
+		if cert, err := readCertInfo(path); err == nil {
 			info.Cert = cert
 		}
 	}
@@ -268,25 +224,9 @@ func (c *ControlServer) buildSecurityInfo() SecurityInfo {
 	return info
 }
 
-func (c *ControlServer) buildDeviceInfo() []DeviceInfo {
-	if c.agent.Devices == nil {
-		return []DeviceInfo{}
-	}
-
-	paired := c.agent.Devices.List()
+func (c *Server) buildDeviceInfo() []DeviceInfo {
+	paired := c.host.PairedDevices()
 	out := make([]DeviceInfo, 0, len(paired))
-
-	// Paired is a stored credential; online is a live session. The console
-	// shows both so an absent device reads as absent rather than broken.
-	online := make(map[string]bool)
-	if mgr := c.remoteManager(); mgr != nil {
-		if ids, err := mgr.ListDevices(); err == nil {
-			for _, id := range ids {
-				online[id] = true
-			}
-		}
-	}
-
 	for _, d := range paired {
 		out = append(out, DeviceInfo{
 			ID:       d.ID,
@@ -294,7 +234,7 @@ func (c *ControlServer) buildDeviceInfo() []DeviceInfo {
 			Platform: d.Platform,
 			PairedAt: d.PairedAt,
 			LastSeen: d.LastSeen,
-			Online:   online[d.ID],
+			Online:   d.Online,
 		})
 	}
 	return out
@@ -303,30 +243,29 @@ func (c *ControlServer) buildDeviceInfo() []DeviceInfo {
 // buildClientInfo lists the applications currently connected to the client
 // endpoint. Until now only their count was visible, which cannot answer the
 // question an operator actually has: what is driving the reader.
-func (c *ControlServer) buildClientInfo() []clientserver.ClientInfo {
-	if c.agent.ClientServer == nil {
-		return []clientserver.ClientInfo{}
+func (c *Server) buildClientInfo() []Client {
+	clients := c.host.Clients()
+	if clients == nil {
+		return []Client{}
 	}
-	if clients := c.agent.ClientServer.Clients(); clients != nil {
-		return clients
-	}
-	return []clientserver.ClientInfo{}
+	return clients
 }
 
-func (c *ControlServer) buildOriginsInfo() OriginsInfo {
-	info := OriginsInfo{Allowed: []string{}, Blocked: []string{}}
-	if c.agent.Origins == nil {
-		return info
+func (c *Server) buildOriginsInfo() OriginsInfo {
+	return OriginsInfo{
+		Allowed:  orEmpty(c.host.AllowedOrigins()),
+		Blocked:  orEmpty(c.host.BlockedOrigins()),
+		AllowAny: c.host.OriginCheckDisabled(),
 	}
+}
 
-	if allowed := c.agent.Origins.List(); allowed != nil {
-		info.Allowed = allowed
+// orEmpty keeps a nil slice out of the JSON, so the console can map over every
+// list without guarding each one.
+func orEmpty(v []string) []string {
+	if v == nil {
+		return []string{}
 	}
-	if blocked := c.agent.Origins.Blocked(); blocked != nil {
-		info.Blocked = blocked
-	}
-	info.AllowAny = c.agent.Origins.IsSessionAllowAny()
-	return info
+	return v
 }
 
 // readCertInfo parses the served certificate for display.

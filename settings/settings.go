@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-const settingsFileName = "settings.json"
+const fileName = "settings.json"
 
 // Settings holds the operator preferences that survive a restart. These
 // previously lived only in tray menu state or a command-line flag.
@@ -41,7 +41,7 @@ type Settings struct {
 
 // DefaultSettings matches the historical defaults, so introducing the file
 // changes nothing until something is deliberately saved.
-func DefaultSettings() Settings {
+func Defaults() Settings {
 	return Settings{
 		Mode:      ModeReadWrite,
 		CardTypes: nil,
@@ -82,8 +82,8 @@ func FormatMode(mode nfc.ReaderMode) string {
 	}
 }
 
-// SettingsStore persists Settings under the config directory.
-type SettingsStore struct {
+// Store persists Settings under the config directory.
+type Store struct {
 	mu        sync.RWMutex
 	configDir string
 	settings  Settings
@@ -91,20 +91,20 @@ type SettingsStore struct {
 	onChangeFunc func(Settings)
 }
 
-// NewSettingsStore loads settings from configDir, falling back to the defaults.
+// New loads settings from configDir, falling back to the defaults.
 // No file is written on load, so its absence keeps meaning "never configured".
 // An empty configDir yields an in-memory store.
-func NewSettingsStore(configDir string) (*SettingsStore, error) {
-	s := &SettingsStore{
+func New(configDir string) (*Store, error) {
+	s := &Store{
 		configDir: configDir,
-		settings:  DefaultSettings(),
+		settings:  Defaults(),
 	}
 
 	if configDir == "" {
 		return s, nil
 	}
 
-	data, err := os.ReadFile(filepath.Join(configDir, settingsFileName))
+	data, err := os.ReadFile(filepath.Join(configDir, fileName))
 	if os.IsNotExist(err) {
 		return s, nil
 	}
@@ -113,33 +113,33 @@ func NewSettingsStore(configDir string) (*SettingsStore, error) {
 	}
 
 	// Over the defaults, so a field absent from an older file keeps its default.
-	stored := DefaultSettings()
+	stored := Defaults()
 	if err := json.Unmarshal(data, &stored); err != nil {
 		return nil, fmt.Errorf("parse settings file: %w", err)
 	}
 
-	s.settings = normalizeSettings(stored)
+	s.settings = normalize(stored)
 	return s, nil
 }
 
 // OnChange registers a callback fired whenever the settings change.
-func (s *SettingsStore) OnChange(fn func(Settings)) {
+func (s *Store) OnChange(fn func(Settings)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onChangeFunc = fn
 }
 
 // Get returns the current settings.
-func (s *SettingsStore) Get() Settings {
+func (s *Store) Get() Settings {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.settings.clone()
 }
 
 // Save replaces the settings and persists them, normalizing first.
-func (s *SettingsStore) Save(next Settings) error {
+func (s *Store) Save(next Settings) error {
 	s.mu.Lock()
-	s.settings = normalizeSettings(next)
+	s.settings = normalize(next)
 	saved := s.settings.clone()
 	onChange := s.onChangeFunc
 	err := s.saveLocked()
@@ -156,11 +156,11 @@ func (s *SettingsStore) Save(next Settings) error {
 
 // Update applies a mutation and persists the result, without the caller having
 // to read-modify-write around the lock.
-func (s *SettingsStore) Update(mutate func(*Settings)) (Settings, error) {
+func (s *Store) Update(mutate func(*Settings)) (Settings, error) {
 	s.mu.Lock()
 	next := s.settings.clone()
 	mutate(&next)
-	s.settings = normalizeSettings(next)
+	s.settings = normalize(next)
 	saved := s.settings.clone()
 	onChange := s.onChangeFunc
 	err := s.saveLocked()
@@ -176,7 +176,7 @@ func (s *SettingsStore) Update(mutate func(*Settings)) (Settings, error) {
 }
 
 // saveLocked writes the settings file. Caller holds the write lock.
-func (s *SettingsStore) saveLocked() error {
+func (s *Store) saveLocked() error {
 	if s.configDir == "" {
 		return nil
 	}
@@ -191,7 +191,7 @@ func (s *SettingsStore) saveLocked() error {
 	data = append(data, '\n')
 
 	// Write and rename, so an interrupted write leaves no truncated file.
-	path := filepath.Join(s.configDir, settingsFileName)
+	path := filepath.Join(s.configDir, fileName)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write settings file: %w", err)
@@ -204,11 +204,11 @@ func (s *SettingsStore) saveLocked() error {
 }
 
 // Path returns the settings file location, or "" for an in-memory store.
-func (s *SettingsStore) Path() string {
+func (s *Store) Path() string {
 	if s.configDir == "" {
 		return ""
 	}
-	return filepath.Join(s.configDir, settingsFileName)
+	return filepath.Join(s.configDir, fileName)
 }
 
 func (s Settings) clone() Settings {
@@ -218,7 +218,7 @@ func (s Settings) clone() Settings {
 }
 
 // normalizeSettings coerces settings into a form the agent can apply.
-func normalizeSettings(s Settings) Settings {
+func normalize(s Settings) Settings {
 	switch s.Mode {
 	case ModeReadWrite, ModeReadOnly, ModeWriteOnly:
 	default:
@@ -260,32 +260,4 @@ func normalizeSettings(s Settings) Settings {
 	}
 
 	return s
-}
-
-// Apply pushes the settings onto a running agent. The port is not applied here;
-// rebinding the listener belongs in an explicit restart.
-func (s Settings) Apply(agent *Agent) {
-	if agent == nil {
-		return
-	}
-
-	if agent.Reader != nil {
-		agent.Reader.SetMode(ParseMode(s.Mode))
-	}
-
-	// Mutated in place, never replaced: the running device server was handed
-	// this same map at construction, so assigning a new one here would leave it
-	// filtering on a snapshot that no longer changes.
-	for t := range agent.AllowedCardTypes {
-		delete(agent.AllowedCardTypes, t)
-	}
-	if len(s.CardTypes) == 0 {
-		agent.AllowAllCardTypes()
-	} else {
-		for _, t := range s.CardTypes {
-			agent.AllowCardType(t)
-		}
-	}
-
-	agent.SetRequirePairedDevice(s.RequirePairedDevice)
 }

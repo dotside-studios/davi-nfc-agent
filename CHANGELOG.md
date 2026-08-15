@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   browser. Being same-origin, it is also the one browser client that works on a
   fresh install without `-install-ca` — a page visit can be accepted manually,
   where a bare `wss://` to an untrusted certificate fails outright. Built with
-  Vite and React; `webui/dist` is committed and embedded, so `go build .` still
-  needs nothing but Go. See [Control Center](docs/control-center.md)
+  Vite and React; `webui/frontend/dist` is committed and embedded, so
+  `go build .` still needs nothing but Go.
+  See [Control Center](docs/control-center.md)
 - **The agent's log is readable.** Log output went to stderr and nowhere else,
   so an agent started from a desktop launcher discarded every certificate
   warning, refused origin and reader failure as it produced it. The last 5000
@@ -36,13 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live event feed.** Scans, writes, locks and errors as they happen,
   filterable, pausable and exportable as NDJSON. The tray only ever showed the
   card currently on the reader, so a tag presented and taken away left no trace
-- **`-tags nocontrol` builds the agent without the control center.** No
-  `/control` routes, no privileged API, no tray entry and no embedded console —
-  about 560 KB smaller, with none of the console's strings present. Everything
-  console-specific carries a build constraint and the call sites tolerate a nil
-  control server, so no shared file needs a tag of its own. The agent's own
-  protocol is unaffected: raw tag exchanges, settings persistence and the log
-  ring remain in both builds, each being reachable without the console
+- **The control center is a removable module.** Everything it needs lives in
+  `webui/` — the gate, the routes, the state snapshot, the dispatcher and the
+  frontend it embeds — and none of it imports the agent. It declares what it
+  needs of the agent as `webui.Host`, implemented by a single adapter in
+  `package main`, which both keeps the console's whole reach into the agent
+  readable in one file and lets its tests run against a fake host with no
+  hardware. `go build -tags nowebui .` then drops it: no `/control` routes, no
+  privileged API, no tray entry and no embedded console — about 820 KB smaller,
+  with none of the console's strings present. Only three files in `package main`
+  carry the constraint; the call sites tolerate a nil console, so no shared file
+  needs a tag of its own. The agent's own protocol is unaffected: raw tag
+  exchanges, settings persistence and the log ring remain in both builds, each
+  being reachable without the console
 - **Raw exchanges with a tag, from a client and from the console.** The agent
   could already transceive with a tag, but only agent-to-device: no client
   could ask for one, so DESFire, ISO-DEP applets and capability probing meant

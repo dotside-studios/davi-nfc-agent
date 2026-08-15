@@ -1,13 +1,4 @@
-//go:build !nocontrol
-
-package main
-
-// Screenshot harness. Stands up the real control handler and the embedded
-// console against a seeded agent, so the UI can be captured without hardware.
-//
-// Not part of the normal suite: it only runs when SCREENSHOT_ADDR is set.
-//
-//	SCREENSHOT_ADDR=127.0.0.1:9911 go test -run TestScreenshotHarness -timeout 20m .
+package webui
 
 import (
 	"encoding/base64"
@@ -23,73 +14,63 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
+// Screenshot harness. Serves the real control handler and the embedded console
+// over a seeded fake host, so the UI can be driven without an agent or hardware.
+//
+// Not part of the normal suite: it only runs when SCREENSHOT_ADDR is set.
+//
+//	SCREENSHOT_ADDR=127.0.0.1:9911 go test ./webui/ -run TestScreenshotHarness -timeout 20m
 func TestScreenshotHarness(t *testing.T) {
 	addr := os.Getenv("SCREENSHOT_ADDR")
 	if addr == "" {
 		t.Skip("set SCREENSHOT_ADDR to run the screenshot harness")
 	}
 
-	dir := t.TempDir()
-
-	agent := NewAgent(nfc.NewMockManager())
-	agent.ConfigDir = dir
-	agent.DevicePort = 9470
-	agent.APISecret = "s3cr3t-0f-the-agent-9f2a1c"
-	agent.PublicKeyPin = "sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
-
-	origins, err := NewOriginStore(dir)
-	if err != nil {
-		t.Fatal(err)
+	host := newFakeHost()
+	host.configDir = "/home/operator/.config/davi-nfc-agent"
+	host.devicePath = ""
+	host.available = []string{"ACS ACR1252U 01 00"}
+	host.cardTypes = []string{
+		"MIFARE Classic 1K", "MIFARE Classic 4K", "MIFARE Ultralight",
+		"NTAG213", "NTAG215", "NTAG216", "DESFire", "Type4",
 	}
-	origins.Allow("console.davi.social")
-	origins.Allow("localhost:3002")
-	origins.RecordBlocked("staging.example.com")
-	origins.RecordBlocked("localhost:5173")
-	agent.Origins = origins
-
-	devices, err := NewDeviceRegistry(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range []struct{ name, platform string }{
-		{"Ned's iPhone", "iOS 17.4"},
-		{"Front desk Pixel", "Android 14"},
-		{"Workshop ACR1252U", "reader"},
-	} {
-		if _, _, err := devices.Pair(d.name, d.platform); err != nil {
-			t.Fatal(err)
-		}
-	}
-	agent.Devices = devices
-
-	settings, err := NewSettingsStore(dir)
-	if err != nil {
-		t.Fatal(err)
+	host.apiSecret = "s3cr3t-0f-the-agent-9f2a1c"
+	host.publicKeyPin = "sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+	host.localIPs = []string{"192.168.1.44"}
+	host.allowed = []string{"console.davi.social", "davi.social", "localhost:3000", "localhost:3002", "shop.davi.social"}
+	host.blocked = []string{"localhost:5173", "staging.example.com"}
+	host.stored = settings.Settings{Mode: settings.ModeReadWrite}
+	host.seedDevices()
+	host.devices = append(host.devices, PairedDevice{
+		ID: "dev-3", Name: "Workshop ACR1252U", Platform: "reader",
+		PairedAt: time.Now().Add(-96 * time.Hour),
+	})
+	host.clients = []Client{
+		{ID: "c1", Origin: "https://console.davi.social", RemoteAddr: "127.0.0.1:59994",
+			UserAgent:   "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0 Safari/537.36",
+			ConnectedAt: time.Now().Add(-4 * time.Minute)},
+		{ID: "c2", Origin: "https://shop.davi.social", RemoteAddr: "127.0.0.1:60004",
+			UserAgent:   "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0 Safari/537.36",
+			ConnectedAt: time.Now().Add(-2 * time.Minute), Writes: 3},
+		{ID: "c3", RemoteAddr: "127.0.0.1:60012", UserAgent: "Go-http-client/2.0",
+			ConnectedAt: time.Now().Add(-30 * time.Second)},
 	}
 
 	ring := logbuf.New(500)
 	seedLog(ring)
 
-	auth := NewControlAuth()
-	control := NewControlServer(agent, auth, settings, ring, nil, 9472)
-
-	// A real client server, so the connected-clients section has rows. The tag
-	// feed is still stubbed; this only supplies the session bookkeeping.
-	agent.ClientServer = clientserver.New(clientserver.Config{
-		AllowedOrigins: []string{"*"},
-		OnChange:       control.NotifyChange,
-	}, server.NewServerBridge())
+	console := New(Config{
+		Host: host, Logs: ring,
+		Name: "davi-nfc-agent", Version: "1.0.3", Dev: true,
+	})
 
 	mux := http.NewServeMux()
-	mux.Handle("/control/", control.Handler())
+	mux.Handle("/control/", console.Handler())
 	mux.HandleFunc("/ws", fakeTagFeed)
-	mux.HandleFunc("/ws-real", agent.ClientServer.ServeWS)
-	mux.Handle("/", webUIHandler())
+	mux.Handle("/", Console())
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -99,16 +80,13 @@ func TestScreenshotHarness(t *testing.T) {
 	go srv.Serve(ln)
 	defer srv.Close()
 
-	token, err := auth.MintHandoff()
+	token, err := console.auth.MintHandoff()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f := os.Getenv("SCREENSHOT_TOKEN_FILE"); f != "" {
 		os.WriteFile(f, []byte(token), 0o600)
 	}
-
-	// A couple of stand-in applications, one of them writing.
-	go fakeClients(addr)
 
 	fmt.Printf("READY http://%s/control/session?token=%s\n", addr, token)
 
@@ -151,62 +129,6 @@ func seedLog(ring *logbuf.Ring) {
 	agentLog.Print("Retrying write after transient failure (attempt 2 of 3)")
 	agentLog.Print("Tag scanned: 04A2B3C4D5E680 (NTAG215)")
 	client.Print("Client disconnected: 8f3a1c2d (total: 0)")
-}
-
-// fakeClients connects a few stand-in applications to the real client server.
-func fakeClients(addr string) {
-	time.Sleep(time.Second)
-
-	for _, c := range []struct {
-		origin string
-		writes int
-	}{
-		{"https://console.davi.social", 0},
-		{"https://shop.davi.social", 3},
-		{"", 0}, // a non-browser caller, which has no Origin
-	} {
-		header := http.Header{}
-		if c.origin != "" {
-			header.Set("Origin", c.origin)
-			header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0 Safari/537.36")
-		} else {
-			header.Set("User-Agent", "Go-http-client/2.0")
-		}
-
-		conn, _, err := websocket.DefaultDialer.Dial("ws://"+addr+"/ws-real", header)
-		if err != nil {
-			continue
-		}
-		for i := 0; i < c.writes; i++ {
-			_ = conn.WriteJSON(map[string]any{
-				"type":    "writeRequest",
-				"payload": map[string]any{"records": []map[string]any{{"type": "text", "content": "x"}}},
-			})
-			time.Sleep(50 * time.Millisecond)
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-}
-
-// fakeAPDUReply answers a handful of commands plausibly enough to exercise the
-// console's status-word decoding.
-func fakeAPDUReply(cmd []byte) []byte {
-	switch {
-	case len(cmd) >= 2 && cmd[0] == 0xFF && cmd[1] == 0xCA: // Get UID
-		return []byte{0x04, 0xA2, 0xB3, 0xC4, 0xD5, 0xE6, 0x80, 0x90, 0x00}
-	case len(cmd) >= 2 && cmd[0] == 0x00 && cmd[1] == 0xA4: // SELECT
-		return []byte{0x90, 0x00}
-	case len(cmd) >= 2 && cmd[0] == 0x00 && cmd[1] == 0xB0: // READ BINARY
-		return []byte{0x00, 0x0F, 0xD1, 0x01, 0x0B, 0x55, 0x01, 0x64, 0x61, 0x76, 0x69, 0x2E, 0x73, 0x6F, 0x63, 0x69, 0x61, 0x6C, 0x90, 0x00}
-	case len(cmd) >= 2 && cmd[0] == 0x90 && cmd[1] == 0x60: // DESFire GetVersion
-		return []byte{0x04, 0x01, 0x01, 0x01, 0x00, 0x1A, 0x05, 0x91, 0xAF}
-	case len(cmd) == 1 && cmd[0] == 0x60: // NTAG GET_VERSION, framing level
-		return []byte{0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03}
-	case len(cmd) == 2 && cmd[0] == 0x30: // Ultralight READ
-		return []byte{0x04, 0xA2, 0xB3, 0x8D, 0xC4, 0xD5, 0xE6, 0x80, 0x00, 0x00, 0x00, 0x00, 0xE1, 0x10, 0x3E, 0x00}
-	default:
-		return []byte{0x6A, 0x82} // File or application not found
-	}
 }
 
 var fakeUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -301,5 +223,26 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 		} else if err := send("deviceStatus", map[string]any{"connected": true, "message": "Polling for tags", "cardPresent": true}); err != nil {
 			return
 		}
+	}
+}
+
+// fakeAPDUReply answers a handful of commands plausibly enough to exercise the
+// console's status-word decoding.
+func fakeAPDUReply(cmd []byte) []byte {
+	switch {
+	case len(cmd) >= 2 && cmd[0] == 0xFF && cmd[1] == 0xCA: // Get UID
+		return []byte{0x04, 0xA2, 0xB3, 0xC4, 0xD5, 0xE6, 0x80, 0x90, 0x00}
+	case len(cmd) >= 2 && cmd[0] == 0x00 && cmd[1] == 0xA4: // SELECT
+		return []byte{0x90, 0x00}
+	case len(cmd) >= 2 && cmd[0] == 0x00 && cmd[1] == 0xB0: // READ BINARY
+		return []byte{0x00, 0x0F, 0xD1, 0x01, 0x0B, 0x55, 0x01, 0x64, 0x61, 0x76, 0x69, 0x2E, 0x73, 0x6F, 0x63, 0x69, 0x61, 0x6C, 0x90, 0x00}
+	case len(cmd) >= 2 && cmd[0] == 0x90 && cmd[1] == 0x60: // DESFire GetVersion
+		return []byte{0x04, 0x01, 0x01, 0x01, 0x00, 0x1A, 0x05, 0x91, 0xAF}
+	case len(cmd) == 1 && cmd[0] == 0x60: // NTAG GET_VERSION, framing level
+		return []byte{0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03}
+	case len(cmd) == 2 && cmd[0] == 0x30: // Ultralight READ
+		return []byte{0x04, 0xA2, 0xB3, 0x8D, 0xC4, 0xD5, 0xE6, 0x80, 0x00, 0x00, 0x00, 0x00, 0xE1, 0x10, 0x3E, 0x00}
+	default:
+		return []byte{0x6A, 0x82} // File or application not found
 	}
 }

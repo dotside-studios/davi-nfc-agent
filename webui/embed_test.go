@@ -1,6 +1,4 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"net/http"
@@ -10,13 +8,13 @@ import (
 )
 
 func TestWebUIIsEmbedded(t *testing.T) {
-	if webUIHandler() == nil {
-		t.Fatal("no console embedded; run `make webui` and commit webui/dist")
+	if Console() == nil {
+		t.Fatal("no console embedded; run `make webui` and commit frontend/dist")
 	}
 }
 
 func TestServesTheAppShell(t *testing.T) {
-	h := webUIHandler()
+	h := Console()
 	if h == nil {
 		t.Skip("console not built")
 	}
@@ -47,7 +45,7 @@ func TestServesTheAppShell(t *testing.T) {
 }
 
 func TestUnknownPathFallsBackToTheShell(t *testing.T) {
-	h := webUIHandler()
+	h := Console()
 	if h == nil {
 		t.Skip("console not built")
 	}
@@ -63,7 +61,7 @@ func TestUnknownPathFallsBackToTheShell(t *testing.T) {
 // HTML for a missing .js only produces an unexpected-"<" error that hides the
 // real problem.
 func TestMissingAssetIs404(t *testing.T) {
-	h := webUIHandler()
+	h := Console()
 	if h == nil {
 		t.Skip("console not built")
 	}
@@ -80,7 +78,7 @@ func TestMissingAssetIs404(t *testing.T) {
 // The control API is mounted separately; a stray request must not be answered
 // with the shell and a 200.
 func TestControlPathsNeverReachTheFileServer(t *testing.T) {
-	h := webUIHandler()
+	h := Console()
 	if h == nil {
 		t.Skip("console not built")
 	}
@@ -94,7 +92,7 @@ func TestControlPathsNeverReachTheFileServer(t *testing.T) {
 }
 
 func TestFingerprintedAssetsAreCacheable(t *testing.T) {
-	h := webUIHandler()
+	h := Console()
 	if h == nil {
 		t.Skip("console not built")
 	}
@@ -127,7 +125,7 @@ func TestFingerprintedAssetsAreCacheable(t *testing.T) {
 
 // Traversal must not escape the embedded filesystem.
 func TestPathTraversalIsRefused(t *testing.T) {
-	h := webUIHandler()
+	h := Console()
 	if h == nil {
 		t.Skip("console not built")
 	}

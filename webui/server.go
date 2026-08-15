@@ -1,11 +1,10 @@
-//go:build !nocontrol
-
-package main
+package webui
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -15,56 +14,44 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
-// ControlServer serves the console's privileged API. See control_auth.go for
-// the gate.
+// Server serves the console's privileged API. See auth.go for the gate.
 //
 // Tag reading and writing are absent by design: the console does those over the
 // ordinary client endpoint, so there is one implementation of the write path.
-type ControlServer struct {
-	agent         *Agent
-	auth          *ControlAuth
-	settings      *SettingsStore
-	logs          *logbuf.Ring
-	bootstrap     *tls.BootstrapServer
-	bootstrapPort int
-	startedAt     time.Time
-
-	// Set by the tray so an action taken in the console runs through the same
-	// code. A nil hook means the action is unavailable.
-	OnStart        func() error
-	OnStop         func()
-	OnSelectDevice func(devicePath string) error
-	OnSettings     func(Settings)
-	OnQuit         func()
+type Server struct {
+	host      Host
+	auth      *Auth
+	logs      *logbuf.Ring
+	name      string
+	version   string
+	dev       bool
+	startedAt time.Time
 
 	mu        sync.Mutex
 	listeners map[int]chan struct{}
 	listenerN int
 }
 
-// NewControlServer wires the console API to a running agent.
-func NewControlServer(agent *Agent, auth *ControlAuth, settings *SettingsStore, logs *logbuf.Ring, bootstrap *tls.BootstrapServer, bootstrapPort int) *ControlServer {
-	return &ControlServer{
-		agent:         agent,
-		auth:          auth,
-		settings:      settings,
-		logs:          logs,
-		bootstrap:     bootstrap,
-		bootstrapPort: bootstrapPort,
-		startedAt:     time.Now(),
-		listeners:     make(map[int]chan struct{}),
+// New builds the console API over a host.
+func New(config Config) *Server {
+	return &Server{
+		host:      config.Host,
+		auth:      NewAuth(),
+		logs:      config.Logs,
+		name:      config.Name,
+		version:   config.Version,
+		dev:       config.Dev,
+		startedAt: time.Now(),
+		listeners: make(map[int]chan struct{}),
 	}
 }
 
 // Handler returns the control routes. Everything but the session handoff runs
 // through requireSession; the handoff is what a browser arrives at without a
 // session and carries its own single-use credential.
-func (c *ControlServer) Handler() http.Handler {
+func (c *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/control/session", c.handleSession)
@@ -79,9 +66,9 @@ func (c *ControlServer) Handler() http.Handler {
 
 // requireSession enforces the control gate. Deliberately without CORS headers,
 // unlike the client routes.
-func (c *ControlServer) requireSession(next http.Handler) http.Handler {
+func (c *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if reason := c.auth.authorizeControlRequest(r); reason != "" {
+		if reason := c.auth.authorize(r); reason != "" {
 			log.Printf("Control request refused (%s): %s %s", reason, r.Method, r.URL.Path)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
@@ -91,7 +78,7 @@ func (c *ControlServer) requireSession(next http.Handler) http.Handler {
 }
 
 // handleSession exchanges a tray-minted handoff token for a session cookie.
-func (c *ControlServer) handleSession(w http.ResponseWriter, r *http.Request) {
+func (c *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	// Checked before redeeming, so a refused request cannot burn the token.
 	if !isLoopbackRequest(r) || !isSameOriginRequest(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -105,26 +92,26 @@ func (c *ControlServer) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     controlCookieName,
+		Name:     cookieName,
 		Value:    session,
 		Path:     "/",
 		HttpOnly: true,
 		// Unconditional Secure would drop the cookie on a plain-HTTP agent.
 		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(controlSessionTTL.Seconds()),
+		MaxAge:   int(sessionTTL.Seconds()),
 	})
 
 	// Redirect so the spent token leaves the address bar and the history.
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (c *ControlServer) handleSignout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(controlCookieName); err == nil {
+func (c *Server) handleSignout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(cookieName); err == nil {
 		c.auth.RevokeSession(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     controlCookieName,
+		Name:     cookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
@@ -133,13 +120,13 @@ func (c *ControlServer) handleSignout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (c *ControlServer) handleState(w http.ResponseWriter, r *http.Request) {
+func (c *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c.buildState())
 }
 
 // handleLogs returns buffered log entries, optionally only those after a
 // sequence the caller already has.
-func (c *ControlServer) handleLogs(w http.ResponseWriter, r *http.Request) {
+func (c *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if c.logs == nil {
 		writeJSON(w, http.StatusOK, []logbuf.Entry{})
 		return
@@ -159,19 +146,19 @@ func (c *ControlServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// controlAction is a console request to change something.
-type controlAction struct {
+// action is a console request to change something.
+type action struct {
 	Action string          `json:"action"`
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
-func (c *ControlServer) handleAction(w http.ResponseWriter, r *http.Request) {
+func (c *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req controlAction
+	var req action
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "malformed request"})
 		return
@@ -195,7 +182,7 @@ func (c *ControlServer) handleAction(w http.ResponseWriter, r *http.Request) {
 
 // NotifyChange pushes fresh state to connected consoles. Safe from any
 // goroutine, and coalesces.
-func (c *ControlServer) NotifyChange() {
+func (c *Server) NotifyChange() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, ch := range c.listeners {
@@ -206,7 +193,7 @@ func (c *ControlServer) NotifyChange() {
 	}
 }
 
-func (c *ControlServer) subscribe() (<-chan struct{}, func()) {
+func (c *Server) subscribe() (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 
 	c.mu.Lock()
@@ -225,9 +212,9 @@ func (c *ControlServer) subscribe() (<-chan struct{}, func()) {
 	}
 }
 
-// controlUpgrader upgrades the console's live connection. CheckOrigin is the
+// upgrader upgrades the console's live connection. CheckOrigin is the
 // strict same-origin test, never the agent's allowlist.
-var controlUpgrader = websocket.Upgrader{
+var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 8192,
 	CheckOrigin: func(r *http.Request) bool {
@@ -235,16 +222,16 @@ var controlUpgrader = websocket.Upgrader{
 	},
 }
 
-// controlEnvelope is one message pushed to the console.
-type controlEnvelope struct {
+// envelope is one message pushed to the console.
+type envelope struct {
 	Type  string         `json:"type"`
-	State *ControlState  `json:"state,omitempty"`
+	State *State         `json:"state,omitempty"`
 	Logs  []logbuf.Entry `json:"logs,omitempty"`
 }
 
 // handleWS streams state changes and log lines to the console.
-func (c *ControlServer) handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := controlUpgrader.Upgrade(w, r, nil)
+func (c *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Control WebSocket upgrade failed: %v", err)
 		return
@@ -262,7 +249,7 @@ func (c *ControlServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Gorilla permits one concurrent writer; this connection has three sources.
-	out := make(chan controlEnvelope, 64)
+	out := make(chan envelope, 64)
 	done := make(chan struct{})
 
 	go func() {
@@ -277,10 +264,10 @@ func (c *ControlServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	state := c.buildState()
-	out <- controlEnvelope{Type: "state", State: &state}
+	out <- envelope{Type: "state", State: &state}
 	if c.logs != nil {
 		if entries := c.logs.Entries(); len(entries) > 0 {
-			out <- controlEnvelope{Type: "logs", Logs: entries}
+			out <- envelope{Type: "logs", Logs: entries}
 		}
 	}
 
@@ -309,13 +296,13 @@ func (c *ControlServer) handleWS(w http.ResponseWriter, r *http.Request) {
 
 // pumpEvents turns change signals and log entries into outbound envelopes,
 // batching log lines on a short tick.
-func (c *ControlServer) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.Entry, out chan<- controlEnvelope, done <-chan struct{}) {
+func (c *Server) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.Entry, out chan<- envelope, done <-chan struct{}) {
 	flush := time.NewTicker(250 * time.Millisecond)
 	defer flush.Stop()
 
 	var pending []logbuf.Entry
 
-	send := func(env controlEnvelope) bool {
+	send := func(env envelope) bool {
 		select {
 		case out <- env:
 			return true
@@ -335,7 +322,7 @@ func (c *ControlServer) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.E
 
 		case <-changes:
 			state := c.buildState()
-			if !send(controlEnvelope{Type: "state", State: &state}) {
+			if !send(envelope{Type: "state", State: &state}) {
 				return
 			}
 
@@ -346,7 +333,7 @@ func (c *ControlServer) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.E
 			}
 			pending = append(pending, entry)
 			if len(pending) >= 200 {
-				if !send(controlEnvelope{Type: "logs", Logs: pending}) {
+				if !send(envelope{Type: "logs", Logs: pending}) {
 					return
 				}
 				pending = nil
@@ -354,7 +341,7 @@ func (c *ControlServer) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.E
 
 		case <-flush.C:
 			if len(pending) > 0 {
-				if !send(controlEnvelope{Type: "logs", Logs: pending}) {
+				if !send(envelope{Type: "logs", Logs: pending}) {
 					return
 				}
 				pending = nil
@@ -363,42 +350,21 @@ func (c *ControlServer) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.E
 	}
 }
 
-// remoteManager returns the remote device manager, held either directly or
-// behind the multi-manager.
-func (c *ControlServer) remoteManager() *remotenfc.Manager {
-	if c.agent.Manager == nil {
-		return nil
-	}
-	if m, ok := c.agent.Manager.(*remotenfc.Manager); ok {
-		return m
-	}
-	if mm, ok := c.agent.Manager.(interface {
-		GetManager(string) (nfc.Manager, bool)
-	}); ok {
-		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {
-			if m, ok := mgr.(*remotenfc.Manager); ok {
-				return m
-			}
-		}
-	}
-	return nil
-}
-
 // ConsoleURL returns the console address carrying a fresh single-use token.
-func (c *ControlServer) ConsoleURL() (string, error) {
+func (c *Server) ConsoleURL() (string, error) {
 	token, err := c.auth.MintHandoff()
 	if err != nil {
 		return "", err
 	}
 
 	scheme := "http"
-	if c.agent.CertFile != "" && c.agent.KeyFile != "" {
+	if c.host.TLSEnabled() {
 		scheme = "https"
 	}
 
 	// Always loopback; the control surface refuses anything else.
 	return fmt.Sprintf("%s://%s/control/session?token=%s",
-		scheme, hostPort("localhost", c.agent.DevicePort), token), nil
+		scheme, net.JoinHostPort("localhost", strconv.Itoa(c.host.Port())), token), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -1,6 +1,8 @@
 package tls
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -203,4 +205,54 @@ func TestWatchNetworkChangesConcurrency(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// Reissuing a certificate must not be a back door into the system trust store.
+// generateCertificates installs a CA; generate only reaches it when this
+// install already uses one, and RegenerateCertificates has to honour that.
+func TestRegenerateKeepsASelfSignedInstallSelfSigned(t *testing.T) {
+	m := NewManager(t.TempDir())
+
+	if m.usesCA() {
+		t.Fatal("a fresh manager takes the CA route; the default is self-signed")
+	}
+
+	if err := m.RegenerateCertificates(); err != nil {
+		t.Fatalf("RegenerateCertificates: %v", err)
+	}
+
+	if m.CAInstalled() {
+		t.Error("reissuing a certificate created a certificate authority")
+	}
+	if m.usesCA() {
+		t.Error("reissuing a certificate switched the install to the CA route")
+	}
+
+	// The issued certificate is its own issuer, i.e. nothing signed it.
+	pemBytes, err := os.ReadFile(m.GetCertFile())
+	if err != nil {
+		t.Fatalf("read cert: %v", err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		t.Fatal("certificate file holds no PEM block")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse cert: %v", err)
+	}
+	if cert.Issuer.String() != cert.Subject.String() {
+		t.Errorf("certificate was issued by %q, want a self-signed one", cert.Issuer)
+	}
+}
+
+func TestUseCASelectsTheCARoute(t *testing.T) {
+	m := NewManager(t.TempDir())
+	if m.usesCA() {
+		t.Fatal("self-signed is the default")
+	}
+	m.UseCA(true)
+	if !m.usesCA() {
+		t.Error("UseCA(true) did not select the CA route")
+	}
 }

@@ -166,6 +166,13 @@ func (c *Server) dispatch(req action) (any, error) {
 		}
 		return map[string]any{"pin": pin}, nil
 
+	case "security.installCA":
+		if err := c.host.InstallCA(); err != nil {
+			return nil, err
+		}
+		// The new certificate only reaches a browser on a fresh listener.
+		return nil, c.host.RestartServers()
+
 	case "security.regenerateCertificate":
 		if err := c.host.RegenerateCertificate(); err != nil {
 			return nil, err

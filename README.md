@@ -135,14 +135,19 @@ value, never the certificate.
 [Setting up an iOS or Android device](docs/device-setup.md) covers the pairing
 flow and the trust-evaluation code for both platforms.
 
-Browsers cannot pin, so they need a certificate they already trust. Two ways:
+Browsers cannot pin, so they need a certificate they already trust. Three ways:
 
 1. **Provide one** — point `-cert` / `-key` at a certificate for a name you
    control that resolves to the agent. Nothing is installed, and the browser
    trusts it because a public CA issued it. This is the option that scales.
-2. **`-install-ca`** — creates a local certificate authority and installs it in
-   the system trust store, which is what makes a browser accept the agent's own
-   certificate.
+2. **Trust This Agent in Browsers** — in the tray, or under *Device trust* in the
+   [Control Center](docs/control-center.md). Creates a local certificate
+   authority, installs it in the system trust store and reissues the agent's
+   certificate under it. The operating system asks for a password, and the
+   listeners restart so the new certificate is the one served. This is the same
+   thing `-install-ca` does, without needing a terminal or a restart with flags.
+3. **`-install-ca`** — the launch-flag equivalent of option 2, for a machine
+   provisioned by a script.
 
 > A certificate authority in a trust store can sign for **any** name, not just
 > this agent. Whoever holds its key can intercept that machine's traffic, so

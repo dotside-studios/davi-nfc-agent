@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Trust this agent in browsers, without a terminal.** A browser cannot open a
+  `wss://` connection to an untrusted certificate, and unlike a page visit there
+  is no warning to click through — the page simply never connects, and nothing
+  on either side says why. The only remedy was `-install-ca`, a launch flag, so
+  a non-technical operator could not get a web page talking to the reader at
+  all. The tray gains **Trust This Agent in Browsers** and the Control Center
+  gains the same action under *Device trust*, both stating the tradeoff before
+  they run: a CA in a trust store can sign for any name, so a certificate for a
+  name you control is still preferable. The listeners restart afterwards, so the
+  reissued certificate is the one served. The entry hides itself once there is a
+  CA, and the flag stays for scripted provisioning
+
+### Fixed
+
+- **Reissuing a certificate no longer installs a certificate authority.**
+  `RegenerateCertificates` called the CA routine directly instead of going
+  through the routing that picks self-signed or CA, so the Control Center's
+  **regenerate** action — labelled as nothing more than reissuing a certificate
+  — created a local CA, installed it in the system trust store and prompted for
+  a password, on an agent that had deliberately never had one. That defeated
+  1.1.0's own change to stop installing a CA by default. Reissuing now keeps
+  whichever route the install already uses, and putting a CA in the trust store
+  happens only when explicitly asked for
+- **A missing reader no longer floods the log.** `ListDevices` is polled
+  continuously by the tray, the console and the device watcher, and every failed
+  poll logged. With no reader attached that was 85 of 108 lines — one repeating
+  message, drowning anything else that happened, including the certificate
+  errors the log was added to surface. A failure is now reported once, again if
+  the reason changes, and a recovery gets a line of its own. Same conditions
+  measured after: 1 line in 21
+
 ## [1.1.0] - 2026-08-15
 
 ### Added

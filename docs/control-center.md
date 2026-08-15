@@ -92,7 +92,7 @@ so it can be read straight through. Each section is linkable:
 | Paired devices | Platform, pairing time, last seen, whether connected now; revoke one or all; the paired-device policy |
 | Browser origins | The allowlist, every origin refused since startup with a one-click **allow**, and the session override |
 | Credentials | API secret, pairing PIN, open console sessions, and the rotations for each |
-| Device trust | Public key pin, local CA status and fingerprint |
+| Device trust | Public key pin, local CA status and fingerprint, and **Trust this agent in browsers** when no CA is installed |
 | Certificate | Expiry, issuer, fingerprint, the names it covers, and a warning when the agent is reachable on an address it omits |
 
 The reader and server settings are deliberately *not* here — they live on
@@ -245,7 +245,7 @@ Actions: `agent.start`, `agent.stop`, `agent.restartServers`, `agent.quit`,
 `settings.save`, `devices.revoke`, `devices.revokeAll`,
 `devices.setRequirePaired`, `clients.disconnect`, `origins.allow`, `origins.revoke`,
 `origins.setAllowAny`, `security.rotateAPISecret`, `security.rotatePairingPIN`,
-`security.regenerateCertificate`, `security.revokeControlSessions`.
+`security.installCA`, `security.regenerateCertificate`, `security.revokeControlSessions`.
 
 Tag operations are absent here on purpose — the console does those over the
 client API described in [api.md](api.md).

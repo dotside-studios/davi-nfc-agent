@@ -50,6 +50,8 @@ type fakeHost struct {
 	revoked                           []string
 	rotatedSecret, rotatedPIN         int
 	regeneratedCert                   int
+	installedCA                       int
+	failInstallCA                     bool
 
 	failDisconnect bool
 }
@@ -154,6 +156,17 @@ func (h *fakeHost) RotatePairingPIN() (string, error) {
 
 func (h *fakeHost) CAInstalled() bool              { return h.caInstalled }
 func (h *fakeHost) CAFingerprint() (string, error) { return "AA:BB", nil }
+
+func (h *fakeHost) InstallCA() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.failInstallCA {
+		return errors.New("failed to install the certificate authority: no trust store")
+	}
+	h.installedCA++
+	h.caInstalled = true
+	return nil
+}
 
 func (h *fakeHost) RegenerateCertificate() error {
 	h.mu.Lock()

@@ -221,6 +221,7 @@ function CredentialsSection({ state }: { state: ControlState }) {
 }
 
 function TrustSection({ state }: { state: ControlState }) {
+  const act = useAction()
   const { security } = state
 
   return (
@@ -258,7 +259,31 @@ function TrustSection({ state }: { state: ControlState }) {
           Whoever holds its key can intercept this machine's traffic. Providing a certificate for a
           name you control is preferable wherever you can arrange it.
         </Notice>
-      ) : null}
+      ) : (
+        <Notice>
+          <div>
+            Browsers cannot pin, so a web page on this machine cannot open a <code>wss://</code>{' '}
+            connection to this agent until it trusts the certificate — and unlike visiting a page,
+            there is no warning to click through. A page that needs the reader will simply never
+            connect.
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <ActionLink
+              run={() => act.mutateAsync({ name: 'security.installCA' })}
+              confirm={{
+                prompt:
+                  'This creates a certificate authority and installs it in this machine’s trust store, then reissues the agent’s certificate under it. Your operating system will ask for a password.\n\nA CA in a trust store can sign for any name, not just this agent. Prefer a certificate for a name you control if you can arrange one.\n\nContinue?',
+              }}
+            >
+              Trust this agent in browsers
+            </ActionLink>
+          </div>
+          <div className="dim" style={{ marginTop: 4 }}>
+            Not needed for phones or readers — they pin the key above. Listeners restart afterwards,
+            so connected clients reconnect.
+          </div>
+        </Notice>
+      )}
     </Panel>
   )
 }

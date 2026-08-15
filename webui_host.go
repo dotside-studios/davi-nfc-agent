@@ -175,6 +175,20 @@ func (h *webuiHost) CAFingerprint() (string, error) {
 	return h.agent.TLSManager.GetCAFingerprint()
 }
 
+func (h *webuiHost) InstallCA() error {
+	if h.agent.TLSManager == nil {
+		return errors.New("agent is not managing its own certificates")
+	}
+	if err := h.agent.TLSManager.InstallCA(); err != nil {
+		return err
+	}
+	if h.app != nil {
+		// The tray offers the same action; it has nothing left to offer now.
+		h.app.refreshTrustMenu()
+	}
+	return nil
+}
+
 func (h *webuiHost) RegenerateCertificate() error {
 	if h.agent.TLSManager == nil {
 		return errors.New("agent is not managing its own certificates")

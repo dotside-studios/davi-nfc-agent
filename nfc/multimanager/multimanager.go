@@ -18,6 +18,14 @@ type MultiManager struct {
 	mu               sync.RWMutex           // Protects managers map
 	deviceChangeChan chan struct{}          // Aggregated device change channel
 	stopForward      chan struct{}          // Stop channel forwarding
+
+	// listErrMu guards lastListErr, which holds the last ListDevices error
+	// reported per manager so a persistent one is logged once rather than on
+	// every poll. ListDevices is polled continuously by the tray, the console
+	// and the device watcher, so an unavailable reader would otherwise be the
+	// only thing in the log.
+	listErrMu   sync.Mutex
+	lastListErr map[string]string
 }
 
 // ManagerEntry represents a named manager for MultiManager initialization.
@@ -215,10 +223,10 @@ func (mm *MultiManager) ListDevices() ([]string, error) {
 	for name, manager := range managers {
 		devices, err := manager.ListDevices()
 		if err != nil {
-			// Log warning but continue with other managers
-			log.Printf("[multi] manager '%s' failed to list devices: %v", name, err)
+			mm.logListError(name, err)
 			continue
 		}
+		mm.clearListError(name)
 
 		// Prepend manager name to each device (if not already prefixed)
 		for _, device := range devices {
@@ -292,5 +300,39 @@ func (mm *MultiManager) forwardDeviceChanges(ch <-chan struct{}) {
 				// Channel full, skip
 			}
 		}
+	}
+}
+
+// logListError reports a manager's ListDevices failure the first time it is
+// seen, and again only if the reason changes. Returns whether it logged.
+func (mm *MultiManager) logListError(name string, err error) bool {
+	reason := err.Error()
+
+	mm.listErrMu.Lock()
+	if mm.lastListErr == nil {
+		mm.lastListErr = make(map[string]string)
+	}
+	repeat := mm.lastListErr[name] == reason
+	mm.lastListErr[name] = reason
+	mm.listErrMu.Unlock()
+
+	if repeat {
+		return false
+	}
+	log.Printf("[multi] manager '%s' failed to list devices: %v", name, err)
+	return true
+}
+
+// clearListError notes that a manager is listing again, so the next failure is
+// reported afresh. A recovery is worth a line of its own: without one the log
+// shows a reader failing and never coming back.
+func (mm *MultiManager) clearListError(name string) {
+	mm.listErrMu.Lock()
+	_, wasFailing := mm.lastListErr[name]
+	delete(mm.lastListErr, name)
+	mm.listErrMu.Unlock()
+
+	if wasFailing {
+		log.Printf("[multi] manager '%s' is listing devices again", name)
 	}
 }

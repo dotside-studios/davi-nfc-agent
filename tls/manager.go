@@ -72,6 +72,36 @@ func (m *Manager) CAInstalled() bool {
 	return err == nil
 }
 
+// usesCA reports whether issuance takes the CA route, which is the route that
+// writes to the system trust store.
+func (m *Manager) usesCA() bool {
+	return m.useCA || m.CAInstalled()
+}
+
+// InstallCA creates a local certificate authority, installs it into the system
+// trust store, and reissues the server certificate under it. This is what makes
+// a browser trust the agent, and it prompts for a password.
+//
+// It is a operation of its own rather than a side effect of reissuing a
+// certificate: a CA in a trust store can sign for any name, so nothing should
+// put one there except an explicit request to.
+func (m *Manager) InstallCA() error {
+	hosts, err := GetAllHosts()
+	if err != nil {
+		m.logger.Printf("Warning: failed to get LAN IPs: %v", err)
+		hosts = []string{"localhost", "127.0.0.1"}
+	}
+
+	m.useCA = true
+	if err := m.generateCertificates(hosts); err != nil {
+		// Leave the flag as it was, or a failed install would silently convert
+		// every later reissue to the CA route.
+		m.useCA = false
+		return fmt.Errorf("failed to install the certificate authority: %w", err)
+	}
+	return nil
+}
+
 // EnsureCertificates checks and generates certificates as needed.
 // Returns cert and key file paths, or error.
 func (m *Manager) EnsureCertificates() (certFile, keyFile string, err error) {
@@ -197,7 +227,13 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 // CA — an operator whose browser console works today should not lose it to a
 // changed default.
 func (m *Manager) generate(hosts []string) error {
-	if m.useCA || m.CAInstalled() {
+	// Startup reaches here after EnsureCertificates has already made the
+	// directory, but a reissue can be the first thing that runs.
+	if err := os.MkdirAll(m.tlsDir, 0700); err != nil {
+		return fmt.Errorf("failed to create TLS directory: %w", err)
+	}
+
+	if m.usesCA() {
 		return m.generateCertificates(hosts)
 	}
 
@@ -434,7 +470,11 @@ func (m *Manager) RegenerateCertificates() error {
 
 	m.logger.Printf("Regenerating certificates for hosts: %v", hosts)
 
-	if err := m.generateCertificates(hosts); err != nil {
+	// Through generate, so this reissues by whichever route the install already
+	// uses. Calling generateCertificates directly would make "reissue my
+	// certificate" install a CA into the system trust store on an agent that had
+	// deliberately never had one.
+	if err := m.generate(hosts); err != nil {
 		return fmt.Errorf("failed to regenerate certificates: %w", err)
 	}
 

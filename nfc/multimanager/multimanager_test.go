@@ -1,6 +1,7 @@
 package multimanager
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -456,5 +457,38 @@ func TestMultiManagerEmptyDeviceString(t *testing.T) {
 	if device != nil {
 		// It succeeded, which is fine
 		t.Logf("OpenDevice('') succeeded with device: %v", device.Connection())
+	}
+}
+
+// ListDevices is polled continuously. A reader that stays unavailable must not
+// fill the log with the same line — the operator has to be able to see anything
+// else that happens while it is broken.
+func TestListDevicesLogsAPersistentFailureOnce(t *testing.T) {
+	mm := &MultiManager{}
+	boom := errors.New("failed to establish PC/SC context")
+
+	if !mm.logListError("hardware", boom) {
+		t.Error("first failure was not logged")
+	}
+	for i := 0; i < 50; i++ {
+		if mm.logListError("hardware", boom) {
+			t.Fatalf("repeat %d of the same failure was logged again", i)
+		}
+	}
+
+	// A different reason is new information.
+	if !mm.logListError("hardware", errors.New("no such device")) {
+		t.Error("a changed reason was suppressed")
+	}
+
+	// Each manager is tracked on its own.
+	if !mm.logListError("smartphone", boom) {
+		t.Error("a second manager's first failure was suppressed")
+	}
+
+	// Recovering resets it, so the next failure is reported afresh.
+	mm.clearListError("hardware")
+	if !mm.logListError("hardware", boom) {
+		t.Error("failure after a recovery was suppressed")
 	}
 }

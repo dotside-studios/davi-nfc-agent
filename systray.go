@@ -107,6 +107,7 @@ type SystrayApp struct {
 
 	// Origin allowlist menu items
 	mOriginsMenu    *systray.MenuItem
+	mTrustBrowsers  *systray.MenuItem
 	mOriginAllowAny *systray.MenuItem
 	originSlots     []*originSlot
 
@@ -300,6 +301,9 @@ func (s *SystrayApp) setupUI() {
 	// Origin allowlist section
 	s.setupOriginsMenu()
 
+	// Certificate trust, the other half of what a browser needs.
+	s.setupTrustMenu()
+
 	systray.AddSeparator()
 
 	s.setupConsoleMenu()
@@ -417,6 +421,8 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.updateDeviceList()
 		case <-controlClicks:
 			s.handleOpenConsole()
+		case <-s.mTrustBrowsers.ClickedCh:
+			s.handleTrustBrowsers()
 		case <-s.mCopyDeviceURL.ClickedCh:
 			if url := s.getDeviceURL(); url != "" {
 				if err := copyToClipboard(url); err != nil {

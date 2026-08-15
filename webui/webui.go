@@ -57,6 +57,9 @@ type Host interface {
 	RotatePairingPIN() (string, error)
 	CAInstalled() bool
 	CAFingerprint() (string, error)
+	// InstallCA puts a local authority in the system trust store, which is what
+	// makes a browser accept the agent. Prompts for a password.
+	InstallCA() error
 	RegenerateCertificate() error
 
 	// ---- paired devices ----

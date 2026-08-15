@@ -155,6 +155,9 @@ export interface TagData {
   }
   capabilities?: TagCapabilities
   err?: string | null
+
+  /** The paired device that scanned it. Absent for the agent's own reader. */
+  deviceID?: string
 }
 
 /** A record as the composer submits it. Field use varies by type — see the

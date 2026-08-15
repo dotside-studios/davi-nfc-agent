@@ -52,6 +52,10 @@ export function useTags(secret?: string): Tags {
   const stopped = useRef(false)
   const eventSeq = useRef(0)
 
+  // Whether the tag on screen came from a paired device rather than the agent's
+  // own reader. deviceStatus only ever describes the latter.
+  const fromDevice = useRef(false)
+
   const push = useCallback((e: Omit<LiveEvent, 'id' | 'at'>) => {
     eventSeq.current += 1
     const event: LiveEvent = { id: eventSeq.current, at: new Date().toISOString(), ...e }
@@ -134,6 +138,17 @@ export function useTags(secret?: string): Tags {
             push({ kind: 'error', summary: `Read failed: ${data.err}`, detail: data.uid, ok: false })
             break
           }
+          // A tag with no UID is how a device reports the one it was holding
+          // has left its field. Showing it as a scan would render a blank tag
+          // over the real one.
+          if (!data.uid) {
+            fromDevice.current = false
+            setTag(null)
+            setCapabilities(null)
+            push({ kind: 'status', summary: 'Tag removed', ok: true })
+            break
+          }
+          fromDevice.current = Boolean(data.deviceID)
           setTag(data)
           if (data.capabilities) setCapabilities(data.capabilities)
           remember(data)
@@ -148,7 +163,12 @@ export function useTags(secret?: string): Tags {
 
         case 'deviceStatus': {
           const p = (msg.payload ?? {}) as { connected?: boolean; message?: string; cardPresent?: boolean }
-          if (p.cardPresent === false) {
+          // deviceStatus describes the agent's own reader and nothing else, so
+          // its cardPresent says nothing about a tag a phone is holding — and
+          // is always false while one is, because the local reader has no card.
+          // Clearing on it discarded every phone scan at the next status
+          // message, which is why they reached other consumers and not here.
+          if (p.cardPresent === false && !fromDevice.current) {
             setTag(null)
             setCapabilities(null)
           }

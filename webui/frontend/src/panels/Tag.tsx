@@ -131,7 +131,7 @@ function Records({ records, text }: { records?: NdefRecord[]; text?: string }) {
                 <td className="num">{i + 1}</td>
                 <td className="mono">{r.tnf ?? '—'}</td>
                 <td className="mono">{r.type ?? '—'}</td>
-                <td className="mono">{r.text ?? r.uri ?? <span className="dim">—</span>}</td>
+                <td className="mono">{r.content || <span className="dim">—</span>}</td>
                 <td className="mono dim">{truncate(r.payload)}</td>
               </tr>
             ))}

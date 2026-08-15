@@ -338,3 +338,8 @@ func (m *Manager) notifyDeviceChange() {
 		// Channel full, skip (previous notification not yet consumed)
 	}
 }
+
+// RemoteDevices reports that this manager's devices are phones rather than
+// readers attached to this machine, so none of them is a candidate to be the
+// agent's own reader.
+func (m *Manager) RemoteDevices() bool { return true }

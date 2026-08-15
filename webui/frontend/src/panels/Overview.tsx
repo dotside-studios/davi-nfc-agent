@@ -279,7 +279,7 @@ function CurrentTagPanel({
                       <td className="num">{i + 1}</td>
                       <td className="mono">{r.tnf ?? '—'}</td>
                       <td className="mono">{r.type ?? '—'}</td>
-                      <td className="mono">{r.text ?? r.uri ?? <span className="dim">—</span>}</td>
+                      <td className="mono">{r.content || <span className="dim">—</span>}</td>
                     </tr>
                   ))}
                 </tbody>

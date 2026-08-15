@@ -150,6 +150,27 @@ func (mm *MultiManager) GetManager(name string) (nfc.Manager, bool) {
 	return manager, exists
 }
 
+// RemoteDevice reports whether a device path names one held by a manager whose
+// devices are remote — a phone rather than a reader attached to this machine.
+// It answers from the path's manager prefix, so a device that is not currently
+// connected is still recognized for what it is.
+func (mm *MultiManager) RemoteDevice(devicePath string) bool {
+	name, _, found := strings.Cut(devicePath, ":")
+	if !found {
+		return false
+	}
+
+	mm.mu.RLock()
+	manager, exists := mm.managers[name]
+	mm.mu.RUnlock()
+	if !exists {
+		return false
+	}
+
+	remote, ok := manager.(nfc.RemoteManager)
+	return ok && remote.RemoteDevices()
+}
+
 // OpenDevice opens a device using the appropriate manager.
 // Device string format:
 //   - "manager:deviceID" - explicit manager (e.g., "smartphone:abc123", "hardware:pn532")
@@ -211,6 +232,18 @@ func (mm *MultiManager) OpenDevice(deviceStr string) (nfc.Device, error) {
 // Each device is prefixed with its manager name for disambiguation.
 // Errors from individual managers are logged but do not fail the overall operation.
 func (mm *MultiManager) ListDevices() ([]string, error) {
+	return mm.list(false)
+}
+
+// ListReaders returns only the devices that can serve as this agent's reader,
+// leaving out the ones held by a manager whose devices are remote. A phone
+// reports its scans over the device bridge and is never opened as a reader, so
+// listing one as a candidate offers a choice that can only fail.
+func (mm *MultiManager) ListReaders() ([]string, error) {
+	return mm.list(true)
+}
+
+func (mm *MultiManager) list(readersOnly bool) ([]string, error) {
 	mm.mu.RLock()
 	managers := make(map[string]nfc.Manager)
 	for k, v := range mm.managers {
@@ -221,6 +254,12 @@ func (mm *MultiManager) ListDevices() ([]string, error) {
 	var allDevices []string
 
 	for name, manager := range managers {
+		if readersOnly {
+			if remote, ok := manager.(nfc.RemoteManager); ok && remote.RemoteDevices() {
+				continue
+			}
+		}
+
 		devices, err := manager.ListDevices()
 		if err != nil {
 			mm.logListError(name, err)

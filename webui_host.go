@@ -62,7 +62,10 @@ func (h *webuiHost) AvailableDevices() []string {
 	if h.agent.Manager == nil {
 		return nil
 	}
-	devices, err := h.agent.Manager.ListDevices()
+	// The reader picker, so it offers only what can actually be one. A phone
+	// appearing here reads as a reader to choose, and choosing it pins the
+	// reader to a device that is never opened.
+	devices, err := nfc.ListReaders(h.agent.Manager)
 	if err != nil {
 		return nil
 	}
@@ -93,6 +96,12 @@ func (h *webuiHost) RemoteDevices() (total, active int) {
 func (h *webuiHost) SelectDevice(devicePath string) error {
 	if h.app == nil {
 		return errors.New("device cannot be changed from here")
+	}
+	// Refused rather than accepted and quietly ignored: the picker no longer
+	// offers a phone, so one arriving here came from somewhere that should hear
+	// why it cannot be the reader.
+	if nfc.IsRemoteDevice(h.agent.Manager, devicePath) {
+		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
 	}
 	h.app.switchDevice(devicePath)
 	return nil

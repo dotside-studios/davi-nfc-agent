@@ -123,6 +123,13 @@ func TestDeviceClose(t *testing.T) {
 	if err == nil {
 		t.Error("GetTags() should return error after Close()")
 	}
+
+	// The reader classifies this error to decide whether to reconnect. A phrase
+	// of its own reads the same to a person and matches nothing, which left the
+	// poll loop spinning on a closed phone instead of reconnecting to it.
+	if !nfc.IsDeviceClosedError(err) {
+		t.Errorf("GetTags() after Close() must report a closed device, got %v", err)
+	}
 }
 
 func TestDeviceIsHealthy(t *testing.T) {

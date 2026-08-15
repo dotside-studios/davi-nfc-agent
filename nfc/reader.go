@@ -314,14 +314,24 @@ func (r *NFCReader) handleDeviceErrors(err error) bool {
 		return true
 	}
 
+	recognized := IsIOError(err) || IsDeviceConfigError(err) || IsTimeoutError(err) || IsDeviceClosedError(err)
+
 	// Check if device was reconnected successfully
 	if r.deviceManager.HasDevice() {
+		// An error no branch above recognized left the device exactly as it
+		// was, so "still has a device" means untouched rather than recovered.
+		// Polling straight back into it spins the loop at full speed, and every
+		// turn logs — which is how one unrecognized error becomes hundreds of
+		// identical lines a second and no reconnection ever attempted.
+		if !recognized {
+			r.clock.Sleep(UnhandledErrorRetryInterval)
+		}
 		r.broadcastDeviceStatus() // Use default message from GetDeviceStatus
 		return true
 	}
 
 	// For unhandled errors, send to data channel
-	if !IsIOError(err) && !IsDeviceConfigError(err) && !IsTimeoutError(err) && !IsDeviceClosedError(err) {
+	if !recognized {
 		log.Printf("Unhandled error from getTags: %v. Sending to dataChan.", err)
 		r.dataChan <- NFCData{Card: nil, Err: fmt.Errorf("get tags error: %v", err)}
 		r.clock.Sleep(UnhandledErrorRetryInterval)

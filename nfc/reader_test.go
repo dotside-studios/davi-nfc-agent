@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -1089,5 +1090,32 @@ func TestNFCReader_WriteMessageWithOptions_NoCard(t *testing.T) {
 		t.Error("Expected error when writing with no card present, got nil")
 	} else if !contains(err.Error(), "no card") {
 		t.Errorf("Expected error about no card, got: %v", err)
+	}
+}
+
+// An error no branch recognizes leaves the device exactly as it was, so the
+// reader still has one and goes straight back to polling it. That is a loop
+// with no delay in it and a log line every turn — the shape behind hundreds of
+// identical lines a second against a phone that had disconnected.
+func TestHandleDeviceErrors_PacesAnErrorNothingRecognizes(t *testing.T) {
+	manager := NewMockManager()
+	manager.MockDevice = NewMockDevice()
+	clock := NewFakeClock(time.Now())
+
+	reader, err := NewNFCReaderWithClock("mock:usb:001", manager, 5*time.Second, clock)
+	if err != nil {
+		t.Fatalf("NewNFCReaderWithClock: %v", err)
+	}
+	defer reader.Close()
+
+	if err := reader.deviceManager.TryConnect(); err != nil {
+		t.Fatalf("TryConnect: %v", err)
+	}
+
+	before := clock.Now()
+	reader.handleDeviceErrors(errors.New("something no classifier claims"))
+
+	if waited := clock.Now().Sub(before); waited < UnhandledErrorRetryInterval {
+		t.Errorf("expected the loop to pause before polling again, waited %v", waited)
 	}
 }

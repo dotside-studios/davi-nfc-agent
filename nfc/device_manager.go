@@ -83,6 +83,12 @@ type DeviceManager struct {
 	events   chan DeviceEvent // Buffered channel for device events
 	eventMux sync.RWMutex     // Protects event channel
 
+	// lastErr holds the last error reported here, so a condition that persists
+	// across polls is logged once rather than on every one. HandleError is
+	// reached from the poll loop, which runs continuously, so a standing fault
+	// would otherwise be the only thing in the log.
+	lastErr string
+
 	// Status tracking
 	mu sync.RWMutex
 }
@@ -235,6 +241,9 @@ func (dm *DeviceManager) TryConnect() error {
 	dm.device = newDevice
 	dm.hasDevice = true
 	dm.devicePath = devicePathToConnect
+	// The device works, so whatever was last wrong with it is worth reporting
+	// again if it comes back.
+	dm.lastErr = ""
 	dm.mu.Unlock()
 
 	log.Printf("Successfully connected to device: %s", newDevice.String())
@@ -375,20 +384,48 @@ func (dm *DeviceManager) Close() {
 	}
 }
 
+// recordError reports whether this error has already been logged, and remembers
+// it either way. A fault that persists across polls repeats verbatim, and the
+// poll loop is continuous, so logging every occurrence buries everything else.
+func (dm *DeviceManager) recordError(err error) bool {
+	message := err.Error()
+
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	repeat := dm.lastErr == message
+	dm.lastErr = message
+	return repeat
+}
+
+// clearLastError forgets the last reported error, so the same one is logged
+// again if it returns after the device has been working.
+func (dm *DeviceManager) clearLastError() {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	dm.lastErr = ""
+}
+
 // HandleError processes device errors and determines the appropriate recovery action.
 // Returns whether a cooldown was initiated. Retry state is now managed internally.
 func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needsCooldown bool) {
 	// "No card present" is a normal condition for NFC readers, not a device error.
 	// Don't log it as an error - the caller will simply retry.
 	if IsNoCardError(err) {
+		dm.clearLastError()
 		return false
 	}
 
-	log.Printf("Device error: %v", err)
+	repeat := dm.recordError(err)
+	if !repeat {
+		log.Printf("Device error: %v", err)
+	}
 
 	// Handle IO/Config errors
 	if IsIOError(err) || IsDeviceConfigError(err) {
-		log.Printf("Device error detected (IO/Config): %v. Closing device.", err)
+		if !repeat {
+			log.Printf("Device error detected (IO/Config): %v. Closing device.", err)
+		}
 		dm.mu.Lock()
 		if dm.hasDevice && dm.device != nil {
 			_ = dm.device.Close()
@@ -427,7 +464,9 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 
 	// Handle Timeout/Closed errors with retry logic using internal retry count
 	if IsTimeoutError(err) || IsDeviceClosedError(err) {
-		log.Printf("Device error (Timeout/Closed): %v", err)
+		if !repeat {
+			log.Printf("Device error (Timeout/Closed): %v", err)
+		}
 
 		dm.mu.Lock()
 		currentRetry := dm.retryCount
@@ -455,6 +494,7 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 				log.Println("Reconnected successfully.")
 				dm.mu.Lock()
 				dm.retryCount = 0
+				dm.lastErr = ""
 				dm.mu.Unlock()
 			}
 		} else {

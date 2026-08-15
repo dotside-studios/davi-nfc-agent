@@ -83,6 +83,7 @@ so it can be read straight through. Each section is linkable:
 
 | Section | Holds |
 |---|---|
+| Connected clients | Every application on the client endpoint: origin, address, how long it has been connected, how many writes and locks it has issued, and a disconnect |
 | Paired devices | Platform, pairing time, last seen, whether connected now; revoke one or all; the paired-device policy |
 | Browser origins | The allowlist, every origin refused since startup with a one-click **allow**, and the session override |
 | Credentials | API secret, pairing PIN, open console sessions, and the rotations for each |
@@ -184,7 +185,7 @@ They are not a public API and carry no compatibility guarantee.
 Actions: `agent.start`, `agent.stop`, `agent.restartServers`, `agent.quit`,
 `reader.selectDevice`, `reader.setMode`, `reader.setCardTypes`,
 `settings.save`, `devices.revoke`, `devices.revokeAll`,
-`devices.setRequirePaired`, `origins.allow`, `origins.revoke`,
+`devices.setRequirePaired`, `clients.disconnect`, `origins.allow`, `origins.revoke`,
 `origins.setAllowAny`, `security.rotateAPISecret`, `security.rotatePairingPIN`,
 `security.regenerateCertificate`, `security.revokeControlSessions`.
 

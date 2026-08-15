@@ -134,8 +134,24 @@ func TestStateSnapshot(t *testing.T) {
 	}
 	// Slices must marshal as [] rather than null so the console can map over
 	// them without guarding every one.
-	if !strings.Contains(w.Body.String(), `"devices":[]`) {
-		t.Error("empty devices marshalled as null, not []")
+	for _, key := range []string{`"devices":[]`, `"clients":[]`} {
+		if !strings.Contains(w.Body.String(), key) {
+			t.Errorf("empty slice marshalled as null, not []: missing %s", key)
+		}
+	}
+}
+
+func TestClientsDisconnectRejectsUnknownID(t *testing.T) {
+	_, handler, cookie := newTestControl(t)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, authorized(http.MethodPost, "/control/action",
+		`{"action":"clients.disconnect","params":{"id":"nope"}}`, cookie))
+
+	// The agent has no client server in this harness, so the action reports
+	// that rather than pretending to have disconnected something.
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status %d, want 400", w.Code)
 	}
 }
 

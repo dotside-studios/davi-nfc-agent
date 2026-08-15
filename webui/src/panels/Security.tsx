@@ -3,6 +3,7 @@ import { fmtDateTime } from '../format'
 import type { ControlState } from '../types'
 import { useAction } from '../useControl'
 import { ActionLink, Copyable, Dot, KV, Notice, Panel, Row } from '../ui'
+import { Clients } from './Clients'
 import { Devices } from './Devices'
 import { Origins } from './Origins'
 
@@ -16,9 +17,10 @@ import { Origins } from './Origins'
  * get turned while working, and these do not.
  */
 
-type SectionId = 'devices' | 'origins' | 'credentials' | 'trust' | 'certificate'
+type SectionId = 'clients' | 'devices' | 'origins' | 'credentials' | 'trust' | 'certificate'
 
 const SECTIONS: { id: SectionId; label: string }[] = [
+  { id: 'clients', label: 'Connected clients' },
   { id: 'devices', label: 'Paired devices' },
   { id: 'origins', label: 'Browser origins' },
   { id: 'credentials', label: 'Credentials' },
@@ -34,7 +36,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 function useSectionNav(): [SectionId, (s: SectionId) => void] {
   const [active, setActive] = useState<SectionId>(() => {
     const raw = location.hash.replace(/^#\/?/, '').split('/')[1]
-    return SECTIONS.some((s) => s.id === raw) ? (raw as SectionId) : 'devices'
+    return SECTIONS.some((s) => s.id === raw) ? (raw as SectionId) : 'clients'
   })
 
   const goTo = useCallback((id: SectionId) => {
@@ -87,10 +89,13 @@ function useSectionNav(): [SectionId, (s: SectionId) => void] {
 
 export function Security({ state }: { state: ControlState }) {
   const [active, goTo] = useSectionNav()
-  const { security, origins, devices } = state
+  const { security, origins, devices, clients } = state
 
   // Counts in the nav, so a problem is visible before scrolling to it.
   const badge = (id: SectionId) => {
+    if (id === 'clients' && clients.length > 0) {
+      return <span className="count"> ({clients.length})</span>
+    }
     if (id === 'devices' && devices.length > 0) {
       return <span className="count"> ({devices.length})</span>
     }
@@ -127,6 +132,9 @@ export function Security({ state }: { state: ControlState }) {
       </nav>
 
       <div className="section-body">
+        <section id="sec-clients">
+          <Clients state={state} />
+        </section>
         <section id="sec-devices">
           <Devices state={state} />
         </section>

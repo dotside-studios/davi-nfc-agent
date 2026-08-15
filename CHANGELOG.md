@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live event feed.** Scans, writes, locks and errors as they happen,
   filterable, pausable and exportable as NDJSON. The tray only ever showed the
   card currently on the reader, so a tag presented and taken away left no trace
+- **Connected clients are visible, and can be disconnected.** The client server
+  tracked its connections but exposed only a count, so "something is writing to
+  my tags" had no answer. Each connection now reports its origin, address, user
+  agent, how long it has been connected, and how many writes and locks it has
+  issued — counted per connection, so a client that is only listening is
+  distinguishable from one changing tags. Any one of them can be disconnected;
+  it is free to reconnect, so revoking its origin remains what bars it
 - **Per-device revocation.** Paired devices are listed with platform, pairing
   time, last seen and whether they are connected, and each can be revoked on
   its own. The tray's only option was to revoke every device, which made

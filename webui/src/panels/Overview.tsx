@@ -119,6 +119,10 @@ function ServerPanel({ state, tagLink }: { state: ControlState; tagLink: TagLink
         </Row>
         <Row label="Clients">
           <Dot state={tagLink === 'open' ? 'ok' : 'warn'}>{server.clients} connected</Dot>
+          {state.clients.some((c) => c.writes > 0 || c.locks > 0) ? (
+            <span className="warn"> · some are writing</span>
+          ) : null}{' '}
+          <a href="#/security/clients">list</a>
         </Row>
         <Row label="Remote devices">
           {reader.remoteActive} active <span className="dim">of {reader.remoteDevices}</span>

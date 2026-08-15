@@ -301,6 +301,7 @@ func (a *Agent) startServers() error {
 		AllowedOrigins: a.AllowedOrigins,
 		OriginPolicy:   a.originPolicy(),
 		TokenVerifier:  a.tokenVerifier(),
+		OnChange:       a.clientsChanged(),
 	}, a.Bridge)
 
 	// Single listener fronts the device, client, control and console handlers.
@@ -401,6 +402,15 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)
 	}
+}
+
+// clientsChanged returns a hook that refreshes the console when the client list
+// moves, or nil when there is no console to refresh.
+func (a *Agent) clientsChanged() func() {
+	if a.Control == nil {
+		return nil
+	}
+	return a.Control.NotifyChange
 }
 
 // tokenVerifier returns the device registry as a token verifier, or nil when

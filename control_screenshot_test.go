@@ -21,6 +21,8 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 )
 
 func TestScreenshotHarness(t *testing.T) {
@@ -73,9 +75,17 @@ func TestScreenshotHarness(t *testing.T) {
 	auth := NewControlAuth()
 	control := NewControlServer(agent, auth, settings, ring, nil, 9472)
 
+	// A real client server, so the connected-clients section has rows. The tag
+	// feed is still stubbed; this only supplies the session bookkeeping.
+	agent.ClientServer = clientserver.New(clientserver.Config{
+		AllowedOrigins: []string{"*"},
+		OnChange:       control.NotifyChange,
+	}, server.NewServerBridge())
+
 	mux := http.NewServeMux()
 	mux.Handle("/control/", control.Handler())
 	mux.HandleFunc("/ws", fakeTagFeed)
+	mux.HandleFunc("/ws-real", agent.ClientServer.ServeWS)
 	mux.Handle("/", webUIHandler())
 
 	ln, err := net.Listen("tcp", addr)
@@ -93,6 +103,9 @@ func TestScreenshotHarness(t *testing.T) {
 	if f := os.Getenv("SCREENSHOT_TOKEN_FILE"); f != "" {
 		os.WriteFile(f, []byte(token), 0o600)
 	}
+
+	// A couple of stand-in applications, one of them writing.
+	go fakeClients(addr)
 
 	fmt.Printf("READY http://%s/control/session?token=%s\n", addr, token)
 
@@ -135,6 +148,41 @@ func seedLog(ring *logbuf.Ring) {
 	agentLog.Print("Retrying write after transient failure (attempt 2 of 3)")
 	agentLog.Print("Tag scanned: 04A2B3C4D5E680 (NTAG215)")
 	client.Print("Client disconnected: 8f3a1c2d (total: 0)")
+}
+
+// fakeClients connects a few stand-in applications to the real client server.
+func fakeClients(addr string) {
+	time.Sleep(time.Second)
+
+	for _, c := range []struct {
+		origin string
+		writes int
+	}{
+		{"https://console.davi.social", 0},
+		{"https://shop.davi.social", 3},
+		{"", 0}, // a non-browser caller, which has no Origin
+	} {
+		header := http.Header{}
+		if c.origin != "" {
+			header.Set("Origin", c.origin)
+			header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0 Safari/537.36")
+		} else {
+			header.Set("User-Agent", "Go-http-client/2.0")
+		}
+
+		conn, _, err := websocket.DefaultDialer.Dial("ws://"+addr+"/ws-real", header)
+		if err != nil {
+			continue
+		}
+		for i := 0; i < c.writes; i++ {
+			_ = conn.WriteJSON(map[string]any{
+				"type":    "writeRequest",
+				"payload": map[string]any{"records": []map[string]any{{"type": "text", "content": "x"}}},
+			})
+			time.Sleep(50 * time.Millisecond)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
 }
 
 var fakeUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}

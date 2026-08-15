@@ -11,20 +11,22 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 )
 
 // ControlState is the whole picture the console renders from. Sent as a
 // snapshot rather than deltas, so the console can never show a half-applied
 // combination of settings.
 type ControlState struct {
-	Agent    AgentInfo    `json:"agent"`
-	Reader   ReaderInfo   `json:"reader"`
-	Server   ServerInfo   `json:"server"`
-	Security SecurityInfo `json:"security"`
-	Settings Settings     `json:"settings"`
-	Devices  []DeviceInfo `json:"devices"`
-	Origins  OriginsInfo  `json:"origins"`
-	Capture  CaptureInfo  `json:"capture"`
+	Agent    AgentInfo                 `json:"agent"`
+	Reader   ReaderInfo                `json:"reader"`
+	Server   ServerInfo                `json:"server"`
+	Security SecurityInfo              `json:"security"`
+	Settings Settings                  `json:"settings"`
+	Devices  []DeviceInfo              `json:"devices"`
+	Clients  []clientserver.ClientInfo `json:"clients"`
+	Origins  OriginsInfo               `json:"origins"`
+	Capture  CaptureInfo               `json:"capture"`
 }
 
 // AgentInfo covers identity and lifecycle.
@@ -137,6 +139,7 @@ func (c *ControlServer) buildState() ControlState {
 	state.Server = c.buildServerInfo()
 	state.Security = c.buildSecurityInfo()
 	state.Devices = c.buildDeviceInfo()
+	state.Clients = c.buildClientInfo()
 	state.Origins = c.buildOriginsInfo()
 
 	if c.logs != nil {
@@ -293,6 +296,19 @@ func (c *ControlServer) buildDeviceInfo() []DeviceInfo {
 		})
 	}
 	return out
+}
+
+// buildClientInfo lists the applications currently connected to the client
+// endpoint. Until now only their count was visible, which cannot answer the
+// question an operator actually has: what is driving the reader.
+func (c *ControlServer) buildClientInfo() []clientserver.ClientInfo {
+	if c.agent.ClientServer == nil {
+		return []clientserver.ClientInfo{}
+	}
+	if clients := c.agent.ClientServer.Clients(); clients != nil {
+		return clients
+	}
+	return []clientserver.ClientInfo{}
 }
 
 func (c *ControlServer) buildOriginsInfo() OriginsInfo {

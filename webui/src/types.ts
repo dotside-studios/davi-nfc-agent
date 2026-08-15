@@ -76,6 +76,17 @@ export interface DeviceInfo {
   online: boolean
 }
 
+/** An application currently connected to the client endpoint. */
+export interface ClientInfo {
+  id: string
+  origin?: string
+  remoteAddr: string
+  userAgent?: string
+  connectedAt: string
+  writes: number
+  locks: number
+}
+
 export interface OriginsInfo {
   allowed: string[]
   blocked: string[]
@@ -94,6 +105,7 @@ export interface ControlState {
   security: SecurityInfo
   settings: Settings
   devices: DeviceInfo[]
+  clients: ClientInfo[]
   origins: OriginsInfo
   capture: CaptureInfo
 }

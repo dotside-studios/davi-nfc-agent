@@ -92,6 +92,23 @@ func (c *ControlServer) dispatch(req controlAction) (any, error) {
 			s.Port = port
 		})
 
+	case "clients.disconnect":
+		var params struct {
+			ID string `json:"id"`
+		}
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, err
+		}
+		if c.agent.ClientServer == nil {
+			return nil, errors.New("agent is not running")
+		}
+		// A client is free to reconnect immediately; this ends the session it
+		// has, it does not bar it. Removing its origin is what bars it.
+		if !c.agent.ClientServer.Disconnect(params.ID) {
+			return nil, errors.New("no such client — it may have already disconnected")
+		}
+		return nil, nil
+
 	// ---- paired devices ----
 
 	case "devices.revoke":

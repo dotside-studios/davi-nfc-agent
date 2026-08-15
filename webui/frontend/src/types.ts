@@ -137,8 +137,11 @@ export interface NdefRecord {
   type?: string
   id?: string
   payload?: string
-  text?: string
-  uri?: string
+
+  /** The decoded text or URI. The agent names this field for every record type
+   *  it can read, which is why there is one field and not one per type. */
+  content?: string
+
   language?: string
   [k: string]: unknown
 }

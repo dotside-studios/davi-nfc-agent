@@ -1,6 +1,7 @@
 package tls
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -78,6 +79,17 @@ func (m *Manager) leafKeyPath() string {
 // trust store. Devices authenticate the agent by pinning its public key, which
 // they learn when pairing.
 func (m *Manager) generateSelfSigned(hosts []string) error {
+	return m.issueLeaf(hosts, nil, nil)
+}
+
+// issueLeaf issues a certificate for hosts over the agent's persistent key and
+// writes it as the server cert/key pair. A nil parent self-signs it; otherwise
+// it is signed by that certificate and key.
+//
+// Both routes sign the same key, which is what keeps PublicKeyPin honest: the
+// pin handed out at pairing is over the key the listener presents, whether or
+// not this install has a certificate authority.
+func (m *Manager) issueLeaf(hosts []string, parent *x509.Certificate, parentKey crypto.Signer) error {
 	key, err := m.loadOrCreateLeafKey()
 	if err != nil {
 		return err
@@ -88,14 +100,18 @@ func (m *Manager) generateSelfSigned(hosts []string) error {
 		return fmt.Errorf("generate serial: %w", err)
 	}
 
+	// Apple rejects a server certificate whose total validity exceeds 825 days,
+	// so the window is anchored to NotBefore rather than to now.
+	notBefore := time.Now().Add(-time.Hour)
+
 	template := x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
 			Organization: []string{"Davi NFC Agent"},
 			CommonName:   "Davi NFC Agent",
 		},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(certValidity),
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(certValidity),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
@@ -109,7 +125,12 @@ func (m *Manager) generateSelfSigned(hosts []string) error {
 		}
 	}
 
-	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	issuer, issuerKey := parent, parentKey
+	if issuer == nil {
+		issuer, issuerKey = &template, key
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, &template, issuer, &key.PublicKey, issuerKey)
 	if err != nil {
 		return fmt.Errorf("create certificate: %w", err)
 	}
@@ -151,4 +172,34 @@ func (m *Manager) PublicKeyPin() (string, error) {
 
 	sum := sha256.Sum256(spki)
 	return "sha256/" + base64.StdEncoding.EncodeToString(sum[:]), nil
+}
+
+// servedCertMatchesPin reports whether the certificate on disk carries the key
+// PublicKeyPin describes.
+//
+// Where it does not, every device that pairs is handed a pin the handshake can
+// never satisfy, and no amount of re-pairing helps. Installs issued before the
+// CA route signed the persistent key are in that state, so this is checked on
+// startup rather than assumed.
+func (m *Manager) servedCertMatchesPin() bool {
+	key, err := m.loadOrCreateLeafKey()
+	if err != nil {
+		return false
+	}
+
+	data, err := os.ReadFile(m.certFile)
+	if err != nil {
+		return false
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false
+	}
+
+	served, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	return ok && served.Equal(&key.PublicKey)
 }

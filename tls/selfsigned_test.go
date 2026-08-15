@@ -1,11 +1,17 @@
 package tls
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"testing"
+	"time"
 )
 
 func newTestManager(t *testing.T) *Manager {
@@ -177,5 +183,166 @@ func TestSelfSignedIsTheDefault(t *testing.T) {
 	if leaf.Issuer.CommonName != leaf.Subject.CommonName {
 		t.Errorf("certificate is not self-signed: issuer %q, subject %q",
 			leaf.Issuer.CommonName, leaf.Subject.CommonName)
+	}
+}
+
+// writeTestCA puts a certificate authority where loadCA expects one, in the
+// same shape truststore writes: a self-signed root and a PKCS#8 key.
+func writeTestCA(t *testing.T, m *Manager) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate CA key: %v", err)
+	}
+	template := x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create CA certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("encode CA key: %v", err)
+	}
+
+	if err := os.MkdirAll(m.caDir, 0700); err != nil {
+		t.Fatalf("create CA dir: %v", err)
+	}
+	writePEM(t, m.caCertFile, "CERTIFICATE", der)
+	writePEM(t, m.caKeyFile, "PRIVATE KEY", keyDER)
+}
+
+func writePEM(t *testing.T, path, blockType string, der []byte) {
+	t.Helper()
+
+	encoded := pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
+	if err := os.WriteFile(path, encoded, 0600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// A CA-signed certificate must carry the same key a self-signed one would.
+// When it does not, PublicKeyPin describes a key the handshake never presents,
+// so every device that pairs records a pin it can never match.
+func TestCASignedCertificateCarriesThePinnedKey(t *testing.T) {
+	m := newTestManager(t)
+	writeTestCA(t, m)
+
+	caCert, caKey, err := m.loadCA()
+	if err != nil {
+		t.Fatalf("loadCA: %v", err)
+	}
+	if err := m.issueLeaf([]string{"localhost", "127.0.0.1"}, caCert, caKey); err != nil {
+		t.Fatalf("issueLeaf: %v", err)
+	}
+
+	if !m.servedCertMatchesPin() {
+		t.Error("the certificate does not carry the key PublicKeyPin reports")
+	}
+
+	pair, err := tls.LoadX509KeyPair(m.certFile, m.keyFile)
+	if err != nil {
+		t.Fatalf("the generated pair does not load: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+
+	// It is still a CA-issued certificate, which is the point of the route.
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: "localhost", Roots: roots}); err != nil {
+		t.Errorf("certificate does not chain to the CA: %v", err)
+	}
+}
+
+// The pin survives switching an install from self-signed to a CA, which is what
+// the console's trust action does to an agent with devices already paired.
+func TestPinSurvivesAdoptingACA(t *testing.T) {
+	m := newTestManager(t)
+
+	if err := m.generateSelfSigned([]string{"localhost"}); err != nil {
+		t.Fatalf("generateSelfSigned: %v", err)
+	}
+	before, err := m.PublicKeyPin()
+	if err != nil {
+		t.Fatalf("PublicKeyPin: %v", err)
+	}
+
+	writeTestCA(t, m)
+	caCert, caKey, err := m.loadCA()
+	if err != nil {
+		t.Fatalf("loadCA: %v", err)
+	}
+	if err := m.issueLeaf([]string{"localhost"}, caCert, caKey); err != nil {
+		t.Fatalf("issueLeaf: %v", err)
+	}
+
+	after, err := m.PublicKeyPin()
+	if err != nil {
+		t.Fatalf("PublicKeyPin after adopting a CA: %v", err)
+	}
+	if before != after {
+		t.Errorf("pin changed: %s -> %s", before, after)
+	}
+	if !m.servedCertMatchesPin() {
+		t.Error("the reissued certificate does not carry the pinned key")
+	}
+}
+
+// An install issued before the CA route signed the persistent key is already
+// serving the wrong one. Startup has to notice and reissue, because the pin it
+// hands out at pairing is otherwise permanently unsatisfiable.
+func TestStartupReissuesWhenTheServedKeyIsNotThePinnedOne(t *testing.T) {
+	m := newTestManager(t)
+
+	hosts, err := GetAllHosts()
+	if err != nil {
+		t.Skipf("GetAllHosts: %v", err)
+	}
+	if err := m.generateSelfSigned(hosts); err != nil {
+		t.Fatalf("generateSelfSigned: %v", err)
+	}
+	if err := m.writeCachedHosts(hosts); err != nil {
+		t.Fatalf("writeCachedHosts: %v", err)
+	}
+
+	// Stand in for what truststore's MakeCert used to leave behind: a valid
+	// pair for the right hosts, over a key nothing has pinned.
+	foreign := NewManager(t.TempDir())
+	if err := os.MkdirAll(foreign.tlsDir, 0700); err != nil {
+		t.Fatalf("create foreign tls dir: %v", err)
+	}
+	if err := foreign.generateSelfSigned(hosts); err != nil {
+		t.Fatalf("generate foreign pair: %v", err)
+	}
+	for _, f := range [][2]string{{foreign.certFile, m.certFile}, {foreign.keyFile, m.keyFile}} {
+		data, err := os.ReadFile(f[0])
+		if err != nil {
+			t.Fatalf("read %s: %v", f[0], err)
+		}
+		if err := os.WriteFile(f[1], data, 0600); err != nil {
+			t.Fatalf("write %s: %v", f[1], err)
+		}
+	}
+
+	if m.servedCertMatchesPin() {
+		t.Fatal("the foreign pair was not installed")
+	}
+
+	if _, _, err := m.EnsureCertificates(); err != nil {
+		t.Fatalf("EnsureCertificates: %v", err)
+	}
+	if !m.servedCertMatchesPin() {
+		t.Error("startup left a certificate that does not carry the pinned key")
 	}
 }

@@ -489,9 +489,10 @@ When a card is detected and read:
       "records": [
         {
           "tnf": 1,
-          "type": "T",
-          "text": "Hello, NFC!",
-          "payload": [72, 101, 108, 108, 111]
+          "type": "text",
+          "content": "Hello, NFC!",
+          "language": "en",
+          "payload": "AmVuSGVsbG8sIE5GQyE="
         }
       ]
     },
@@ -523,19 +524,32 @@ When a card is detected and read:
   "records": [
     {
       "tnf": 1,
-      "type": "T",
-      "text": "Decoded text",
+      "type": "text",
+      "content": "Decoded text",
       "language": "en",
-      "payload": [...]
+      "payload": "AmVuRGVjb2RlZCB0ZXh0"
     }
   ]
 }
 ```
 
 - `tnf`: Type Name Format (0x01 = Well Known)
-- `type`: Record type (`T` = Text, `U` = URI)
-- `text`: Decoded text (for Text records)
-- `uri`: Decoded URI (for URI records)
+- `type`: Record type, human-readable — `text`, `uri`, `mime`, `smartposter`,
+  `aar`, `external`, and so on. Not the raw NFC Forum type byte
+- `content`: the record's decoded value, whatever its type — the text of a text
+  record, the URI of a URI record. One field rather than one per type, since a
+  record carries a single value and `type` beside it already says which kind.
+  Omitted for a record with nothing decodable
+- `language`: language code, text records only
+- `id`: record ID, when the record carries one
+- `payload`: the raw record payload, base64-encoded. This is the record's bytes
+  as they sit on the tag, not the decoded value — a text record's payload leads
+  with a status byte and the language code, which is why it does not simply
+  base64-decode to `content`
+
+The write direction uses these same names — see
+[Write Request](#write-request) — so a record read from one tag can be written
+back to another unchanged.
 
 ### Messages to Server
 

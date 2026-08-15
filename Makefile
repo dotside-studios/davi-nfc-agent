@@ -1,4 +1,4 @@
-.PHONY: all build webui webui-dev webui-install test lint clean
+.PHONY: all build build-nocontrol webui webui-dev webui-install test test-nocontrol lint clean
 
 # The agent binary. webui/dist is committed, so this needs no Node.
 all: build
@@ -6,11 +6,20 @@ all: build
 build:
 	go build .
 
+# Without the control center: no /control routes, no privileged API, and no
+# embedded console. The agent's own protocol is unchanged.
+build-nocontrol:
+	go build -tags nocontrol .
+
 test:
 	go test ./...
 
+test-nocontrol:
+	go test -tags nocontrol ./...
+
 lint:
 	go vet ./...
+	go vet -tags nocontrol ./...
 	gofmt -l . | grep -v '^webui/' || true
 
 # Rebuild the control center. Run this after changing anything under webui/src

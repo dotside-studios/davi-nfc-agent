@@ -1,3 +1,5 @@
+//go:build !nocontrol
+
 package main
 
 // Screenshot harness. Stands up the real control handler and the embedded

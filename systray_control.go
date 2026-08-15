@@ -1,3 +1,5 @@
+//go:build !nocontrol
+
 package main
 
 import (
@@ -8,6 +10,22 @@ import (
 
 	"fyne.io/systray"
 )
+
+// AttachControl wires the control center to the tray, so an action taken in one
+// runs through the same code as the other.
+func (s *SystrayApp) AttachControl(control *ControlServer, settings *SettingsStore) {
+	s.control = control
+	s.settings = settings
+
+	control.OnStart = func() error { return s.agent.Start(s.agent.CurrentDevicePath()) }
+	control.OnStop = func() { s.handleStopAgent() }
+	control.OnQuit = func() { systray.Quit() }
+	control.OnSelectDevice = func(devicePath string) error {
+		s.switchDevice(devicePath)
+		return nil
+	}
+	control.OnSettings = func(next Settings) { s.syncSettingsToMenu(next) }
+}
 
 // setupControlMenu adds the control center entry.
 func (s *SystrayApp) setupControlMenu() {

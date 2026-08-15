@@ -133,22 +133,6 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 	}
 }
 
-// AttachControl wires the control center to the tray, so an action taken in one
-// runs through the same code as the other.
-func (s *SystrayApp) AttachControl(control *ControlServer, settings *SettingsStore) {
-	s.control = control
-	s.settings = settings
-
-	control.OnStart = func() error { return s.agent.Start(s.agent.CurrentDevicePath()) }
-	control.OnStop = func() { s.handleStopAgent() }
-	control.OnQuit = func() { systray.Quit() }
-	control.OnSelectDevice = func(devicePath string) error {
-		s.switchDevice(devicePath)
-		return nil
-	}
-	control.OnSettings = func(next Settings) { s.syncSettingsToMenu(next) }
-}
-
 // syncSettingsToMenu reflects a settings change made in the console.
 func (s *SystrayApp) syncSettingsToMenu(next Settings) {
 	if s.mModeMenu == nil {
@@ -413,6 +397,13 @@ func (s *SystrayApp) startEventHandler() {
 
 // handleMenuEvents processes all menu click events
 func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
+	// Nil in a build without the console, and a receive on a nil channel simply
+	// never fires — so this case costs nothing rather than needing a build tag.
+	var controlClicks <-chan struct{}
+	if s.mControlCenter != nil {
+		controlClicks = s.mControlCenter.ClickedCh
+	}
+
 	for {
 		select {
 		case <-s.mStart.ClickedCh:
@@ -421,7 +412,7 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.handleStopAgent()
 		case <-mRefreshDevices.ClickedCh:
 			s.updateDeviceList()
-		case <-s.mControlCenter.ClickedCh:
+		case <-controlClicks:
 			s.handleOpenControlCenter()
 		case <-s.mCopyDeviceURL.ClickedCh:
 			if url := s.getDeviceURL(); url != "" {

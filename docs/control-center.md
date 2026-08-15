@@ -173,6 +173,38 @@ SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
 # then open http://127.0.0.1:9911/control/session?token=$(cat /tmp/tok)
 ```
 
+## Leaving it out
+
+`go build -tags nocontrol .` produces an agent without the control center: no
+`/control` routes, no privileged API, no tray entry, and no `webui/dist` in the
+binary. Roughly 560 KB smaller, and the console's strings are absent entirely.
+
+```bash
+make build-nocontrol
+make test-nocontrol     # the suite under the same tag
+```
+
+Everything console-specific lives in files carrying `//go:build !nocontrol`:
+
+```
+control_auth.go       the three-check gate
+control_server.go     routes, the live socket
+control_state.go      the state snapshot
+control_actions.go    the action dispatcher
+control_enabled.go    the one wiring entry point
+systray_control.go    the tray entry
+webui.go              go:embed of webui/dist
+```
+
+`control_disabled.go` supplies the stubs under the opposite tag. Call sites in
+`agent.go`, `main.go` and `systray.go` hold a nil `*ControlServer` and tolerate
+it, so none of them needs a build tag of its own.
+
+**The agent's protocol is unaffected.** Raw tag exchanges, settings
+persistence and the log ring stay in either build — each is reachable without
+the console, and the transceive channel in particular is part of the client API
+rather than a console feature.
+
 ## API
 
 The console's endpoints, all under the gate described in [Who can open it](#who-can-open-it).

@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live event feed.** Scans, writes, locks and errors as they happen,
   filterable, pausable and exportable as NDJSON. The tray only ever showed the
   card currently on the reader, so a tag presented and taken away left no trace
+- **`-tags nocontrol` builds the agent without the control center.** No
+  `/control` routes, no privileged API, no tray entry and no embedded console —
+  about 560 KB smaller, with none of the console's strings present. Everything
+  console-specific carries a build constraint and the call sites tolerate a nil
+  control server, so no shared file needs a tag of its own. The agent's own
+  protocol is unaffected: raw tag exchanges, settings persistence and the log
+  ring remain in both builds, each being reachable without the console
 - **Raw exchanges with a tag, from a client and from the console.** The agent
   could already transceive with a tag, but only agent-to-device: no client
   could ask for one, so DESFire, ISO-DEP applets and capability probing meant

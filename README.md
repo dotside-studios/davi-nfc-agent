@@ -55,6 +55,9 @@ It is reachable only over loopback, only from a page the agent served, and only
 with a token minted by that tray entry — the origin allowlist plays no part in
 it. See [Control Center](docs/control-center.md).
 
+Build without it with `go build -tags nocontrol .`, which omits the routes, the
+privileged API and the embedded console.
+
 ### Command-line Options
 
 ```bash

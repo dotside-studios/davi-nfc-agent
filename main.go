@@ -230,8 +230,8 @@ func main() {
 	}
 	stored.Apply(agent)
 
-	control := NewControlServer(agent, NewControlAuth(), settings, logRing, bootstrapServer, bootstrapPortFlag)
-	agent.Control = control
+	// Nil in a -tags nocontrol build, which is why everything below tolerates it.
+	control := setupControlCenter(agent, settings, logRing, bootstrapServer, bootstrapPortFlag)
 
 	// Redraw the console whenever something changes it from elsewhere.
 	origins.OnChange(control.NotifyChange)

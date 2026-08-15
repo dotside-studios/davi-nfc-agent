@@ -4,6 +4,7 @@ import type { NdefRecord, WriteRecord } from '../types'
 import type { Tags } from '../useTags'
 import { fmtBytes, fmtDateTime } from '../format'
 import { ActionLink, Copyable, Dot, Empty, KV, Notice, Panel, Row } from '../ui'
+import { Apdu } from './Apdu'
 
 /**
  * Tag inspector and NDEF composer. Writing previously required being a client
@@ -22,6 +23,7 @@ export function Tag({ tags, writable }: { tags: Tags; writable: boolean }) {
       <div>
         {tag ? <Records records={tag.message?.records} text={tag.text} /> : null}
         <Composer tags={tags} writable={writable} />
+        <Apdu tags={tags} writable={writable} />
       </div>
     </div>
   )

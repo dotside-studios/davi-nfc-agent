@@ -67,6 +67,11 @@ in the console only — the agent does not persist it.
   vCard, MIME, geo, tel/sms/mailto, Android Application Records and fully raw
   records — with a live size estimate against the tag's actual capacity.
 - Also erase, and lock (irreversible, and gated behind typing `lock`).
+- A **raw exchange (APDU)** console: hex in, hex and ASCII out, with ISO 7816
+  status words decoded, per-exchange timing, presets built from the commands
+  `nfc/apdu.go` already constructs, and a toggle between APDU-level and
+  framing-level exchange. Refused in read-only mode, since the agent cannot
+  tell a `SELECT` from a write to a configuration page.
 
 The console writes over the ordinary client endpoint, exactly as an application
 would, so there is one implementation of the write path.

@@ -36,6 +36,7 @@ export interface Tags {
   write: (records: WriteRecord[], lock?: boolean) => Promise<Record<string, unknown>>
   lock: () => Promise<Record<string, unknown>>
   refreshCapabilities: () => Promise<Record<string, unknown>>
+  transceive: (data: string, raw: boolean) => Promise<Record<string, unknown>>
 }
 
 export function useTags(secret?: string): Tags {
@@ -175,6 +176,15 @@ export function useTags(secret?: string): Tags {
           break
         }
 
+        case 'transceiveResponse': {
+          push({
+            kind: 'apdu',
+            summary: msg.success ? 'Raw exchange completed' : `Raw exchange failed: ${msg.error ?? 'unknown'}`,
+            ok: msg.success,
+          })
+          break
+        }
+
         case 'capabilitiesResponse': {
           if (msg.success && msg.payload) {
             setCapabilities(msg.payload as TagCapabilities)
@@ -252,11 +262,26 @@ export function useTags(secret?: string): Tags {
     [send],
   )
   const lock = useCallback(() => send('lockRequest', {}), [send])
+  const transceive = useCallback(
+    (data: string, raw: boolean) => send('transceiveRequest', { data, raw }),
+    [send],
+  )
   const refreshCapabilities = useCallback(() => send('capabilitiesRequest', {}), [send])
   const clearEvents = useCallback(() => {
     setEvents([])
     setHistory([])
   }, [])
 
-  return { link, tag, capabilities, events, history, clearEvents, write, lock, refreshCapabilities }
+  return {
+    link,
+    tag,
+    capabilities,
+    events,
+    history,
+    clearEvents,
+    write,
+    lock,
+    refreshCapabilities,
+    transceive,
+  }
 }

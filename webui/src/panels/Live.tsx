@@ -12,6 +12,7 @@ const KINDS: { key: LiveEvent['kind']; label: string }[] = [
   { key: 'scan', label: 'scans' },
   { key: 'write', label: 'writes' },
   { key: 'lock', label: 'locks' },
+  { key: 'apdu', label: 'apdu' },
   { key: 'status', label: 'status' },
   { key: 'error', label: 'errors' },
   { key: 'removed', label: 'removals' },
@@ -128,6 +129,7 @@ export function Live({
 function kindClass(e: LiveEvent): string {
   if (e.kind === 'error' || e.ok === false) return 'err'
   if (e.kind === 'lock') return 'warn'
+  if (e.kind === 'apdu') return 'dim'
   if (e.kind === 'scan' || e.kind === 'write') return 'ok'
   return 'dim'
 }

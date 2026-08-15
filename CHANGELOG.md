@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live event feed.** Scans, writes, locks and errors as they happen,
   filterable, pausable and exportable as NDJSON. The tray only ever showed the
   card currently on the reader, so a tag presented and taken away left no trace
+- **Raw exchanges with a tag, from a client and from the console.** The agent
+  could already transceive with a tag, but only agent-to-device: no client
+  could ask for one, so DESFire, ISO-DEP applets and capability probing meant
+  writing a program. `transceiveRequest`/`transceiveResponse` open that channel
+  to clients, routed like a write — to the device holding a tag, otherwise to
+  the hardware reader. The console gains an APDU panel with hex in, hex and
+  ASCII out, decoded ISO 7816 status words, per-exchange timing, and presets
+  built from the commands `nfc/apdu.go` already constructs.
+  **Refused in read-only mode**: a raw command can write to a configuration
+  page, burn OTP bits or lock a tag permanently, and the agent can neither tell
+  that apart from a `SELECT` nor undo it
 - **Connected clients are visible, and can be disconnected.** The client server
   tracked its connections but exposed only a count, so "something is writing to
   my tags" had no answer. Each connection now reports its origin, address, user

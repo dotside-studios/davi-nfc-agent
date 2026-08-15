@@ -635,6 +635,50 @@ error response rather than a success — `success: true` means the data is on th
 tag. A response with `verified: false` only occurs if verification was explicitly
 disabled by the agent.
 
+### Raw Exchange (transceive)
+
+Exchange raw bytes with the tag currently present. Command and response are
+base64 in transit, matching how the device protocol carries byte slices.
+
+```json
+{
+  "id": "req_3",
+  "type": "transceiveRequest",
+  "payload": {
+    "data": "/8oAAAA=",
+    "raw": false
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `data` | bytes (base64) | Yes | Command bytes to send |
+| `raw` | bool | No | Framing-level exchange (`NfcA.transceive`, `InCommunicateThru`) instead of APDU-level (`IsoDep.transceive`, `InDataExchange`) |
+
+**Response:**
+
+```json
+{
+  "id": "req_3",
+  "type": "transceiveResponse",
+  "success": true,
+  "payload": { "data": "BKKzxNXmgJAA" }
+}
+```
+
+The request is routed like a write: to the remote device holding a tag when no
+hardware reader has a card present, otherwise to the reader.
+
+A tag answering with an error status word is still `success: true` — the
+exchange happened, and interpreting SW1SW2 is the caller's job. `success` is
+false only when the exchange itself could not be performed.
+
+> **Refused in read-only mode.** The agent cannot tell a `SELECT` from a write
+> to a configuration page, so a raw exchange is treated as a write and refused
+> with `READ_ONLY`. A raw command can also burn OTP bits or lock a tag
+> permanently, and the agent can neither recognise nor undo that.
+
 ### Tag Capabilities
 
 Every `tagData` broadcast includes a `capabilities` object describing what the

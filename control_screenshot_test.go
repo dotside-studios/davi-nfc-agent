@@ -8,6 +8,7 @@ package main
 //	SCREENSHOT_ADDR=127.0.0.1:9911 go test -run TestScreenshotHarness -timeout 20m .
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -185,6 +186,27 @@ func fakeClients(addr string) {
 	}
 }
 
+// fakeAPDUReply answers a handful of commands plausibly enough to exercise the
+// console's status-word decoding.
+func fakeAPDUReply(cmd []byte) []byte {
+	switch {
+	case len(cmd) >= 2 && cmd[0] == 0xFF && cmd[1] == 0xCA: // Get UID
+		return []byte{0x04, 0xA2, 0xB3, 0xC4, 0xD5, 0xE6, 0x80, 0x90, 0x00}
+	case len(cmd) >= 2 && cmd[0] == 0x00 && cmd[1] == 0xA4: // SELECT
+		return []byte{0x90, 0x00}
+	case len(cmd) >= 2 && cmd[0] == 0x00 && cmd[1] == 0xB0: // READ BINARY
+		return []byte{0x00, 0x0F, 0xD1, 0x01, 0x0B, 0x55, 0x01, 0x64, 0x61, 0x76, 0x69, 0x2E, 0x73, 0x6F, 0x63, 0x69, 0x61, 0x6C, 0x90, 0x00}
+	case len(cmd) >= 2 && cmd[0] == 0x90 && cmd[1] == 0x60: // DESFire GetVersion
+		return []byte{0x04, 0x01, 0x01, 0x01, 0x00, 0x1A, 0x05, 0x91, 0xAF}
+	case len(cmd) == 1 && cmd[0] == 0x60: // NTAG GET_VERSION, framing level
+		return []byte{0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03}
+	case len(cmd) == 2 && cmd[0] == 0x30: // Ultralight READ
+		return []byte{0x04, 0xA2, 0xB3, 0x8D, 0xC4, 0xD5, 0xE6, 0x80, 0x00, 0x00, 0x00, 0x00, 0xE1, 0x10, 0x3E, 0x00}
+	default:
+		return []byte{0x6A, 0x82} // File or application not found
+	}
+}
+
 var fakeUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 // fakeTagFeed stands in for the client endpoint, which needs real hardware.
@@ -237,11 +259,33 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 	send("tagData", tags[0])
 	send("deviceStatus", map[string]any{"connected": true, "message": "Tag present", "cardPresent": true})
 
+	// Answer transceive requests, so the APDU console has something to show.
 	go func() {
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
 				return
 			}
+
+			var req struct {
+				ID      string `json:"id"`
+				Type    string `json:"type"`
+				Payload struct {
+					Data string `json:"data"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(raw, &req) != nil || req.Type != "transceiveRequest" {
+				continue
+			}
+
+			cmd, _ := base64.StdEncoding.DecodeString(req.Payload.Data)
+			body, _ := json.Marshal(map[string]any{
+				"id":      req.ID,
+				"type":    "transceiveResponse",
+				"success": true,
+				"payload": map[string]any{"data": base64.StdEncoding.EncodeToString(fakeAPDUReply(cmd))},
+			})
+			_ = conn.WriteMessage(websocket.TextMessage, body)
 		}
 	}()
 

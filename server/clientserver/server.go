@@ -3,6 +3,7 @@ package clientserver
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -170,6 +171,10 @@ func (s *Server) countOperation(conn *server.SafeConn, kind string) {
 		c.writes++
 	case "lock":
 		c.locks++
+	case "transceive":
+		// Counted with writes: a raw exchange can write, and the point of the
+		// count is to show which clients are capable of changing a tag.
+		c.writes++
 	}
 }
 
@@ -262,6 +267,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.handleLockRequest(conn, clientID, req)
 		case server.WSMessageTypeCapabilitiesRequest:
 			s.handleCapabilitiesRequest(conn, clientID, req)
+		case server.WSMessageTypeTransceiveRequest:
+			s.countOperation(conn, "transceive")
+			s.handleTransceiveRequest(conn, clientID, req)
 		default:
 			log.Printf("[client] Unknown message type: %s", req.Type)
 			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
@@ -381,6 +389,71 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 
 	if err := conn.WriteJSON(wsResponse); err != nil {
 		log.Printf("[client] Failed to send lock response: %v", err)
+	}
+}
+
+// handleTransceiveRequest exchanges raw bytes with the present tag.
+//
+// The command arrives base64-encoded, matching how the device protocol carries
+// byte slices, so a client builds it the same way at both ends.
+func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+	requestID := req.ID
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+
+	var payload struct {
+		Data string `json:"data"`
+		Raw  bool   `json:"raw"`
+	}
+	payloadBytes, err := json.Marshal(req.Payload)
+	if err == nil {
+		err = json.Unmarshal(payloadBytes, &payload)
+	}
+	if err != nil {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid transceive request")
+		return
+	}
+
+	data, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "data must be base64")
+		return
+	}
+	if len(data) == 0 {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "data is empty")
+		return
+	}
+
+	response, err := s.bridge.SendTransceiveRequest(server.TransceiveRequestMessage{
+		RequestID:  requestID,
+		ClientID:   clientID,
+		Data:       data,
+		Raw:        payload.Raw,
+		ResponseCh: make(chan server.TransceiveResponseMessage, 1),
+	})
+	if err != nil {
+		log.Printf("[client] Transceive request failed: %v", err)
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
+		return
+	}
+
+	wsResponse := protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    server.WSMessageTypeTransceiveResponse,
+		Success: response.Success,
+	}
+	if response.Success {
+		wsResponse.Payload = map[string]interface{}{
+			"data": base64.StdEncoding.EncodeToString(response.Data),
+		}
+	} else {
+		wsResponse.Error = response.Error
+		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeTransceiveFailed)
+	}
+
+	if err := conn.WriteJSON(wsResponse); err != nil {
+		log.Printf("[client] Failed to send transceive response: %v", err)
 	}
 }
 

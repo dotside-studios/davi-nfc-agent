@@ -181,11 +181,23 @@ export interface ScanRecord {
   lastAt: string
 }
 
+/** One raw exchange with a tag, as the APDU console records it. */
+export interface Exchange {
+  id: number
+  at: string
+  command: string
+  response?: string
+  raw: boolean
+  ok: boolean
+  error?: string
+  elapsedMs: number
+}
+
 /** One line in the live event feed. */
 export interface LiveEvent {
   id: number
   at: string
-  kind: 'scan' | 'removed' | 'write' | 'lock' | 'status' | 'error'
+  kind: 'scan' | 'removed' | 'write' | 'lock' | 'apdu' | 'status' | 'error'
   summary: string
   detail?: string
   ok?: boolean

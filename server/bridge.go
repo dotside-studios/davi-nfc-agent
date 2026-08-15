@@ -21,6 +21,9 @@ type ServerBridge struct {
 	// capabilities before a write/lock.
 	CapabilitiesRequest chan CapabilitiesRequestMessage
 
+	// Transceive flows from Client -> Device for raw exchanges with the tag.
+	Transceive chan TransceiveRequestMessage
+
 	// DeviceStatus flows from Device -> Client for device state updates
 	DeviceStatus chan nfc.DeviceStatus
 
@@ -97,6 +100,46 @@ type LockResponseMessage struct {
 	Payload any
 }
 
+// TransceiveRequestMessage wraps a raw exchange with the present tag.
+type TransceiveRequestMessage struct {
+	// RequestID correlates request with response
+	RequestID string
+
+	// ClientID identifies the requesting client
+	ClientID string
+
+	// Data is the command to send to the tag.
+	Data []byte
+
+	// Raw selects framing-level exchange over APDU-level, matching
+	// protocol.DeviceTransceiveRequest.Raw.
+	Raw bool
+
+	// ResponseCh receives the exchange result (buffered, size 1)
+	ResponseCh chan TransceiveResponseMessage
+}
+
+// TransceiveResponseMessage carries the tag's reply.
+type TransceiveResponseMessage struct {
+	// RequestID correlates with the original request
+	RequestID string
+
+	// Success indicates if the exchange completed. A tag answering with an
+	// error status word is still a success here: the exchange happened, and
+	// interpreting the status is the caller's job.
+	Success bool
+
+	// Data is the tag's response.
+	Data []byte
+
+	// Error contains error message if Success is false
+	Error string
+
+	// ErrorCode classifies the failure so a client can tell a transient fault
+	// from a refusal. Empty when Success is true.
+	ErrorCode protocol.ErrorCode
+}
+
 // CapabilitiesRequestMessage wraps a capabilities query with client identification.
 type CapabilitiesRequestMessage struct {
 	// RequestID correlates request with response
@@ -134,6 +177,7 @@ func NewServerBridge() *ServerBridge {
 		TagData:             make(chan nfc.NFCData, 10),
 		WriteRequest:        make(chan WriteRequestMessage, 10),
 		LockRequest:         make(chan LockRequestMessage, 10),
+		Transceive:          make(chan TransceiveRequestMessage, 10),
 		CapabilitiesRequest: make(chan CapabilitiesRequestMessage, 10),
 		DeviceStatus:        make(chan nfc.DeviceStatus, 10),
 		done:                make(chan struct{}),
@@ -243,6 +287,25 @@ func (b *ServerBridge) SendCapabilitiesRequest(msg CapabilitiesRequestMessage) (
 		select {
 		case <-b.done:
 			return CapabilitiesResponseMessage{}, ErrBridgeClosed
+		case resp := <-msg.ResponseCh:
+			return resp, nil
+		}
+	}
+}
+
+// SendTransceiveRequest sends a raw exchange and waits for the tag's reply.
+func (b *ServerBridge) SendTransceiveRequest(msg TransceiveRequestMessage) (TransceiveResponseMessage, error) {
+	if msg.ResponseCh == nil {
+		msg.ResponseCh = make(chan TransceiveResponseMessage, 1)
+	}
+
+	select {
+	case <-b.done:
+		return TransceiveResponseMessage{}, ErrBridgeClosed
+	case b.Transceive <- msg:
+		select {
+		case <-b.done:
+			return TransceiveResponseMessage{}, ErrBridgeClosed
 		case resp := <-msg.ResponseCh:
 			return resp, nil
 		}

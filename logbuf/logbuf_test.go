@@ -32,13 +32,13 @@ func TestWriteSplitsLines(t *testing.T) {
 // own entry would corrupt both halves, so the remainder has to be held back.
 func TestWriteHoldsPartialLine(t *testing.T) {
 	r := New(10)
-	r.Write([]byte("incomplete"))
+	_, _ = r.Write([]byte("incomplete"))
 
 	if got := r.Len(); got != 0 {
 		t.Fatalf("partial line recorded early: %d entries", got)
 	}
 
-	r.Write([]byte(" line\n"))
+	_, _ = r.Write([]byte(" line\n"))
 
 	entries := r.Entries()
 	if len(entries) != 1 {
@@ -52,7 +52,7 @@ func TestWriteHoldsPartialLine(t *testing.T) {
 func TestRingEvictsOldest(t *testing.T) {
 	r := New(3)
 	for i := 1; i <= 5; i++ {
-		fmt.Fprintf(r, "line %d\n", i)
+		_, _ = fmt.Fprintf(r, "line %d\n", i)
 	}
 
 	entries := r.Entries()
@@ -74,7 +74,7 @@ func TestRingEvictsOldest(t *testing.T) {
 func TestSinceReturnsOnlyNewer(t *testing.T) {
 	r := New(10)
 	for i := 1; i <= 5; i++ {
-		fmt.Fprintf(r, "line %d\n", i)
+		_, _ = fmt.Fprintf(r, "line %d\n", i)
 	}
 
 	entries := r.Since(3)
@@ -115,7 +115,7 @@ func TestParsesStandardLoggerFormat(t *testing.T) {
 
 func TestUnparseableLineIsKeptWhole(t *testing.T) {
 	r := New(10)
-	r.Write([]byte("a bare message with no stamp\n"))
+	_, _ = r.Write([]byte("a bare message with no stamp\n"))
 
 	entries := r.Entries()
 	if len(entries) != 1 {
@@ -150,7 +150,7 @@ func TestSubscribeReceivesNewEntries(t *testing.T) {
 	ch, cancel := r.Subscribe(4)
 	defer cancel()
 
-	r.Write([]byte("hello\n"))
+	_, _ = r.Write([]byte("hello\n"))
 
 	select {
 	case e := <-ch:
@@ -172,7 +172,7 @@ func TestSlowSubscriberDoesNotBlockWriter(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 50; i++ {
-			fmt.Fprintf(r, "line %d\n", i)
+			_, _ = fmt.Fprintf(r, "line %d\n", i)
 		}
 		close(done)
 	}()
@@ -199,7 +199,7 @@ func TestCancelSubscriptionIsIdempotent(t *testing.T) {
 		t.Error("channel still open after cancel")
 	}
 
-	r.Write([]byte("after cancel\n")) // must not panic writing to a closed sub
+	_, _ = r.Write([]byte("after cancel\n")) // must not panic writing to a closed sub
 }
 
 func TestConcurrentWritesAndReads(t *testing.T) {
@@ -211,7 +211,7 @@ func TestConcurrentWritesAndReads(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < 100; i++ {
-				fmt.Fprintf(r, "writer %d line %d\n", w, i)
+				_, _ = fmt.Fprintf(r, "writer %d line %d\n", w, i)
 			}
 		}(w)
 	}

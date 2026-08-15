@@ -234,7 +234,7 @@ func TestOriginActionsRoundTrip(t *testing.T) {
 func TestLogsEndpointHonoursSince(t *testing.T) {
 	console, _, handler, cookie := newTestServer(t)
 
-	console.logs.Write([]byte("first\nsecond\nthird\n"))
+	_, _ = console.logs.Write([]byte("first\nsecond\nthird\n"))
 
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, authorized(http.MethodGet, "/control/logs?since=2", "", cookie))

@@ -195,7 +195,7 @@ func (s *Store) saveLocked() error {
 		return fmt.Errorf("write settings file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("replace settings file: %w", err)
 	}
 	return nil

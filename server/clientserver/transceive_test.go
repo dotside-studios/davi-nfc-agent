@@ -15,7 +15,7 @@ func readResponse(t *testing.T, conn interface {
 }) map[string]any {
 	t.Helper()
 
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var msg map[string]any
 	if err := conn.ReadJSON(&msg); err != nil {
 		t.Fatalf("read: %v", err)
@@ -101,7 +101,7 @@ func TestTransceiveCarriesTheRawFlag(t *testing.T) {
 		msg.ResponseCh <- server.TransceiveResponseMessage{RequestID: msg.RequestID, Success: true}
 	}()
 
-	conn.WriteJSON(map[string]any{
+	_ = conn.WriteJSON(map[string]any{
 		"id":      "req-3",
 		"type":    "transceiveRequest",
 		"payload": map[string]any{"data": base64.StdEncoding.EncodeToString([]byte{0x30, 0x00}), "raw": true},
@@ -129,7 +129,7 @@ func TestTransceiveCountsAsAWrite(t *testing.T) {
 		msg.ResponseCh <- server.TransceiveResponseMessage{RequestID: msg.RequestID, Success: true}
 	}()
 
-	conn.WriteJSON(map[string]any{
+	_ = conn.WriteJSON(map[string]any{
 		"id":      "req-4",
 		"type":    "transceiveRequest",
 		"payload": map[string]any{"data": base64.StdEncoding.EncodeToString([]byte{0x60})},

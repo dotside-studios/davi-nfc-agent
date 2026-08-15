@@ -25,7 +25,7 @@ type State struct {
 	Security SecurityInfo      `json:"security"`
 	Settings settings.Settings `json:"settings"`
 	Devices  []DeviceInfo      `json:"devices"`
-	Clients  []Client          `json:"clients"`
+	Clients  []ClientInfo      `json:"clients"`
 	Origins  OriginsInfo       `json:"origins"`
 	Capture  CaptureInfo       `json:"capture"`
 }
@@ -102,6 +102,17 @@ type DeviceInfo struct {
 	PairedAt time.Time `json:"pairedAt"`
 	LastSeen time.Time `json:"lastSeen,omitempty"`
 	Online   bool      `json:"online"`
+}
+
+// ClientInfo is a connected client application as the console lists it.
+type ClientInfo struct {
+	ID          string    `json:"id"`
+	Origin      string    `json:"origin,omitempty"`
+	RemoteAddr  string    `json:"remoteAddr"`
+	UserAgent   string    `json:"userAgent,omitempty"`
+	ConnectedAt time.Time `json:"connectedAt"`
+	Writes      int       `json:"writes"`
+	Locks       int       `json:"locks"`
 }
 
 // OriginsInfo is the browser allowlist and what it has recently refused.
@@ -227,26 +238,20 @@ func (c *Server) buildDeviceInfo() []DeviceInfo {
 	paired := c.host.PairedDevices()
 	out := make([]DeviceInfo, 0, len(paired))
 	for _, d := range paired {
-		out = append(out, DeviceInfo{
-			ID:       d.ID,
-			Name:     d.Name,
-			Platform: d.Platform,
-			PairedAt: d.PairedAt,
-			LastSeen: d.LastSeen,
-			Online:   d.Online,
-		})
+		out = append(out, DeviceInfo(d))
 	}
 	return out
 }
 
 // buildClientInfo lists the applications currently connected to the client
 // endpoint.
-func (c *Server) buildClientInfo() []Client {
-	clients := c.host.Clients()
-	if clients == nil {
-		return []Client{}
+func (c *Server) buildClientInfo() []ClientInfo {
+	live := c.host.Clients()
+	out := make([]ClientInfo, 0, len(live))
+	for _, c := range live {
+		out = append(out, ClientInfo(c))
 	}
-	return clients
+	return out
 }
 
 func (c *Server) buildOriginsInfo() OriginsInfo {

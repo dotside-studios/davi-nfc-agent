@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -236,7 +235,7 @@ func (c *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Control WebSocket upgrade failed: %v", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	changes, unsubscribe := c.subscribe()
 	defer unsubscribe()
@@ -281,12 +280,12 @@ func (c *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 			return
 		case env := <-out:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(env); err != nil {
 				return
 			}
 		case <-ping.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -372,8 +371,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func platformName() string {
-	return runtime.GOOS + "/" + runtime.GOARCH
 }

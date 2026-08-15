@@ -28,7 +28,7 @@ func dial(t *testing.T, s *Server, origin string) *websocket.Conn {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	waitFor(t, func() bool { return s.ClientCount() > 0 })
 	return conn
@@ -126,13 +126,13 @@ func TestWriteAndLockAreCountedPerClient(t *testing.T) {
 	s := newTestServer(nil)
 
 	writer := dial(t, s, "https://writer.example.com")
-	writer.WriteJSON(map[string]any{
+	_ = writer.WriteJSON(map[string]any{
 		"type":    "writeRequest",
 		"payload": map[string]any{"records": []map[string]any{{"type": "text", "content": "x"}}},
 	})
 
 	locker := dial(t, s, "https://locker.example.com")
-	locker.WriteJSON(map[string]any{"type": "lockRequest", "payload": map[string]any{}})
+	_ = locker.WriteJSON(map[string]any{"type": "lockRequest", "payload": map[string]any{}})
 
 	waitFor(t, func() bool {
 		byOrigin := map[string]ClientInfo{}

@@ -147,7 +147,7 @@ func (s *Server) Disconnect(clientID string) bool {
 	}
 
 	log.Printf("[client] Disconnecting client %s at an operator's request", clientID[:8])
-	target.Close()
+	_ = target.Close()
 	return true
 }
 

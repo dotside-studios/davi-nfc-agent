@@ -77,15 +77,15 @@ func TestScreenshotHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
-	defer srv.Close()
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
 
 	token, err := console.auth.MintHandoff()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f := os.Getenv("SCREENSHOT_TOKEN_FILE"); f != "" {
-		os.WriteFile(f, []byte(token), 0o600)
+		_ = os.WriteFile(f, []byte(token), 0o600)
 	}
 
 	fmt.Printf("READY http://%s/control/session?token=%s\n", addr, token)
@@ -139,7 +139,7 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	tag := func(uid, tagType, text string, memory, usable int) map[string]any {
 		return map[string]any{
@@ -179,9 +179,9 @@ func fakeTagFeed(w http.ResponseWriter, r *http.Request) {
 		return conn.WriteMessage(websocket.TextMessage, b)
 	}
 
-	send("deviceStatus", map[string]any{"connected": true, "message": "Reader ready: ACS ACR1252U", "cardPresent": false})
-	send("tagData", tags[0])
-	send("deviceStatus", map[string]any{"connected": true, "message": "Tag present", "cardPresent": true})
+	_ = send("deviceStatus", map[string]any{"connected": true, "message": "Reader ready: ACS ACR1252U", "cardPresent": false})
+	_ = send("tagData", tags[0])
+	_ = send("deviceStatus", map[string]any{"connected": true, "message": "Tag present", "cardPresent": true})
 
 	// Answer transceive requests, so the APDU console has something to show.
 	go func() {

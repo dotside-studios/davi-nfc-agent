@@ -132,6 +132,25 @@ device declaring nothing extra sends exactly the v0 object.
 | `deviceType` | Free-form kind, e.g. `smartphone`, `pn532-serial`. Defaults to `smartphone` |
 | `supportedTagTypes` | Tag families this device handles, e.g. `["MIFARE Classic", "NTAG"]` |
 | `maxBaudRate` | Maximum baud rate in bps, for serial-attached readers |
+| `maxHoldMs` | How long a tag stays available for work after being reported. Omit for open-ended |
+
+#### How long a tag stays available
+
+A reader holding a tag in its field can act on it until it leaves, so it omits
+`maxHoldMs` and the agent may take as long as it likes. A phone need not be so
+lucky: CoreNFC connects a tag for roughly twenty seconds and cannot renew that,
+so an iOS device declares `"maxHoldMs": 20000` and everything the agent wants
+done must fit inside it.
+
+The deadline for a particular tag is the arrival of its `tagScanned` plus
+`maxHoldMs`. That sum is optimistic — the tag was already connected when the
+message was sent — so leave margin rather than treating it as exact. A hold that
+ends early, because the tag was pulled or the session was invalidated, arrives as
+`tagRemoved` like any other departure.
+
+**It is advice, not permission.** A device that declares nothing is open-ended,
+which is how every device behaved before this field existed. Use it to decide
+what is worth attempting; never to refuse a device that stayed silent.
 
 Capability is a set rather than a level: a PN532 reader can declare
 `canTransceive` and MIFARE Classic support that an iPhone cannot, while the

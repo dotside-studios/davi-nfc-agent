@@ -1,6 +1,8 @@
 package remotenfc
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -343,5 +345,41 @@ func TestDeviceLevelTransceiveUnsupported(t *testing.T) {
 	}
 	if _, err := dev.Transceive([]byte{0x00}); !nfc.IsNotSupportedError(err) {
 		t.Errorf("Transceive error = %v, want a not-supported error", err)
+	}
+}
+
+func TestMaxHoldMsSurvivesTheWire(t *testing.T) {
+	const registration = `{
+		"deviceName": "Warehouse iPhone",
+		"platform": "ios",
+		"appVersion": "1.0.0",
+		"capabilities": {"canRead": true, "canWrite": false, "nfcType": "corenfc", "maxHoldMs": 20000}
+	}`
+
+	var req protocol.DeviceRegistrationRequest
+	if err := json.Unmarshal([]byte(registration), &req); err != nil {
+		t.Fatalf("unmarshal registration: %v", err)
+	}
+
+	if req.Capabilities.MaxHoldMs != 20000 {
+		t.Errorf("MaxHoldMs = %d, want 20000", req.Capabilities.MaxHoldMs)
+	}
+}
+
+func TestMaxHoldMsIsAbsentWhenOpenEnded(t *testing.T) {
+	// A reader holding a tag in its field has no bound, and a device predating
+	// the field declares nothing. Both must serialize to the same bytes as
+	// before it existed, so an agent reading only the old fields is unaffected.
+	encoded, err := json.Marshal(protocol.DeviceCapabilities{
+		CanRead:  true,
+		CanWrite: true,
+		NFCType:  "isodep",
+	})
+	if err != nil {
+		t.Fatalf("marshal capabilities: %v", err)
+	}
+
+	if strings.Contains(string(encoded), "maxHoldMs") {
+		t.Errorf("open-ended capabilities carried maxHoldMs: %s", encoded)
 	}
 }

@@ -35,6 +35,17 @@ type Config struct {
 	// HTTPS/WSS.
 	CertFile string
 	KeyFile  string
+
+	// ControlHandler serves the control center's privileged API under
+	// /control/. It is mounted ahead of everything else and, unlike the client
+	// and device endpoints, is deliberately not wrapped in CORS: it administers
+	// the agent rather than serving applications, so no other origin has any
+	// business calling it. Nil disables the control surface entirely.
+	ControlHandler http.Handler
+
+	// UIHandler serves the control center's static assets at the root. Nil
+	// leaves the root as the plain-text agent banner.
+	UIHandler http.Handler
 }
 
 // TLSEnabled returns true if TLS is configured.
@@ -119,6 +130,13 @@ func (s *Server) Start() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// Control center API. Registered first and without the CORS wrapper: these
+	// routes are privileged, and the permissive headers the client endpoints
+	// need would invite a browser to call them cross-site and read the replies.
+	if s.config.ControlHandler != nil {
+		mux.Handle("/control/", s.config.ControlHandler)
+	}
+
 	// Single WebSocket endpoint. Device connections (?mode=device or the
 	// X-Device-Mode header) route to the device handler; everything else routes
 	// to the client handler. Each handler performs its own API-secret and origin
@@ -156,10 +174,19 @@ func (s *Server) Handler() http.Handler {
 		})
 	}))
 
-	// Root
-	mux.HandleFunc("/", enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("NFC Agent"))
-	}))
+	// Root: the control center when it is built in, otherwise the banner that
+	// has always been here.
+	//
+	// The UI is served without CORS for the same reason the control API is. It
+	// is a page, not an API — nothing should be embedding or fetching it from
+	// another origin.
+	if s.config.UIHandler != nil {
+		mux.Handle("/", s.config.UIHandler)
+	} else {
+		mux.HandleFunc("/", enableCORS(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("NFC Agent"))
+		}))
+	}
 
 	return mux
 }

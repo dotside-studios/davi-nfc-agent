@@ -22,4 +22,9 @@ type Config struct {
 	// device can be admitted -- and revoked -- independently of the shared
 	// secret.
 	TokenVerifier server.TokenVerifier
+
+	// OnChange, when set, is called whenever a client connects or disconnects
+	// so an observer can refresh without polling. Called off the hot path but
+	// on the connection's own goroutine, so it must not block.
+	OnChange func()
 }

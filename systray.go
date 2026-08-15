@@ -17,6 +17,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -65,6 +66,7 @@ type SystrayApp struct {
 	initialDevice string
 	bootstrapPort int
 	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
+	console       *Console             // nil if the control center is not built in
 
 	// Menu items
 	mStatus     *systray.MenuItem
@@ -112,6 +114,9 @@ type SystrayApp struct {
 	mCardFilterMenu *systray.MenuItem
 	mFilterAll      *systray.MenuItem
 	cardTypeFilters map[string]*cardTypeFilterItem // Maps card type to filter item
+
+	// Control center
+	mConsole *systray.MenuItem
 }
 
 // NewSystrayApp creates a new systray application. bootstrap may be nil
@@ -127,6 +132,62 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
 	}
 }
+
+// syncSettingsToMenu reflects a settings change made in the console.
+func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
+	if s.mModeMenu == nil {
+		return
+	}
+
+	modeName := "Read/Write"
+	switch next.Mode {
+	case settings.ModeReadOnly:
+		modeName = "Read Only"
+	case settings.ModeWriteOnly:
+		modeName = "Write Only"
+	}
+	s.mModeMenu.SetTitle("Mode: " + modeName)
+
+	s.mReadWriteMode.Uncheck()
+	s.mReadMode.Uncheck()
+	s.mWriteMode.Uncheck()
+	switch next.Mode {
+	case settings.ModeReadOnly:
+		s.mReadMode.Check()
+	case settings.ModeWriteOnly:
+		s.mWriteMode.Check()
+	default:
+		s.mReadWriteMode.Check()
+	}
+
+	selected := make(map[string]bool, len(next.CardTypes))
+	for _, t := range next.CardTypes {
+		selected[t] = true
+	}
+	for cardType, filter := range s.cardTypeFilters {
+		if selected[cardType] {
+			filter.menuItem.Check()
+		} else {
+			filter.menuItem.Uncheck()
+		}
+	}
+	if len(next.CardTypes) == 0 {
+		s.mFilterAll.Check()
+	} else {
+		s.mFilterAll.Uncheck()
+	}
+
+	if s.mRequirePaired != nil {
+		if next.RequirePairedDevice {
+			s.mRequirePaired.Check()
+		} else {
+			s.mRequirePaired.Uncheck()
+		}
+	}
+}
+
+// Quit tears the tray down, which stops the agent on the way out.
+func (s *SystrayApp) Quit() { systray.Quit() }
 
 // Run starts the systray application
 func (s *SystrayApp) Run() {
@@ -241,6 +302,10 @@ func (s *SystrayApp) setupUI() {
 
 	systray.AddSeparator()
 
+	s.setupConsoleMenu()
+
+	systray.AddSeparator()
+
 	// Agent control section
 	s.mStart = systray.AddMenuItem("Start Agent", "Start the NFC agent")
 	s.mStop = systray.AddMenuItem("Stop Agent", "Stop the NFC agent")
@@ -335,6 +400,13 @@ func (s *SystrayApp) startEventHandler() {
 
 // handleMenuEvents processes all menu click events
 func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
+	// Nil in a build without the console, and a receive on a nil channel simply
+	// never fires — so this case costs nothing rather than needing a build tag.
+	var controlClicks <-chan struct{}
+	if s.mConsole != nil {
+		controlClicks = s.mConsole.ClickedCh
+	}
+
 	for {
 		select {
 		case <-s.mStart.ClickedCh:
@@ -343,6 +415,8 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 			s.handleStopAgent()
 		case <-mRefreshDevices.ClickedCh:
 			s.updateDeviceList()
+		case <-controlClicks:
+			s.handleOpenConsole()
 		case <-s.mCopyDeviceURL.ClickedCh:
 			if url := s.getDeviceURL(); url != "" {
 				if err := copyToClipboard(url); err != nil {

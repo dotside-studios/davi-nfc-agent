@@ -16,6 +16,8 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 - **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
 - **Cross-platform**: Linux, macOS, Windows
 - **System Tray UI**: Device management and status
+- **Control Center**: A built-in web console for logs, tag inspection, NDEF
+  writing, per-device revocation and persistent settings
 
 ## Supported Devices
 
@@ -42,6 +44,20 @@ go build .
 See the [Installation Guide](docs/installation.md) for platform-specific setup
 and troubleshooting, and [Setting up an iOS or Android device](docs/device-setup.md)
 for pairing a phone.
+
+### Control Center
+
+Choose **Open Control Center** from the tray menu to manage the agent in a
+browser: read its log, inspect and write tags, revoke a single paired device,
+edit the origin allowlist, and set preferences that survive a restart.
+
+It is reachable only over loopback, only from a page the agent served, and only
+with a token minted by that tray entry — the origin allowlist plays no part in
+it. See [Control Center](docs/control-center.md).
+
+It is a self-contained package (`webui/`, frontend included) that reaches the
+agent through one interface, so `go build -tags nowebui .` omits the routes, the
+privileged API and the embedded console without touching anything else.
 
 ### Command-line Options
 

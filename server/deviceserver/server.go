@@ -149,6 +149,7 @@ func (s *Server) StartBackground(ctx context.Context) {
 	// Start bridge request consumers
 	go s.handleWriteRequests()
 	go s.handleLockRequests()
+	go s.handleTransceiveRequests()
 	go s.handleCapabilitiesRequests()
 }
 
@@ -421,6 +422,124 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 }
 
 // handleCapabilitiesRequests listens for capabilities queries from the client server.
+func (s *Server) handleTransceiveRequests() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg, ok := <-s.bridge.Transceive:
+			if !ok {
+				return
+			}
+			s.executeTransceiveRequest(msg)
+		}
+	}
+}
+
+// executeTransceiveRequest exchanges raw bytes with whichever holds the tag,
+// preferring a remote device when the hardware reader has no card — the same
+// routing a write uses, so an APDU reaches the tag the operator is looking at.
+func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
+	reader := s.config.Reader
+
+	// Refused in read-only mode. A raw exchange cannot be assumed harmless —
+	// the same call carries a SELECT and a write to a configuration page — so
+	// it is treated as a write for the purposes of the mode.
+	if reader != nil && reader.GetMode() == nfc.ModeReadOnly {
+		msg.ResponseCh <- server.TransceiveResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     "Reader is in read-only mode; raw exchanges are refused because they can write",
+			ErrorCode: protocol.ErrCodeReadOnly,
+		}
+		return
+	}
+
+	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+		if s.transceiveViaDevice(msg) {
+			return
+		}
+	}
+
+	if reader == nil {
+		msg.ResponseCh <- server.TransceiveResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     "No NFC reader or device holding a tag",
+			ErrorCode: protocol.ErrCodeNoCard,
+		}
+		return
+	}
+
+	resp, err := reader.Transceive(msg.Data)
+	if err != nil {
+		msg.ResponseCh <- server.TransceiveResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeTransceiveFailed),
+		}
+		return
+	}
+
+	msg.ResponseCh <- server.TransceiveResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Data:      resp,
+	}
+}
+
+// transceiveViaDevice routes an exchange to the remote device holding a tag. It
+// reports whether it handled the request; false means no device was available
+// and the caller should fall back to the hardware reader.
+func (s *Server) transceiveViaDevice(msg server.TransceiveRequestMessage) bool {
+	if s.deviceHandler == nil {
+		return false
+	}
+
+	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	if !ok {
+		return false
+	}
+
+	resp, err := s.deviceHandler.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
+		RequestID: msg.RequestID,
+		DeviceID:  deviceID,
+		TagUID:    uid,
+		Data:      msg.Data,
+		Raw:       msg.Raw,
+	})
+	if err != nil {
+		msg.ResponseCh <- server.TransceiveResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: protocol.ErrCodeTransceiveFailed,
+		}
+		return true
+	}
+	if !resp.Success {
+		code := resp.ErrorCode
+		if code == "" {
+			code = protocol.ErrCodeTransceiveFailed
+		}
+		msg.ResponseCh <- server.TransceiveResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     resp.Error,
+			ErrorCode: code,
+		}
+		return true
+	}
+
+	msg.ResponseCh <- server.TransceiveResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Data:      resp.Data,
+	}
+	return true
+}
+
 func (s *Server) handleCapabilitiesRequests() {
 	for {
 		select {

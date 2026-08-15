@@ -3,11 +3,14 @@ package clientserver
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -28,7 +31,7 @@ type Server struct {
 	upgrader websocket.Upgrader
 
 	// Client connections (multiple allowed)
-	clients    map[*server.SafeConn]string // conn -> clientID
+	clients    map[*server.SafeConn]*clientSession
 	clientsMux sync.RWMutex
 
 	// Last received data for late joiners
@@ -41,7 +44,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 	return &Server{
 		config:  config,
 		bridge:  bridge,
-		clients: make(map[*server.SafeConn]string),
+		clients: make(map[*server.SafeConn]*clientSession),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: originChecker(config),
 		},
@@ -75,6 +78,104 @@ func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 // ClientCount returns the number of currently connected clients.
 func (s *Server) ClientCount() int {
 	return s.clientCount()
+}
+
+// clientSession is what is known about one connected client. Kept so an
+// operator can tell which application is driving the reader: a count alone
+// cannot answer "what is writing to my tags".
+type clientSession struct {
+	id          string
+	origin      string
+	remoteAddr  string
+	userAgent   string
+	connectedAt time.Time
+
+	// Counted per connection, so a client that is merely listening is
+	// distinguishable from one issuing writes.
+	writes int
+	locks  int
+}
+
+// ClientInfo describes a connected client for display.
+type ClientInfo struct {
+	ID          string    `json:"id"`
+	Origin      string    `json:"origin,omitempty"`
+	RemoteAddr  string    `json:"remoteAddr"`
+	UserAgent   string    `json:"userAgent,omitempty"`
+	ConnectedAt time.Time `json:"connectedAt"`
+	Writes      int       `json:"writes"`
+	Locks       int       `json:"locks"`
+}
+
+// Clients returns the connected clients, most recently connected first.
+func (s *Server) Clients() []ClientInfo {
+	s.clientsMux.RLock()
+	defer s.clientsMux.RUnlock()
+
+	out := make([]ClientInfo, 0, len(s.clients))
+	for _, c := range s.clients {
+		out = append(out, ClientInfo{
+			ID:          c.id,
+			Origin:      c.origin,
+			RemoteAddr:  c.remoteAddr,
+			UserAgent:   c.userAgent,
+			ConnectedAt: c.connectedAt,
+			Writes:      c.writes,
+			Locks:       c.locks,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ConnectedAt.After(out[j].ConnectedAt) })
+	return out
+}
+
+// Disconnect closes one client's connection by ID, reporting whether it was
+// found. The read loop notices the closed socket and removes the session, so
+// this does not touch the map itself.
+func (s *Server) Disconnect(clientID string) bool {
+	s.clientsMux.RLock()
+	var target *server.SafeConn
+	for conn, c := range s.clients {
+		if c.id == clientID {
+			target = conn
+			break
+		}
+	}
+	s.clientsMux.RUnlock()
+
+	if target == nil {
+		return false
+	}
+
+	log.Printf("[client] Disconnecting client %s at an operator's request", clientID[:8])
+	_ = target.Close()
+	return true
+}
+
+// notifyChange tells any observer that the client list moved.
+func (s *Server) notifyChange() {
+	if s.config.OnChange != nil {
+		s.config.OnChange()
+	}
+}
+
+// countOperation records that a client issued a write or lock.
+func (s *Server) countOperation(conn *server.SafeConn, kind string) {
+	s.clientsMux.Lock()
+	defer s.clientsMux.Unlock()
+	c, ok := s.clients[conn]
+	if !ok {
+		return
+	}
+	switch kind {
+	case "write":
+		c.writes++
+	case "lock":
+		c.locks++
+	case "transceive":
+		// Counted with writes: a raw exchange can write, and the point of the
+		// count is to show which clients are capable of changing a tag.
+		c.writes++
+	}
 }
 
 // Stop stops the client server's background work. The unified server owns the
@@ -118,8 +219,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Add to clients map
 	s.clientsMux.Lock()
-	s.clients[conn] = clientID
+	s.clients[conn] = &clientSession{
+		id:          clientID,
+		origin:      r.Header.Get("Origin"),
+		remoteAddr:  r.RemoteAddr,
+		userAgent:   r.Header.Get("User-Agent"),
+		connectedAt: time.Now(),
+	}
 	s.clientsMux.Unlock()
+	s.notifyChange()
 
 	log.Printf("[client] Client connected: %s (total: %d)", clientID[:8], s.clientCount())
 
@@ -129,6 +237,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		delete(s.clients, conn)
 		s.clientsMux.Unlock()
 		log.Printf("[client] Client disconnected: %s (total: %d)", clientID[:8], s.clientCount())
+		s.notifyChange()
 	}()
 
 	// Handle incoming messages
@@ -151,11 +260,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		// Handle message types
 		switch req.Type {
 		case server.WSMessageTypeWriteRequest:
+			s.countOperation(conn, "write")
 			s.handleWriteRequest(conn, clientID, req)
 		case server.WSMessageTypeLockRequest:
+			s.countOperation(conn, "lock")
 			s.handleLockRequest(conn, clientID, req)
 		case server.WSMessageTypeCapabilitiesRequest:
 			s.handleCapabilitiesRequest(conn, clientID, req)
+		case server.WSMessageTypeTransceiveRequest:
+			s.countOperation(conn, "transceive")
+			s.handleTransceiveRequest(conn, clientID, req)
 		default:
 			log.Printf("[client] Unknown message type: %s", req.Type)
 			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
@@ -275,6 +389,71 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 
 	if err := conn.WriteJSON(wsResponse); err != nil {
 		log.Printf("[client] Failed to send lock response: %v", err)
+	}
+}
+
+// handleTransceiveRequest exchanges raw bytes with the present tag.
+//
+// The command arrives base64-encoded, matching how the device protocol carries
+// byte slices, so a client builds it the same way at both ends.
+func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+	requestID := req.ID
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+
+	var payload struct {
+		Data string `json:"data"`
+		Raw  bool   `json:"raw"`
+	}
+	payloadBytes, err := json.Marshal(req.Payload)
+	if err == nil {
+		err = json.Unmarshal(payloadBytes, &payload)
+	}
+	if err != nil {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid transceive request")
+		return
+	}
+
+	data, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "data must be base64")
+		return
+	}
+	if len(data) == 0 {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "data is empty")
+		return
+	}
+
+	response, err := s.bridge.SendTransceiveRequest(server.TransceiveRequestMessage{
+		RequestID:  requestID,
+		ClientID:   clientID,
+		Data:       data,
+		Raw:        payload.Raw,
+		ResponseCh: make(chan server.TransceiveResponseMessage, 1),
+	})
+	if err != nil {
+		log.Printf("[client] Transceive request failed: %v", err)
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
+		return
+	}
+
+	wsResponse := protocol.WebSocketResponse{
+		ID:      req.ID,
+		Type:    server.WSMessageTypeTransceiveResponse,
+		Success: response.Success,
+	}
+	if response.Success {
+		wsResponse.Payload = map[string]interface{}{
+			"data": base64.StdEncoding.EncodeToString(response.Data),
+		}
+	} else {
+		wsResponse.Error = response.Error
+		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeTransceiveFailed)
+	}
+
+	if err := conn.WriteJSON(wsResponse); err != nil {
+		log.Printf("[client] Failed to send transceive response: %v", err)
 	}
 }
 

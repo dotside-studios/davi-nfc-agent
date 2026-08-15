@@ -1,0 +1,28 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist-ssr
+*.local
+
+# dist/ is deliberately NOT ignored. It is embedded into the Go binary with
+# go:embed, so committing it keeps `go build .` working for anyone who does not
+# have Node installed — which is most people building the agent. Rebuild it with
+# `make webui` (or `npm run build` here) whenever the console changes.
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

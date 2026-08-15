@@ -9,6 +9,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Control Center.** A web console served by the agent itself at its own root,
+  covering what neither the tray nor the flags could do. Four tabs: Overview,
+  Tag, Activity and Security. The reader controls — start/stop, device,
+  mode, card filter, port — sit on Overview rather than behind a settings tab,
+  so the page an operator lands on is the page they work from. Opened from the
+  tray's
+  **Open Control Center**, which mints a single-use token and hands it to the
+  browser. Being same-origin, it is also the one browser client that works on a
+  fresh install without `-install-ca` — a page visit can be accepted manually,
+  where a bare `wss://` to an untrusted certificate fails outright. Built with
+  Vite and React; `webui/frontend/dist` is committed and embedded, so
+  `go build .` still needs nothing but Go.
+  See [Control Center](docs/control-center.md)
+- **The agent's log is readable.** Log output went to stderr and nowhere else,
+  so an agent started from a desktop launcher discarded every certificate
+  warning, refused origin and reader failure as it produced it. The last 5000
+  lines are now kept in memory, streamed live to the console, filterable by
+  level and text, and downloadable for a bug report. Nothing is written to disk
+- **NDEF composer and tag inspector.** Writing a tag by hand previously meant
+  being a client application: the agent's support for smart posters, vCards,
+  MIME, geo, Android Application Records and fully raw records was unreachable
+  without writing code against the WebSocket protocol. The console composes any
+  of them, sizes the message against the tag's reported capacity as it is
+  typed, and can erase or permanently lock. It writes over the ordinary client
+  endpoint, so there remains one implementation of the write path
+- **Live event feed.** Scans, writes, locks and errors as they happen,
+  filterable, pausable and exportable as NDJSON. The tray only ever showed the
+  card currently on the reader, so a tag presented and taken away left no trace
+- **The control center is a removable module.** Everything it needs lives in
+  `webui/` — the gate, the routes, the state snapshot, the dispatcher and the
+  frontend it embeds — and none of it imports the agent. It declares what it
+  needs of the agent as `webui.Host`, implemented by a single adapter in
+  `package main`, which both keeps the console's whole reach into the agent
+  readable in one file and lets its tests run against a fake host with no
+  hardware. `go build -tags nowebui .` then drops it: no `/control` routes, no
+  privileged API, no tray entry and no embedded console — about 820 KB smaller,
+  with none of the console's strings present. Only three files in `package main`
+  carry the constraint; the call sites tolerate a nil console, so no shared file
+  needs a tag of its own. The agent's own protocol is unaffected: raw tag
+  exchanges, settings persistence and the log ring remain in both builds, each
+  being reachable without the console
+- **Raw exchanges with a tag, from a client and from the console.** The agent
+  could already transceive with a tag, but only agent-to-device: no client
+  could ask for one, so DESFire, ISO-DEP applets and capability probing meant
+  writing a program. `transceiveRequest`/`transceiveResponse` open that channel
+  to clients, routed like a write — to the device holding a tag, otherwise to
+  the hardware reader. The console gains an APDU panel with hex in, hex and
+  ASCII out, decoded ISO 7816 status words, per-exchange timing, and presets
+  built from the commands `nfc/apdu.go` already constructs.
+  **Refused in read-only mode**: a raw command can write to a configuration
+  page, burn OTP bits or lock a tag permanently, and the agent can neither tell
+  that apart from a `SELECT` nor undo it
+- **Connected clients are visible, and can be disconnected.** The client server
+  tracked its connections but exposed only a count, so "something is writing to
+  my tags" had no answer. Each connection now reports its origin, address, user
+  agent, how long it has been connected, and how many writes and locks it has
+  issued — counted per connection, so a client that is only listening is
+  distinguishable from one changing tags. Any one of them can be disconnected;
+  it is free to reconnect, so revoking its origin remains what bars it
+- **Per-device revocation.** Paired devices are listed with platform, pairing
+  time, last seen and whether they are connected, and each can be revoked on
+  its own. The tray's only option was to revoke every device, which made
+  removing one lost phone cost every other phone its pairing
+- **Settings persist.** Reader mode, card-type filter, reader selection, port
+  and the paired-device requirement are written to `settings.json` in the
+  config directory. Mode and filter previously lived only in the tray's menu
+  state and were lost on every launch; device and port could only be set with a
+  flag, and so had to be repeated in whatever started the agent. An explicit
+  flag still wins, and no file is written until something is deliberately saved
+- **Certificate and origin diagnostics.** The console reports certificate
+  expiry, issuer and the names it actually covers, and warns when the agent is
+  reachable on an address the certificate omits — previously indistinguishable
+  from the agent being down, since a browser reports both as a failed
+  connection. Origins refused since startup accumulate with a one-click
+  **allow**, where the tray offered a blocked origin only while its menu was open
 - **Device protocol versioning.** Devices offer the `davi-nfc-device.v1`
   WebSocket subprotocol and send a `hello` first frame carrying the protocol
   version alongside registration, so setup costs one round trip. The response
@@ -120,6 +195,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The Control Center's API is gated independently of the client and device
+  endpoints. Every request must arrive over loopback, declare the agent's own
+  origin, and carry a session cookie minted by the tray; the routes are served
+  without the permissive CORS headers the client endpoints carry. The origin
+  allowlist is deliberately not consulted — an entry there authorises a console
+  to read tags and must never confer the ability to revoke a device or rotate
+  the secret. Loopback is determined from `RemoteAddr`, never from a forwarding
+  header
 - `golang.org/x/text` and `golang.org/x/net` are updated past two
   vulnerabilities reachable from certificate generation: an infinite loop on
   invalid input in `x/text` (GO-2026-5970) and a failure to reject ASCII-only

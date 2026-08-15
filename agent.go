@@ -68,6 +68,18 @@ type Agent struct {
 	// Devices holds the paired devices and their per-device credentials.
 	Devices *DeviceRegistry
 
+	// Console serves the control center's privileged API. Nil disables it.
+	Console *Console
+
+	// consoleHost is the adapter the console administers the agent through.
+	consoleHost any
+
+	// Bootstrap is the pairing server, or nil when pairing is disabled.
+	Bootstrap *tls.BootstrapServer
+
+	// BootstrapPort is the pairing server's port, 0 when disabled.
+	BootstrapPort int
+
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
 	// connections. Browser clients are unaffected.
@@ -297,13 +309,16 @@ func (a *Agent) startServers() error {
 		AllowedOrigins: a.AllowedOrigins,
 		OriginPolicy:   a.originPolicy(),
 		TokenVerifier:  a.tokenVerifier(),
+		OnChange:       a.clientsChanged(),
 	}, a.Bridge)
 
-	// Single listener fronts both the device and client handlers.
+	// Single listener fronts the device, client, control and console handlers.
 	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:     a.DevicePort,
-		CertFile: a.CertFile,
-		KeyFile:  a.KeyFile,
+		Port:           a.DevicePort,
+		CertFile:       a.CertFile,
+		KeyFile:        a.KeyFile,
+		ControlHandler: consoleRoutes(a.Console),
+		UIHandler:      consoleAssets(),
 	}, a.DeviceServer, a.ClientServer)
 
 	go func() {
@@ -390,6 +405,15 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)
 	}
+}
+
+// clientsChanged returns a hook that refreshes the console when the client list
+// moves, or nil when there is no console to refresh.
+func (a *Agent) clientsChanged() func() {
+	if a.Console == nil {
+		return nil
+	}
+	return a.Console.NotifyChange
 }
 
 // tokenVerifier returns the device registry as a token verifier, or nil when

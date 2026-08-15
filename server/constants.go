@@ -23,6 +23,9 @@ const (
 	WSMessageTypeCapabilitiesRequest  = "capabilitiesRequest"
 	WSMessageTypeCapabilitiesResponse = "capabilitiesResponse"
 
+	WSMessageTypeTransceiveRequest  = "transceiveRequest"
+	WSMessageTypeTransceiveResponse = "transceiveResponse"
+
 	WSMessageTypeError = "error"
 )
 

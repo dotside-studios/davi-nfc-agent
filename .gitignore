@@ -1,2 +1,6 @@
 .DS_Store
 build/
+
+# Built agent binary
+/davi-nfc-agent
+/davi-nfc-agent.exe

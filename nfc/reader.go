@@ -1039,6 +1039,57 @@ func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
 	return &caps, nil
 }
 
+// Transceive exchanges raw bytes with the tag currently on the reader.
+//
+// Deliberately not gated on ReaderMode here: the caller decides. A raw exchange
+// is neither a read nor a write as far as this layer can tell — the same
+// interface carries a SELECT and a write to a config page — so the policy call
+// belongs where the request enters, not here.
+func (r *NFCReader) Transceive(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no command bytes to send")
+	}
+
+	var response []byte
+	err := r.withTagOperation(func() error {
+		if !r.deviceManager.HasDevice() {
+			return fmt.Errorf("no NFC device connected")
+		}
+
+		tags, err := r.GetTags()
+		if err != nil {
+			return fmt.Errorf("failed to get tags: %w", err)
+		}
+		if len(tags) == 0 {
+			return fmt.Errorf("no card detected")
+		}
+		if len(tags) > 1 {
+			return fmt.Errorf("multiple cards detected (%d tags), please present only one card", len(tags))
+		}
+
+		tag := tags[0]
+		if !CanTagTransceive(tag) {
+			return NewNotSupportedError("Transceive")
+		}
+
+		transceiver, ok := tag.(TagTransceiver)
+		if !ok {
+			return NewNotSupportedError("Transceive")
+		}
+
+		resp, err := transceiver.Transceive(data)
+		if err != nil {
+			return err
+		}
+		response = resp
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
 // GetTags retrieves available tags from the connected NFC device.
 func (r *NFCReader) GetTags() ([]Tag, error) {
 	dev := r.deviceManager.Device()

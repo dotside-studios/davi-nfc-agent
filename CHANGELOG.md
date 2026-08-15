@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The public key pin now describes the key the agent actually serves.** The
+  pin is computed from `agent.key`, the long-lived key the self-signed route
+  signs, and that is what `/pair` hands a device. The CA route did not use it:
+  truststore's `MakeCert` generates a key of its own, which was then installed
+  as the server key. So an agent with a CA advertised a pin its handshake could
+  never present, and a device that paired with one was locked out permanently —
+  re-pairing returned the same unusable pin. The CA route now signs the same
+  persistent key, so the pin holds across adopting a CA and devices paired
+  before **Trust This Agent in Browsers** keep working after it. An install
+  already serving the wrong key reissues on the next start
 - **Reissuing a certificate no longer installs a certificate authority.**
   `RegenerateCertificates` called the CA routine directly instead of going
   through the routing that picks self-signed or CA, so the Control Center's

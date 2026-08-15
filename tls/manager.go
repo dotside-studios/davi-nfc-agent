@@ -2,6 +2,7 @@ package tls
 
 import (
 	"bufio"
+	"crypto"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
@@ -23,6 +24,7 @@ type Manager struct {
 	tlsDir     string
 	caDir      string
 	caCertFile string
+	caKeyFile  string
 	certFile   string
 	keyFile    string
 	hostsFile  string
@@ -49,6 +51,7 @@ func NewManager(configDir string) *Manager {
 		tlsDir:     tlsDir,
 		caDir:      caDir,
 		caCertFile: filepath.Join(caDir, "rootCA.pem"),
+		caKeyFile:  filepath.Join(caDir, "rootCA-key.pem"),
 		certFile:   filepath.Join(tlsDir, "server.crt"),
 		keyFile:    filepath.Join(tlsDir, "server.key"),
 		hostsFile:  filepath.Join(tlsDir, "hosts.txt"),
@@ -130,6 +133,9 @@ func (m *Manager) EnsureCertificates() (certFile, keyFile string, err error) {
 		needsRegeneration = true
 	} else if m.hostsChanged(hosts) {
 		m.logger.Println("Network configuration changed, regenerating certificates...")
+		needsRegeneration = true
+	} else if !m.servedCertMatchesPin() {
+		m.logger.Println("Certificate does not carry the agent's pinned key, regenerating...")
 		needsRegeneration = true
 	}
 
@@ -281,30 +287,20 @@ func (m *Manager) generateCertificates(hosts []string) error {
 
 	m.logger.Println("CA installed successfully")
 
-	// Generate server certificate
+	// Generate server certificate.
+	//
+	// The leaf is issued here rather than by truststore's MakeCert, which
+	// generates a key of its own. That key would not be the one PublicKeyPin
+	// reports, so a device pairing with a CA-route agent would record a pin the
+	// handshake could never present.
 	m.logger.Printf("Generating certificate for hosts: %v", hosts)
 
-	cert, err := ml.MakeCert(hosts, m.tlsDir)
+	caCert, caKey, err := m.loadCA()
 	if err != nil {
-		return fmt.Errorf("failed to generate certificate: %w", err)
+		return err
 	}
-
-	// Rename files to our expected names.
-	if cert.CertFile != m.certFile {
-		if err := os.Rename(cert.CertFile, m.certFile); err != nil {
-			return fmt.Errorf("failed to rename cert file: %w", err)
-		}
-	}
-	if cert.KeyFile != m.keyFile {
-		if err := os.Rename(cert.KeyFile, m.keyFile); err != nil {
-			return fmt.Errorf("failed to rename key file: %w", err)
-		}
-	}
-
-	// Restrict ACL on the private key. The cert is public, but truststore may
-	// have created the key world-readable on Windows (Unix mode bits ignored).
-	if err := secureFile(m.keyFile); err != nil {
-		m.logger.Printf("Warning: failed to lock down key file permissions: %v", err)
+	if err := m.issueLeaf(hosts, caCert, caKey); err != nil {
+		return err
 	}
 
 	// Cache the hosts
@@ -318,8 +314,46 @@ func (m *Manager) generateCertificates(hosts []string) error {
 	if fingerprint, err := m.GetCAFingerprint(); err == nil {
 		m.logger.Printf("CA Fingerprint (SHA256): %s", fingerprint)
 	}
+	if pin, err := m.PublicKeyPin(); err == nil {
+		m.logger.Printf("Agent public key pin: %s", pin)
+	}
 
 	return nil
+}
+
+// loadCA reads the local certificate authority truststore created under caDir.
+func (m *Manager) loadCA() (*x509.Certificate, crypto.Signer, error) {
+	certPEM, err := os.ReadFile(m.caCertFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA certificate: %w", err)
+	}
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		return nil, nil, fmt.Errorf("CA certificate is not valid PEM")
+	}
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA certificate: %w", err)
+	}
+
+	keyPEM, err := os.ReadFile(m.caKeyFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA key: %w", err)
+	}
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return nil, nil, fmt.Errorf("CA key is not valid PEM")
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA key: %w", err)
+	}
+	key, ok := parsed.(crypto.Signer)
+	if !ok {
+		return nil, nil, fmt.Errorf("CA key cannot sign")
+	}
+
+	return cert, key, nil
 }
 
 // GetCertFile returns the path to the certificate file.

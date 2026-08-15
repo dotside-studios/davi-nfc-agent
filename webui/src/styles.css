@@ -240,6 +240,8 @@ main {
 .section-nav {
   border: 1px solid var(--border);
   background: var(--bg);
+  position: sticky;
+  top: 0;
 }
 .section-nav h3 {
   margin: 0;
@@ -273,6 +275,22 @@ main {
 }
 .section-body {
   min-width: 0;
+  /* Capped rather than full-bleed: these are tables of a few short columns and
+     paragraphs of prose, and stretching them to a wide monitor strands each
+     row's action a long way from the row. Left-aligned, not centred — the nav
+     sits against the left edge and the content should line up with it. */
+  max-width: 1000px;
+}
+.section-body > section {
+  scroll-margin-top: 4px;
+}
+/* Trailing room so the last section can still scroll to the top. Without it a
+   jump to it stops at the scroll floor and the nav highlight sticks on
+   whatever is left under the header. */
+.section-body::after {
+  content: "";
+  display: block;
+  height: 30vh;
 }
 
 /* Two key/value lists abreast where a panel is wide enough to hold them. */

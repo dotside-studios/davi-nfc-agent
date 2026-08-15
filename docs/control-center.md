@@ -76,9 +76,10 @@ and both filling the window. They are read together in practice: a failed write
 and the line explaining it arrive at the same moment. Events export as NDJSON,
 the log downloads as text.
 
-**Security** — who may reach this agent and with what credential, as sections
-down the side. Each is linkable: `#/security/origins`, `#/security/certificate`
-and so on.
+**Security** — who may reach this agent and with what credential. One page with
+section links down the side that scroll to each part; everything stays on screen
+so it can be read straight through. Each section is linkable:
+`#/security/origins`, `#/security/certificate` and so on.
 
 | Section | Holds |
 |---|---|

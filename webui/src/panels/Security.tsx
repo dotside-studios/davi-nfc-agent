@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fmtDateTime } from '../format'
 import type { ControlState } from '../types'
 import { useAction } from '../useControl'
@@ -26,35 +26,70 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'certificate', label: 'Certificate' },
 ]
 
-/** Section in the hash after the tab, so one can be linked to directly. */
-function useSection(): [SectionId, (s: SectionId) => void] {
-  const read = (): SectionId => {
+/**
+ * Tracks which section is in view and scrolls to one on demand. Every section
+ * stays rendered — the nav jumps between them rather than filtering, so the
+ * whole subject can be read by scrolling.
+ */
+function useSectionNav(): [SectionId, (s: SectionId) => void] {
+  const [active, setActive] = useState<SectionId>(() => {
     const raw = location.hash.replace(/^#\/?/, '').split('/')[1]
     return SECTIONS.some((s) => s.id === raw) ? (raw as SectionId) : 'devices'
-  }
+  })
 
-  const [section, setSection] = useState<SectionId>(read)
-
-  useEffect(() => {
-    const onHash = () => setSection(read())
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+  const goTo = useCallback((id: SectionId) => {
+    document.getElementById(`sec-${id}`)?.scrollIntoView({ block: 'start' })
+    // Written without a hashchange, so the scroll is not fought by the
+    // listener that would otherwise scroll it again.
+    history.replaceState(null, '', `#/security/${id}`)
+    setActive(id)
   }, [])
 
-  return [
-    section,
-    (next: SectionId) => {
-      location.hash = `#/security/${next}`
-      setSection(next)
-    },
-  ]
+  // Land on the linked section after the first paint.
+  useEffect(() => {
+    const raw = location.hash.replace(/^#\/?/, '').split('/')[1]
+    if (!SECTIONS.some((s) => s.id === raw)) return
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`sec-${raw}`)?.scrollIntoView({ block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
+  // Highlight whichever section is nearest the top of the scrollport.
+  useEffect(() => {
+    const scroller = document.querySelector('main')
+    if (!scroller) return
+
+    const onScroll = () => {
+      // At the bottom the last section is the one being read, even though it
+      // is too short to reach the top of the scrollport.
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+        setActive(SECTIONS[SECTIONS.length - 1].id)
+        return
+      }
+
+      const threshold = scroller.getBoundingClientRect().top + 80
+      let current = SECTIONS[0].id
+      for (const s of SECTIONS) {
+        const el = document.getElementById(`sec-${s.id}`)
+        if (el && el.getBoundingClientRect().top <= threshold) current = s.id
+      }
+      setActive(current)
+    }
+
+    onScroll()
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [])
+
+  return [active, goTo]
 }
 
 export function Security({ state }: { state: ControlState }) {
-  const [section, setSection] = useSection()
+  const [active, goTo] = useSectionNav()
   const { security, origins, devices } = state
 
-  // Counts in the nav, so a problem is visible without opening the section.
+  // Counts in the nav, so a problem is visible before scrolling to it.
   const badge = (id: SectionId) => {
     if (id === 'devices' && devices.length > 0) {
       return <span className="count"> ({devices.length})</span>
@@ -82,8 +117,8 @@ export function Security({ state }: { state: ControlState }) {
           <button
             key={s.id}
             type="button"
-            className={section === s.id ? 'active' : undefined}
-            onClick={() => setSection(s.id)}
+            className={active === s.id ? 'active' : undefined}
+            onClick={() => goTo(s.id)}
           >
             {s.label}
             {badge(s.id)}
@@ -92,11 +127,21 @@ export function Security({ state }: { state: ControlState }) {
       </nav>
 
       <div className="section-body">
-        {section === 'devices' ? <Devices state={state} /> : null}
-        {section === 'origins' ? <Origins state={state} /> : null}
-        {section === 'credentials' ? <CredentialsSection state={state} /> : null}
-        {section === 'trust' ? <TrustSection state={state} /> : null}
-        {section === 'certificate' ? <CertificateSection state={state} /> : null}
+        <section id="sec-devices">
+          <Devices state={state} />
+        </section>
+        <section id="sec-origins">
+          <Origins state={state} />
+        </section>
+        <section id="sec-credentials">
+          <CredentialsSection state={state} />
+        </section>
+        <section id="sec-trust">
+          <TrustSection state={state} />
+        </section>
+        <section id="sec-certificate">
+          <CertificateSection state={state} />
+        </section>
       </div>
     </div>
   )

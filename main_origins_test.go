@@ -51,5 +51,5 @@ func TestParseAllowedOriginsFallsBackToEnv(t *testing.T) {
 		t.Errorf("flag did not take precedence: got %v", got)
 	}
 
-	os.Unsetenv("DAVI_NFC_ALLOWED_ORIGINS")
+	_ = os.Unsetenv("DAVI_NFC_ALLOWED_ORIGINS")
 }

@@ -2,15 +2,11 @@ package server
 
 import "github.com/dotside-studios/davi-nfc-agent/buildinfo"
 
-// mDNS service discovery constants for legacy single-server mode
+// mDNS service discovery constants. The agent advertises a single service,
+// under the device service type, on the one unified port.
 var (
-	MDNSServiceType = "_nfc-agent._tcp"
-	MDNSServiceName = buildinfo.DisplayName
-	MDNSDomain      = "local."
-)
+	MDNSDomain = "local."
 
-// mDNS service discovery constants for device server
-var (
 	MDNSDeviceServiceType = "_nfc-device._tcp"
 	MDNSDeviceServiceName = buildinfo.DisplayName + " Device"
 )

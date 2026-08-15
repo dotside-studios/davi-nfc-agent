@@ -50,7 +50,7 @@ func dialDevice(t *testing.T, url string, subprotocols []string) (*websocket.Con
 		}
 		t.Fatalf("dial failed: %v (status %d)", err, status)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	return conn, conn.Subprotocol()
 }

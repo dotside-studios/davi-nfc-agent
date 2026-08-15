@@ -23,6 +23,21 @@ type DeviceCapabilities struct {
 	SupportedTagTypes []string `json:"supportedTagTypes,omitempty"` // e.g. ["MIFARE Classic", "NTAG"]
 	DeviceType        string   `json:"deviceType,omitempty"`        // e.g. "smartphone", "pn532-serial"
 	MaxBaudRate       int      `json:"maxBaudRate,omitempty"`
+
+	// MaxHoldMs is how long this device can keep a tag available for work after
+	// reporting it, zero meaning open-ended. A reader holding a tag in its field
+	// has no bound; an iOS device does, because CoreNFC connects a tag for about
+	// twenty seconds and cannot renew that.
+	//
+	// The deadline for a given tag is the arrival of its tagScanned plus this,
+	// and that sum is optimistic — the tag was connected before the message was
+	// sent, so leave margin rather than treating it as exact.
+	//
+	// Advisory. A device declaring nothing is open-ended, which is how every
+	// device behaved before this field existed, so it must not become a gate:
+	// use it to decide what is worth attempting, never to refuse a device that
+	// stayed silent.
+	MaxHoldMs int `json:"maxHoldMs,omitempty"`
 }
 
 // DeviceRegistrationRequest is sent by a device to register with the server.

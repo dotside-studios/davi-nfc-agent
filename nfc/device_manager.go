@@ -214,7 +214,7 @@ func (dm *DeviceManager) TryConnect() error {
 			return nil
 		}
 		dm.mu.Lock()
-		currentDevice.Close() // Ignore error
+		_ = currentDevice.Close() // Ignore error
 		dm.device = nil
 		dm.hasDevice = false
 		dm.mu.Unlock()
@@ -307,7 +307,7 @@ func (dm *DeviceManager) reconnectDevice(forceMode bool, stopChan <-chan struct{
 	dm.mu.Lock()
 	if dm.hasDevice && dm.device != nil {
 		log.Printf("%s: Closing existing device connection.", logPrefix)
-		dm.device.Close()
+		_ = dm.device.Close()
 		dm.device = nil
 		dm.hasDevice = false
 	}
@@ -391,7 +391,7 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 		log.Printf("Device error detected (IO/Config): %v. Closing device.", err)
 		dm.mu.Lock()
 		if dm.hasDevice && dm.device != nil {
-			dm.device.Close()
+			_ = dm.device.Close()
 		}
 		dm.device = nil
 		dm.hasDevice = false
@@ -461,7 +461,7 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			log.Printf("Max retries reached for Timeout/Closed error: %v. Closing device.", err)
 			dm.mu.Lock()
 			if dm.hasDevice && dm.device != nil {
-				dm.device.Close()
+				_ = dm.device.Close()
 			}
 			dm.device = nil
 			dm.hasDevice = false

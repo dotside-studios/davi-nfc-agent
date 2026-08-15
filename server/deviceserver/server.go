@@ -192,7 +192,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[device] WebSocket upgrade error: %v", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Add to devices map
 	s.devicesMux.Lock()

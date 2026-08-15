@@ -79,7 +79,7 @@ func TestMockTag_ConnectDisconnectErrors(t *testing.T) {
 
 func TestMockTag_ReadWriteErrors(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Test ReadDataError
 	readErr := fmt.Errorf("read failed")
@@ -102,7 +102,7 @@ func TestMockTag_ReadWriteErrors(t *testing.T) {
 
 func TestMockTag_Transceive(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Test with TransceiveResponse
 	tag.TransceiveResponse = []byte{0x90, 0x00}
@@ -119,7 +119,7 @@ func TestMockTag_Transceive(t *testing.T) {
 
 func TestMockTag_TransceiveCustomFunc(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Test with custom TransceiveFunc
 	tag.TransceiveFunc = func(tx []byte) ([]byte, error) {
@@ -139,7 +139,7 @@ func TestMockTag_TransceiveCustomFunc(t *testing.T) {
 
 func TestMockClassicTag_ReadWrite(t *testing.T) {
 	tag := NewMockClassicTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Write data to sector 1, block 0
 	writeData := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
@@ -197,10 +197,10 @@ func TestMockTag_CallLog(t *testing.T) {
 
 	tag.UID()
 	tag.Type()
-	tag.Connect()
-	tag.ReadData()
-	tag.WriteData([]byte{0x01})
-	tag.Disconnect()
+	_ = tag.Connect()
+	_, _ = tag.ReadData()
+	_ = tag.WriteData([]byte{0x01})
+	_ = tag.Disconnect()
 
 	callLog := tag.GetCallLog()
 	expectedCalls := []string{
@@ -228,7 +228,7 @@ func TestMockTag_CallLog(t *testing.T) {
 
 func TestMockTag_IsWritable(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Test default behavior - should be writable
 	writable, err := tag.IsWritable()
@@ -265,7 +265,7 @@ func TestMockTag_IsWritable(t *testing.T) {
 
 func TestMockTag_MakeReadOnly(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Verify tag is writable initially
 	writable, _ := tag.IsWritable()
@@ -294,7 +294,7 @@ func TestMockTag_MakeReadOnly(t *testing.T) {
 
 func TestMockTag_MakeReadOnlyWithError(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Set custom error for MakeReadOnly
 	expectedErr := fmt.Errorf("make read-only failed")
@@ -314,7 +314,7 @@ func TestMockTag_MakeReadOnlyWithError(t *testing.T) {
 
 func TestMockTag_WriteProtectionWorkflow(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Write some data
 	originalData := []byte{0x01, 0x02, 0x03, 0x04}
@@ -387,7 +387,7 @@ func TestMockTag_MakeReadOnlyWhenNotConnected(t *testing.T) {
 
 func TestMockTag_CanMakeReadOnly(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Test default behavior - should be able to make read-only
 	canMake, err := tag.CanMakeReadOnly()
@@ -399,7 +399,7 @@ func TestMockTag_CanMakeReadOnly(t *testing.T) {
 	}
 
 	// Make tag read-only
-	tag.MakeReadOnly()
+	_ = tag.MakeReadOnly()
 
 	// Test after making read-only - should NOT be able to make read-only again
 	canMake, err = tag.CanMakeReadOnly()
@@ -436,7 +436,7 @@ func TestMockTag_CanMakeReadOnlyWhenNotConnected(t *testing.T) {
 
 func TestMockTag_CanMakeReadOnlyWithError(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// Set custom error for CanMakeReadOnly
 	expectedErr := fmt.Errorf("cannot check read-only capability")
@@ -453,7 +453,7 @@ func TestMockTag_CanMakeReadOnlyWithError(t *testing.T) {
 
 func TestMockTag_CompleteReadOnlyWorkflow(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
-	tag.Connect()
+	_ = tag.Connect()
 
 	// 1. Check if tag is writable
 	writable, err := tag.IsWritable()

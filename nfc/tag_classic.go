@@ -464,11 +464,9 @@ func (t *pcscClassicTag) Write(sector, block uint8, data []byte, key []byte, key
 		return err
 	}
 
-	// Check if trying to write to sector trailer (block 3 in small sectors, 15 in large)
-	// This is allowed but dangerous - warn via error if it's the trailer
-	if t.isSectorTrailer(absoluteBlock) {
-		// Allow it but the caller should know what they're doing
-	}
+	// Writes to a sector trailer (block 3 in small sectors, 15 in large) are
+	// deliberately permitted here: rewriting keys and access bits is a valid
+	// operation, and the caller is expected to know what it is doing.
 
 	// Authenticate to the sector
 	if err := t.authenticateWithKey(int(sector), key, keyType); err != nil {

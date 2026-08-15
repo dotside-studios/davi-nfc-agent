@@ -64,7 +64,7 @@ func dialAndProbe(t *testing.T, wsURL string) string {
 		}
 		t.Fatalf("dial %s failed: %v (status %d)", wsURL, err, status)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: "bogus"}); err != nil {
 		t.Fatalf("write to %s failed: %v", wsURL, err)
@@ -120,7 +120,7 @@ func TestHealthEndpoints(t *testing.T) {
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			t.Fatalf("decode %s body failed: %v", path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if body["type"] != "agent" {
 			t.Errorf("GET %s type = %v, want agent", path, body["type"])
 		}

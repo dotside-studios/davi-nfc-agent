@@ -120,7 +120,7 @@ func (h *DeviceHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	var deviceID string
 	reason := protocol.DisconnectDropped
 	defer func() {
-		conn.Close()
+		_ = conn.Close()
 		if deviceID != "" {
 			h.handleDeviceDisconnect(deviceID, reason)
 		}
@@ -310,7 +310,9 @@ func (h *DeviceHandler) sendRegistration(conn *server.SafeConn, device *remotenf
 
 	if err := conn.WriteJSON(resp); err != nil {
 		h.removeDeviceSession(deviceID)
-		h.manager.UnregisterDevice(deviceID)
+		if unregErr := h.manager.UnregisterDevice(deviceID); unregErr != nil {
+			log.Printf("[device] Failed to unregister %s after registration send error: %v", deviceID, unregErr)
+		}
 		return fmt.Errorf("failed to send registration response: %w", err)
 	}
 
@@ -437,7 +439,9 @@ func (h *DeviceHandler) handleDeviceHeartbeat(_ *server.SafeConn, deviceID strin
 		return fmt.Errorf("device ID mismatch")
 	}
 
-	h.manager.UpdateHeartbeat(deviceID)
+	if err := h.manager.UpdateHeartbeat(deviceID); err != nil {
+		return fmt.Errorf("failed to record heartbeat: %w", err)
+	}
 	return nil
 }
 
@@ -520,6 +524,23 @@ func (h *DeviceHandler) DeviceCanWrite(deviceID string) bool {
 // DeviceCanLock implements remotenfc.TagWriter.
 func (h *DeviceHandler) DeviceCanLock(deviceID string) bool {
 	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanLock })
+}
+
+// DeviceMaxHoldMs reports how long a device can keep a tag available for work,
+// zero meaning open-ended — which is also the answer for a device that declared
+// nothing, and for one that is no longer connected. Callers should treat it as
+// advice about what is worth attempting rather than as permission.
+func (h *DeviceHandler) DeviceMaxHoldMs(deviceID string) int {
+	if h.manager == nil {
+		return 0
+	}
+
+	device, ok := h.manager.GetDevice(deviceID)
+	if !ok || !device.IsActive() {
+		return 0
+	}
+
+	return device.PhoneCapabilities().MaxHoldMs
 }
 
 // deviceDeclared reports whether a still-connected device declared a capability.
@@ -738,7 +759,9 @@ func (h *DeviceHandler) handleDeviceDisconnect(deviceID string, reason protocol.
 	h.clearActiveTag(deviceID, "")
 
 	if h.manager != nil {
-		h.manager.UnregisterDevice(deviceID)
+		if err := h.manager.UnregisterDevice(deviceID); err != nil {
+			log.Printf("[device] Failed to unregister %s on disconnect: %v", deviceID, err)
+		}
 	}
 
 	if reason.Expected() {

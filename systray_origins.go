@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
 	"fyne.io/systray"
@@ -156,15 +155,4 @@ func (s *SystrayApp) startOriginWatcher() {
 		log.Printf("[systray] Blocked connection from %s — allow it under Allowed Origins to let it use the reader", origin)
 		s.refreshOriginsMenu()
 	})
-}
-
-// originsSummary describes the current policy for the status tooltip.
-func (s *SystrayApp) originsSummary() string {
-	if s.agent.Origins == nil {
-		return ""
-	}
-	if s.agent.Origins.IsSessionAllowAny() {
-		return "any origin (this session)"
-	}
-	return fmt.Sprintf("%d allowed origin(s)", len(s.agent.Origins.List()))
 }

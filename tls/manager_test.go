@@ -37,7 +37,9 @@ func TestHostsChanged(t *testing.T) {
 	mgr := NewManager(tmpDir)
 
 	// Create TLS directory
-	os.MkdirAll(mgr.tlsDir, 0700)
+	if err := os.MkdirAll(mgr.tlsDir, 0700); err != nil {
+		t.Fatalf("failed to create TLS dir: %v", err)
+	}
 
 	// No cached hosts - should report changed
 	if !mgr.hostsChanged([]string{"localhost"}) {
@@ -76,7 +78,9 @@ func TestReadWriteCachedHosts(t *testing.T) {
 	mgr := NewManager(tmpDir)
 
 	// Create TLS directory
-	os.MkdirAll(mgr.tlsDir, 0700)
+	if err := os.MkdirAll(mgr.tlsDir, 0700); err != nil {
+		t.Fatalf("failed to create TLS dir: %v", err)
+	}
 
 	hosts := []string{"localhost", "127.0.0.1", "192.168.1.100"}
 
@@ -106,7 +110,9 @@ func TestCertsExist(t *testing.T) {
 	mgr := NewManager(tmpDir)
 
 	// Create TLS directory
-	os.MkdirAll(mgr.tlsDir, 0700)
+	if err := os.MkdirAll(mgr.tlsDir, 0700); err != nil {
+		t.Fatalf("failed to create TLS dir: %v", err)
+	}
 
 	// No certs - should not exist
 	if mgr.certsExist() {
@@ -114,13 +120,17 @@ func TestCertsExist(t *testing.T) {
 	}
 
 	// Create only cert file
-	os.WriteFile(mgr.certFile, []byte("cert"), 0600)
+	if err := os.WriteFile(mgr.certFile, []byte("cert"), 0600); err != nil {
+		t.Fatalf("failed to write cert file: %v", err)
+	}
 	if mgr.certsExist() {
 		t.Error("Expected certsExist=false when only cert exists")
 	}
 
 	// Create key file too
-	os.WriteFile(mgr.keyFile, []byte("key"), 0600)
+	if err := os.WriteFile(mgr.keyFile, []byte("key"), 0600); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
 	if !mgr.certsExist() {
 		t.Error("Expected certsExist=true when both files exist")
 	}

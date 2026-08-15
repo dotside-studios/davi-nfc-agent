@@ -49,6 +49,13 @@ function Inspector({ tags }: { tags: Tags }) {
         <Row label="Type">{tag.type || <span className="dim">unknown</span>}</Row>
         <Row label="Technology">{tag.technology || <span className="dim">—</span>}</Row>
         <Row label="Scanned">{fmtDateTime(tag.scannedAt)}</Row>
+        <Row label="Read by">
+          {tag.deviceID ? (
+            <span className="mono">{tag.deviceID}</span>
+          ) : (
+            <span className="dim">this agent's reader</span>
+          )}
+        </Row>
         <Row label="Text">
           {tag.text ? <span className="mono">{tag.text}</span> : <span className="dim">no text content</span>}
         </Row>

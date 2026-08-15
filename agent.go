@@ -121,9 +121,18 @@ func (a *Agent) Start(devicePath string) error {
 		return errors.New("agent is already running")
 	}
 
+	// A pinned phone is not a reader that has gone missing, it is one that
+	// never existed: a phone reports its scans over the device bridge and is
+	// never opened here. Left in place it becomes a connection retried for as
+	// long as the agent runs.
+	if nfc.IsRemoteDevice(a.Manager, devicePath) {
+		a.Logger.Printf("Ignoring pinned reader %s: a phone reports its scans over the device bridge rather than being read from", devicePath)
+		devicePath = ""
+	}
+
 	// If no device path specified, discover available devices
 	if devicePath == "" {
-		devices, err := a.Manager.ListDevices()
+		devices, err := nfc.ListReaders(a.Manager)
 		if err != nil {
 			a.Logger.Printf("Error listing NFC devices: %v", err)
 			// Continue without a device - one may connect later

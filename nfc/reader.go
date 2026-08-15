@@ -473,7 +473,10 @@ func (r *NFCReader) doPoll() {
 	if !hasDev {
 		// If no device path configured, try to discover one
 		if r.deviceManager.DevicePath() == "" {
-			devices, err := r.deviceManager.Manager().ListDevices()
+			// Readers only: a phone is reached over the device bridge, never
+			// opened and polled here, so adopting one leaves the reader bound
+			// to a device it can never connect to.
+			devices, err := ListReaders(r.deviceManager.Manager())
 			if err != nil || len(devices) == 0 {
 				return // No devices available yet
 			}
@@ -483,9 +486,16 @@ func (r *NFCReader) doPoll() {
 		}
 		if err := r.deviceManager.TryConnect(); err != nil {
 			// No card present is normal - just wait and retry
-			if !IsNoCardError(err) {
+			//
+			// Reported once for as long as the reason holds. This runs on every
+			// poll, so a reader that is unplugged — or a device path naming one
+			// that will not reappear — otherwise fills the log at the polling
+			// rate with the same line.
+			if !IsNoCardError(err) && !r.deviceManager.recordError(err) {
 				log.Printf("Connection attempt failed: %v", err)
 			}
+		} else {
+			r.deviceManager.clearLastError()
 		}
 		return
 	}

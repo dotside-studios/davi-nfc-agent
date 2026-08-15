@@ -49,3 +49,60 @@ func GetAllCardTypes() []string {
 		CardTypeType4,
 	}
 }
+
+// RemoteManager is implemented by a manager whose devices are not readers
+// attached to this machine. A phone reports the tags it scans over the device
+// bridge, so it is never opened and polled the way a reader is — offering one
+// as the agent's reader only produces a device that can never be connected.
+//
+// Optional: a manager that does not implement it manages local readers.
+type RemoteManager interface {
+	RemoteDevices() bool
+}
+
+// ReaderLister is implemented by a manager that holds others, so it can list
+// only the devices eligible to be this agent's reader.
+//
+// Optional: a manager that does not implement it lists readers from ListDevices.
+type ReaderLister interface {
+	ListReaders() ([]string, error)
+}
+
+// RemoteDeviceChecker is implemented by a manager that can recognize a device
+// path as naming a remote device without connecting to it.
+//
+// Optional: a manager that does not implement it is asked whether all of its
+// devices are remote instead.
+type RemoteDeviceChecker interface {
+	RemoteDevice(devicePath string) bool
+}
+
+// IsRemoteDevice reports whether a device path names a phone rather than a
+// reader. A pinned path that does can never be opened as a reader, so it is
+// worth recognizing before it becomes a connection retried forever.
+func IsRemoteDevice(m Manager, devicePath string) bool {
+	if m == nil || devicePath == "" {
+		return false
+	}
+	if checker, ok := m.(RemoteDeviceChecker); ok {
+		return checker.RemoteDevice(devicePath)
+	}
+	remote, ok := m.(RemoteManager)
+	return ok && remote.RemoteDevices()
+}
+
+// ListReaders returns the devices that can serve as this agent's reader,
+// falling back to every device a manager knows for one that draws no
+// distinction.
+func ListReaders(m Manager) ([]string, error) {
+	if m == nil {
+		return nil, nil
+	}
+	if lister, ok := m.(ReaderLister); ok {
+		return lister.ListReaders()
+	}
+	if remote, ok := m.(RemoteManager); ok && remote.RemoteDevices() {
+		return nil, nil
+	}
+	return m.ListDevices()
+}

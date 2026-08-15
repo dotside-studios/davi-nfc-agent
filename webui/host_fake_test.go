@@ -8,11 +8,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
-// fakeHost is a Host with no agent behind it.
-//
-// The whole reason the package takes an interface is that it can be exercised
-// like this: every test below drives the real routes, the real gate and the
-// real dispatcher against state it controls outright.
+// fakeHost is a Host with no agent behind it, so the tests drive the real
+// routes, the real gate and the real dispatcher against state they control.
 type fakeHost struct {
 	mu sync.Mutex
 

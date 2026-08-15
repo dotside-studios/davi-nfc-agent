@@ -4,10 +4,6 @@ import type { TagLink } from '../useTags'
 import { fmtTime } from '../format'
 import { Empty, Notice, Panel } from '../ui'
 
-/**
- * Scans, writes, locks and errors as they happen. The tray shows only the card
- * currently present, so a tag presented and taken away leaves no trace.
- */
 const KINDS: { key: LiveEvent['kind']; label: string }[] = [
   { key: 'scan', label: 'scans' },
   { key: 'write', label: 'writes' },

@@ -3,10 +3,7 @@ import type { LogEntry, LogLevel } from '../types'
 import { fmtTime } from '../format'
 import { Empty, Panel } from '../ui'
 
-/**
- * The agent's log output. Previously this went to stderr and nowhere else, so
- * for a tray app started from a launcher it was discarded as it was produced.
- */
+/** The agent's log output, filterable and downloadable. */
 export function Logs({ logs, onClear }: { logs: LogEntry[]; onClear: () => void }) {
   const [level, setLevel] = useState<LogLevel | 'all'>('all')
   const [query, setQuery] = useState('')

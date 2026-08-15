@@ -1,5 +1,5 @@
-/** Display formatting. Kept apart from ui.tsx so that file exports only
- *  components, which is what lets fast refresh work on it. */
+/** Display formatting. Kept out of ui.tsx so that file exports only components,
+ *  which is what lets fast refresh work on it. */
 
 export function fmtDuration(seconds: number): string {
   if (seconds < 60) return `${Math.floor(seconds)}s`

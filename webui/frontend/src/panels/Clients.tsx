@@ -3,11 +3,7 @@ import type { ControlState } from '../types'
 import { useAction } from '../useControl'
 import { ActionLink, Dot, Empty, Panel } from '../ui'
 
-/**
- * The applications currently driving the reader. Only their count was visible
- * before, which cannot answer the question an operator actually has when a tag
- * is written unexpectedly: what is connected, and from where.
- */
+/** The applications currently driving the reader, and where each connected from. */
 export function Clients({ state }: { state: ControlState }) {
   const act = useAction()
   const { clients } = state

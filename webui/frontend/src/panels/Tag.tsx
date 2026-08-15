@@ -6,11 +6,7 @@ import { fmtBytes, fmtDateTime } from '../format'
 import { ActionLink, Copyable, Dot, Empty, KV, Notice, Panel, Row } from '../ui'
 import { Apdu } from './Apdu'
 
-/**
- * Tag inspector and NDEF composer. Writing previously required being a client
- * application — the agent's smart poster, vCard, AAR and raw record support was
- * unreachable without writing code against the WebSocket protocol.
- */
+/** Tag inspector and NDEF composer. */
 export function Tag({ tags, writable }: { tags: Tags; writable: boolean }) {
   const { tag, capabilities } = tags
 

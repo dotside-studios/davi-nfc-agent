@@ -5,14 +5,7 @@ import type { Exchange } from '../types'
 import type { Tags } from '../useTags'
 import { Empty, Notice, Panel } from '../ui'
 
-/**
- * A console for raw exchanges with the present tag.
- *
- * The agent has been able to do this since the transceive channel was added,
- * but only agent-to-device — no client could ask for one, so DESFire, ISO-DEP
- * applets and capability probing meant writing a program. This is that channel
- * reachable by hand.
- */
+/** Raw exchanges with the present tag, over the client transceive channel. */
 export function Apdu({ tags, writable }: { tags: Tags; writable: boolean }) {
   const [command, setCommand] = useState('FF CA 00 00 00')
   const [raw, setRaw] = useState(false)

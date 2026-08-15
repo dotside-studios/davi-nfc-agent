@@ -3,8 +3,6 @@ import type { ControlState, Mode } from '../types'
 import { useAction } from '../useControl'
 import { ActionLink, Notice } from '../ui'
 
-/** The reader controls, shared by Overview so they are one click from landing. */
-
 export function ModeControl({ state }: { state: ControlState }) {
   const act = useAction()
   const { settings } = state

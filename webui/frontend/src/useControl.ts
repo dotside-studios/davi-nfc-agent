@@ -5,8 +5,8 @@ import type { ControlState, LogEntry } from './types'
 
 /**
  * Agent state is a Query cache entry kept fresh by a push rather than polling.
- * Query owns the cache and error states; the socket only writes newer snapshots
- * into it, so a failed socket still leaves the query able to populate the page.
+ * The socket only writes newer snapshots into it, so a failed socket still
+ * leaves the query able to populate the page.
  */
 
 export const controlKeys = {

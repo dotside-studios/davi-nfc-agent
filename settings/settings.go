@@ -13,8 +13,7 @@ import (
 
 const fileName = "settings.json"
 
-// Settings holds the operator preferences that survive a restart. These
-// previously lived only in tray menu state or a command-line flag.
+// Settings holds the operator preferences that survive a restart.
 //
 // Credentials are deliberately not here: the API secret, paired devices and
 // origin allowlist keep their own files.
@@ -39,8 +38,7 @@ type Settings struct {
 	RequirePairedDevice bool `json:"requirePairedDevice"`
 }
 
-// DefaultSettings matches the historical defaults, so introducing the file
-// changes nothing until something is deliberately saved.
+// Defaults are what the agent does when no file has ever been saved.
 func Defaults() Settings {
 	return Settings{
 		Mode:      ModeReadWrite,
@@ -217,7 +215,7 @@ func (s Settings) clone() Settings {
 	return out
 }
 
-// normalizeSettings coerces settings into a form the agent can apply.
+// normalize coerces settings into a form the agent can apply.
 func normalize(s Settings) Settings {
 	switch s.Mode {
 	case ModeReadWrite, ModeReadOnly, ModeWriteOnly:

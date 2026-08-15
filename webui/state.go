@@ -81,8 +81,7 @@ type SecurityInfo struct {
 	ControlSessions     int       `json:"controlSessions"`
 }
 
-// CertInfo describes the certificate being served. Expiry and covered names are
-// the two things that break a deployment and neither is visible elsewhere.
+// CertInfo describes the certificate being served.
 type CertInfo struct {
 	Subject     string    `json:"subject"`
 	Issuer      string    `json:"issuer"`
@@ -241,8 +240,7 @@ func (c *Server) buildDeviceInfo() []DeviceInfo {
 }
 
 // buildClientInfo lists the applications currently connected to the client
-// endpoint. Until now only their count was visible, which cannot answer the
-// question an operator actually has: what is driving the reader.
+// endpoint.
 func (c *Server) buildClientInfo() []Client {
 	clients := c.host.Clients()
 	if clients == nil {

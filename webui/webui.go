@@ -2,9 +2,8 @@
 // /control and the console that drives it, whose source lives in frontend/ and
 // whose build is embedded by embed.go.
 //
-// The package depends on no agent internals. Everything it needs is declared
-// here as Host and supplied by the caller, which is what lets the whole feature
-// be left out of a build (see the nowebui tag) without the agent noticing.
+// It imports no agent internals; everything it needs is declared here as Host
+// and supplied by the caller.
 package webui
 
 import (
@@ -14,11 +13,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
-// Host is what the console needs from the agent it administers.
-//
-// It is deliberately stated as one interface rather than reaching into an
-// agent struct: this is the complete list of what the console can do, so the
-// blast radius of the feature is readable in one place.
+// Host is what the console needs from the agent it administers. Stating it as
+// one interface makes the complete list of what the console can do readable in
+// one place.
 type Host interface {
 	// ---- identity and lifecycle ----
 
@@ -114,7 +111,6 @@ type Config struct {
 	// Logs is the ring the console tails. Nil disables the log views.
 	Logs *logbuf.Ring
 
-	// Name and Version identify the build to the console.
 	Name    string
 	Version string
 	Dev     bool

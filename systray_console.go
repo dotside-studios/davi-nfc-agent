@@ -12,8 +12,7 @@ import (
 )
 
 // AttachConsole gives the tray the console it opens, and gives the console's
-// host the tray, so an action taken in one runs through the same code as the
-// other rather than the two drifting apart.
+// host the tray, so an action taken in either runs through the same code.
 func (s *SystrayApp) AttachConsole(console *Console) {
 	s.console = console
 	if host, ok := s.agent.consoleHost.(*webuiHost); ok && host != nil {
@@ -21,7 +20,6 @@ func (s *SystrayApp) AttachConsole(console *Console) {
 	}
 }
 
-// setupConsoleMenu adds the control center entry.
 func (s *SystrayApp) setupConsoleMenu() {
 	s.mConsole = systray.AddMenuItem("Open Control Center", "Manage this agent in a browser")
 	if s.console == nil {

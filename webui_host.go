@@ -11,11 +11,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
-// webuiHost adapts the agent to webui.Host.
-//
-// It exists so the webui package depends on nothing here: every reach into the
-// agent is a method on this type, which makes the console's whole surface area
-// on the agent readable in one file.
+// webuiHost adapts the agent to webui.Host. Every reach the console makes into
+// the agent is a method here.
 type webuiHost struct {
 	agent    *Agent
 	settings *settings.Store

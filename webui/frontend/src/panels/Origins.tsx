@@ -3,8 +3,7 @@ import type { ControlState } from '../types'
 import { useAction } from '../useControl'
 import { ActionLink, Empty, Notice, Panel } from '../ui'
 
-/** The browser allowlist. The tray offers a blocked origin only while it is on
- *  screen; here the refusals accumulate and stay clickable. */
+/** The browser allowlist, and the origins it has recently refused. */
 export function Origins({ state }: { state: ControlState }) {
   const act = useAction()
   const { origins } = state

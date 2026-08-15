@@ -5,8 +5,7 @@ import type { LiveEvent, ScanRecord, TagCapabilities, TagData, WriteRecord } fro
 /**
  * The console's connection to the ordinary client endpoint. It speaks the same
  * protocol as any other client rather than taking a private path through the
- * control API, so there is one implementation of write, lock and capabilities
- * and the console behaves exactly as a real application does.
+ * control API, so there is one implementation of write, lock and capabilities.
  */
 
 const EVENT_LIMIT = 2000

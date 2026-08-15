@@ -3,11 +3,7 @@ import type { TagLink } from '../useTags'
 import { Live } from './Live'
 import { Logs } from './Logs'
 
-/**
- * Both streams side by side: tag events on the left, agent log on the right.
- * They are usually read together — a failed write and the line explaining it
- * arrive at the same moment — and a wide screen has room for both.
- */
+/** Tag events and the agent log side by side; they are usually read together. */
 export function Activity({
   events,
   logs,

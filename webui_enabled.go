@@ -11,14 +11,10 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
-// Console is the agent's view of the control center: a handler to mount, a way
-// to open it, and a nudge when something it displays has changed.
-//
-// A build with -tags nowebui gets the stub in webui_disabled.go, and every
-// caller tolerates a nil one.
+// Console is the agent's view of the control center. A build with -tags nowebui
+// gets the stub in webui_disabled.go, and every caller tolerates a nil one.
 type Console = webui.Server
 
-// setupConsole builds the control center over the agent.
 func setupConsole(agent *Agent, store *settings.Store, logs *logbuf.Ring) *Console {
 	host := &webuiHost{agent: agent, settings: store}
 	console := webui.New(webui.Config{

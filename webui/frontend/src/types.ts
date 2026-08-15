@@ -1,4 +1,4 @@
-/** Mirrors the Go types in control_state.go. */
+/** Mirrors the Go types in webui/state.go. */
 
 export type Mode = 'readwrite' | 'read' | 'write'
 

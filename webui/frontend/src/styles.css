@@ -203,11 +203,8 @@ main {
 
 /* Multi-column rather than grid: panels have very different heights, and a grid
    row is as tall as its tallest cell, which leaves a ragged band of white under
-   the short ones. Columns pack them and balance the height instead.
-   
-   Capped at two: a third column makes each one narrow enough that content wraps
-   more than it packs, and spreads related panels far enough apart to read as
-   clutter rather than as organisation. */
+   the short ones. Columns pack them instead. Capped at two — a third makes each
+   narrow enough that content wraps more than it packs. */
 .cols {
   columns: 2 480px;
   column-gap: 8px;
@@ -216,9 +213,8 @@ main {
   break-inside: avoid;
 }
 
-/* A narrow column of context beside the column that carries the work. Used by
-   Overview (knobs beside what the reader is doing) and Tag (what the tag is
-   beside what to write to it). */
+/* A narrow column of context beside the column that carries the work, as on
+   Overview: the knobs beside what the reader is doing. */
 .aside-main {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) 2fr;
@@ -234,8 +230,7 @@ main {
   grid-template-columns: 1fr 1fr;
 }
 
-/* A section list down the side with the chosen one beside it. Used where a tab
-   covers one subject in several parts that are each too small for a tab. */
+/* A section list down the side, with the sections themselves beside it. */
 .sections {
   display: grid;
   grid-template-columns: 180px 1fr;
@@ -280,10 +275,9 @@ main {
 }
 .section-body {
   min-width: 0;
-  /* Capped rather than full-bleed: these are tables of a few short columns and
-     paragraphs of prose, and stretching them to a wide monitor strands each
-     row's action a long way from the row. Left-aligned, not centred — the nav
-     sits against the left edge and the content should line up with it. */
+  /* Capped rather than full-bleed: stretching a table of short columns to a
+     wide monitor strands each row's action a long way from the row. Left, not
+     centred, so it lines up with the nav. */
   max-width: 1000px;
 }
 .section-body > section {

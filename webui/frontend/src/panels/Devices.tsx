@@ -3,8 +3,7 @@ import { useAction } from '../useControl'
 import { fmtDateTime, fmtRelative } from '../format'
 import { ActionLink, Dot, Empty, Notice, Panel } from '../ui'
 
-/** Paired devices, one row each. The tray can only revoke all of them at once,
- *  which makes removing one lost phone cost every other phone its pairing. */
+/** Paired devices, one row each, revocable individually or all at once. */
 export function Devices({ state }: { state: ControlState }) {
   const act = useAction()
   const { devices, security } = state

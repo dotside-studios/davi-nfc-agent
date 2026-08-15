@@ -9,12 +9,8 @@ import { Origins } from './Origins'
 
 /**
  * Who may reach this agent and with what credential: paired devices, the
- * browser allowlist, the shared secret, and the certificate. One tab with
- * sections down the side, because they are read as one subject and none of
- * them fills a tab alone.
- *
- * The reader and server settings deliberately live on Overview instead — those
- * get turned while working, and these do not.
+ * browser allowlist, the shared secret, and the certificate. One scrolling page
+ * with the sections listed down the side.
  */
 
 type SectionId = 'clients' | 'devices' | 'origins' | 'credentials' | 'trust' | 'certificate'

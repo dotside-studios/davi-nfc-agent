@@ -1,6 +1,6 @@
 // Package logbuf keeps the agent's most recent log output in memory so it can
-// be read back after the fact. Started from a desktop launcher there is no
-// stderr to read, so without this the agent's diagnostics are discarded.
+// be read back after the fact, there being no stderr to read when the agent is
+// started from a desktop launcher.
 package logbuf
 
 import (

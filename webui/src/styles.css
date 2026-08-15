@@ -216,17 +216,22 @@ main {
   break-inside: avoid;
 }
 
-/* Overview: knobs and state on the left, what the reader is doing on the
-   right. The right side carries the tall content, so it gets the two thirds. */
-.overview {
+/* A narrow column of context beside the column that carries the work. Used by
+   Overview (knobs beside what the reader is doing) and Tag (what the tag is
+   beside what to write to it). */
+.aside-main {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) 2fr;
   gap: 8px;
   align-items: start;
 }
-.overview-side,
-.overview-main {
+.aside-main > * {
   min-width: 0;
+}
+/* Even halves where both columns carry comparable weight, as on Tag: what the
+   tag holds beside what to write to it. */
+.aside-main.even {
+  grid-template-columns: 1fr 1fr;
 }
 
 /* A section list down the side with the chosen one beside it. Used where a tab
@@ -603,7 +608,7 @@ table.grid th.mono {
   .cols {
     columns: 1;
   }
-  .overview,
+  .aside-main,
   .sections {
     grid-template-columns: 1fr;
   }

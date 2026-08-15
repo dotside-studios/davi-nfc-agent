@@ -26,8 +26,8 @@ export function Overview({
   onOpenTag: () => void
 }) {
   return (
-    <div className="overview">
-      <div className="overview-side">
+    <div className="aside-main">
+      <div>
         <AgentPanel state={state} />
         <Panel title="Reader">
           <DevicePicker state={state} />
@@ -42,7 +42,7 @@ export function Overview({
         <ConfigPanel state={state} />
       </div>
 
-      <div className="overview-main">
+      <div>
         {state.origins.allowAny ? (
           <Notice kind="err">
             <b>Origin checking is off for this session.</b> Any page the operator opens can drive this

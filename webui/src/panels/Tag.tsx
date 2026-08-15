@@ -14,11 +14,15 @@ export function Tag({ tags, writable }: { tags: Tags; writable: boolean }) {
   const { tag, capabilities } = tags
 
   return (
-    <div className="cols">
-      <Inspector tags={tags} />
-      <Composer tags={tags} writable={writable} />
-      {tag ? <Records records={tag.message?.records} text={tag.text} /> : null}
-      {capabilities ? <Capabilities tags={tags} /> : null}
+    <div className="aside-main even">
+      <div>
+        <Inspector tags={tags} />
+        {capabilities ? <Capabilities tags={tags} /> : null}
+      </div>
+      <div>
+        {tag ? <Records records={tag.message?.records} text={tag.text} /> : null}
+        <Composer tags={tags} writable={writable} />
+      </div>
     </div>
   )
 }

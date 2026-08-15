@@ -475,6 +475,7 @@ When a card is detected and read:
     "type": "MIFARE Classic 1K",
     "technology": "ISO14443A",
     "scannedAt": "2024-10-06T12:34:56Z",
+    "deviceID": "dev_abc123",
     "capabilities": {
       "canRead": true,
       "canWrite": true,
@@ -508,6 +509,7 @@ When a card is detected and read:
 | `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental) |
 | `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.) |
 | `scannedAt` | ISO 8601 timestamp |
+| `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it — which is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
 | `capabilities` | What the tag supports — see [Tag Capabilities](#tag-capabilities) |
 | `message` | Structured NDEF message data |
 | `text` | Quick access to first text record |

@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-08-15
+
+### Added
+
+- **A tag broadcast names the reader that read it.** `tagData` described the tag
+  and not its source, so a client holding one had no way to tell whether a
+  `deviceStatus` applied to it. The payload now carries `deviceID` when the tag
+  came from a paired device, taken from the source the tag already records.
+  Absent means the agent's own hardware, which is what every tag was before
+  devices existed. See [Tag Data](docs/api.md#tag-data)
+
+### Changed
+
+- The tag inspector names the reader a tag came from, since with a phone paired
+  that is no longer a question with one answer
+
+### Fixed
+
+- **A smartphone disconnecting no longer floods the log.** `GetTags` reported a
+  closed device as `fmt.Errorf("device is closed")` — its own phrase, matching
+  no sentinel. `IsDeviceClosedError` looks for the typed `ErrDeviceClosed` or,
+  failing that, the string `device closed`, so it declined every one of them:
+  two spellings that read identically to a person and not at all to
+  `strings.Contains`. Nothing downstream handled a phone disconnecting as a
+  result — the reader still had a device, so it polled straight back into the
+  closed one, a loop with no delay and a log line every turn, and a reconnection
+  never once attempted. The three returns are now `nfc.ErrDeviceClosed`, which
+  survives the `%w` wrapping `getTags` adds; the string fallback accepts both
+  spellings, since it exists for text this package does not control
+- **A poll that hit an unrecognized error is paced.** `handleDeviceErrors`
+  treats "the device manager still has a device" as a sign the device recovered,
+  and polls again immediately. That holds for the branches that close and reopen
+  one, but an error no branch recognized left the device exactly as it was, so
+  the test passed trivially and the loop spun at full speed. The delay for an
+  unhandled error existed already, one branch further down, unreachable in the
+  case that needed it most. A poll that recognizes nothing now waits the same
+  interval, so an error past the classifiers costs a line a second rather than a
+  line a millisecond
+- **A standing device fault is reported once, not on every poll.** `HandleError`
+  is reached from the poll loop, so an error that persisted was logged as often
+  as the device was polled — and the reason a line is worth reading is that the
+  condition changed. It now reports a fault the first time, again when the
+  reason changes, and again when one returns after the device has worked,
+  matching what `ListDevices` was given in 1.1.1 against the same log buffer
+- **The control center no longer discards tags scanned by a phone.** A tag
+  tapped on a paired phone reached the frontend and never appeared in the
+  console, which reads the same broadcast on the same endpoint. The console
+  cleared its tag whenever a `deviceStatus` reported no card — and that status
+  describes the agent's own reader, whose `cardPresent` is false for the entire
+  life of every phone scan. The tag was received, displayed, and wiped by the
+  next status message. No other consumer reads tag presence out of reader
+  status, which is why only this one lost them. Reader status now clears only a
+  tag the reader itself produced; a tag from a device is cleared by the device
+  saying so
+- **A tag leaving a phone's field is recorded as a removal.** A device reports it
+  as a `tagData` with no UID, which the console treated as a scan — rendering a
+  blank tag over the real one and logging a scan of nothing
+
 ## [1.1.1] - 2026-08-15
 
 ### Added

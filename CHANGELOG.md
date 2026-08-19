@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The agent starts without auto-TLS again.** `-auto-tls=false`, and an
+  externally provisioned `-cert`/`-key`, both panicked before the systray
+  appeared. The bootstrap server takes its CA source as an interface so it can
+  run without one — that deployment has no CA to hand out but still has phones
+  to pair — and every use of the field is nil-guarded. The guards never fired:
+  the caller built the argument as a concrete `*tls.Manager`, so a nil manager
+  arrived boxed in a non-nil interface, `s.manager != nil` passed, and the next
+  line dereferenced nothing. The nil is now normalised once in
+  `NewBootstrapServer` rather than at the four places that read the field, so a
+  guard added later cannot quietly inherit the same bug
+
 ## [1.1.3] - 2026-08-15
 
 ### Fixed

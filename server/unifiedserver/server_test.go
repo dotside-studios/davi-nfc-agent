@@ -13,7 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/gorilla/websocket"
 )
@@ -26,15 +26,17 @@ func newTestServer(t *testing.T) string {
 	bridge := server.NewServerBridge()
 	deviceMgr := remotenfc.NewManager(30 * time.Second)
 
-	device := deviceserver.New(deviceserver.Config{
-		DeviceManager: deviceMgr,
-	}, bridge)
+	// The device endpoint is the driver's handler behind the credential check,
+	// which is how the agent mounts it.
+	auth := server.NewDeviceAuth("", nil, false)
+	device := auth.Wrap(deviceMgr.Handler(remotenfc.ServerOptions{}))
 	client := clientserver.New(clientserver.Config{}, bridge)
+	router := tagrouter.New(tagrouter.Config{Remote: deviceMgr}, bridge)
 
 	u := unifiedserver.New(unifiedserver.Config{}, device, client)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	device.StartBackground(ctx)
+	router.Start(ctx)
 	client.StartBackground(ctx)
 	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
 

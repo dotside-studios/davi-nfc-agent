@@ -1,4 +1,4 @@
-package deviceserver
+package tagrouter
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 )
 
 // respond runs one transceive request through the executor and returns the reply.
-func respond(t *testing.T, s *Server, msg server.TransceiveRequestMessage) server.TransceiveResponseMessage {
+func respond(t *testing.T, s *Router, msg server.TransceiveRequestMessage) server.TransceiveResponseMessage {
 	t.Helper()
 
 	msg.ResponseCh = make(chan server.TransceiveResponseMessage, 1)

@@ -59,6 +59,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`deviceserver` is gone, split into the two things it was.** It had not been
+  a server for a while: no listener, no port, and one HTTP method that was a
+  credential check in front of somebody else's handler. What remained was
+  authentication and the routing that answers "reader or device?" for each
+  client request, held together only because it was the one place that could
+  see both.
+
+  The credential check is `server.DeviceAuth`, an `http.Handler` wrapper beside
+  the `CheckAuth` and `CheckPairedDevice` it calls. The routing is
+  `server/tagrouter`, which serves no HTTP at all. `unifiedserver` now takes a
+  plain `http.Handler` for the device endpoint instead of a device server, and
+  no longer imports either of them, so what mounts the endpoint decides what
+  stands in front of it.
+
+  A build that wires these up itself does what the agent does:
+  `auth.Wrap(remote.Handler(opts))` for the endpoint, `tagrouter.New` for the
+  routing, and `server.PumpTagData` to join the driver to the bridge. Nothing
+  is started implicitly by something else
+
 - **The agent drains its own tag sources.** The reader pump lived in
   `deviceserver`, which had nothing to do with serving it: the package was once
   "the tag-facing side of the bridge", so the hardware reader went there, and

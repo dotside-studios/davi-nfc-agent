@@ -1,4 +1,4 @@
-package deviceserver_test
+package tagrouter_test
 
 import (
 	"testing"

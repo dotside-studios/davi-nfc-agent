@@ -1,18 +1,12 @@
-package deviceserver_test
+package tagrouter_test
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/gorilla/websocket"
 )
 
@@ -28,29 +22,8 @@ func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *server.Serv
 	}
 	reader.SetMode(mode)
 
-	bridge := server.NewServerBridge()
-	deviceMgr := remotenfc.NewManager(30 * time.Second)
-
-	dev := deviceserver.New(deviceserver.Config{
-		Reader:        reader,
-		DeviceManager: deviceMgr,
-	}, bridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	dev.StartBackground(ctx)
-	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
-
-	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
-
-	t.Cleanup(func() {
-		ts.Close()
-		cancel()
-		bridge.Close()
-		deviceMgr.Close()
-		reader.Stop()
-	})
-
-	return "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device", bridge
+	st := newStack(t, stackConfig{Reader: reader})
+	return st.URL, st.Bridge
 }
 
 func sampleLock(requestID string) server.LockRequestMessage {

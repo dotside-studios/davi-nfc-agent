@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
@@ -116,13 +117,15 @@ type Agent struct {
 	Reader *nfc.NFCReader
 
 	// The device and client endpoints are served from a single listener
-	// (UnifiedServer) on the configured port. DeviceServer and ClientServer
-	// hold the device/client logic; the unified server fronts both and routes
-	// each /ws connection to the right one. All are nil until Start.
+	// (UnifiedServer) on the configured port, which routes each /ws connection
+	// to the device driver or the client server. Router decides which tag
+	// source a client request applies to, and DeviceAuth gates the device
+	// endpoint. All are nil until Start.
 	Bridge        *server.ServerBridge
 	UnifiedServer *unifiedserver.Server
-	DeviceServer  *deviceserver.Server
 	ClientServer  *clientserver.Server
+	Router        *tagrouter.Router
+	DeviceAuth    *server.DeviceAuth
 
 	// Settled at construction.
 	info                buildinfo.Info
@@ -315,7 +318,7 @@ func (a *Agent) startLocked(devicePath string) error {
 // lifecycle lock and owns the state transition; see Stop. It is safe to call on
 // a partly started agent, which is what makes an aborted Start recoverable.
 func (a *Agent) stopLocked() {
-	if a.Reader == nil && a.DeviceServer == nil {
+	if a.Reader == nil && a.UnifiedServer == nil {
 		return
 	}
 
@@ -331,9 +334,9 @@ func (a *Agent) stopLocked() {
 		a.ClientServer = nil
 	}
 
-	if a.DeviceServer != nil {
-		a.DeviceServer.Stop()
-		a.DeviceServer = nil
+	if a.Router != nil {
+		a.Router.Stop()
+		a.Router = nil
 	}
 
 	if a.Bridge != nil {
@@ -452,9 +455,9 @@ func (a *Agent) stopServers() {
 		a.ClientServer = nil
 	}
 
-	if a.DeviceServer != nil {
-		a.DeviceServer.Stop()
-		a.DeviceServer = nil
+	if a.Router != nil {
+		a.Router.Stop()
+		a.Router = nil
 	}
 
 	if a.Bridge != nil {
@@ -478,22 +481,25 @@ func (a *Agent) startServers() error {
 	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
 	a.Reader.Start()
 	go a.pumpReader(a.pumpCtx, a.Reader, a.Bridge)
-	if remote := findDeviceDriver(a.manager); remote != nil {
+
+	// The device endpoint is the driver's own handler behind the agent's
+	// credential check. The driver speaks the device protocol and knows nothing
+	// about API secrets or pairing; the agent knows nothing about the protocol.
+	remote := findDeviceDriver(a.manager)
+	a.DeviceAuth = server.NewDeviceAuth(a.apiSecret, a.tokenVerifier(), a.requirePairedDevice)
+	var deviceEndpoint http.Handler
+	if remote != nil {
 		go server.PumpTagData(a.pumpCtx, remote.Data(), a.Bridge)
+		deviceEndpoint = a.DeviceAuth.Wrap(remote.Handler(remotenfc.ServerOptions{
+			CheckOrigin:          a.checkOrigin(),
+			AllowTagModification: a.tagModificationPolicy(),
+			PublicKeyPin:         a.publicKeyPin,
+		}))
 	}
 
-	// Create device server (handles NFC device connections)
-	a.DeviceServer = deviceserver.New(deviceserver.Config{
-		Reader:         a.Reader,
-		DeviceManager:  findDeviceDriver(a.manager),
-		APISecret:      a.apiSecret,
-		AllowedOrigins: a.allowedOrigins,
-		OriginPolicy:   a.originPolicy(),
-		PublicKeyPin:   a.publicKeyPin,
-		TokenVerifier:  a.tokenVerifier(),
-
-		RequirePairedDevice: a.requirePairedDevice,
-	}, a.Bridge)
+	// Routes each client request to whichever source holds the tag it names.
+	a.Router = tagrouter.New(tagrouter.Config{Reader: a.Reader, Remote: remote}, a.Bridge)
+	a.Router.Start(a.pumpCtx)
 
 	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
@@ -513,7 +519,7 @@ func (a *Agent) startServers() error {
 		ControlHandler:  a.consoleRoutes(),
 		UIHandler:       a.consoleAssets(),
 		MDNSServiceName: a.info.DisplayName + " Device",
-	}, a.DeviceServer, a.ClientServer)
+	}, deviceEndpoint, a.ClientServer)
 
 	// Captured, not read from the field: a Stop that lands before this
 	// goroutine is scheduled sets a.UnifiedServer to nil, and the goroutine
@@ -591,6 +597,27 @@ func (a *Agent) CurrentDevicePath() string {
 	return a.Reader.DevicePath()
 }
 
+// checkOrigin admits or rejects a device upgrade by Origin, preferring the
+// live policy over the static allowlist so the tray can admit one without
+// restarting the listener.
+func (a *Agent) checkOrigin() func(r *http.Request) bool {
+	if policy := a.originPolicy(); policy != nil {
+		return server.CheckOriginPolicy(policy)
+	}
+	return server.CheckOrigin(a.allowedOrigins)
+}
+
+// tagModificationPolicy captures the reader's mode as a predicate, so the
+// driver refuses a modifying operation the agent's mode forbids. Read-only
+// gates every route to a tag, not just the hardware one.
+func (a *Agent) tagModificationPolicy() func() bool {
+	reader := a.Reader
+	if reader == nil {
+		return nil
+	}
+	return func() bool { return reader.GetMode() != nfc.ModeReadOnly }
+}
+
 // originPolicy returns the live allowlist as an origin policy, or nil to fall
 // back to the static AllowedOrigins list. Returning a typed nil would satisfy
 // the interface and defeat that fallback, so the check is explicit.
@@ -605,8 +632,8 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 		return
 	}
 	a.requirePairedDevice = on
-	if a.DeviceServer != nil {
-		a.DeviceServer.SetRequirePairedDevice(on)
+	if a.DeviceAuth != nil {
+		a.DeviceAuth.SetRequirePaired(on)
 	}
 }
 

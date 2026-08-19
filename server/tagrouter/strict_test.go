@@ -1,16 +1,9 @@
-package deviceserver_test
+package tagrouter_test
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/gorilla/websocket"
 )
 
@@ -26,29 +19,11 @@ func (v tokenVerifier) VerifyToken(token string) (string, bool) {
 
 func newStrictServer(t *testing.T, strict bool) string {
 	t.Helper()
-
-	bridge := server.NewServerBridge()
-	deviceMgr := remotenfc.NewManager(30 * time.Second)
-
-	dev := deviceserver.New(deviceserver.Config{
-		DeviceManager:       deviceMgr,
-		APISecret:           "shared-secret",
-		TokenVerifier:       tokenVerifier{valid: "paired-token"},
-		RequirePairedDevice: strict,
-	}, bridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	dev.StartBackground(ctx)
-	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
-
-	t.Cleanup(func() {
-		ts.Close()
-		cancel()
-		bridge.Close()
-		deviceMgr.Close()
-	})
-
-	return "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
+	return newStack(t, stackConfig{
+		APISecret:     "shared-secret",
+		TokenVerifier: tokenVerifier{valid: "paired-token"},
+		RequirePaired: strict,
+	}).URL
 }
 
 func dialStatus(t *testing.T, url string) int {
@@ -100,44 +75,29 @@ func TestNonStrictModeUnchanged(t *testing.T) {
 // The requirement is settable while the agent runs, so it can be tried against
 // a real device without a restart.
 func TestStrictModeTogglesAtRuntime(t *testing.T) {
-	bridge := server.NewServerBridge()
-	deviceMgr := remotenfc.NewManager(30 * time.Second)
-
-	dev := deviceserver.New(deviceserver.Config{
-		DeviceManager: deviceMgr,
+	st := newStack(t, stackConfig{
 		APISecret:     "shared-secret",
 		TokenVerifier: tokenVerifier{valid: "paired-token"},
-	}, bridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	dev.StartBackground(ctx)
-	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
-	t.Cleanup(func() {
-		ts.Close()
-		cancel()
-		bridge.Close()
-		deviceMgr.Close()
 	})
+	url, dev := st.URL, st.Auth
 
-	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
-
-	if dev.RequirePairedDevice() {
+	if dev.RequirePaired() {
 		t.Error("strict mode defaulted on")
 	}
 	if code := dialStatus(t, url); code != http.StatusSwitchingProtocols {
 		t.Fatalf("loopback got %d before the toggle, want an upgrade", code)
 	}
 
-	dev.SetRequirePairedDevice(true)
+	dev.SetRequirePaired(true)
 
-	if !dev.RequirePairedDevice() {
+	if !dev.RequirePaired() {
 		t.Error("RequirePairedDevice did not report the change")
 	}
 	if code := dialStatus(t, url); code != http.StatusUnauthorized {
 		t.Errorf("loopback got %d after the toggle, want 401", code)
 	}
 
-	dev.SetRequirePairedDevice(false)
+	dev.SetRequirePaired(false)
 
 	if code := dialStatus(t, url); code != http.StatusSwitchingProtocols {
 		t.Errorf("loopback got %d after turning it off, want an upgrade", code)

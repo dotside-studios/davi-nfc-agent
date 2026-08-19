@@ -1,18 +1,12 @@
-package deviceserver_test
+package tagrouter_test
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/gorilla/websocket"
 )
 
@@ -20,30 +14,8 @@ import (
 // can submit a write the way the client server would.
 func newWriteTestServer(t *testing.T) (string, *server.ServerBridge) {
 	t.Helper()
-
-	bridge := server.NewServerBridge()
-	deviceMgr := remotenfc.NewManager(30 * time.Second)
-
-	dev := deviceserver.New(deviceserver.Config{DeviceManager: deviceMgr}, bridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	dev.StartBackground(ctx)
-
-	// The driver's scans reach the bridge because something pumps them there.
-	// The agent does it in the shipped binary; a consumer wiring these up
-	// directly does it here.
-	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
-
-	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
-
-	t.Cleanup(func() {
-		ts.Close()
-		cancel()
-		bridge.Close()
-		deviceMgr.Close()
-	})
-
-	return "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device", bridge
+	st := newStack(t, stackConfig{})
+	return st.URL, st.Bridge
 }
 
 // scanTag makes the device the holder of the active tag, which is what a write

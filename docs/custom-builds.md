@@ -130,7 +130,10 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `nfc/pcsc` | The PC/SC hardware backend |
 | `nfc/remotenfc` | Phones and WebNFC browsers: the device WebSocket endpoint, its sessions and the tags behind them |
 | `nfc/multimanager` | Several backends behind one `nfc.Manager` |
-| `server/…` | The client WebSocket endpoint, and the routing that picks a reader or a device per request |
+| `server` | The bridge between tag sources and clients, and the device credential check |
+| `server/clientserver` | The client WebSocket endpoint |
+| `server/tagrouter` | Picks the reader or a device for each client request |
+| `server/unifiedserver` | One listener fronting all of the above |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
 
 Dependencies run in one direction. `agent/console` and `agent/tray` import

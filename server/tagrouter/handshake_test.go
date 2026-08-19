@@ -1,41 +1,16 @@
-package deviceserver_test
+package tagrouter_test
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/gorilla/websocket"
 )
 
 func newDeviceTestServer(t *testing.T) string {
 	t.Helper()
-
-	bridge := server.NewServerBridge()
-	deviceMgr := remotenfc.NewManager(30 * time.Second)
-
-	dev := deviceserver.New(deviceserver.Config{DeviceManager: deviceMgr}, bridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	dev.StartBackground(ctx)
-
-	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
-
-	t.Cleanup(func() {
-		ts.Close()
-		cancel()
-		bridge.Close()
-		deviceMgr.Close()
-	})
-
-	return "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
+	return newStack(t, stackConfig{}).URL
 }
 
 func dialDevice(t *testing.T, url string, subprotocols []string) (*websocket.Conn, string) {
@@ -377,26 +352,8 @@ func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
 // A device learns the agent's key pin during the handshake it already performs,
 // so it can recognize the same agent later without a certificate authority.
 func TestHelloReportsPublicKeyPin(t *testing.T) {
-	bridge := server.NewServerBridge()
-	deviceMgr := remotenfc.NewManager(30 * time.Second)
-
 	const pin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-	dev := deviceserver.New(deviceserver.Config{
-		DeviceManager: deviceMgr,
-		PublicKeyPin:  pin,
-	}, bridge)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	dev.StartBackground(ctx)
-	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
-	t.Cleanup(func() {
-		ts.Close()
-		cancel()
-		bridge.Close()
-		deviceMgr.Close()
-	})
-
-	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
+	url := newStack(t, stackConfig{PublicKeyPin: pin}).URL
 	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{

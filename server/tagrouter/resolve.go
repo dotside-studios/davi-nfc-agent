@@ -1,4 +1,4 @@
-package deviceserver
+package tagrouter
 
 import (
 	"errors"
@@ -38,7 +38,7 @@ func refuse(code protocol.ErrorCode, format string, args ...any) *routeError {
 // the tag it names rather than preferring one source over another. A preference
 // is re-evaluated when the request arrives, so a card lifted since the scan
 // used to move the request to whichever phone had scanned last.
-func (s *Server) resolveRoute(uid, deviceID string, allowUntargeted bool) (route, error) {
+func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route, error) {
 	reader := s.config.Reader
 
 	// A named device is held to the UID too, when one is given.
@@ -72,7 +72,7 @@ func (s *Server) resolveRoute(uid, deviceID string, allowUntargeted bool) (route
 }
 
 // deviceHoldingUID finds the remote device holding a tag, by UID.
-func (s *Server) deviceHoldingUID(uid string) (remotenfc.ActiveTagInfo, bool) {
+func (s *Router) deviceHoldingUID(uid string) (remotenfc.ActiveTagInfo, bool) {
 	if s.remote == nil {
 		return remotenfc.ActiveTagInfo{}, false
 	}
@@ -97,7 +97,7 @@ func readerHoldsUID(reader *nfc.NFCReader, uid string) bool {
 
 // guessRoute is what allowUntargeted opts into: the reader while it reports a
 // card, otherwise the most recent remote scan.
-func (s *Server) guessRoute(reader *nfc.NFCReader) (route, error) {
+func (s *Router) guessRoute(reader *nfc.NFCReader) (route, error) {
 	if reader != nil && reader.GetDeviceStatus().CardPresent {
 		return route{reader: true}, nil
 	}

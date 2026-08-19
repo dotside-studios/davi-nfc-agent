@@ -1,12 +1,16 @@
-// Package deviceserver provides the WebSocket server for NFC readers and devices.
-package deviceserver
+// Package tagrouter answers one question for every client request: which of the
+// agent's tag sources does this apply to, the hardware reader or a paired
+// device? It reads the request channels of the bridge and performs the
+// operation on whichever source holds the tag the request names.
+//
+// It serves no HTTP. The device protocol belongs to nfc/remotenfc and the
+// listener to server/unifiedserver; this is the part that has to see both a
+// reader and a device driver at once, which is why it is neither of them.
+package tagrouter
 
 import (
 	"context"
 	"fmt"
-	"log"
-	"net/http"
-	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
@@ -14,87 +18,34 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
-// Server handles device connections and tag data input.
-type Server struct {
+// Config names the tag sources to route between.
+type Config struct {
+	// Reader is the agent's own hardware reader. Nil when it has none.
+	Reader *nfc.NFCReader
+
+	// Remote is the driver serving paired devices. Nil when none are
+	// configured.
+	Remote *remotenfc.Manager
+}
+
+// Router routes client requests to a tag source.
+type Router struct {
 	config Config
 	bridge *server.ServerBridge
+	remote *remotenfc.Manager
 
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	// Handler registry for device message types
-	handlerRegistry *server.HandlerRegistry
-
-	// remote is the remote-device driver, which serves their WebSocket
-	// endpoint and routes work to them. Nil when none are configured.
-	remote *remotenfc.Manager
-
-	// deviceEndpoint is the driver's HTTP handler, reached after this server's
-	// own auth check.
-	deviceEndpoint http.Handler
-
-	// requirePaired is read on every upgrade and settable at runtime, so the
-	// policy can be tried without restarting the agent.
-	requirePaired atomic.Bool
 }
 
-// SetRequirePairedDevice turns the paired-device requirement on or off while
-// the agent runs.
-func (s *Server) SetRequirePairedDevice(on bool) {
-	s.requirePaired.Store(on)
+// New builds the router. It reads nothing until Start.
+func New(config Config, bridge *server.ServerBridge) *Router {
+	return &Router{config: config, bridge: bridge, remote: config.Remote}
 }
 
-// RequirePairedDevice reports whether only paired devices are admitted.
-func (s *Server) RequirePairedDevice() bool {
-	return s.requirePaired.Load()
-}
-
-// New creates a new device server instance.
-func New(config Config, bridge *server.ServerBridge) *Server {
-	s := &Server{
-		config:          config,
-		bridge:          bridge,
-		handlerRegistry: server.NewHandlerRegistry(),
-	}
-
-	s.requirePaired.Store(config.RequirePairedDevice)
-
-	// Register the remote-device driver. It owns the device protocol and the
-	// sessions; this server owns authentication and the choice between a
-	// device and the hardware reader.
-	if config.DeviceManager != nil {
-		s.remote = config.DeviceManager
-		s.deviceEndpoint = s.remote.Handler(remotenfc.ServerOptions{
-			CheckOrigin:          originChecker(config),
-			AllowTagModification: tagModificationPolicy(config.Reader),
-			PublicKeyPin:         config.PublicKeyPin,
-		})
-
-		s.HandleWebSocket(remotenfc.IsDeviceConnection, func(w http.ResponseWriter, r *http.Request) bool {
-			s.deviceEndpoint.ServeHTTP(w, r)
-			return true
-		})
-	}
-
-	return s
-}
-
-// IsDeviceConnection reports whether a request is a device asking to connect
-// rather than a client. The device protocol defines it; this is where the rest
-// of the agent reaches it.
-var IsDeviceConnection = remotenfc.IsDeviceConnection
-
-// HandleWebSocket implements server.HandlerServer interface.
-func (s *Server) HandleWebSocket(matcher func(r *http.Request) bool, handler server.WebSocketHandlerFunc) {
-	s.handlerRegistry.HandleWebSocket(matcher, handler)
-}
-
-// StartBackground starts the bridge consumers that route client requests to a
-// tag. It binds no listener: the unified server owns that and routes device
-// connections here through ServeWS.
-func (s *Server) StartBackground(ctx context.Context) {
-	// Derive a cancelable context so Stop can tear the goroutines down even
-	// when the parent context outlives this server.
+// Start begins draining the bridge's request channels. It returns once the
+// goroutines are running.
+func (s *Router) Start(ctx context.Context) {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
 	go s.handleWriteRequests()
@@ -103,45 +54,15 @@ func (s *Server) StartBackground(ctx context.Context) {
 	go s.handleCapabilitiesRequests()
 }
 
-// ServeWS handles a WebSocket connection request for a device. It performs its
-// own API-secret check and origin validation, so it is safe to call directly
-// from a shared listener (unified single-port mode).
-func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
-	s.handleWebSocket(w, r)
-}
-
-// Stop stops the device server's background work. The unified server owns the
-// HTTP listener; this only cancels the context the background goroutines run
-// under.
-func (s *Server) Stop() {
+// Stop ends them.
+func (s *Router) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
 }
 
-// handleWebSocket handles WebSocket connections from devices.
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if s.requirePaired.Load() {
-		if !server.CheckPairedDevice(w, r, s.config.TokenVerifier) {
-			log.Printf("[device] Connection rejected from %s: no paired-device credential", r.RemoteAddr)
-			return
-		}
-	} else if !server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier) {
-		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
-		return
-	}
-
-	// The remote-device driver serves the connection. Without one there is no
-	// device protocol to speak, so say so rather than accepting a socket that
-	// can only answer "no handler" to everything a device sends.
-	if !s.handlerRegistry.TryCustomWebSocketHandler(w, r) {
-		log.Printf("[device] Connection from %s refused: no device driver configured", r.RemoteAddr)
-		http.Error(w, "no device driver configured", http.StatusServiceUnavailable)
-	}
-}
-
 // handleWriteRequests listens for write requests from the client server.
-func (s *Server) handleWriteRequests() {
+func (s *Router) handleWriteRequests() {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -160,7 +81,7 @@ func (s *Server) handleWriteRequests() {
 // The hardware reader keeps priority while it actually holds a card, so mixed
 // setups behave as they always have. Otherwise the write goes to whichever
 // remote device is currently holding a tag.
-func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
+func (s *Router) executeWriteRequest(msg server.WriteRequestMessage) {
 	reader := s.config.Reader
 
 	// The mode gates every route to a tag, not just the hardware one. The
@@ -234,7 +155,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 // writeViaDevice routes a write to the remote device holding a tag. It reports
 // whether it handled the request; false means no device was available and the
 // caller should fall back to the hardware reader.
-func (s *Server) writeViaDevice(msg server.WriteRequestMessage, active remotenfc.ActiveTagInfo) {
+func (s *Router) writeViaDevice(msg server.WriteRequestMessage, active remotenfc.ActiveTagInfo) {
 	deviceID, uid := active.DeviceID, active.UID
 
 	// Encode here so the device receives exactly the message the hardware path
@@ -289,7 +210,7 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage, active remotenfc
 }
 
 // handleLockRequests listens for make-read-only requests from the client server.
-func (s *Server) handleLockRequests() {
+func (s *Router) handleLockRequests() {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -309,7 +230,7 @@ func (s *Server) handleLockRequests() {
 // card, otherwise the lock goes to the remote device holding a tag. Without the
 // fallback, a lock aimed at a phone-held tag lands on whatever card is sitting
 // on the reader, irreversibly.
-func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
+func (s *Router) executeLockRequest(msg server.LockRequestMessage) {
 	reader := s.config.Reader
 
 	if !modeAllowsTagModification(reader) {
@@ -363,7 +284,7 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 //
 // A lock travels as a write request with Lock set and no NDEF. The device
 // protocol has one tag-modifying frame, not two.
-func (s *Server) lockViaDevice(msg server.LockRequestMessage, active remotenfc.ActiveTagInfo) {
+func (s *Router) lockViaDevice(msg server.LockRequestMessage, active remotenfc.ActiveTagInfo) {
 	deviceID, uid := active.DeviceID, active.UID
 
 	resp, err := s.remote.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
@@ -404,7 +325,7 @@ func (s *Server) lockViaDevice(msg server.LockRequestMessage, active remotenfc.A
 }
 
 // handleCapabilitiesRequests listens for capabilities queries from the client server.
-func (s *Server) handleTransceiveRequests() {
+func (s *Router) handleTransceiveRequests() {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -421,7 +342,7 @@ func (s *Server) handleTransceiveRequests() {
 // executeTransceiveRequest exchanges raw bytes with whichever holds the tag,
 // preferring a remote device when the hardware reader has no card. This is the
 // routing a write uses, so an APDU reaches the tag the operator is looking at.
-func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
+func (s *Router) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 	reader := s.config.Reader
 
 	// A raw exchange cannot be assumed harmless: the same call carries a SELECT
@@ -474,7 +395,7 @@ func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 // transceiveViaDevice routes an exchange to the remote device holding a tag. It
 // reports whether it handled the request; false means no device was available
 // and the caller should fall back to the hardware reader.
-func (s *Server) transceiveViaDevice(msg server.TransceiveRequestMessage, active remotenfc.ActiveTagInfo) {
+func (s *Router) transceiveViaDevice(msg server.TransceiveRequestMessage, active remotenfc.ActiveTagInfo) {
 	deviceID, uid := active.DeviceID, active.UID
 
 	resp, err := s.remote.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
@@ -514,7 +435,7 @@ func (s *Server) transceiveViaDevice(msg server.TransceiveRequestMessage, active
 	}
 }
 
-func (s *Server) handleCapabilitiesRequests() {
+func (s *Router) handleCapabilitiesRequests() {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -529,7 +450,7 @@ func (s *Server) handleCapabilitiesRequests() {
 }
 
 // executeCapabilitiesRequest queries the present tag's capabilities.
-func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessage) {
+func (s *Router) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessage) {
 	reader := s.config.Reader
 
 	rt, err := s.resolveRoute(msg.TagUID, msg.TargetDevice, msg.AllowUntargeted)
@@ -584,7 +505,7 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 // No round trip: the device declares a tag's capabilities when it reports the
 // scan, and the tag recomputes what the agent can actually route each time it
 // is asked. Asking the phone again would only fetch what it already sent.
-func (s *Server) capabilitiesViaDevice(msg server.CapabilitiesRequestMessage, active remotenfc.ActiveTagInfo) {
+func (s *Router) capabilitiesViaDevice(msg server.CapabilitiesRequestMessage, active remotenfc.ActiveTagInfo) {
 	caps := nfc.GetTagCapabilities(active.Tag)
 
 	msg.ResponseCh <- server.CapabilitiesResponseMessage{
@@ -592,6 +513,16 @@ func (s *Server) capabilitiesViaDevice(msg server.CapabilitiesRequestMessage, ac
 		Success:   true,
 		Payload:   &caps,
 	}
+}
+
+// targetDevice resolves which remote device a request is for. A request naming
+// one is answered by that device or not at all; naming none falls back to the
+// most recent scan.
+func (s *Router) targetDevice(target string) (remotenfc.ActiveTagInfo, bool) {
+	if s.remote == nil {
+		return remotenfc.ActiveTagInfo{}, false
+	}
+	return s.remote.ActiveTag(target)
 }
 
 // modeAllowsTagModification reports whether the agent's current mode permits a
@@ -603,25 +534,9 @@ func modeAllowsTagModification(reader *nfc.NFCReader) bool {
 	return reader == nil || reader.GetMode() != nfc.ModeReadOnly
 }
 
-// tagModificationPolicy captures the mode as a predicate, so a consumer can
-// honour it without holding the reader it is read from.
-func tagModificationPolicy(reader *nfc.NFCReader) func() bool {
-	return func() bool { return modeAllowsTagModification(reader) }
-}
-
 // readOnlyModeMessage explains a mode refusal for the named operation.
 func readOnlyModeMessage(operations string) string {
 	return fmt.Sprintf("Agent is in read-only mode; %s are refused", operations)
-}
-
-// targetDevice resolves which remote device a request is for. A request naming
-// one is answered by that device or not at all; naming none falls back to the
-// most recent scan.
-func (s *Server) targetDevice(target string) (remotenfc.ActiveTagInfo, bool) {
-	if s.remote == nil {
-		return remotenfc.ActiveTagInfo{}, false
-	}
-	return s.remote.ActiveTag(target)
 }
 
 // operationErrorCode classifies a reader failure, falling back to the
@@ -631,13 +546,4 @@ func operationErrorCode(err error, fallback protocol.ErrorCode) protocol.ErrorCo
 		return payload.Code
 	}
 	return fallback
-}
-
-// originChecker prefers an explicit policy over the static allowlist, so the
-// tray can admit an origin without restarting the listener.
-func originChecker(config Config) func(r *http.Request) bool {
-	if config.OriginPolicy != nil {
-		return server.CheckOriginPolicy(config.OriginPolicy)
-	}
-	return server.CheckOrigin(config.AllowedOrigins)
 }

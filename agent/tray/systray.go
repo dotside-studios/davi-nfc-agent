@@ -198,9 +198,9 @@ func (s *App) setupUI() {
 
 	// URLs menu
 	s.mURLsMenu = systray.AddMenuItem("Server URLs", "Server addresses")
-	s.mDeviceURL = s.mURLsMenu.AddSubMenuItem("Device: Not running", "DeviceServer WebSocket URL")
+	s.mDeviceURL = s.mURLsMenu.AddSubMenuItem("Device: Not running", "Device WebSocket URL")
 	s.mDeviceURL.Disable()
-	s.mCopyDeviceURL = s.mURLsMenu.AddSubMenuItem("  Copy Device URL", "Copy DeviceServer URL to clipboard")
+	s.mCopyDeviceURL = s.mURLsMenu.AddSubMenuItem("  Copy Device URL", "Copy device URL to clipboard")
 	s.mClientURL = s.mURLsMenu.AddSubMenuItem("Client: Not running", "ClientServer URL")
 	s.mClientURL.Disable()
 	s.mCopyClientURL = s.mURLsMenu.AddSubMenuItem("  Copy Client URL", "Copy ClientServer URL to clipboard")
@@ -404,7 +404,7 @@ func (s *App) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
 				if err := copyToClipboard(url); err != nil {
 					log.Printf("[systray] Failed to copy to clipboard: %v", err)
 				} else {
-					log.Printf("[systray] Copied DeviceServer URL to clipboard")
+					log.Printf("[systray] Copied device URL to clipboard")
 				}
 			}
 		case <-s.mCopyClientURL.ClickedCh:
@@ -770,7 +770,7 @@ func (s *App) clearURLs() {
 	s.mBootstrapURL.SetTitle("CA Cert: Not running")
 }
 
-// getDeviceURL returns the current DeviceServer URL
+// getDeviceURL returns the current device endpoint URL
 func (s *App) getDeviceURL() string {
 	ips := agent.LocalIPs()
 	ip := "localhost"

@@ -8,7 +8,7 @@
 // boundary, not a technical requirement. This package collapses them onto one
 // listener and routes each incoming /ws connection to the device or client
 // handler based on the same discriminator the device server already used
-// (deviceserver.IsDeviceConnection: the ?mode=device query param or the
+// (remotenfc.IsDeviceConnection: the ?mode=device query param or the
 // X-Device-Mode header).
 package unifiedserver
 
@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/grandcat/zeroconf"
 )
 
@@ -68,12 +68,12 @@ func (c Config) TLSEnabled() bool {
 }
 
 // Server owns the single HTTP listener and dispatches WebSocket connections to
-// the device or client handler. The underlying deviceserver/clientserver
-// instances retain all NFC and client-fanout logic; this type only fronts them
-// with one listener, one mDNS advertisement, and shared health/CORS handling.
+// the device or client handler. Those retain all NFC and client-fanout logic;
+// this type only fronts them with one listener, one mDNS advertisement, and
+// shared health/CORS handling.
 type Server struct {
 	config Config
-	device *deviceserver.Server
+	device http.Handler
 	client *clientserver.Server
 
 	// mu guards the lifecycle fields below. Start runs on its own goroutine
@@ -89,8 +89,11 @@ type Server struct {
 	mdnsServer *zeroconf.Server
 }
 
-// New creates a unified server fronting the given device and client servers.
-func New(config Config, device *deviceserver.Server, client *clientserver.Server) *Server {
+// New creates a unified server fronting the device endpoint and the client
+// server. The device endpoint is an ordinary http.Handler: the driver serving
+// devices supplies it, and whoever mounts it decides what stands in front,
+// which is where authentication goes.
+func New(config Config, device http.Handler, client *clientserver.Server) *Server {
 	return &Server{
 		config: config,
 		device: device,
@@ -115,9 +118,8 @@ func (s *Server) Start() error {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	ctx := s.ctx
 
-	// Start device and client background work under the shared context. Neither
-	// binds a listener; this server owns the single listener below.
-	s.device.StartBackground(ctx)
+	// The client server's background work runs under the shared context. It
+	// binds no listener; this server owns the single listener below.
 	s.client.StartBackground(ctx)
 
 	s.httpServer = &http.Server{
@@ -174,8 +176,8 @@ func (s *Server) Handler() http.Handler {
 	// to the client handler. Each handler performs its own API-secret and origin
 	// checks, so auth is not duplicated here.
 	mux.HandleFunc("/ws", enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		if deviceserver.IsDeviceConnection(r) {
-			s.device.ServeWS(w, r)
+		if remotenfc.IsDeviceConnection(r) && s.device != nil {
+			s.device.ServeHTTP(w, r)
 			return
 		}
 		s.client.ServeWS(w, r)

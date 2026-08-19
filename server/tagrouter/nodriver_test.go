@@ -1,28 +1,19 @@
-package deviceserver_test
+package tagrouter_test
 
 import (
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 )
 
 // With no device driver there is no device protocol to speak. The connection
 // used to be accepted anyway: the device registered, got "no handler for
 // message type" logged at it, and waited for a reply that could never come.
 func TestDeviceConnectionRefusedWithoutADriver(t *testing.T) {
-	ds := deviceserver.New(deviceserver.Config{AllowedOrigins: []string{"*"}}, server.NewServerBridge())
+	url := newStack(t, stackConfig{NoDriver: true}).URL
 
-	ts := httptest.NewServer(http.HandlerFunc(ds.ServeWS))
-	defer ts.Close()
-
-	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
 	conn, resp, err := (&websocket.Dialer{HandshakeTimeout: 3 * time.Second}).Dial(url, nil)
 	if err == nil {
 		conn.Close()

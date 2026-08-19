@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,16 +33,6 @@ import (
 type caReader interface {
 	ReadCACert() ([]byte, error)
 	GetCAFingerprint() (string, error)
-}
-
-// isNilReader reports whether r is either an untyped nil or a nil pointer
-// wrapped in a non-nil interface value.
-func isNilReader(r caReader) bool {
-	if r == nil {
-		return true
-	}
-	v := reflect.ValueOf(r)
-	return v.Kind() == reflect.Ptr && v.IsNil()
 }
 
 // bootstrapMaxFailures is the number of wrong PIN attempts before the
@@ -81,12 +70,13 @@ type BootstrapServer struct {
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
 //
 // A nil manager is expected (see caReader) and must survive the trip through
-// the interface: callers hold a concrete *Manager, and a nil one boxed into an
-// interface is itself non-nil, so every `s.manager != nil` guard below would
-// pass and then dereference nothing. Normalise here, once, rather than asking
-// four call sites to remember.
+// the interface: a nil *Manager boxed into one is itself non-nil, so every
+// `s.manager != nil` guard below would pass and then dereference nothing.
+// *Manager is the only nil that can arrive here — it is what every caller
+// outside this package holds. Normalise it once rather than asking the four
+// call sites that read the field to remember.
 func NewBootstrapServer(manager caReader, port int) *BootstrapServer {
-	if isNilReader(manager) {
+	if m, ok := manager.(*Manager); ok && m == nil {
 		manager = nil
 	}
 	return &BootstrapServer{

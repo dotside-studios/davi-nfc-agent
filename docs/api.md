@@ -360,6 +360,11 @@ report the previous outcome rather than write again. The same request can arrive
 twice — the agent sends a write, the device applies it, and the response is lost
 to a dropped connection. Without the check, the retry writes a second time.
 
+**Lock-only requests.** A client `lockRequest` arrives as the same frame with
+`lock: true` and no `ndefBytes` or `ndefMessage` — the protocol has one
+tag-modifying frame, not two. Lock the tag as it stands and write nothing.
+Answer with `deviceWriteResponse` as for any other write.
+
 #### Transceive Request
 
 The agent asks the device to exchange raw data with the tag it is holding. Sent
@@ -748,6 +753,12 @@ when supported, render a capacity meter, etc.) without a round-trip.
 | `supportsNdef` | Tag supports NDEF |
 | `supportsPassword` | Tag supports simple password protection (NTAG21x `PWD`/`PACK`) |
 
+`canWrite`, `canLock` and `canTransceive` describe what the agent will actually
+do, not just what the tag is built for: they are reported false while the agent
+is in read-only mode, and — for a tag held by a remote device — false unless
+that device declared the operation and is still connected. A capability the
+agent would refuse is never advertised.
+
 **Query on demand** — to fetch capabilities without waiting for the next scan,
 send a `capabilitiesRequest`:
 
@@ -821,6 +832,14 @@ Response (`type: "lockResponse"`):
 ```
 
 If the present tag does not support locking, `success` is `false` with an error.
+
+The request is routed like a write: to the remote device holding a tag when no
+hardware reader has a card present, otherwise to the reader. A device receives
+it as a `deviceWriteRequest` with `lock: true` and no message.
+
+> **Refused in read-only mode.** Locking is irreversible, so the agent's
+> read-only mode refuses it with `READ_ONLY` on every route — a tag held by a
+> phone included. Writes are refused the same way.
 
 ### Password Protection (planned)
 
@@ -1015,7 +1034,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `WRITE_FAILED` | yes | Write failed |
 | `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
 | `TAG_NOT_CONNECTED` | yes | No tag connected |
-| `READ_ONLY` | no | Tag is locked |
+| `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
 | `NO_CARD` | yes | No card present on reader |

@@ -58,6 +58,12 @@ type DeviceHandler struct {
 	// publicKeyPin lets a device recognize this agent on later connections.
 	publicKeyPin string
 
+	// reader supplies the agent's current mode. Tags held by remote devices are
+	// reached through this handler rather than through the reader, so the mode
+	// has to be consulted here or it would not apply to them at all. Nil when
+	// the agent has no reader, which imposes no restriction.
+	reader *nfc.NFCReader
+
 	pending    map[string]pendingRequest // requestID -> waiter
 	pendingMux sync.Mutex
 
@@ -72,6 +78,7 @@ func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, c
 		manager:        manager,
 		bridge:         bridge,
 		publicKeyPin:   config.PublicKeyPin,
+		reader:         config.Reader,
 		deviceSessions: make(map[string]*server.SafeConn),
 		connToDeviceID: make(map[*server.SafeConn]string),
 		pending:        make(map[string]pendingRequest),
@@ -448,6 +455,10 @@ func (h *DeviceHandler) handleDeviceHeartbeat(_ *server.SafeConn, deviceID strin
 // WriteTag implements remotenfc.TagWriter, letting a tag write through the
 // device holding it.
 func (h *DeviceHandler) WriteTag(deviceID, tagUID string, ndef []byte, opts nfc.WriteOptions) error {
+	if !h.modeAllowsTagModification() {
+		return h.readOnlyModeError("WriteData", tagUID)
+	}
+
 	id := uuid.NewString()
 
 	resp, err := h.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
@@ -468,6 +479,10 @@ func (h *DeviceHandler) WriteTag(deviceID, tagUID string, ndef []byte, opts nfc.
 
 // LockTag implements remotenfc.TagWriter.
 func (h *DeviceHandler) LockTag(deviceID, tagUID string) error {
+	if !h.modeAllowsTagModification() {
+		return h.readOnlyModeError("MakeReadOnly", tagUID)
+	}
+
 	id := uuid.NewString()
 
 	resp, err := h.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
@@ -487,6 +502,12 @@ func (h *DeviceHandler) LockTag(deviceID, tagUID string) error {
 
 // TransceiveTag implements remotenfc.TagTransceiver.
 func (h *DeviceHandler) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+	// A raw exchange can carry a write, so read-only mode refuses it here for
+	// the same reason executeTransceiveRequest does.
+	if !h.modeAllowsTagModification() {
+		return nil, h.readOnlyModeError("Transceive", tagUID)
+	}
+
 	resp, err := h.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
 		RequestID: uuid.NewString(),
 		TagUID:    tagUID,
@@ -526,6 +547,23 @@ func (h *DeviceHandler) DeviceCanLock(deviceID string) bool {
 	return h.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanLock })
 }
 
+// modeAllowsTagModification reports whether the agent's mode currently permits
+// an operation that can change a tag.
+func (h *DeviceHandler) modeAllowsTagModification() bool {
+	return modeAllowsTagModification(h.reader)
+}
+
+// readOnlyModeError refuses a tag-modifying operation on mode grounds, typed so
+// the refusal survives as READ_ONLY rather than collapsing into a string.
+func (h *DeviceHandler) readOnlyModeError(op, tagUID string) error {
+	return &nfc.NFCError{
+		Code:    nfc.ErrCodeReadOnly,
+		Op:      op,
+		TagUID:  tagUID,
+		Message: "agent is in read-only mode",
+	}
+}
+
 // DeviceMaxHoldMs reports how long a device can keep a tag available for work,
 // zero meaning open-ended — which is also the answer for a device that declared
 // nothing, and for one that is no longer connected. Callers should treat it as
@@ -544,8 +582,12 @@ func (h *DeviceHandler) DeviceMaxHoldMs(deviceID string) int {
 }
 
 // deviceDeclared reports whether a still-connected device declared a capability.
+//
+// Every capability routed through this handler modifies a tag, so read-only
+// mode withdraws all of them: a tag must not advertise an operation the
+// handler would then refuse.
 func (h *DeviceHandler) deviceDeclared(deviceID string, want func(protocol.DeviceCapabilities) bool) bool {
-	if h.manager == nil {
+	if h.manager == nil || !h.modeAllowsTagModification() {
 		return false
 	}
 

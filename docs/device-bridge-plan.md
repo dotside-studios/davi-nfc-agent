@@ -17,6 +17,17 @@ Two bugs surfaced while building and were fixed in passing: `ServerBridge.Close`
 closed channels producers could still be sending on, and `handleTagScanned`
 published a scan before registering the route a write would need.
 
+Two more surfaced in review afterwards. `lockRequest` had no device route at
+all: it went straight to the hardware reader, which locks whatever card it is
+holding, so a lock aimed at a phone-held tag was applied to a different tag
+entirely — irreversibly. And read-only mode was enforced inside the reader's own
+write path, which a request routed to a device never reaches, so writes and
+locks escaped the mode while transceive alone honoured it. Both are fixed: lock
+routes like a write, and the mode is checked once for all three operations on
+both routes, including the `remotenfc.Tag` route that reaches devices through
+`TagWriter`. Capabilities follow the mode too, so a tag never advertises an
+operation the agent would refuse.
+
 ## Diagnosis
 
 Reading the code, the defects are not scattered — they are four instances of one

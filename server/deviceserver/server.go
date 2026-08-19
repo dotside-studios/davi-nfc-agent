@@ -4,6 +4,7 @@ package deviceserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -257,6 +258,19 @@ func (s *Server) handleWriteRequests() {
 func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 	reader := s.config.Reader
 
+	// The mode gates every route to a tag, not just the hardware one. The
+	// reader enforces it inside prepareCardForWrite, which a write routed to a
+	// remote device never reaches, so the check has to happen up here.
+	if !modeAllowsTagModification(reader) {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     readOnlyModeMessage("writes"),
+			ErrorCode: protocol.ErrCodeReadOnly,
+		}
+		return
+	}
+
 	if reader == nil || !reader.GetDeviceStatus().CardPresent {
 		if s.writeViaDevice(msg) {
 			return
@@ -391,13 +405,36 @@ func (s *Server) handleLockRequests() {
 }
 
 // executeLockRequest executes a lock request from the client server.
+//
+// Routing mirrors a write: the hardware reader keeps priority while it actually
+// holds a card, and otherwise the lock goes to the remote device holding a tag.
+// Without that fallback a lock aimed at a phone-held tag would be applied to
+// whatever card happened to be sitting on the hardware reader — and locking is
+// irreversible, so guessing the target is not an option.
 func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 	reader := s.config.Reader
+
+	if !modeAllowsTagModification(reader) {
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     readOnlyModeMessage("locks"),
+			ErrorCode: protocol.ErrCodeReadOnly,
+		}
+		return
+	}
+
+	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+		if s.lockViaDevice(msg) {
+			return
+		}
+	}
+
 	if reader == nil {
 		msg.ResponseCh <- server.LockResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
-			Error:     "No NFC reader available",
+			Error:     "No NFC reader or device holding a tag",
 			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
@@ -419,6 +456,64 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 		Success:   true,
 		Payload:   result,
 	}
+}
+
+// lockViaDevice routes a lock to the remote device holding a tag. It reports
+// whether it handled the request; false means no device was available and the
+// caller should fall back to the hardware reader.
+//
+// A lock travels as a write request carrying no NDEF and Lock set, which is the
+// same shape DeviceHandler.LockTag sends — the device protocol has one
+// tag-modifying frame, not two.
+func (s *Server) lockViaDevice(msg server.LockRequestMessage) bool {
+	if s.deviceHandler == nil {
+		return false
+	}
+
+	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	if !ok {
+		return false
+	}
+
+	resp, err := s.deviceHandler.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+		RequestID: msg.RequestID,
+		TagUID:    uid,
+		Lock:      true,
+		// The request ID already identifies this logical lock, so a device that
+		// applied it before a reconnect can report the earlier outcome.
+		IdempotencyKey: msg.RequestID,
+	})
+	if err != nil {
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: operationErrorCode(err, protocol.ErrCodeDeviceGone),
+		}
+		return true
+	}
+	if !resp.Success {
+		code := resp.ErrorCode
+		if code == "" {
+			code = protocol.ErrCodeLockFailed
+		}
+		msg.ResponseCh <- server.LockResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     resp.Error,
+			ErrorCode: code,
+		}
+		return true
+	}
+
+	msg.ResponseCh <- server.LockResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		// The device reports the outcome, not the tag type, so only what was
+		// actually established is filled in.
+		Payload: &nfc.LockResult{UID: uid, Locked: true},
+	}
+	return true
 }
 
 // handleCapabilitiesRequests listens for capabilities queries from the client server.
@@ -445,7 +540,7 @@ func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 	// Refused in read-only mode. A raw exchange cannot be assumed harmless —
 	// the same call carries a SELECT and a write to a configuration page — so
 	// it is treated as a write for the purposes of the mode.
-	if reader != nil && reader.GetMode() == nfc.ModeReadOnly {
+	if !modeAllowsTagModification(reader) {
 		msg.ResponseCh <- server.TransceiveResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
@@ -583,6 +678,21 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 		Success:   true,
 		Payload:   caps,
 	}
+}
+
+// modeAllowsTagModification reports whether the agent's current mode permits an
+// operation that can change a tag — a write, a lock, or a raw exchange.
+//
+// The mode is a property of the agent rather than of the reader, so it governs
+// tags held by remote devices too. A nil reader means there is no mode to
+// consult and nothing to restrict.
+func modeAllowsTagModification(reader *nfc.NFCReader) bool {
+	return reader == nil || reader.GetMode() != nfc.ModeReadOnly
+}
+
+// readOnlyModeMessage explains a mode refusal for the named operation.
+func readOnlyModeMessage(operations string) string {
+	return fmt.Sprintf("Agent is in read-only mode; %s are refused", operations)
 }
 
 // operationErrorCode classifies a reader failure, falling back to the

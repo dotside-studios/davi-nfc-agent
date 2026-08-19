@@ -231,6 +231,9 @@ export interface WriteRequestEvent {
   /**
    * NDEF message to write, as records. Provided for APIs like Web NFC that
    * only accept records; prefer `ndefBytes` where the device can write raw.
+   *
+   * Absent — along with `ndefBytes` — when `lock` is set on its own: that is a
+   * lock-only request, and the tag must be locked as it stands.
    */
   ndefMessage: NDEFMessageProtocol | null;
 
@@ -246,7 +249,10 @@ export interface WriteRequestEvent {
   tagUID?: string;
 
   /**
-   * Make the tag permanently read-only after a successful write
+   * Make the tag permanently read-only after a successful write. Set without
+   * any message, this is a lock-only request — the agent's `lockRequest`
+   * travels as a write frame, since the protocol has one tag-modifying frame
+   * rather than two.
    */
   lock?: boolean;
 

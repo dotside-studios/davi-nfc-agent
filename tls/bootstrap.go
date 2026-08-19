@@ -68,7 +68,14 @@ type BootstrapServer struct {
 }
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
+//
+// manager may be nil (see caReader). A nil *Manager boxed into an interface
+// is not a nil interface, so it is unboxed here and the guards on s.manager
+// can stay simple.
 func NewBootstrapServer(manager caReader, port int) *BootstrapServer {
+	if m, ok := manager.(*Manager); ok && m == nil {
+		manager = nil
+	}
 	return &BootstrapServer{
 		manager: manager,
 		port:    port,

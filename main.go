@@ -144,11 +144,7 @@ func main() {
 	if bootstrapPortFlag > 0 {
 		// tlsMgr may be nil here; the CA endpoints report that there is nothing
 		// to install and the pairing endpoint works regardless.
-		var caReader *tls.Manager
-		if tlsMgr != nil {
-			caReader = tlsMgr
-		}
-		bootstrapServer = tls.NewBootstrapServer(caReader, bootstrapPortFlag)
+		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
 		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), devicePortFlag)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)

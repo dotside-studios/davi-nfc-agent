@@ -39,19 +39,6 @@ type HandlerServer interface {
 	BroadcastDeviceStatus(status nfc.DeviceStatus)
 }
 
-// ServerHandler is the interface that handlers must implement.
-// Handlers call Register() to set up their routes and lifecycle in one place.
-type ServerHandler interface {
-	Register(server HandlerServer)
-}
-
-// ServerHandlerCloser extends ServerHandler with cleanup functionality.
-// Implement this interface for handlers that manage resources requiring explicit cleanup.
-type ServerHandlerCloser interface {
-	ServerHandler
-	Close()
-}
-
 // wsHandlerEntry represents a custom WebSocket handler with its matcher.
 type wsHandlerEntry struct {
 	matcher func(r *http.Request) bool

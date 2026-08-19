@@ -198,12 +198,20 @@ func (a *Agent) Stop() {
 		a.Reader = nil
 	}
 
-	// Cleanup Manager if it's a remotenfc.Manager
-	if pm, ok := a.Manager.(*remotenfc.Manager); ok {
-		pm.Close()
-	}
-
 	a.Logger.Println("Agent stopped successfully")
+}
+
+// Shutdown stops the agent and releases what outlives a stop.
+//
+// The manager is built once for the process and survives Stop, since the tray
+// and the console can stop and start the agent again against the same one.
+// Closing it belongs here, on the way out.
+func (a *Agent) Shutdown() {
+	a.Stop()
+
+	if closer, ok := a.Manager.(interface{ Close() }); ok {
+		closer.Close()
+	}
 }
 
 // watchNetworkChanges listens for network changes from TLS manager and restarts servers.

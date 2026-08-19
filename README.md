@@ -176,11 +176,19 @@ By default the agent generates and persists a TLS certificate and an API secret
 under a platform-specific config directory, so paired devices keep working
 across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
 
-## Usage Examples
+## Ports
 
-The agent runs a single server on one port that fills both roles, plus a bootstrap helper:
-- **Agent Server** (port 9470): Serves both NFC devices (readers and smartphones, via `/ws?mode=device`) and client applications (via `/ws`) on the same port. The port is configurable via `-device-port`.
-- **CA Bootstrap Server** (port 9472): Serves the root certificate for device setup, when a local CA is in use (`-install-ca`)
+The agent listens on two ports, both configurable:
+
+- **9470 — agent server** (`-device-port`): One listener for both roles. NFC
+  devices connect to `/ws?mode=device`, client applications to `/ws`, and the
+  Control Center is served from the same port
+- **9472 — pairing server** (`-bootstrap-port`, `0` disables it): Serves the
+  page a phone opens to pair, and issues each device its own credential against
+  the PIN printed at startup. Where a local CA is in use, it hands that out too,
+  to a request carrying the PIN
+
+## Usage Examples
 
 ### JavaScript / TypeScript
 

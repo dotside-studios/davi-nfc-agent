@@ -26,15 +26,15 @@ type Console interface {
 // consoleRoutes and consoleAssets are what the unified server mounts. Both
 // tolerate the absence of a console.
 func (a *Agent) consoleRoutes() http.Handler {
-	if a.Console == nil {
+	if a.console == nil {
 		return nil
 	}
-	return a.Console.Routes()
+	return a.console.Routes()
 }
 
 func (a *Agent) consoleAssets() http.Handler {
-	if a.Console == nil {
+	if a.console == nil {
 		return nil
 	}
-	return a.Console.Assets()
+	return a.console.Assets()
 }

@@ -60,9 +60,9 @@ func main() {
 	// nil satisfies agent.Console and would defeat every check downstream.
 	c := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if c != nil {
-		rt.Agent.Console = c
-		rt.Agent.Origins.OnChange(c.NotifyChange)
-		rt.Agent.Devices.OnChange(c.NotifyChange)
+		rt.Agent.SetConsole(c)
+		rt.Agent.Origins().OnChange(c.NotifyChange)
+		rt.Agent.Devices().OnChange(c.NotifyChange)
 	}
 
 	app := tray.New(rt)
@@ -86,6 +86,16 @@ with the flags of anything embedding the agent. The shipped command adds its
 own flag set on top of `Options` in
 [`cmd/davi-nfc-agent/flags.go`](../cmd/davi-nfc-agent/flags.go), and installs
 the log ring itself, as above.
+
+`Setup` is the convenient path, not the only one. It reads and writes a config
+directory, which a program with its own configuration may not want; `agent.New`
+takes an `agent.Config` and builds the agent from values you already hold,
+leaving the certificate, secret and store loading to you. Either way the
+configuration is fixed once the agent exists: it is read back through methods,
+so nothing can rebind the port or withdraw the pairing requirement behind the
+running servers. The settings that may legitimately change while running have
+methods of their own — `SetRequirePairedDevice`, `SetAllowCardType`,
+`SetConsole`.
 
 ## Package layout
 

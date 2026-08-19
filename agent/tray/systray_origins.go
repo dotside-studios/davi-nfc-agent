@@ -42,12 +42,12 @@ func (s *App) setupOriginsMenu() {
 // refreshOriginsMenu redraws the submenu from the store: allowed origins first,
 // then anything refused since start, offered for one-click approval.
 func (s *App) refreshOriginsMenu() {
-	if s.agent.Origins == nil || len(s.originSlots) == 0 {
+	if s.agent.Origins() == nil || len(s.originSlots) == 0 {
 		return
 	}
 
-	allowed := s.agent.Origins.List()
-	blocked := s.agent.Origins.Blocked()
+	allowed := s.agent.Origins().List()
+	blocked := s.agent.Origins().Blocked()
 
 	slot := 0
 	for _, origin := range allowed {
@@ -71,7 +71,7 @@ func (s *App) refreshOriginsMenu() {
 		s.originSlots[slot].item.Hide()
 	}
 
-	if s.agent.Origins.IsSessionAllowAny() {
+	if s.agent.Origins().IsSessionAllowAny() {
 		s.mOriginAllowAny.Check()
 	} else {
 		s.mOriginAllowAny.Uncheck()
@@ -97,7 +97,7 @@ func (s *App) setOriginSlot(slot *originSlot, origin string, blocked bool) {
 // handleOriginSelection polls the origin slots, matching how device and card
 // filter items are handled: a fixed select cannot cover a changing set.
 func (s *App) handleOriginSelection() {
-	if s.agent.Origins == nil {
+	if s.agent.Origins() == nil {
 		return
 	}
 
@@ -108,13 +108,13 @@ func (s *App) handleOriginSelection() {
 				continue
 			}
 			if slot.blocked {
-				if err := s.agent.Origins.Allow(slot.origin); err != nil {
+				if err := s.agent.Origins().Allow(slot.origin); err != nil {
 					log.Printf("[systray] Failed to allow origin %q: %v", slot.origin, err)
 					continue
 				}
 				log.Printf("[systray] Allowed origin: %s", slot.origin)
 			} else {
-				if err := s.agent.Origins.Revoke(slot.origin); err != nil {
+				if err := s.agent.Origins().Revoke(slot.origin); err != nil {
 					log.Printf("[systray] Failed to revoke origin %q: %v", slot.origin, err)
 					continue
 				}
@@ -128,12 +128,12 @@ func (s *App) handleOriginSelection() {
 
 // handleOriginAllowAny toggles the session-only escape hatch.
 func (s *App) handleOriginAllowAny() {
-	if s.agent.Origins == nil {
+	if s.agent.Origins() == nil {
 		return
 	}
 
 	on := !s.mOriginAllowAny.Checked()
-	s.agent.Origins.SessionAllowAny(on)
+	s.agent.Origins().SessionAllowAny(on)
 
 	if on {
 		log.Printf("[systray] Origin check disabled for this session — any site can drive the reader until restart")
@@ -147,11 +147,11 @@ func (s *App) handleOriginAllowAny() {
 // startOriginWatcher redraws the menu when an origin is refused, so a blocked
 // console becomes a visible one-click prompt instead of a silent failure.
 func (s *App) startOriginWatcher() {
-	if s.agent.Origins == nil {
+	if s.agent.Origins() == nil {
 		return
 	}
 
-	s.agent.Origins.OnBlocked(func(origin string) {
+	s.agent.Origins().OnBlocked(func(origin string) {
 		log.Printf("[systray] Blocked connection from %s — allow it under Allowed Origins to let it use the reader", origin)
 		s.refreshOriginsMenu()
 	})

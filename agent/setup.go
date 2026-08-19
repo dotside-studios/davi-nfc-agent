@@ -162,15 +162,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	a := NewAgent(manager)
-	a.DevicePort = opts.DevicePort
-	if a.DevicePort == 0 {
-		// A hand-built Options that never set a port means the default, not a
-		// listener on whatever the kernel hands out.
-		a.DevicePort = DefaultDevicePort
-	}
-	a.APISecret = apiSecret
-
 	// The allowlist persists in the config dir and starts with the first-party
 	// consoles, so the shipped console connects on a fresh install. Anything
 	// passed on the command line is added to it.
@@ -189,23 +180,14 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 			log.Printf("Warning: failed to allow origin %q: %v", origin, err)
 		}
 	}
-	a.Origins = origins
-	a.ConfigDir = configDir
-	a.PublicKeyPin = agentPublicKeyPin
-	a.Devices = devices
-	a.Bootstrap = bootstrapServer
-	a.BootstrapPort = opts.BootstrapPort
-	a.RequirePairedDevice = opts.RequirePaired || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
 
-	if a.RequirePairedDevice {
+	askedForPairing := opts.RequirePaired || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
+	if askedForPairing {
 		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
 		if devices.Count() == 0 {
 			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
 		}
 	}
-	a.CertFile = certFile
-	a.KeyFile = keyFile
-	a.TLSManager = tlsMgr // For network change watching and cert regeneration
 
 	// Load persisted preferences. Explicit flags still win: something that
 	// passed -device meant it for this run.
@@ -220,12 +202,40 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	if devicePath == "" {
 		devicePath = stored.DevicePath
 	}
+
+	devicePort := opts.DevicePort
+	if devicePort == 0 {
+		// Options built by hand rather than from flags: the default, not a
+		// listener on whatever the kernel hands out.
+		devicePort = DefaultDevicePort
+	}
 	if !opts.DevicePortSet && stored.Port > 0 {
-		a.DevicePort = stored.Port
+		devicePort = stored.Port
 	}
-	if !opts.RequirePaired && os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") != "1" && stored.RequirePairedDevice {
-		a.RequirePairedDevice = true
+
+	requirePaired := askedForPairing
+	if !askedForPairing && stored.RequirePairedDevice {
+		requirePaired = true
 	}
+
+	// Everything the agent runs on is settled by this point, which is why it
+	// can be handed over in one piece.
+	a := New(Config{
+		Manager:             manager,
+		DevicePort:          devicePort,
+		APISecret:           apiSecret,
+		ConfigDir:           configDir,
+		Origins:             origins,
+		Devices:             devices,
+		PublicKeyPin:        agentPublicKeyPin,
+		Bootstrap:           bootstrapServer,
+		BootstrapPort:       opts.BootstrapPort,
+		RequirePairedDevice: requirePaired,
+		CertFile:            certFile,
+		KeyFile:             keyFile,
+		TLSManager:          tlsMgr,
+	})
+
 	a.ApplySettings(stored)
 
 	return &Runtime{

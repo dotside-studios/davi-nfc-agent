@@ -92,8 +92,8 @@ func TestDevicePortSetOutranksStoredPort(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
-		if rt.Agent.DevicePort != 9999 {
-			t.Errorf("DevicePort = %d, want the stored 9999", rt.Agent.DevicePort)
+		if rt.Agent.DevicePort() != 9999 {
+			t.Errorf("DevicePort = %d, want the stored 9999", rt.Agent.DevicePort())
 		}
 	})
 
@@ -107,8 +107,8 @@ func TestDevicePortSetOutranksStoredPort(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
-		if rt.Agent.DevicePort != 9123 {
-			t.Errorf("DevicePort = %d, want the requested 9123", rt.Agent.DevicePort)
+		if rt.Agent.DevicePort() != 9123 {
+			t.Errorf("DevicePort = %d, want the requested 9123", rt.Agent.DevicePort())
 		}
 	})
 }

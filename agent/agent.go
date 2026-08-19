@@ -31,78 +31,176 @@ func GetCardTypeFilterTooltip(cardType string) string {
 	return "Allow " + cardType + " only"
 }
 
-type Agent struct {
-	Logger           *log.Logger
-	Manager          nfc.Manager // NFC device manager (supports hardware and smartphone)
-	Reader           *nfc.NFCReader
-	AllowedCardTypes map[string]bool // Card type filter using map
-	APISecret        string
-	ConfigDir        string // Config directory; used for persisting the API secret
+// Config is the agent's settled configuration. New copies it in, and nothing
+// afterwards can change it: the fields below are read through the accessors on
+// Agent, so a caller holding a running agent cannot rebind its port, swap its
+// origin allowlist or withdraw its pairing requirement behind the servers'
+// backs. The few settings that may legitimately change while running have
+// methods of their own -- SetRequirePairedDevice, SetAllowCardType, SetConsole.
+type Config struct {
+	// Manager supplies the readers. Required; New panics without one, because
+	// an agent with no way to enumerate a reader cannot be started later.
+	Manager nfc.Manager
+
+	// Logger receives the agent's diagnostics. Nil installs one writing to
+	// stderr with an [agent] prefix.
+	Logger *log.Logger
+
+	// DevicePort is the single listener serving both devices and clients.
+	// Zero means DefaultDevicePort.
+	DevicePort int
+
+	// APISecret is the shared secret for the session handshake. Empty admits
+	// unauthenticated connections, which is the development default.
+	APISecret string
+
+	// ConfigDir is where the API secret and other state persist.
+	ConfigDir string
 
 	// AllowedOrigins extends the same-origin policy on both WebSocket
 	// endpoints. A browser page served from anywhere other than the agent's
-	// own host:port — which is every hosted console — needs its origin listed
+	// own host:port -- which is every hosted console -- needs its origin listed
 	// here, or the upgrade is rejected as cross-site.
 	//
 	// Ignored when Origins is set, which is the normal path.
 	AllowedOrigins []string
 
-	// Origins is the live allowlist. Unlike AllowedOrigins it can be changed
-	// while the agent runs, and reports rejections so they can be surfaced.
+	// Origins is the live allowlist. Unlike AllowedOrigins its contents can
+	// change while the agent runs, and it reports rejections so they can be
+	// surfaced. The store is mutable; which store is in use is not.
 	Origins *OriginStore
 
-	// Server architecture. The device and client endpoints are served from a
-	// single listener (UnifiedServer) on DevicePort. DeviceServer and
-	// ClientServer hold the device/client logic; the unified server fronts
-	// both and routes each /ws connection to the right one.
-	Bridge        *server.ServerBridge
-	UnifiedServer *unifiedserver.Server
-	DeviceServer  *deviceserver.Server
-	ClientServer  *clientserver.Server
-	DevicePort    int // Single agent server port. Default: 9470
+	// Devices holds the paired devices and their per-device credentials.
+	Devices *DeviceRegistry
 
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
 
-	// Devices holds the paired devices and their per-device credentials.
-	Devices *DeviceRegistry
-
-	// Console serves the control center's privileged API. Nil disables it.
-	Console Console
-
-	// Bootstrap is the pairing server, or nil when pairing is disabled.
-	Bootstrap *tls.BootstrapServer
-
-	// BootstrapPort is the pairing server's port, 0 when disabled.
+	// Bootstrap is the pairing server, or nil when pairing is disabled, and
+	// BootstrapPort is the port it listens on.
+	Bootstrap     *tls.BootstrapServer
 	BootstrapPort int
 
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
-	// connections. Browser clients are unaffected.
+	// connections. Browser clients are unaffected. Changeable at runtime
+	// through SetRequirePairedDevice, which also tells the running server.
 	RequirePairedDevice bool
 
-	// TLS configuration (optional, used by the unified server)
-	CertFile   string       // Path to TLS certificate file
-	KeyFile    string       // Path to TLS private key file
-	TLSManager *tls.Manager // TLS manager for auto-TLS and network watching
-
-	// Internal state
-	onTag             []func(nfc.NFCData)
-	devicePath        string        // Current device path
-	serversMu         sync.Mutex    // Protects server restart operations
-	serverRestartChan chan struct{} // Signals when servers are restarted
+	// TLS configuration, used by the unified server. TLSManager also drives
+	// certificate regeneration and network-change watching.
+	CertFile   string
+	KeyFile    string
+	TLSManager *tls.Manager
 }
 
-func NewAgent(nfcManager nfc.Manager) *Agent {
+// Agent runs the NFC reader and the servers in front of it. Build one with New;
+// its configuration is fixed from that point, and the exported fields below are
+// the parts that come and go as it runs.
+type Agent struct {
+	// Reader is the reader currently open, nil before Start and after Stop.
+	Reader *nfc.NFCReader
+
+	// The device and client endpoints are served from a single listener
+	// (UnifiedServer) on the configured port. DeviceServer and ClientServer
+	// hold the device/client logic; the unified server fronts both and routes
+	// each /ws connection to the right one. All are nil until Start.
+	Bridge        *server.ServerBridge
+	UnifiedServer *unifiedserver.Server
+	DeviceServer  *deviceserver.Server
+	ClientServer  *clientserver.Server
+
+	// Settled at construction.
+	logger              *log.Logger
+	manager             nfc.Manager
+	apiSecret           string
+	configDir           string
+	allowedOrigins      []string
+	origins             *OriginStore
+	devices             *DeviceRegistry
+	devicePort          int
+	publicKeyPin        string
+	bootstrap           *tls.BootstrapServer
+	bootstrapPort       int
+	certFile            string
+	keyFile             string
+	tlsManager          *tls.Manager
+	requirePairedDevice bool
+
+	// Mutable state.
+	allowedCardTypes  map[string]bool
+	console           Console
+	onTag             []func(nfc.NFCData)
+	devicePath        string
+	serversMu         sync.Mutex
+	serverRestartChan chan struct{}
+}
+
+// New builds an agent from cfg. The configuration is copied, so later changes
+// to cfg do not reach the agent.
+func New(cfg Config) *Agent {
+	if cfg.Manager == nil {
+		panic("agent: Config.Manager is required")
+	}
+
+	logger := cfg.Logger
+	if logger == nil {
+		logger = log.New(os.Stderr, "[agent] ", log.LstdFlags)
+	}
+
+	port := cfg.DevicePort
+	if port == 0 {
+		port = DefaultDevicePort
+	}
+
 	return &Agent{
-		Logger:            log.New(os.Stderr, "[agent] ", log.LstdFlags),
-		Manager:           nfcManager,
-		AllowedCardTypes:  make(map[string]bool),
-		DevicePort:        9470,
-		serverRestartChan: make(chan struct{}, 1),
+		logger:              logger,
+		manager:             cfg.Manager,
+		apiSecret:           cfg.APISecret,
+		configDir:           cfg.ConfigDir,
+		allowedOrigins:      cfg.AllowedOrigins,
+		origins:             cfg.Origins,
+		devices:             cfg.Devices,
+		devicePort:          port,
+		publicKeyPin:        cfg.PublicKeyPin,
+		bootstrap:           cfg.Bootstrap,
+		bootstrapPort:       cfg.BootstrapPort,
+		certFile:            cfg.CertFile,
+		keyFile:             cfg.KeyFile,
+		tlsManager:          cfg.TLSManager,
+		requirePairedDevice: cfg.RequirePairedDevice,
+		allowedCardTypes:    make(map[string]bool),
+		serverRestartChan:   make(chan struct{}, 1),
 	}
 }
+
+// Configuration readers. These exist because the tray and the console display
+// what the agent was built with; none of them can change it.
+
+func (a *Agent) Manager() nfc.Manager            { return a.manager }
+func (a *Agent) Logger() *log.Logger             { return a.logger }
+func (a *Agent) APISecret() string               { return a.apiSecret }
+func (a *Agent) ConfigDir() string               { return a.configDir }
+func (a *Agent) Origins() *OriginStore           { return a.origins }
+func (a *Agent) Devices() *DeviceRegistry        { return a.devices }
+func (a *Agent) DevicePort() int                 { return a.devicePort }
+func (a *Agent) PublicKeyPin() string            { return a.publicKeyPin }
+func (a *Agent) Bootstrap() *tls.BootstrapServer { return a.bootstrap }
+func (a *Agent) BootstrapPort() int              { return a.bootstrapPort }
+func (a *Agent) CertFile() string                { return a.certFile }
+func (a *Agent) KeyFile() string                 { return a.keyFile }
+func (a *Agent) TLSManager() *tls.Manager        { return a.tlsManager }
+func (a *Agent) RequirePairedDevice() bool       { return a.requirePairedDevice }
+
+// Console returns the control center, or nil when there is none.
+func (a *Agent) Console() Console { return a.console }
+
+// SetConsole attaches the control center. Pass a nil Console to detach.
+//
+// Check the concrete value for nil before calling: a typed nil satisfies
+// Console and would defeat every nil check downstream.
+func (a *Agent) SetConsole(c Console) { a.console = c }
 
 // ServerRestarts returns a channel that signals when servers are restarted
 // due to network changes or certificate regeneration.
@@ -113,7 +211,7 @@ func (a *Agent) ServerRestarts() <-chan struct{} {
 func (a *Agent) Start(devicePath string) error {
 	if a.Reader != nil {
 		if devicePath == a.Reader.DevicePath() {
-			a.Logger.Printf("NFC reader already running on device: %s", devicePath)
+			a.logger.Printf("NFC reader already running on device: %s", devicePath)
 			return nil
 		}
 		return errors.New("agent is already running")
@@ -123,22 +221,22 @@ func (a *Agent) Start(devicePath string) error {
 	// never existed: a phone reports its scans over the device bridge and is
 	// never opened here. Left in place it becomes a connection retried for as
 	// long as the agent runs.
-	if nfc.IsRemoteDevice(a.Manager, devicePath) {
-		a.Logger.Printf("Ignoring pinned reader %s: a phone reports its scans over the device bridge rather than being read from", devicePath)
+	if nfc.IsRemoteDevice(a.manager, devicePath) {
+		a.logger.Printf("Ignoring pinned reader %s: a phone reports its scans over the device bridge rather than being read from", devicePath)
 		devicePath = ""
 	}
 
 	// If no device path specified, discover available devices
 	if devicePath == "" {
-		devices, err := nfc.ListReaders(a.Manager)
+		devices, err := nfc.ListReaders(a.manager)
 		if err != nil {
-			a.Logger.Printf("Error listing NFC devices: %v", err)
+			a.logger.Printf("Error listing NFC devices: %v", err)
 			// Continue without a device - one may connect later
 		} else if len(devices) == 0 {
-			a.Logger.Println("No NFC devices found - waiting for device connection")
+			a.logger.Println("No NFC devices found - waiting for device connection")
 		} else {
 			devicePath = devices[0]
-			a.Logger.Printf("Auto-selected NFC device: %s", devicePath)
+			a.logger.Printf("Auto-selected NFC device: %s", devicePath)
 		}
 	}
 
@@ -146,16 +244,16 @@ func (a *Agent) Start(devicePath string) error {
 	a.devicePath = devicePath
 
 	// Create NFC reader with manager (supports both hardware and smartphone devices)
-	nfcReader, err := nfc.NewNFCReader(devicePath, a.Manager, 5*time.Second)
+	nfcReader, err := nfc.NewNFCReader(devicePath, a.manager, 5*time.Second)
 	if err != nil {
-		a.Logger.Printf("Error initializing NFC reader: %v", err)
+		a.logger.Printf("Error initializing NFC reader: %v", err)
 		return err
 	}
 
 	a.Reader = nfcReader
 
 	// Start network watcher if TLS manager is configured
-	if a.TLSManager != nil {
+	if a.tlsManager != nil {
 		go a.watchNetworkChanges()
 	}
 
@@ -165,11 +263,11 @@ func (a *Agent) Start(devicePath string) error {
 
 func (a *Agent) Stop() {
 	if a.Reader == nil && a.DeviceServer == nil {
-		a.Logger.Println("Agent is not running")
+		a.logger.Println("Agent is not running")
 		return
 	}
 
-	a.Logger.Println("Stopping agent...")
+	a.logger.Println("Stopping agent...")
 
 	if a.UnifiedServer != nil {
 		a.UnifiedServer.Stop()
@@ -197,24 +295,24 @@ func (a *Agent) Stop() {
 	}
 
 	// Cleanup Manager if it's a remotenfc.Manager
-	if pm, ok := a.Manager.(*remotenfc.Manager); ok {
+	if pm, ok := a.manager.(*remotenfc.Manager); ok {
 		pm.Close()
 	}
 
-	a.Logger.Println("Agent stopped successfully")
+	a.logger.Println("Agent stopped successfully")
 }
 
 // watchNetworkChanges listens for network changes from TLS manager and restarts servers.
 func (a *Agent) watchNetworkChanges() {
-	if a.TLSManager == nil {
+	if a.tlsManager == nil {
 		return
 	}
 
-	ch := a.TLSManager.WatchNetworkChanges()
+	ch := a.tlsManager.WatchNetworkChanges()
 	for range ch {
-		a.Logger.Println("Network change detected, restarting servers with new certificates...")
+		a.logger.Println("Network change detected, restarting servers with new certificates...")
 		if err := a.RestartServers(); err != nil {
-			a.Logger.Printf("Failed to restart servers: %v", err)
+			a.logger.Printf("Failed to restart servers: %v", err)
 		}
 	}
 }
@@ -225,7 +323,7 @@ func (a *Agent) RestartServers() error {
 	a.serversMu.Lock()
 	defer a.serversMu.Unlock()
 
-	a.Logger.Println("Restarting servers...")
+	a.logger.Println("Restarting servers...")
 
 	// Stop servers
 	a.stopServers()
@@ -238,7 +336,7 @@ func (a *Agent) RestartServers() error {
 		return err
 	}
 
-	a.Logger.Println("Servers restarted successfully")
+	a.logger.Println("Servers restarted successfully")
 
 	// Notify listeners of server restart
 	select {
@@ -284,9 +382,9 @@ func (a *Agent) startServers() error {
 
 	// Get device manager
 	var deviceManager *remotenfc.Manager
-	if pm, ok := a.Manager.(*remotenfc.Manager); ok {
+	if pm, ok := a.manager.(*remotenfc.Manager); ok {
 		deviceManager = pm
-	} else if mm, ok := a.Manager.(interface {
+	} else if mm, ok := a.manager.(interface {
 		GetManager(string) (nfc.Manager, bool)
 	}); ok {
 		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {
@@ -300,20 +398,20 @@ func (a *Agent) startServers() error {
 	a.DeviceServer = deviceserver.New(deviceserver.Config{
 		Reader:           a.Reader,
 		DeviceManager:    deviceManager,
-		APISecret:        a.APISecret,
-		AllowedCardTypes: a.AllowedCardTypes,
-		AllowedOrigins:   a.AllowedOrigins,
+		APISecret:        a.apiSecret,
+		AllowedCardTypes: a.allowedCardTypes,
+		AllowedOrigins:   a.allowedOrigins,
 		OriginPolicy:     a.originPolicy(),
-		PublicKeyPin:     a.PublicKeyPin,
+		PublicKeyPin:     a.publicKeyPin,
 		TokenVerifier:    a.tokenVerifier(),
 
-		RequirePairedDevice: a.RequirePairedDevice,
+		RequirePairedDevice: a.requirePairedDevice,
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret:      a.APISecret,
-		AllowedOrigins: a.AllowedOrigins,
+		APISecret:      a.apiSecret,
+		AllowedOrigins: a.allowedOrigins,
 		OriginPolicy:   a.originPolicy(),
 		TokenVerifier:  a.tokenVerifier(),
 		OnChange:       a.clientsChanged(),
@@ -322,20 +420,20 @@ func (a *Agent) startServers() error {
 
 	// Single listener fronts the device, client, control and console handlers.
 	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:           a.DevicePort,
-		CertFile:       a.CertFile,
-		KeyFile:        a.KeyFile,
+		Port:           a.devicePort,
+		CertFile:       a.certFile,
+		KeyFile:        a.keyFile,
 		ControlHandler: a.consoleRoutes(),
 		UIHandler:      a.consoleAssets(),
 	}, a.DeviceServer, a.ClientServer)
 
 	go func() {
 		if err := a.UnifiedServer.Start(); err != nil {
-			a.Logger.Printf("Unified server error: %v", err)
+			a.logger.Printf("Unified server error: %v", err)
 		}
 	}()
 
-	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", a.DevicePort)
+	a.logger.Printf("Server started on port %d (NFC devices + web clients)", a.devicePort)
 	return nil
 }
 
@@ -347,17 +445,17 @@ func (a *Agent) startServers() error {
 // Returns the new secret. Errors propagate from filesystem ops or
 // server restart; on error the previous secret remains in effect.
 func (a *Agent) RotateAPISecret() (string, error) {
-	if a.ConfigDir == "" {
+	if a.configDir == "" {
 		return "", errors.New("config dir not configured")
 	}
 
-	fresh, err := rotateAPISecret(a.ConfigDir)
+	fresh, err := rotateAPISecret(a.configDir)
 	if err != nil {
 		return "", err
 	}
 
-	a.APISecret = fresh
-	a.Logger.Println("API secret rotated; restarting servers…")
+	a.apiSecret = fresh
+	a.logger.Println("API secret rotated; restarting servers…")
 	if err := a.RestartServers(); err != nil {
 		return fresh, err
 	}
@@ -374,24 +472,24 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 
 func (a *Agent) AllowAllCardTypes() {
 	for _, cardType := range nfc.GetAllCardTypes() {
-		a.AllowedCardTypes[cardType] = true
+		a.allowedCardTypes[cardType] = true
 	}
 }
 
 func (a *Agent) AllowedCardTypesLength() int {
-	return len(a.AllowedCardTypes)
+	return len(a.allowedCardTypes)
 }
 
 func (a *Agent) AllowCardType(cardType string) {
-	a.AllowedCardTypes[cardType] = true
+	a.allowedCardTypes[cardType] = true
 }
 
 func (a *Agent) DisallowCardType(cardType string) {
-	delete(a.AllowedCardTypes, cardType)
+	delete(a.allowedCardTypes, cardType)
 }
 
 func (a *Agent) IsCardTypeAllowed(cardType string) bool {
-	return a.AllowedCardTypes[cardType]
+	return a.allowedCardTypes[cardType]
 }
 
 // CurrentDevicePath returns the current device path from the reader.
@@ -409,7 +507,7 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
-	a.RequirePairedDevice = on
+	a.requirePairedDevice = on
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)
 	}
@@ -447,25 +545,25 @@ func (a *Agent) tagObserver() func(nfc.NFCData) {
 // clientsChanged returns a hook that refreshes the console when the client list
 // moves, or nil when there is no console to refresh.
 func (a *Agent) clientsChanged() func() {
-	if a.Console == nil {
+	if a.console == nil {
 		return nil
 	}
-	return a.Console.NotifyChange
+	return a.console.NotifyChange
 }
 
 // tokenVerifier returns the device registry as a token verifier, or nil when
 // there is none. As with originPolicy, a typed nil would satisfy the interface
 // and defeat the caller's nil check.
 func (a *Agent) tokenVerifier() server.TokenVerifier {
-	if a.Devices == nil {
+	if a.devices == nil {
 		return nil
 	}
-	return a.Devices
+	return a.devices
 }
 
 func (a *Agent) originPolicy() server.OriginPolicy {
-	if a.Origins == nil {
+	if a.origins == nil {
 		return nil
 	}
-	return a.Origins
+	return a.origins
 }

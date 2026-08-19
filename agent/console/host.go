@@ -27,7 +27,7 @@ var _ webui.Host = (*host)(nil)
 // ---- identity and lifecycle ----
 
 func (h *host) Running() bool     { return h.agent.Reader != nil }
-func (h *host) ConfigDir() string { return h.agent.ConfigDir }
+func (h *host) ConfigDir() string { return h.agent.ConfigDir() }
 
 func (h *host) StartAgent() error {
 	return h.agent.Start(h.agent.CurrentDevicePath())
@@ -62,13 +62,13 @@ func (h *host) ReaderMode() string {
 func (h *host) DevicePath() string { return h.agent.CurrentDevicePath() }
 
 func (h *host) AvailableDevices() []string {
-	if h.agent.Manager == nil {
+	if h.agent.Manager() == nil {
 		return nil
 	}
 	// The reader picker, so it offers only what can actually be one. A phone
 	// appearing here reads as a reader to choose, and choosing it pins the
 	// reader to a device that is never opened.
-	devices, err := nfc.ListReaders(h.agent.Manager)
+	devices, err := nfc.ListReaders(h.agent.Manager())
 	if err != nil {
 		return nil
 	}
@@ -103,7 +103,7 @@ func (h *host) SelectDevice(devicePath string) error {
 	// Refused rather than accepted and quietly ignored: the picker no longer
 	// offers a phone, so one arriving here came from somewhere that should hear
 	// why it cannot be the reader.
-	if nfc.IsRemoteDevice(h.agent.Manager, devicePath) {
+	if nfc.IsRemoteDevice(h.agent.Manager(), devicePath) {
 		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
 	}
 	h.app.SwitchDevice(devicePath)
@@ -112,10 +112,10 @@ func (h *host) SelectDevice(devicePath string) error {
 
 // ---- server ----
 
-func (h *host) Port() int          { return h.agent.DevicePort }
-func (h *host) BootstrapPort() int { return h.agent.BootstrapPort }
-func (h *host) CertFile() string   { return h.agent.CertFile }
-func (h *host) TLSEnabled() bool   { return h.agent.CertFile != "" && h.agent.KeyFile != "" }
+func (h *host) Port() int          { return h.agent.DevicePort() }
+func (h *host) BootstrapPort() int { return h.agent.BootstrapPort() }
+func (h *host) CertFile() string   { return h.agent.CertFile() }
+func (h *host) TLSEnabled() bool   { return h.agent.CertFile() != "" && h.agent.KeyFile() != "" }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
 func (h *host) ClientCount() int {
@@ -157,41 +157,41 @@ func (h *host) DisconnectClient(id string) error {
 
 // ---- credentials and trust ----
 
-func (h *host) APISecret() string    { return h.agent.APISecret }
-func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin }
+func (h *host) APISecret() string    { return h.agent.APISecret() }
+func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
 
 func (h *host) RotateAPISecret() (string, error) { return h.agent.RotateAPISecret() }
 
 func (h *host) PairingPIN() string {
-	if h.agent.Bootstrap == nil {
+	if h.agent.Bootstrap() == nil {
 		return ""
 	}
-	return h.agent.Bootstrap.PIN()
+	return h.agent.Bootstrap().PIN()
 }
 
 func (h *host) RotatePairingPIN() (string, error) {
-	if h.agent.Bootstrap == nil {
+	if h.agent.Bootstrap() == nil {
 		return "", errors.New("pairing server is disabled")
 	}
-	return h.agent.Bootstrap.RotatePIN(), nil
+	return h.agent.Bootstrap().RotatePIN(), nil
 }
 
 func (h *host) CAInstalled() bool {
-	return h.agent.TLSManager != nil && h.agent.TLSManager.CAInstalled()
+	return h.agent.TLSManager() != nil && h.agent.TLSManager().CAInstalled()
 }
 
 func (h *host) CAFingerprint() (string, error) {
-	if h.agent.TLSManager == nil {
+	if h.agent.TLSManager() == nil {
 		return "", errors.New("no certificate authority")
 	}
-	return h.agent.TLSManager.GetCAFingerprint()
+	return h.agent.TLSManager().GetCAFingerprint()
 }
 
 func (h *host) InstallCA() error {
-	if h.agent.TLSManager == nil {
+	if h.agent.TLSManager() == nil {
 		return errors.New("agent is not managing its own certificates")
 	}
-	if err := h.agent.TLSManager.InstallCA(); err != nil {
+	if err := h.agent.TLSManager().InstallCA(); err != nil {
 		return err
 	}
 	if h.app != nil {
@@ -202,16 +202,16 @@ func (h *host) InstallCA() error {
 }
 
 func (h *host) RegenerateCertificate() error {
-	if h.agent.TLSManager == nil {
+	if h.agent.TLSManager() == nil {
 		return errors.New("agent is not managing its own certificates")
 	}
-	return h.agent.TLSManager.RegenerateCertificates()
+	return h.agent.TLSManager().RegenerateCertificates()
 }
 
 // ---- paired devices ----
 
 func (h *host) PairedDevices() []webui.PairedDevice {
-	if h.agent.Devices == nil {
+	if h.agent.Devices() == nil {
 		return nil
 	}
 
@@ -226,7 +226,7 @@ func (h *host) PairedDevices() []webui.PairedDevice {
 		}
 	}
 
-	paired := h.agent.Devices.List()
+	paired := h.agent.Devices().List()
 	out := make([]webui.PairedDevice, 0, len(paired))
 	for _, d := range paired {
 		out = append(out, webui.PairedDevice{
@@ -242,58 +242,58 @@ func (h *host) PairedDevices() []webui.PairedDevice {
 }
 
 func (h *host) RevokeDevice(id string) error {
-	if h.agent.Devices == nil {
+	if h.agent.Devices() == nil {
 		return errors.New("no device registry")
 	}
-	return h.agent.Devices.Revoke(id)
+	return h.agent.Devices().Revoke(id)
 }
 
 func (h *host) RevokeAllDevices() error {
-	if h.agent.Devices == nil {
+	if h.agent.Devices() == nil {
 		return errors.New("no device registry")
 	}
-	return h.agent.Devices.RevokeAll()
+	return h.agent.Devices().RevokeAll()
 }
 
-func (h *host) RequirePairedDevice() bool { return h.agent.RequirePairedDevice }
+func (h *host) RequirePairedDevice() bool { return h.agent.RequirePairedDevice() }
 
 // ---- browser origins ----
 
 func (h *host) AllowedOrigins() []string {
-	if h.agent.Origins == nil {
+	if h.agent.Origins() == nil {
 		return nil
 	}
-	return h.agent.Origins.List()
+	return h.agent.Origins().List()
 }
 
 func (h *host) BlockedOrigins() []string {
-	if h.agent.Origins == nil {
+	if h.agent.Origins() == nil {
 		return nil
 	}
-	return h.agent.Origins.Blocked()
+	return h.agent.Origins().Blocked()
 }
 
 func (h *host) OriginCheckDisabled() bool {
-	return h.agent.Origins != nil && h.agent.Origins.IsSessionAllowAny()
+	return h.agent.Origins() != nil && h.agent.Origins().IsSessionAllowAny()
 }
 
 func (h *host) AllowOrigin(origin string) error {
-	if h.agent.Origins == nil {
+	if h.agent.Origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins.Allow(origin)
+	return h.agent.Origins().Allow(origin)
 }
 
 func (h *host) RevokeOrigin(origin string) error {
-	if h.agent.Origins == nil {
+	if h.agent.Origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins.Revoke(origin)
+	return h.agent.Origins().Revoke(origin)
 }
 
 func (h *host) SetOriginCheckDisabled(on bool) {
-	if h.agent.Origins != nil {
-		h.agent.Origins.SessionAllowAny(on)
+	if h.agent.Origins() != nil {
+		h.agent.Origins().SessionAllowAny(on)
 	}
 }
 
@@ -317,13 +317,13 @@ func (h *host) SaveSettings(mutate func(*settings.Settings)) (settings.Settings,
 // remoteManager returns the remote device manager, held either directly or
 // behind the multi-manager.
 func (h *host) remoteManager() *remotenfc.Manager {
-	if h.agent.Manager == nil {
+	if h.agent.Manager() == nil {
 		return nil
 	}
-	if m, ok := h.agent.Manager.(*remotenfc.Manager); ok {
+	if m, ok := h.agent.Manager().(*remotenfc.Manager); ok {
 		return m
 	}
-	if mm, ok := h.agent.Manager.(interface {
+	if mm, ok := h.agent.Manager().(interface {
 		GetManager(string) (nfc.Manager, bool)
 	}); ok {
 		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {

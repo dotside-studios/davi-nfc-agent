@@ -104,8 +104,8 @@ func New(rt *agent.Runtime) *App {
 	return &App{
 		agent:           rt.Agent,
 		initialDevice:   rt.DevicePath,
-		bootstrapPort:   rt.Agent.BootstrapPort,
-		bootstrap:       rt.Agent.Bootstrap,
+		bootstrapPort:   rt.Agent.BootstrapPort(),
+		bootstrap:       rt.Agent.Bootstrap(),
 		deviceMenuItems: make(map[string]*systray.MenuItem),
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
 	}
@@ -223,7 +223,7 @@ func (s *App) setupUI() {
 	s.mAPISecret.Disable()
 	s.mCopyAPISecret = s.mURLsMenu.AddSubMenuItem("  Copy API Secret", "Copy the agent's API secret to clipboard")
 	s.mRotateAPISecret = s.mURLsMenu.AddSubMenuItem("  Regenerate API Secret", "Generate a fresh secret; all phones must re-handshake")
-	if s.agent.APISecret == "" {
+	if s.agent.APISecret() == "" {
 		s.mAPISecret.Hide()
 		s.mCopyAPISecret.Hide()
 		s.mRotateAPISecret.Hide()
@@ -321,7 +321,7 @@ func (s *App) autoStartAgent() {
 
 // setupDeviceChangeListener sets up automatic device list refresh on device changes
 func (s *App) setupDeviceChangeListener() {
-	notifier, ok := s.agent.Manager.(nfc.DeviceChangeNotifier)
+	notifier, ok := s.agent.Manager().(nfc.DeviceChangeNotifier)
 	if !ok {
 		return
 	}
@@ -439,8 +439,8 @@ func (s *App) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
 				s.updateURLs()
 			}
 		case <-s.mCopyAPISecret.ClickedCh:
-			if s.agent.APISecret != "" {
-				if err := copyToClipboard(s.agent.APISecret); err != nil {
+			if s.agent.APISecret() != "" {
+				if err := copyToClipboard(s.agent.APISecret()); err != nil {
 					log.Printf("[systray] Failed to copy API secret: %v", err)
 				} else {
 					log.Printf("[systray] Copied API secret to clipboard")
@@ -632,7 +632,7 @@ func (s *App) updateDeviceList() {
 	s.deviceMenuItems = make(map[string]*systray.MenuItem)
 
 	// Get available devices
-	devices, err := s.agent.Manager.ListDevices()
+	devices, err := s.agent.Manager().ListDevices()
 	if err != nil {
 		log.Printf("Error listing devices: %v", err)
 		return
@@ -711,14 +711,14 @@ func (s *App) updateURLs() {
 	}
 
 	// Determine protocol based on TLS
-	tlsEnabled := s.agent.CertFile != "" && s.agent.KeyFile != ""
+	tlsEnabled := s.agent.CertFile() != "" && s.agent.KeyFile() != ""
 	wsProto := "ws"
 	if tlsEnabled {
 		wsProto = "wss"
 	}
 
 	// Device server URL
-	devicePort := s.agent.DevicePort
+	devicePort := s.agent.DevicePort()
 	if devicePort == 0 {
 		devicePort = agent.DefaultDevicePort
 	}
@@ -745,7 +745,7 @@ func (s *App) updateURLs() {
 		s.mBootstrapURL.SetTitle("Pair Phone: Disabled")
 	}
 
-	s.updateAPISecretLabel(s.agent.APISecret)
+	s.updateAPISecretLabel(s.agent.APISecret())
 }
 
 // updateAPISecretLabel updates the systray label with a redacted view
@@ -779,13 +779,13 @@ func (s *App) getDeviceURL() string {
 		ip = ips[0]
 	}
 
-	tlsEnabled := s.agent.CertFile != "" && s.agent.KeyFile != ""
+	tlsEnabled := s.agent.CertFile() != "" && s.agent.KeyFile() != ""
 	wsProto := "ws"
 	if tlsEnabled {
 		wsProto = "wss"
 	}
 
-	devicePort := s.agent.DevicePort
+	devicePort := s.agent.DevicePort()
 	if devicePort == 0 {
 		devicePort = agent.DefaultDevicePort
 	}
@@ -800,13 +800,13 @@ func (s *App) getClientURL() string {
 		ip = ips[0]
 	}
 
-	tlsEnabled := s.agent.CertFile != "" && s.agent.KeyFile != ""
+	tlsEnabled := s.agent.CertFile() != "" && s.agent.KeyFile() != ""
 	wsProto := "ws"
 	if tlsEnabled {
 		wsProto = "wss"
 	}
 
-	clientPort := s.agent.DevicePort
+	clientPort := s.agent.DevicePort()
 	if clientPort == 0 {
 		clientPort = agent.DefaultDevicePort
 	}

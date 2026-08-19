@@ -42,11 +42,11 @@ func (s *App) setupDevicesMenu() {
 
 // refreshDevicesMenu redraws the submenu from the registry.
 func (s *App) refreshDevicesMenu() {
-	if s.agent.Devices == nil || len(s.deviceSlots) == 0 {
+	if s.agent.Devices() == nil || len(s.deviceSlots) == 0 {
 		return
 	}
 
-	devices := s.agent.Devices.List()
+	devices := s.agent.Devices().List()
 
 	slot := 0
 	for _, device := range devices {
@@ -79,7 +79,7 @@ func (s *App) refreshDevicesMenu() {
 		s.mRevokeAllDevices.Show()
 	}
 
-	if s.agent.RequirePairedDevice {
+	if s.agent.RequirePairedDevice() {
 		s.mRequirePaired.Check()
 	} else {
 		s.mRequirePaired.Uncheck()
@@ -91,7 +91,7 @@ func (s *App) refreshDevicesMenu() {
 func (s *App) handleRequirePaired() {
 	on := !s.mRequirePaired.Checked()
 
-	if on && s.agent.Devices != nil && s.agent.Devices.Count() == 0 {
+	if on && s.agent.Devices() != nil && s.agent.Devices().Count() == 0 {
 		// Turning this on with nothing paired locks out every device, which is
 		// unlikely to be what the operator meant from this menu.
 		log.Printf("[systray] Not requiring pairing: no devices are paired, so every device would be refused")
@@ -113,7 +113,7 @@ func (s *App) handleRequirePaired() {
 // handleDeviceRevokeSelection polls the device slots, matching how the other
 // dynamic menus are handled.
 func (s *App) handleDeviceRevokeSelection() {
-	if s.agent.Devices == nil {
+	if s.agent.Devices() == nil {
 		return
 	}
 
@@ -123,7 +123,7 @@ func (s *App) handleDeviceRevokeSelection() {
 			if slot.id == "" {
 				continue
 			}
-			if err := s.agent.Devices.Revoke(slot.id); err != nil {
+			if err := s.agent.Devices().Revoke(slot.id); err != nil {
 				log.Printf("[systray] Failed to revoke device %s: %v", slot.id, err)
 				continue
 			}
@@ -136,11 +136,11 @@ func (s *App) handleDeviceRevokeSelection() {
 
 // handleRevokeAllDevices clears the registry.
 func (s *App) handleRevokeAllDevices() {
-	if s.agent.Devices == nil {
+	if s.agent.Devices() == nil {
 		return
 	}
 
-	if err := s.agent.Devices.RevokeAll(); err != nil {
+	if err := s.agent.Devices().RevokeAll(); err != nil {
 		log.Printf("[systray] Failed to revoke devices: %v", err)
 		return
 	}
@@ -152,8 +152,8 @@ func (s *App) handleRevokeAllDevices() {
 // startDeviceWatcher redraws the menu when a device pairs, so a completed
 // pairing shows up without the operator reopening the menu.
 func (s *App) startDeviceWatcher() {
-	if s.agent.Devices == nil {
+	if s.agent.Devices() == nil {
 		return
 	}
-	s.agent.Devices.OnChange(s.refreshDevicesMenu)
+	s.agent.Devices().OnChange(s.refreshDevicesMenu)
 }

@@ -16,8 +16,8 @@ func (agent *Agent) ApplySettings(s settings.Settings) {
 	// Mutated in place, never replaced: the running device server was handed
 	// this same map at construction, so assigning a new one here would leave it
 	// filtering on a snapshot that no longer changes.
-	for t := range agent.AllowedCardTypes {
-		delete(agent.AllowedCardTypes, t)
+	for t := range agent.allowedCardTypes {
+		delete(agent.allowedCardTypes, t)
 	}
 	if len(s.CardTypes) == 0 {
 		agent.AllowAllCardTypes()

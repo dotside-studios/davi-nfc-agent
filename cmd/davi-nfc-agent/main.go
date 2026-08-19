@@ -61,11 +61,11 @@ func main() {
 	// typed nil would satisfy agent.Console and defeat every check downstream.
 	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if consoleServer != nil {
-		rt.Agent.Console = consoleServer
+		rt.Agent.SetConsole(consoleServer)
 
 		// Redraw the console whenever something changes it from elsewhere.
-		rt.Agent.Origins.OnChange(consoleServer.NotifyChange)
-		rt.Agent.Devices.OnChange(consoleServer.NotifyChange)
+		rt.Agent.Origins().OnChange(consoleServer.NotifyChange)
+		rt.Agent.Devices().OnChange(consoleServer.NotifyChange)
 	}
 
 	app := tray.New(rt)
@@ -76,8 +76,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		if rt.Agent.Bootstrap != nil {
-			rt.Agent.Bootstrap.Stop()
+		if rt.Agent.Bootstrap() != nil {
+			rt.Agent.Bootstrap().Stop()
 		}
 		app.Quit()
 	}()

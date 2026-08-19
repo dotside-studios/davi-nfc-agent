@@ -24,7 +24,7 @@ func (s *App) RefreshTrustMenu() {
 	if s.mTrustBrowsers == nil {
 		return
 	}
-	if s.agent.TLSManager == nil || s.agent.TLSManager.CAInstalled() {
+	if s.agent.TLSManager() == nil || s.agent.TLSManager().CAInstalled() {
 		s.mTrustBrowsers.Hide()
 		return
 	}
@@ -37,7 +37,7 @@ func (s *App) RefreshTrustMenu() {
 // The OS prompts for a password, which blocks, so this runs off the menu
 // goroutine — a stalled handler would freeze every other menu item.
 func (s *App) handleTrustBrowsers() {
-	if s.agent.TLSManager == nil {
+	if s.agent.TLSManager() == nil {
 		log.Printf("[systray] Cannot trust this agent: it is not managing its own certificates")
 		return
 	}
@@ -45,7 +45,7 @@ func (s *App) handleTrustBrowsers() {
 	go func() {
 		log.Printf("[systray] Installing a certificate authority so browsers trust this agent; your operating system may ask for a password")
 
-		if err := s.agent.TLSManager.InstallCA(); err != nil {
+		if err := s.agent.TLSManager().InstallCA(); err != nil {
 			log.Printf("[systray] Could not trust this agent in browsers: %v", err)
 			return
 		}

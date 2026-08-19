@@ -71,7 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The agent now lives in `agent`, the control center in `agent/console` and the
   tray in `agent/tray`, leaving `main.go` as the composition root — the one
   place that picks an NFC backend and joins the three. Behaviour, flags and the
-  on-disk config are unchanged.
+  on-disk config are unchanged, with one visible exception: the two
+  `[multi] Manager registered` lines now precede the startup banner, because the
+  command builds the backend before handing it to the agent.
 
   The dependencies run one way. `agent` knows the console only as an interface
   of two handlers and a redraw signal, so `agent/console` imports `agent` and
@@ -90,6 +92,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`tray.New` takes the `agent.Runtime`** rather than four fields unpacked
   from it at the call site
+
+- **The agent's configuration is settled at construction.** `Agent` carried 22
+  exported fields, twelve of which `Setup` assigned one at a time after
+  `NewAgent`, so the object existed in a half-built state and anything holding
+  it afterwards could rebind the port, swap the origin allowlist or withdraw the
+  pairing requirement behind the running servers. `agent.New(agent.Config{…})`
+  now takes them together and copies them in; the fields behind it are read
+  through methods — `Origins()`, `Devices()`, `DevicePort()` and the rest — and
+  cannot be reassigned. What may legitimately change while running keeps a
+  method: `SetRequirePairedDevice`, `SetAllowCardType`, and the new `SetConsole`
+  for the one write a command still makes. `Reader`, `Bridge` and the three
+  servers stay exported, being state that comes and goes rather than
+  configuration. `NewAgent` is replaced by `New`
 
 - **`agent.Runtime` stops duplicating the agent.** `Origins`, `Devices`,
   `Bootstrap` and `BootstrapPort` were assigned twice by `Setup` — once on the

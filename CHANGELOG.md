@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The agent's own listener is a component too.** The bridge, the device and
+  client handlers and the unified listener are now a `serverStack` component,
+  so every long-lived thing the agent owns goes through the same start and stop
+  path. It differs from the pairing server in one way that could not be avoided:
+  the listener is built from handlers that are built from the reader, so it
+  cannot be handed in by the caller. The agent registers it itself, last, which
+  makes it the first thing stopped — the listener stops accepting before the
+  handlers behind it are taken apart. `Start` now opens the reader and then runs
+  components; `Stop` runs them in reverse and then closes the reader
+
 - **The pairing server is a component of the agent.** It was started inside
   `Setup` and stopped only by the command's signal handler, so `Agent.Stop` left
   it bound: stopping the agent from the tray left port 9472 listening, and an

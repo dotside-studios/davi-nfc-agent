@@ -232,3 +232,50 @@ func TestDuplicateComponentRejected(t *testing.T) {
 	}
 	_ = time.Now
 }
+
+// TestServerStackRunsLast pins the ordering the split depends on: the agent's
+// own listener comes up after everything registered, and goes down before it.
+// A registered component that refuses to start is therefore enough to prove it,
+// because the servers must never have been built.
+func TestServerStackRunsLast(t *testing.T) {
+	a := runningAgent(t, 9503)
+
+	var order []string
+	if err := a.Use(&probe{name: "refuses", failOn: true, order: &order}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.Start(""); err == nil {
+		t.Fatal("Start should fail when a registered component refuses")
+	}
+	if a.UnifiedServer != nil {
+		t.Error("the listener came up despite an earlier component failing; it must run last")
+	}
+	if a.Reader != nil {
+		t.Error("a failed Start must not leave the reader open")
+	}
+}
+
+// TestServerStackFollowsTheLifecycle checks the ordinary path: the servers are
+// built by Start and taken apart by Stop, with the reader outliving them.
+func TestServerStackFollowsTheLifecycle(t *testing.T) {
+	a := runningAgent(t, 9505)
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if a.UnifiedServer == nil || a.DeviceServer == nil || a.ClientServer == nil || a.Bridge == nil {
+		t.Fatal("Start should have built the whole server stack")
+	}
+	if a.Reader == nil {
+		t.Fatal("Start should have opened the reader")
+	}
+
+	a.Stop()
+	if a.UnifiedServer != nil || a.DeviceServer != nil || a.ClientServer != nil || a.Bridge != nil {
+		t.Error("Stop should have torn the server stack down")
+	}
+	if a.Reader != nil {
+		t.Error("Stop should have closed the reader")
+	}
+}

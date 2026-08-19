@@ -257,9 +257,10 @@ func (a *Agent) ServerRestarts() <-chan struct{} {
 	return a.serverRestartChan
 }
 
-// startLocked opens the reader and brings the servers up. The caller holds the
-// lifecycle lock and owns the state transition; see Start.
-func (a *Agent) startLocked(devicePath string) error {
+// openReader opens the reader and starts the network watcher. The servers come
+// up separately, in the serverStack component. The caller holds the lifecycle
+// lock and owns the state transition; see Start.
+func (a *Agent) openReader(devicePath string) error {
 	// A pinned phone is not a reader that has gone missing, it is one that
 	// never existed: a phone reports its scans over the device bridge and is
 	// never opened here. Left in place it becomes a connection retried for as
@@ -300,44 +301,19 @@ func (a *Agent) startLocked(devicePath string) error {
 		go a.watchNetworkChanges()
 	}
 
-	// Start the servers using shared code
-	return a.startServers()
+	return nil
 }
 
-// stopLocked tears down the servers and the reader. The caller holds the
-// lifecycle lock and owns the state transition; see Stop. It is safe to call on
-// a partly started agent, which is what makes an aborted Start recoverable.
-func (a *Agent) stopLocked() {
-	if a.Reader == nil && a.DeviceServer == nil {
+// closeReader stops the reader and releases the manager. The servers are taken
+// down separately, by the serverStack component, before this runs. The caller
+// holds the lifecycle lock; see Stop.
+func (a *Agent) closeReader() {
+	if a.Reader == nil {
 		return
 	}
 
-	a.logger.Println("Stopping agent...")
-
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
-		a.UnifiedServer = nil
-	}
-
-	if a.ClientServer != nil {
-		a.ClientServer.Stop()
-		a.ClientServer = nil
-	}
-
-	if a.DeviceServer != nil {
-		a.DeviceServer.Stop()
-		a.DeviceServer = nil
-	}
-
-	if a.Bridge != nil {
-		a.Bridge.Close()
-		a.Bridge = nil
-	}
-
-	if a.Reader != nil {
-		a.Reader.Stop()
-		a.Reader = nil
-	}
+	a.Reader.Stop()
+	a.Reader = nil
 
 	// Cleanup Manager if it's a remotenfc.Manager
 	if pm, ok := a.manager.(*remotenfc.Manager); ok {
@@ -347,7 +323,6 @@ func (a *Agent) stopLocked() {
 	a.logger.Println("Agent stopped successfully")
 }
 
-// watchNetworkChanges listens for network changes from TLS manager and restarts servers.
 func (a *Agent) watchNetworkChanges() {
 	if a.tlsManager == nil {
 		return

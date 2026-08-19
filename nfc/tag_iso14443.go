@@ -22,15 +22,15 @@ func newPCSCISO14443Tag(dev CardTransport, uid string) *pcscISO14443Tag {
 }
 
 func (t *pcscISO14443Tag) Type() string {
-	return CardTypeType4
+	return tagProfiles[DetectedISO14443_4].name
 }
 
 func (t *pcscISO14443Tag) NumericType() int {
-	return detectedTypeNumeric(t.detectedType)
+	return tagProfiles[DetectedISO14443_4].numericType
 }
 
 func (t *pcscISO14443Tag) Capabilities() TagCapabilities {
-	return InferTagCapabilities(t.Type())
+	return tagProfiles[DetectedISO14443_4].capabilities()
 }
 
 func (t *pcscISO14443Tag) Transceive(data []byte) ([]byte, error) {

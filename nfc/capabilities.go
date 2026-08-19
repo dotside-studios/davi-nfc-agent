@@ -28,7 +28,11 @@ type DeviceCapabilities struct {
 	SupportsEvents bool `json:"supportsEvents"` // Tag arrival/removal events
 }
 
-// TagCapabilityProvider is an optional interface for tags to report their capabilities.
+// TagCapabilityProvider is the part of Tag that reports what a tag supports.
+// Every Tag must answer: an implementation is the only thing that knows what it
+// can do, and a capability guessed from a tag's name is a promise nothing is
+// bound to keep. Embed BaseTag for a conservative default (read only) and
+// override it alongside the operations you implement.
 type TagCapabilityProvider interface {
 	Capabilities() TagCapabilities
 }
@@ -55,14 +59,9 @@ type DeviceTransceiver interface {
 	SupportsTransceive() bool
 }
 
-// GetTagCapabilities returns capabilities for any Tag.
-// If the tag implements TagCapabilityProvider, it uses that.
-// Otherwise, it infers capabilities from the tag type string.
+// GetTagCapabilities returns what a tag reports it can do.
 func GetTagCapabilities(tag Tag) TagCapabilities {
-	if provider, ok := tag.(TagCapabilityProvider); ok {
-		return provider.Capabilities()
-	}
-	return InferTagCapabilities(tag.Type())
+	return tag.Capabilities()
 }
 
 // GetDeviceCapabilities returns capabilities for any Device.
@@ -102,8 +101,12 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 	return caps
 }
 
-// InferTagCapabilities infers capabilities from a tag type string.
-// This is used as a fallback when the tag doesn't implement TagCapabilityProvider.
+// InferTagCapabilities guesses capabilities from a tag type string.
+//
+// It is a last resort, for when there is no tag left to ask: a Card decoded
+// from the wire, or one whose tag has gone. A tag that is present reports its
+// own capabilities, and the drivers in this package declare theirs in
+// tagProfiles rather than round-tripping through a name.
 func InferTagCapabilities(tagType string) TagCapabilities {
 	caps := TagCapabilities{
 		CanRead:      true, // All tags can read

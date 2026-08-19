@@ -62,9 +62,9 @@ func NewCard(tag Tag) *Card {
 }
 
 // Capabilities reports what operations the card's tag supports (memory,
-// writability, lock/password support, read-only state). When the underlying
-// tag is available it is queried directly; otherwise capabilities are inferred
-// from the tag type string.
+// writability, lock/password support, read-only state). A card that still
+// holds its tag asks it; one decoded from the wire has only the type name to
+// go on, and falls back to guessing from that.
 func (c *Card) Capabilities() TagCapabilities {
 	if c.tag != nil {
 		return GetTagCapabilities(c.tag)
@@ -73,9 +73,9 @@ func (c *Card) Capabilities() TagCapabilities {
 }
 
 // tagTechnology reports the tag's technology, preferring what the tag itself
-// says over a guess from its name. A backend that knows the technology — a
+// says over a guess from its name. A backend that knows the technology (a
 // phone reports it with every scan, and the drivers set it in their
-// capabilities — should not have that answer replaced by string matching.
+// capabilities) should not have that answer replaced by string matching.
 func tagTechnology(tag Tag) string {
 	if tech := GetTagCapabilities(tag).Technology; tech != "" {
 		return tech

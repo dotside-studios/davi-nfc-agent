@@ -83,6 +83,7 @@ type Tag interface {
 	TagWriter
 	TagTransceiver
 	TagLocker
+	TagCapabilityProvider
 }
 
 // TagWriteOptions defines options for tag write operations.

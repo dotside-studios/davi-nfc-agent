@@ -50,29 +50,22 @@ func newPCSCUltralightTag(dev CardTransport, uid string, tagType DetectedTagType
 }
 
 func (t *pcscUltralightTag) Type() string {
-	return CardTypeMifareUltralight
+	return t.profile().name
 }
 
 func (t *pcscUltralightTag) NumericType() int {
-	return detectedTypeNumeric(t.detectedType)
+	return t.profile().numericType
+}
+
+func (t *pcscUltralightTag) profile() tagProfile {
+	if p, ok := profileFor(t.detectedType); ok {
+		return p
+	}
+	return tagProfiles[DetectedUltralight]
 }
 
 func (t *pcscUltralightTag) Capabilities() TagCapabilities {
-	caps := InferTagCapabilities(t.Type())
-
-	// The inference works from the type string, which reads "MIFARE
-	// Ultralight" for every variant in this family. The layout knows what the
-	// chip actually is, and MaxNDEFSize gates writes (see Reader.WriteMessage),
-	// so an EV1 has to report its own memory or its extra pages go unused.
-	caps.CanLock = t.layout.lockable
-	switch t.detectedType {
-	case DetectedUltralightEV1:
-		caps.MemorySize = 80 // MF0UL11: 20 pages
-	case DetectedUltralightEV1_128:
-		caps.MemorySize = 164 // MF0UL21: 41 pages
-		caps.MaxNDEFSize = t.layout.writablePages*4 - 2
-	}
-	return caps
+	return t.profile().capabilities()
 }
 
 func (t *pcscUltralightTag) Transceive(data []byte) ([]byte, error) {
@@ -180,7 +173,7 @@ func (t *pcscUltralightTag) MakeReadOnly() error {
 	// A complete lock needs both lock regions on an Ultralight C. The static
 	// lock bytes (page 2) only cover pages 3-15, but an UL-C has 48 pages;
 	// pages 16-47 are governed by the dynamic lock bytes at page 0x28. Setting
-	// only the static lock — as this previously did — left most of an UL-C
+	// only the static lock, as this previously did, left most of an UL-C
 	// writable. The original Ultralight has just 16 pages and no dynamic lock
 	// area, so the static lock alone is complete there.
 	if dynamicLockPage := t.layout.dynamicLockPage; dynamicLockPage != 0 {

@@ -95,6 +95,12 @@ type Config struct {
 	// through SetRequirePairedDevice, which also tells the running server.
 	RequirePairedDevice bool
 
+	// RequirePairedDeviceLocked stops anything lowering that requirement for
+	// the rest of the run. Set it when the requirement came from the command
+	// line or the environment: an operator who asked for it there should not
+	// have it withdrawn by a preference file or a toggle in the console.
+	RequirePairedDeviceLocked bool
+
 	// TLS configuration, used by the unified server. TLSManager also drives
 	// certificate regeneration and network-change watching.
 	CertFile   string
@@ -135,6 +141,7 @@ type Agent struct {
 	keyFile             string
 	tlsManager          *tls.Manager
 	requirePairedDevice bool
+	requirePairedLocked bool
 
 	// Mutable state.
 	allowedCardTypes  map[string]bool
@@ -178,7 +185,8 @@ func New(cfg Config) *Agent {
 		certFile:            cfg.CertFile,
 		keyFile:             cfg.KeyFile,
 		tlsManager:          cfg.TLSManager,
-		requirePairedDevice: cfg.RequirePairedDevice,
+		requirePairedDevice: cfg.RequirePairedDevice || cfg.RequirePairedDeviceLocked,
+		requirePairedLocked: cfg.RequirePairedDeviceLocked,
 		allowedCardTypes:    make(map[string]bool),
 		serverRestartChan:   make(chan struct{}, 1),
 	}
@@ -204,6 +212,10 @@ func (a *Agent) CertFile() string                { return a.certFile }
 func (a *Agent) KeyFile() string                 { return a.keyFile }
 func (a *Agent) TLSManager() *tls.Manager        { return a.tlsManager }
 func (a *Agent) RequirePairedDevice() bool       { return a.requirePairedDevice }
+
+// RequirePairedDeviceLocked reports that the requirement came from the command
+// line and cannot be lowered while this agent runs.
+func (a *Agent) RequirePairedDeviceLocked() bool { return a.requirePairedLocked }
 
 // Console returns the control center, or nil when there is none.
 func (a *Agent) Console() Console { return a.console }
@@ -520,6 +532,13 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
+	if a.requirePairedLocked && !on {
+		// Asked for on the command line. A stored preference or a console
+		// toggle may not withdraw it, which is the direction that matters:
+		// the operator who set the flag is the one who would be surprised.
+		a.logger.Printf("Ignoring request to stop requiring paired devices: it was set on the command line")
+		return
+	}
 	a.requirePairedDevice = on
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)

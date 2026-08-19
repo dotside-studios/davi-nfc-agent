@@ -188,13 +188,10 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
+	// Asked for on the command line or in the environment, as opposed to
+	// remembered from a previous run. The distinction matters below: a stored
+	// preference may raise the requirement but not withdraw one set here.
 	askedForPairing := opts.RequirePaired || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
-	if askedForPairing {
-		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
-		if devices.Count() == 0 {
-			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
-		}
-	}
 
 	// Load persisted preferences. Explicit flags still win: something that
 	// passed -device meant it for this run.
@@ -220,28 +217,34 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		devicePort = stored.Port
 	}
 
-	requirePaired := askedForPairing
-	if !askedForPairing && stored.RequirePairedDevice {
-		requirePaired = true
+	// Either source can turn the requirement on; only the command line can be
+	// relied on to keep it on, which is what RequirePairedDeviceLocked carries.
+	requirePaired := askedForPairing || stored.RequirePairedDevice
+	if requirePaired {
+		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		if devices.Count() == 0 {
+			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
+		}
 	}
 
 	// Everything the agent runs on is settled by this point, which is why it
 	// can be handed over in one piece.
 	a := New(Config{
-		Manager:             manager,
-		Info:                info,
-		DevicePort:          devicePort,
-		APISecret:           apiSecret,
-		ConfigDir:           configDir,
-		Origins:             origins,
-		Devices:             devices,
-		PublicKeyPin:        agentPublicKeyPin,
-		Bootstrap:           bootstrapServer,
-		BootstrapPort:       opts.BootstrapPort,
-		RequirePairedDevice: requirePaired,
-		CertFile:            certFile,
-		KeyFile:             keyFile,
-		TLSManager:          tlsMgr,
+		Manager:                   manager,
+		Info:                      info,
+		DevicePort:                devicePort,
+		APISecret:                 apiSecret,
+		ConfigDir:                 configDir,
+		Origins:                   origins,
+		Devices:                   devices,
+		PublicKeyPin:              agentPublicKeyPin,
+		Bootstrap:                 bootstrapServer,
+		BootstrapPort:             opts.BootstrapPort,
+		RequirePairedDevice:       requirePaired,
+		RequirePairedDeviceLocked: askedForPairing,
+		CertFile:                  certFile,
+		KeyFile:                   keyFile,
+		TLSManager:                tlsMgr,
 	})
 
 	a.ApplySettings(stored)

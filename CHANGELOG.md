@@ -32,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`-require-paired-devices` can no longer be withdrawn by a stored setting.**
+  The flag set the requirement, and then `applySettings` -- the last thing
+  startup did -- pushed the persisted value straight back over it. An operator
+  who launched with the flag while `requirePairedDevice` was false in
+  `settings.json` got an agent that logged *Paired devices required* and then
+  admitted unpaired devices anyway, which is the one direction of this setting
+  that costs security rather than convenience. The console had the same hole
+  from the other side: saving any preference re-applied the stored settings, so
+  a toggle unrelated to pairing could withdraw the requirement mid-run.
+
+  A requirement asked for on the command line or in the environment is now
+  locked for that run: `Config.RequirePairedDeviceLocked` records where it came
+  from, and `SetRequirePairedDevice` refuses to lower it, saying so in the log
+  rather than silently. A requirement that came only from settings stays the
+  operator's to toggle, which is what the console's switch is for. Either source
+  can still turn it on
+
 - **Package `agent` no longer writes to process-wide state.** Moving the CLI
   into the agent took `flag.BoolVar`, `flag.Parse` and `log.SetOutput` with it,
   all of which belong to a program rather than a library: registering flags

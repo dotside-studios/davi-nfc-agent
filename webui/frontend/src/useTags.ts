@@ -55,6 +55,9 @@ export function useTags(secret?: string): Tags {
   // Whether the tag on screen came from a paired device rather than the agent's
   // own reader. deviceStatus only ever describes the latter.
   const fromDevice = useRef(false)
+  // The tag a request applies to. Requests name it, so the agent can refuse
+  // rather than act on whichever tag happens to be present instead.
+  const target = useRef<{ uid: string; deviceID?: string } | null>(null)
 
   const push = useCallback((e: Omit<LiveEvent, 'id' | 'at'>) => {
     eventSeq.current += 1
@@ -143,12 +146,14 @@ export function useTags(secret?: string): Tags {
           // over the real one.
           if (!data.uid) {
             fromDevice.current = false
+            target.current = null
             setTag(null)
             setCapabilities(null)
             push({ kind: 'status', summary: 'Tag removed', ok: true })
             break
           }
           fromDevice.current = Boolean(data.deviceID)
+          target.current = { uid: data.uid, deviceID: data.deviceID || undefined }
           setTag(data)
           if (data.capabilities) setCapabilities(data.capabilities)
           remember(data)
@@ -169,6 +174,7 @@ export function useTags(secret?: string): Tags {
           // Clearing on it discarded every phone scan at the next status
           // message, which is why they reached other consumers and not here.
           if (p.cardPresent === false && !fromDevice.current) {
+            target.current = null
             setTag(null)
             setCapabilities(null)
           }
@@ -276,16 +282,23 @@ export function useTags(secret?: string): Tags {
     [],
   )
 
+  /** Names the tag on a request payload. */
+  const forTag = useCallback((payload: Record<string, unknown>) => {
+    const t = target.current
+    return t ? { ...payload, uid: t.uid, ...(t.deviceID ? { deviceID: t.deviceID } : {}) } : payload
+  }, [])
+
   const write = useCallback(
-    (records: WriteRecord[], lock = false) => send('writeRequest', lock ? { records, lock } : { records }),
-    [send],
+    (records: WriteRecord[], lock = false) =>
+      send('writeRequest', forTag(lock ? { records, lock } : { records })),
+    [send, forTag],
   )
-  const lock = useCallback(() => send('lockRequest', {}), [send])
+  const lock = useCallback(() => send('lockRequest', forTag({})), [send, forTag])
   const transceive = useCallback(
-    (data: string, raw: boolean) => send('transceiveRequest', { data, raw }),
-    [send],
+    (data: string, raw: boolean) => send('transceiveRequest', forTag({ data, raw })),
+    [send, forTag],
   )
-  const refreshCapabilities = useCallback(() => send('capabilitiesRequest', {}), [send])
+  const refreshCapabilities = useCallback(() => send('capabilitiesRequest', forTag({})), [send, forTag])
   const clearEvents = useCallback(() => {
     setEvents([])
     setHistory([])

@@ -141,6 +141,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A write can no longer land on a tag the client did not mean.** Requests were
+  routed by preference rather than by name: the agent's own reader while it
+  reported a card, otherwise whichever device had scanned most recently. That
+  preference was evaluated when the request arrived, not when the tag was
+  scanned, so lifting a card in between moved the request to a phone's tag. A
+  payload encoded for one tag was written to another, irreversibly when the
+  request also locked. Nothing caught it, because the request had no field
+  naming the tag it meant: `uid` was reported in the *response*, so a client
+  learned which tag it had hit only afterwards.
+
+  `writeRequest`, `lockRequest`, `transceiveRequest` and `capabilitiesRequest`
+  now carry the `uid` of the tag they apply to, and the agent finds whichever
+  source is holding it instead of choosing one. A tag that is not present fails
+  with `NO_CARD`; a tag present but not the one named fails with the new
+  `TAG_MISMATCH`, which is not retryable. Naming a `deviceID` as well holds that
+  device to the UID too, so an id remembered from an earlier scan cannot act on
+  whatever that device is holding now.
+
+  The check runs at both ends of the route. On the reader it happens inside the
+  tag operation, against the tag physically present, so it cannot go stale
+  between the check and the write: `WriteOptions.ExpectUID`, and the new
+  `LockCardExpecting`, `TransceiveExpecting` and `GetCapabilitiesExpecting`
+  beside the existing calls, which keep their behaviour when given no UID.
+
+  A request naming neither a tag nor a device is refused with `TAG_NOT_NAMED`
+  rather than guessed at. A client that cannot name its tag sets
+  `allowUntargeted: true` on the request to get the old behaviour back. It is a
+  request field rather than an agent setting so that one such client carries the
+  risk itself instead of the operator weakening every client on the agent.
+
+  The bundled JavaScript client fills `uid` in from the last tag it saw, so
+  `client.write({ records })` is targeted without any application change. Its
+  `tagData` now also exposes `deviceID`, which the payload always carried and
+  the client dropped
+
 - **The agent starts without auto-TLS again.** `-auto-tls=false` and an
   externally provisioned `-cert`/`-key` both panicked at startup, before the
   systray appeared. Neither configuration has a certificate authority, and the

@@ -66,9 +66,18 @@ func scanTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, de
 	}
 }
 
+// scannedUID is the tag every test in this package presents. Requests name it,
+// because the agent no longer guesses which tag a request means.
+const scannedUID = "04:A1:B2:C3"
+
 func sampleWrite(requestID string) server.WriteRequestMessage {
+	return sampleWriteFor(requestID, scannedUID)
+}
+
+func sampleWriteFor(requestID, uid string) server.WriteRequestMessage {
 	return server.WriteRequestMessage{
 		RequestID: requestID,
+		TagUID:    uid,
 		Request: server.WriteRequest{
 			Records: []server.WriteRecord{{Type: "text", Content: "Hello, NFC!"}},
 		},
@@ -97,14 +106,14 @@ func TestWriteRoutesToDeviceHoldingTag(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleWrite("w1")
 	go func() { bridge.WriteRequest <- msg }()
 
 	req := readDeviceWriteRequest(t, conn)
 
-	if got, _ := req.Payload["tagUID"].(string); got != "04:A1:B2:C3" {
+	if got, _ := req.Payload["tagUID"].(string); got != scannedUID {
 		t.Errorf("tagUID = %q, want the scanned UID", got)
 	}
 	if got, _ := req.Payload["idempotencyKey"].(string); got != "key-w1" {
@@ -143,7 +152,7 @@ func TestWriteReportsDeviceFailure(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleWrite("w2")
 	go func() { bridge.WriteRequest <- msg }()
@@ -182,7 +191,7 @@ func TestWriteFailsFastWhenDeviceDisconnects(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleWrite("w3")
 	go func() { bridge.WriteRequest <- msg }()
@@ -229,13 +238,13 @@ func TestTagRemovalClearsWriteTarget(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
 		Type: protocol.WSTypeTagRemoved,
 		Payload: map[string]any{
 			"deviceID":  deviceID,
-			"uid":       "04:A1:B2:C3",
+			"uid":       scannedUID,
 			"removedAt": time.Now().Format(time.RFC3339),
 		},
 	}); err != nil {
@@ -284,7 +293,7 @@ func scanCapableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBri
 		Type: protocol.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
-			"uid":        "04:A1:B2:C3",
+			"uid":        scannedUID,
 			"technology": "ISO14443A",
 			"type":       "Type4",
 			"capabilities": map[string]any{
@@ -334,7 +343,7 @@ func TestTransceiveRoundTrip(t *testing.T) {
 	if raw, _ := req.Payload["raw"].(bool); raw {
 		t.Error("Tag.Transceive requested raw framing, want APDU-level")
 	}
-	if got, _ := req.Payload["tagUID"].(string); got != "04:A1:B2:C3" {
+	if got, _ := req.Payload["tagUID"].(string); got != scannedUID {
 		t.Errorf("tagUID = %q, want the scanned UID", got)
 	}
 

@@ -214,6 +214,33 @@ func (a *Agent) Shutdown() {
 	}
 }
 
+// findDeviceDriver locates the driver serving remote devices, whether the agent
+// holds it directly or behind a manager that holds others.
+func findDeviceDriver(m nfc.Manager) *remotenfc.Manager {
+	if m == nil {
+		return nil
+	}
+
+	if driver, ok := m.(*remotenfc.Manager); ok {
+		return driver
+	}
+
+	holder, ok := m.(interface {
+		GetManager(string) (nfc.Manager, bool)
+	})
+	if !ok {
+		return nil
+	}
+
+	child, exists := holder.GetManager(nfc.ManagerTypeSmartphone)
+	if !exists {
+		return nil
+	}
+
+	driver, _ := child.(*remotenfc.Manager)
+	return driver
+}
+
 // watchNetworkChanges listens for network changes from TLS manager and restarts servers.
 func (a *Agent) watchNetworkChanges() {
 	if a.TLSManager == nil {
@@ -292,24 +319,10 @@ func (a *Agent) startServers() error {
 	// Create bridge for inter-server communication
 	a.Bridge = server.NewServerBridge()
 
-	// Get device manager
-	var deviceManager *remotenfc.Manager
-	if pm, ok := a.Manager.(*remotenfc.Manager); ok {
-		deviceManager = pm
-	} else if mm, ok := a.Manager.(interface {
-		GetManager(string) (nfc.Manager, bool)
-	}); ok {
-		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {
-			if pm, ok := mgr.(*remotenfc.Manager); ok {
-				deviceManager = pm
-			}
-		}
-	}
-
 	// Create device server (handles NFC device connections)
 	a.DeviceServer = deviceserver.New(deviceserver.Config{
 		Reader:           a.Reader,
-		DeviceManager:    deviceManager,
+		DeviceManager:    findDeviceDriver(a.Manager),
 		APISecret:        a.APISecret,
 		AllowedCardTypes: a.AllowedCardTypes,
 		AllowedOrigins:   a.AllowedOrigins,

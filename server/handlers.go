@@ -58,6 +58,16 @@ type WriteRequest struct {
 	// Lock, when true, makes the tag permanently read-only after a successful
 	// write. Only tags that support locking honor this. WARNING: irreversible.
 	Lock bool `json:"lock,omitempty"`
+
+	// DeviceID names the remote device holding the tag to write. Empty leaves
+	// the routing to the agent, which prefers its own reader and then the most
+	// recent scan. Clients learn the value from the deviceID on a tagData
+	// broadcast.
+	DeviceID string `json:"deviceID,omitempty"`
+
+	// IdempotencyKey identifies the logical write. A client that retries after
+	// a lost response should reuse it, so the write is not applied twice.
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
 // BuildNDEFMessage builds an NDEF message from the request.

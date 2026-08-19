@@ -300,13 +300,10 @@ func (m *Manager) handleTagScanned(conn *wsconn.SafeConn, deviceID string, req p
 	}
 	tagData.DeviceID = deviceID
 
-	// Route before publishing: a client reacting to the broadcast with an
-	// immediate write must find the device already holding the tag.
-	m.setActiveTag(deviceID, tagData.UID)
-
+	// SendTagData records the tag before publishing it, so a client reacting to
+	// the broadcast finds the device already holding it.
 	if err := m.SendTagData(deviceID, tagData); err != nil {
 		log.Printf("[device] Failed to send tag data: %v", err)
-		m.clearActiveTag(deviceID, tagData.UID)
 		m.sendTagError(conn, req.ID, err)
 		return err
 	}

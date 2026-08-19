@@ -301,13 +301,13 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 		return
 	}
 
-	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+	if preferDevice(reader, msg.TargetDevice) {
 		if s.writeViaDevice(msg) {
 			return
 		}
 	}
 
-	if reader == nil {
+	if reader == nil || msg.TargetDevice != "" {
 		msg.ResponseCh <- server.WriteResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
@@ -362,10 +362,11 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
 		return false
 	}
 
-	deviceID, uid, ok := s.remote.ActiveTagDevice()
+	active, ok := s.targetDevice(msg.TargetDevice)
 	if !ok {
 		return false
 	}
+	deviceID, uid := active.DeviceID, active.UID
 
 	// Encode here so the device receives exactly the message the hardware path
 	// would have written, rather than re-deriving it from records.
@@ -453,13 +454,13 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 		return
 	}
 
-	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+	if preferDevice(reader, msg.TargetDevice) {
 		if s.lockViaDevice(msg) {
 			return
 		}
 	}
 
-	if reader == nil {
+	if reader == nil || msg.TargetDevice != "" {
 		msg.ResponseCh <- server.LockResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
@@ -498,18 +499,17 @@ func (s *Server) lockViaDevice(msg server.LockRequestMessage) bool {
 		return false
 	}
 
-	deviceID, uid, ok := s.remote.ActiveTagDevice()
+	active, ok := s.targetDevice(msg.TargetDevice)
 	if !ok {
 		return false
 	}
+	deviceID, uid := active.DeviceID, active.UID
 
 	resp, err := s.remote.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
-		RequestID: msg.RequestID,
-		TagUID:    uid,
-		Lock:      true,
-		// The request ID identifies this logical lock, so a device that applied
-		// it before a reconnect can report the earlier outcome.
-		IdempotencyKey: msg.RequestID,
+		RequestID:      msg.RequestID,
+		TagUID:         uid,
+		Lock:           true,
+		IdempotencyKey: msg.IdempotencyKey,
 	})
 	if err != nil {
 		msg.ResponseCh <- server.LockResponseMessage{
@@ -576,13 +576,13 @@ func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 		return
 	}
 
-	if reader == nil || !reader.GetDeviceStatus().CardPresent {
+	if preferDevice(reader, msg.TargetDevice) {
 		if s.transceiveViaDevice(msg) {
 			return
 		}
 	}
 
-	if reader == nil {
+	if reader == nil || msg.TargetDevice != "" {
 		msg.ResponseCh <- server.TransceiveResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
@@ -618,10 +618,11 @@ func (s *Server) transceiveViaDevice(msg server.TransceiveRequestMessage) bool {
 		return false
 	}
 
-	deviceID, uid, ok := s.remote.ActiveTagDevice()
+	active, ok := s.targetDevice(msg.TargetDevice)
 	if !ok {
 		return false
 	}
+	deviceID, uid := active.DeviceID, active.UID
 
 	resp, err := s.remote.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
 		RequestID: msg.RequestID,
@@ -678,11 +679,18 @@ func (s *Server) handleCapabilitiesRequests() {
 // executeCapabilitiesRequest queries the present tag's capabilities.
 func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessage) {
 	reader := s.config.Reader
-	if reader == nil {
+
+	if preferDevice(reader, msg.TargetDevice) {
+		if s.capabilitiesViaDevice(msg) {
+			return
+		}
+	}
+
+	if reader == nil || msg.TargetDevice != "" {
 		msg.ResponseCh <- server.CapabilitiesResponseMessage{
 			RequestID: msg.RequestID,
 			Success:   false,
-			Error:     "No NFC reader available",
+			Error:     "No NFC reader or device holding a tag",
 			ErrorCode: protocol.ErrCodeNoCard,
 		}
 		return
@@ -706,6 +714,29 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 	}
 }
 
+// capabilitiesViaDevice answers from the tag a remote device is holding. It
+// reports whether it handled the request; false means no device was available
+// and the caller should fall back to the hardware reader.
+//
+// No round trip: the device declares a tag's capabilities when it reports the
+// scan, and the tag recomputes what the agent can actually route each time it
+// is asked. Asking the phone again would only fetch what it already sent.
+func (s *Server) capabilitiesViaDevice(msg server.CapabilitiesRequestMessage) bool {
+	active, ok := s.targetDevice(msg.TargetDevice)
+	if !ok || active.Tag == nil {
+		return false
+	}
+
+	caps := nfc.GetTagCapabilities(active.Tag)
+
+	msg.ResponseCh <- server.CapabilitiesResponseMessage{
+		RequestID: msg.RequestID,
+		Success:   true,
+		Payload:   &caps,
+	}
+	return true
+}
+
 // modeAllowsTagModification reports whether the agent's current mode permits a
 // write, a lock or a raw exchange.
 //
@@ -724,6 +755,26 @@ func tagModificationPolicy(reader *nfc.NFCReader) func() bool {
 // readOnlyModeMessage explains a mode refusal for the named operation.
 func readOnlyModeMessage(operations string) string {
 	return fmt.Sprintf("Agent is in read-only mode; %s are refused", operations)
+}
+
+// targetDevice resolves which remote device a request is for. A request naming
+// one is answered by that device or not at all; naming none falls back to the
+// most recent scan.
+func (s *Server) targetDevice(target string) (remotenfc.ActiveTagInfo, bool) {
+	if s.remote == nil {
+		return remotenfc.ActiveTagInfo{}, false
+	}
+	return s.remote.ActiveTag(target)
+}
+
+// preferDevice reports whether a request should go to a remote device rather
+// than the hardware reader.
+//
+// Naming a device is decisive: the client is acting on a tag it can see on that
+// phone, so silently writing to a card sitting on the reader would be wrong.
+// Otherwise the reader keeps priority while it holds a card.
+func preferDevice(reader *nfc.NFCReader, target string) bool {
+	return target != "" || reader == nil || !reader.GetDeviceStatus().CardPresent
 }
 
 // operationErrorCode classifies a reader failure, falling back to the

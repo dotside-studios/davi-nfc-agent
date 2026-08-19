@@ -39,6 +39,11 @@ type WriteRequestMessage struct {
 	// ClientID identifies the requesting client
 	ClientID string
 
+	// TargetDevice names the remote device holding the tag to act on. Empty
+	// leaves the routing to the agent, which prefers its own reader and then
+	// the most recent scan.
+	TargetDevice string
+
 	// Request contains the actual write data
 	Request WriteRequest
 
@@ -77,6 +82,15 @@ type LockRequestMessage struct {
 	// ClientID identifies the requesting client
 	ClientID string
 
+	// TargetDevice names the remote device holding the tag to act on. Empty
+	// leaves the routing to the agent, which prefers its own reader and then
+	// the most recent scan.
+	TargetDevice string
+
+	// IdempotencyKey identifies the logical lock, so a device that already
+	// applied it reports the previous outcome instead of locking twice.
+	IdempotencyKey string
+
 	// ResponseCh receives the lock result (buffered, size 1)
 	ResponseCh chan LockResponseMessage
 }
@@ -107,6 +121,11 @@ type TransceiveRequestMessage struct {
 
 	// ClientID identifies the requesting client
 	ClientID string
+
+	// TargetDevice names the remote device holding the tag to act on. Empty
+	// leaves the routing to the agent, which prefers its own reader and then
+	// the most recent scan.
+	TargetDevice string
 
 	// Data is the command to send to the tag.
 	Data []byte
@@ -147,6 +166,11 @@ type CapabilitiesRequestMessage struct {
 
 	// ClientID identifies the requesting client
 	ClientID string
+
+	// TargetDevice names the remote device holding the tag to act on. Empty
+	// leaves the routing to the agent, which prefers its own reader and then
+	// the most recent scan.
+	TargetDevice string
 
 	// ResponseCh receives the capabilities result (buffered, size 1)
 	ResponseCh chan CapabilitiesResponseMessage

@@ -13,7 +13,8 @@ type Config struct {
 	// Reader is the NFC reader instance (hardware NFC)
 	Reader *nfc.NFCReader
 
-	// DeviceManager manages external devices (phones, tablets, etc.)
+	// DeviceManager is the driver serving external devices (phones, tablets).
+	// Nil when none are configured.
 	DeviceManager *remotenfc.Manager
 
 	// APISecret is the API secret required for non-loopback connections.

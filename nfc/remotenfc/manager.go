@@ -38,8 +38,9 @@ type Manager struct {
 	pending   map[string]pendingRequest // requestID -> waiter
 	pendingMu sync.Mutex
 
-	active   activeTag
-	activeMu sync.RWMutex
+	active       map[string]activeTag // deviceID -> the tag it is holding
+	activeLatest string               // Most recent scan, for a request naming no device
+	activeMu     sync.RWMutex
 }
 
 // NewManager creates a new smartphone manager.
@@ -57,6 +58,7 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 		sessions:          make(map[string]*wsconn.SafeConn),
 		sessionConn:       make(map[*wsconn.SafeConn]string),
 		pending:           make(map[string]pendingRequest),
+		active:            make(map[string]activeTag),
 	}
 
 	// Start cleanup routine
@@ -182,6 +184,10 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	if err != nil {
 		return fmt.Errorf("failed to convert tag data: %w", err)
 	}
+
+	// Record before publishing: a client reacting to the broadcast with an
+	// immediate write must find the device already holding the tag.
+	m.setActiveTag(deviceID, tag.UID(), tag)
 
 	// Create Card and broadcast via data channel
 	card := nfc.NewCard(tag)

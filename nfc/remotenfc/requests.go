@@ -1,6 +1,8 @@
 package remotenfc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
@@ -33,43 +35,98 @@ type pendingResult struct {
 	err     error
 }
 
-// activeTag records which device holds a tag in its field, so a write knows
-// where to go.
+// activeTag is a tag a device is holding in its field. The tag itself is kept,
+// not just its UID, so its capabilities can be answered without waiting for the
+// next scan.
 type activeTag struct {
 	deviceID string
 	uid      string
+	tag      nfc.Tag
 }
 
-// ActiveTagDevice returns the device currently holding a tag.
-func (m *Manager) ActiveTagDevice() (deviceID string, uid string, ok bool) {
+// ActiveTag returns the tag on the named device. An empty deviceID asks for the
+// most recent scan across all devices.
+//
+// Tags are tracked per device rather than in a single slot: two phones can each
+// be holding one, and a request that names its target must reach that target
+// rather than whichever scanned last.
+func (m *Manager) ActiveTag(deviceID string) (ActiveTagInfo, bool) {
 	m.activeMu.RLock()
 	defer m.activeMu.RUnlock()
 
-	if m.active.deviceID == "" {
-		return "", "", false
+	if deviceID == "" {
+		deviceID = m.activeLatest
 	}
-	return m.active.deviceID, m.active.uid, true
+	if deviceID == "" {
+		return ActiveTagInfo{}, false
+	}
+
+	active, ok := m.active[deviceID]
+	if !ok {
+		return ActiveTagInfo{}, false
+	}
+	return ActiveTagInfo{DeviceID: active.deviceID, UID: active.uid, Tag: active.tag}, true
 }
 
-func (m *Manager) setActiveTag(deviceID, uid string) {
+// ActiveTagInfo describes a tag a device is holding.
+type ActiveTagInfo struct {
+	DeviceID string
+	UID      string
+
+	// Tag answers for the tag's capabilities. Nil if the scan carried none.
+	Tag nfc.Tag
+}
+
+// ActiveTagDevices lists the devices currently holding a tag, most recent first.
+func (m *Manager) ActiveTagDevices() []string {
+	m.activeMu.RLock()
+	defer m.activeMu.RUnlock()
+
+	ids := make([]string, 0, len(m.active))
+	if m.activeLatest != "" {
+		ids = append(ids, m.activeLatest)
+	}
+	for deviceID := range m.active {
+		if deviceID != m.activeLatest {
+			ids = append(ids, deviceID)
+		}
+	}
+	return ids
+}
+
+func (m *Manager) setActiveTag(deviceID, uid string, tag nfc.Tag) {
 	m.activeMu.Lock()
 	defer m.activeMu.Unlock()
-	m.active = activeTag{deviceID: deviceID, uid: uid}
+
+	m.active[deviceID] = activeTag{deviceID: deviceID, uid: uid, tag: tag}
+	m.activeLatest = deviceID
 }
 
-// clearActiveTag forgets the active tag only if it is still the one being
-// cleared, since another device may have presented one in the meantime.
+// clearActiveTag forgets a device's tag, but only if it is still the one being
+// cleared: the device may have presented another in the meantime.
 func (m *Manager) clearActiveTag(deviceID, uid string) {
 	m.activeMu.Lock()
 	defer m.activeMu.Unlock()
 
-	if m.active.deviceID != deviceID {
+	active, ok := m.active[deviceID]
+	if !ok {
 		return
 	}
-	if uid != "" && m.active.uid != "" && m.active.uid != uid {
+	if uid != "" && active.uid != "" && active.uid != uid {
 		return
 	}
-	m.active = activeTag{}
+
+	delete(m.active, deviceID)
+
+	if m.activeLatest == deviceID {
+		m.activeLatest = ""
+		// Fall back to any other device still holding one, so a second phone
+		// keeps working when the first withdraws its tag.
+		for id := range m.active {
+			m.activeLatest = id
+			break
+		}
+	}
 }
 
 func (m *Manager) addSession(deviceID string, conn *wsconn.SafeConn) {
@@ -250,13 +307,15 @@ func (m *Manager) writeTag(deviceID, tagUID string, ndef []byte, opts nfc.WriteO
 		return readOnlyModeError("WriteData", tagUID)
 	}
 
-	id := uuid.NewString()
 	resp, err := m.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
-		RequestID:      id,
-		TagUID:         tagUID,
-		NDEFBytes:      ndef,
-		Lock:           opts.Lock,
-		IdempotencyKey: id,
+		RequestID: uuid.NewString(),
+		TagUID:    tagUID,
+		NDEFBytes: ndef,
+		Lock:      opts.Lock,
+		// Derived from the operation, not freshly generated: a key that differs
+		// on every attempt can never match a replay, which is the only thing it
+		// exists to catch.
+		IdempotencyKey: operationKey(deviceID, tagUID, "write", ndef, opts.Lock),
 	})
 	if err != nil {
 		return err
@@ -273,12 +332,11 @@ func (m *Manager) lockTag(deviceID, tagUID string) error {
 		return readOnlyModeError("MakeReadOnly", tagUID)
 	}
 
-	id := uuid.NewString()
 	resp, err := m.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
-		RequestID:      id,
+		RequestID:      uuid.NewString(),
 		TagUID:         tagUID,
 		Lock:           true,
-		IdempotencyKey: id,
+		IdempotencyKey: operationKey(deviceID, tagUID, "lock", nil, true),
 	})
 	if err != nil {
 		return err
@@ -372,6 +430,23 @@ func (m *Manager) tagModificationAllowed() bool {
 	m.mu.RUnlock()
 
 	return allow == nil || allow()
+}
+
+// operationKey identifies a logical tag operation, so the same one retried after
+// a lost response carries the same key and a device can report the earlier
+// outcome instead of applying it twice.
+func operationKey(deviceID, tagUID, op string, payload []byte, lock bool) string {
+	sum := sha256.New()
+	for _, part := range []string{deviceID, tagUID, op} {
+		sum.Write([]byte(part))
+		sum.Write([]byte{0})
+	}
+	if lock {
+		sum.Write([]byte{1})
+	}
+	sum.Write(payload)
+
+	return hex.EncodeToString(sum.Sum(nil)[:16])
 }
 
 // readOnlyModeError refuses a tag-modifying operation on mode grounds, typed so

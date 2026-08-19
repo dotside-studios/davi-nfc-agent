@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+	"log"
+
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
@@ -404,4 +407,24 @@ type BridgeError struct {
 
 func (e *BridgeError) Error() string {
 	return e.Message
+}
+
+// PumpTagData forwards scans from a tag source onto the bridge until ctx is
+// done. A driver produces tags; the bridge carries them to the clients; this is
+// the join, and it lives here so each consumer of a driver does not write it
+// again.
+func PumpTagData(ctx context.Context, src <-chan nfc.NFCData, bridge *ServerBridge) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-src:
+			if !ok {
+				return
+			}
+			if !bridge.SendTagData(data) {
+				log.Println("[bridge] Warning: failed to send tag data (channel full or closed)")
+			}
+		}
+	}
 }

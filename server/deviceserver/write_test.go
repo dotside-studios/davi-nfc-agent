@@ -29,6 +29,11 @@ func newWriteTestServer(t *testing.T) (string, *server.ServerBridge) {
 	ctx, cancel := context.WithCancel(context.Background())
 	dev.StartBackground(ctx)
 
+	// The driver's scans reach the bridge because something pumps them there.
+	// The agent does it in the shipped binary; a consumer wiring these up
+	// directly does it here.
+	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
+
 	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
 
 	t.Cleanup(func() {

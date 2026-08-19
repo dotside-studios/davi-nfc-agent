@@ -36,6 +36,7 @@ func newTestServer(t *testing.T) string {
 	ctx, cancel := context.WithCancel(context.Background())
 	device.StartBackground(ctx)
 	client.StartBackground(ctx)
+	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
 
 	ts := httptest.NewServer(u.Handler())
 

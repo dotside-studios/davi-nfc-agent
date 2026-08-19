@@ -256,6 +256,17 @@ func (s *Server) Stop() {
 // device service type (_nfc-device._tcp) so existing device clients continue to
 // discover the agent, now on the single unified port.
 func (s *Server) startMDNS() error {
+	// Nothing to advertise if Stop already ran. Checked before registering as
+	// well as after: registering and then immediately withdrawing trips a race
+	// inside zeroconf, whose shutdown writes state its own receive goroutines
+	// are still reading.
+	s.mu.Lock()
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		return nil
+	}
+
 	registered, err := zeroconf.Register(
 		s.config.mdnsServiceName(),
 		server.MDNSDeviceServiceType,

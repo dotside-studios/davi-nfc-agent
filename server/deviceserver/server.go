@@ -3,18 +3,15 @@ package deviceserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/gorilla/websocket"
 )
 
 // Server handles device connections and tag data input.
@@ -27,13 +24,6 @@ type Server struct {
 
 	// Handler registry for device message types
 	handlerRegistry *server.HandlerRegistry
-
-	// WebSocket upgrader
-	upgrader websocket.Upgrader
-
-	// Device connections (phones, etc.)
-	devices    map[*websocket.Conn]string // conn -> deviceID
-	devicesMux sync.RWMutex
 
 	// remote is the remote-device driver, which serves their WebSocket
 	// endpoint and routes work to them. Nil when none are configured.
@@ -62,22 +52,12 @@ func (s *Server) RequirePairedDevice() bool {
 // New creates a new device server instance.
 func New(config Config, bridge *server.ServerBridge) *Server {
 	s := &Server{
-		config:  config,
-		bridge:  bridge,
-		devices: make(map[*websocket.Conn]string),
-		upgrader: websocket.Upgrader{
-			CheckOrigin: originChecker(config),
-		},
+		config:          config,
+		bridge:          bridge,
 		handlerRegistry: server.NewHandlerRegistry(),
 	}
 
 	s.requirePaired.Store(config.RequirePairedDevice)
-
-	// Register NFC reader handlers (hardware NFC)
-	if config.Reader != nil {
-		nfcHandler := NewNFCHandler(config.Reader, config.AllowedCardTypes, bridge)
-		nfcHandler.Register(s)
-	}
 
 	// Register the remote-device driver. It owns the device protocol and the
 	// sessions; this server owns authentication and the choice between a
@@ -94,19 +74,6 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 			s.deviceEndpoint.ServeHTTP(w, r)
 			return true
 		})
-
-		s.StartLifecycle(func(ctx context.Context) {
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case data := <-s.remote.Data():
-						s.BroadcastTagData(data)
-					}
-				}
-			}()
-		})
 	}
 
 	return s
@@ -117,67 +84,19 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 // of the agent reaches it.
 var IsDeviceConnection = remotenfc.IsDeviceConnection
 
-// Handle implements server.HandlerServer interface.
-func (s *Server) Handle(messageType string, handler server.HandlerFunc) error {
-	return s.handlerRegistry.Handle(messageType, handler)
-}
-
-// StartLifecycle implements server.HandlerServer interface.
-func (s *Server) StartLifecycle(start func(ctx context.Context)) {
-	s.handlerRegistry.RegisterLifecycle(start)
-}
-
 // HandleWebSocket implements server.HandlerServer interface.
 func (s *Server) HandleWebSocket(matcher func(r *http.Request) bool, handler server.WebSocketHandlerFunc) {
 	s.handlerRegistry.HandleWebSocket(matcher, handler)
 }
 
-// BroadcastTagData sends tag data through the bridge to the client server.
-func (s *Server) BroadcastTagData(data nfc.NFCData) {
-	if !s.bridge.SendTagData(data) {
-		log.Printf("[device] Warning: failed to send tag data to bridge (channel full or closed)")
-	}
-}
-
-// BroadcastDeviceStatus sends device status through the bridge to the client server.
-func (s *Server) BroadcastDeviceStatus(status nfc.DeviceStatus) {
-	if !s.bridge.SendDeviceStatus(status) {
-		log.Printf("[device] Warning: failed to send device status to bridge (channel full or closed)")
-	}
-}
-
-// StartBackground starts the device-side background work under the given parent
-// context, without binding an HTTP listener: the NFC reader, lifecycle handlers
-// and the bridge consumers. It returns once the goroutines are running.
-//
-// The unified server owns the HTTP listener and routes device WebSocket
-// connections here via ServeWS.
+// StartBackground starts the bridge consumers that route client requests to a
+// tag. It binds no listener: the unified server owns that and routes device
+// connections here through ServeWS.
 func (s *Server) StartBackground(ctx context.Context) {
 	// Derive a cancelable context so Stop can tear the goroutines down even
 	// when the parent context outlives this server.
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
-	reader := s.config.Reader
-
-	// Check device status
-	if reader != nil {
-		deviceStatus := reader.GetDeviceStatus()
-		if deviceStatus.Connected {
-			reader.LogDeviceInfo()
-		} else {
-			log.Printf("[device] No NFC device connected, waiting for device...")
-		}
-	}
-
-	// Start reader
-	if reader != nil {
-		reader.Start()
-	}
-
-	// Start lifecycle handlers
-	s.handlerRegistry.StartLifecycleHandlers(s.ctx)
-
-	// Start bridge request consumers
 	go s.handleWriteRequests()
 	go s.handleLockRequests()
 	go s.handleTransceiveRequests()
@@ -212,56 +131,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try custom handlers first (e.g., remotenfc)
-	if s.handlerRegistry.TryCustomWebSocketHandler(w, r) {
-		return
-	}
-
-	// Default device handling (if no custom handler matched)
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("[device] WebSocket upgrade error: %v", err)
-		return
-	}
-	defer func() { _ = conn.Close() }()
-
-	// Add to devices map
-	s.devicesMux.Lock()
-	s.devices[conn] = "" // Unknown device ID initially
-	s.devicesMux.Unlock()
-
-	defer func() {
-		s.devicesMux.Lock()
-		delete(s.devices, conn)
-		s.devicesMux.Unlock()
-	}()
-
-	log.Printf("[device] Device connected")
-
-	// Handle incoming messages
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("[device] WebSocket read error: %v", err)
-			}
-			break
-		}
-
-		var req protocol.WebSocketRequest
-		if err := json.Unmarshal(message, &req); err != nil {
-			log.Printf("[device] Failed to parse message: %v", err)
-			continue
-		}
-
-		// Route to handler
-		if handler, ok := s.handlerRegistry.Get(req.Type); ok {
-			if err := handler(s.ctx, conn, req); err != nil {
-				log.Printf("[device] Handler error for %s: %v", req.Type, err)
-			}
-		} else {
-			log.Printf("[device] No handler for message type: %s", req.Type)
-		}
+	// The remote-device driver serves the connection. Without one there is no
+	// device protocol to speak, so say so rather than accepting a socket that
+	// can only answer "no handler" to everything a device sends.
+	if !s.handlerRegistry.TryCustomWebSocketHandler(w, r) {
+		log.Printf("[device] Connection from %s refused: no device driver configured", r.RemoteAddr)
+		http.Error(w, "no device driver configured", http.StatusServiceUnavailable)
 	}
 }
 

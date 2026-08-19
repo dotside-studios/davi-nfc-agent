@@ -59,6 +59,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The agent drains its own tag sources.** The reader pump lived in
+  `deviceserver`, which had nothing to do with serving it: the package was once
+  "the tag-facing side of the bridge", so the hardware reader went there, and
+  the name stayed after phones arrived and took the same word. The agent now
+  starts the reader and forwards its scans, and `server.PumpTagData` joins any
+  driver's channel to the bridge, so a consumer wiring `remotenfc` up directly
+  writes one call rather than its own loop. `deviceserver` keeps authentication
+  and the choice of tag source
+
+### Removed
+
+- **Dead code in `deviceserver`.** `Handle` had no callers, so the message
+  registry it fed was permanently empty; the `devices` map was written and
+  deleted but never read; and the fallback WebSocket loop behind them ran only
+  when no device driver was configured, where it accepted a device, logged "no
+  handler for message type" at its registration, and left it waiting for a
+  reply that could not come. That connection is now refused with 503, which is
+  what a device can act on
+
 - **`Agent.Shutdown` is the way out; `Stop` is the way to pause.** Merged from
   master, where `Stop` no longer closes the NFC manager: the manager is built
   once for the process, and both the tray's stop button and its device switch
@@ -140,6 +159,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read through `rt.Agent`
 
 ### Fixed
+
+- **The card-type filter no longer races.** It was a bare `map[string]bool`
+  handed to the device server at construction and mutated in place afterwards
+  by the console and the tray, which is why `ApplySettings` cleared it key by
+  key rather than replacing it. The goroutine filtering scans read that map
+  while those writes landed. Go aborts the process on a concurrent map write
+  rather than merely returning the wrong answer, so this was a crash waiting on
+  timing, not a stale read. The filter is now a type that guards itself and is
+  asked rather than shared
 
 - **A write can no longer land on a tag the client did not mean.** Requests were
   routed by preference rather than by name: the agent's own reader while it

@@ -38,6 +38,7 @@ func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *server.Serv
 
 	ctx, cancel := context.WithCancel(context.Background())
 	dev.StartBackground(ctx)
+	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
 
 	ts := httptest.NewServer(http.HandlerFunc(dev.ServeWS))
 

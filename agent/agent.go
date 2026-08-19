@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"log"
 	"os"
@@ -144,7 +145,13 @@ type Agent struct {
 	// Mutable state. lifecycle carries the state machine, the hooks and the
 	// registered components; every transition below runs under its lock.
 	lifecycle
-	allowedCardTypes  map[string]bool
+	cardTypes *cardTypeFilter
+
+	// pumpCtx bounds the goroutines draining the reader and the paired devices
+	// onto the bridge. Cancelled by stopServers, so they end with the bridge
+	// they feed.
+	pumpCtx           context.Context
+	pumpCancel        context.CancelFunc
 	console           Console
 	onTag             []func(nfc.NFCData)
 	devicePath        string
@@ -185,7 +192,7 @@ func New(cfg Config) *Agent {
 		tlsManager:          cfg.TLSManager,
 		requirePairedDevice: cfg.RequirePairedDevice || cfg.RequirePairedDeviceLocked,
 		requirePairedLocked: cfg.RequirePairedDeviceLocked,
-		allowedCardTypes:    make(map[string]bool),
+		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
 	}
 
@@ -430,6 +437,11 @@ func (a *Agent) RestartServers() error {
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
 func (a *Agent) stopServers() {
+	if a.pumpCancel != nil {
+		a.pumpCancel()
+		a.pumpCtx, a.pumpCancel = nil, nil
+	}
+
 	if a.UnifiedServer != nil {
 		a.UnifiedServer.Stop()
 		a.UnifiedServer = nil
@@ -460,16 +472,25 @@ func (a *Agent) startServers() error {
 	// Create bridge for inter-server communication
 	a.Bridge = server.NewServerBridge()
 
+	// The reader and the paired devices are the agent's tag sources; it drains
+	// them onto the bridge itself rather than a server doing it, since neither
+	// has anything to do with serving.
+	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
+	a.Reader.Start()
+	go a.pumpReader(a.pumpCtx, a.Reader, a.Bridge)
+	if remote := findDeviceDriver(a.manager); remote != nil {
+		go server.PumpTagData(a.pumpCtx, remote.Data(), a.Bridge)
+	}
+
 	// Create device server (handles NFC device connections)
 	a.DeviceServer = deviceserver.New(deviceserver.Config{
-		Reader:           a.Reader,
-		DeviceManager:    findDeviceDriver(a.manager),
-		APISecret:        a.apiSecret,
-		AllowedCardTypes: a.allowedCardTypes,
-		AllowedOrigins:   a.allowedOrigins,
-		OriginPolicy:     a.originPolicy(),
-		PublicKeyPin:     a.publicKeyPin,
-		TokenVerifier:    a.tokenVerifier(),
+		Reader:         a.Reader,
+		DeviceManager:  findDeviceDriver(a.manager),
+		APISecret:      a.apiSecret,
+		AllowedOrigins: a.allowedOrigins,
+		OriginPolicy:   a.originPolicy(),
+		PublicKeyPin:   a.publicKeyPin,
+		TokenVerifier:  a.tokenVerifier(),
 
 		RequirePairedDevice: a.requirePairedDevice,
 	}, a.Bridge)
@@ -542,25 +563,23 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 }
 
 func (a *Agent) AllowAllCardTypes() {
-	for _, cardType := range nfc.GetAllCardTypes() {
-		a.allowedCardTypes[cardType] = true
-	}
+	a.cardTypes.allowAll(nfc.GetAllCardTypes())
 }
 
 func (a *Agent) AllowedCardTypesLength() int {
-	return len(a.allowedCardTypes)
+	return a.cardTypes.len()
 }
 
 func (a *Agent) AllowCardType(cardType string) {
-	a.allowedCardTypes[cardType] = true
+	a.cardTypes.allow(cardType)
 }
 
 func (a *Agent) DisallowCardType(cardType string) {
-	delete(a.allowedCardTypes, cardType)
+	a.cardTypes.disallow(cardType)
 }
 
 func (a *Agent) IsCardTypeAllowed(cardType string) bool {
-	return a.allowedCardTypes[cardType]
+	return a.cardTypes.explicitlyAllowed(cardType)
 }
 
 // CurrentDevicePath returns the current device path from the reader.

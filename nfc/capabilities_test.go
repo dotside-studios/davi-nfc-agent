@@ -274,3 +274,31 @@ func TestGetDeviceCapabilities_Fallback(t *testing.T) {
 		t.Errorf("DeviceType = %q, want %q", caps.DeviceType, "mock")
 	}
 }
+
+// TestUltralightEV1Capabilities checks that an EV1 reports its own memory
+// rather than the original Ultralight's. Reader.WriteMessage refuses anything
+// over MaxNDEFSize, so a 128-byte EV1 that reported 46 could never use the
+// pages the driver is willing to write.
+func TestUltralightEV1Capabilities(t *testing.T) {
+	tests := []struct {
+		name        string
+		kind        DetectedTagType
+		wantMaxNDEF int
+		wantCanLock bool
+	}{
+		{"Ultralight", DetectedUltralight, 46, true},
+		{"EV1 48-byte", DetectedUltralightEV1, 46, true},
+		{"EV1 128-byte", DetectedUltralightEV1_128, 126, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			caps := GetTagCapabilities(NewTagForType(tt.kind, &stubTransport{}, "04112233"))
+			if caps.MaxNDEFSize != tt.wantMaxNDEF {
+				t.Errorf("MaxNDEFSize = %d, want %d", caps.MaxNDEFSize, tt.wantMaxNDEF)
+			}
+			if caps.CanLock != tt.wantCanLock {
+				t.Errorf("CanLock = %v, want %v", caps.CanLock, tt.wantCanLock)
+			}
+		})
+	}
+}

@@ -7,7 +7,7 @@ package nfc
 //
 // Example:
 //
-//	manager := nfc.NewManager()
+//	manager := pcsc.NewManager()
 //	devices, _ := manager.ListDevices()
 //	device, _ := manager.OpenDevice(devices[0])
 //	tags, _ := device.GetTags()
@@ -21,13 +21,4 @@ type Manager interface {
 type DeviceChangeNotifier interface {
 	// DeviceChanges returns a channel that signals when devices are added or removed.
 	DeviceChanges() <-chan struct{}
-}
-
-// NewManager creates a new Manager using the PC/SC implementation.
-//
-// Example:
-//
-//	manager := nfc.NewManager()
-func NewManager() Manager {
-	return newPCSCManager()
 }

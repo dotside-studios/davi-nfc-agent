@@ -28,8 +28,8 @@ func TestDetectTagTypeFromATR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := detectTagTypeFromATR(atrWithCardType(tt.cardType)); got != tt.want {
-				t.Errorf("detectTagTypeFromATR(%s) = %v, want %v", tt.name, got, tt.want)
+			if got := DetectTagTypeFromATR(atrWithCardType(tt.cardType)); got != tt.want {
+				t.Errorf("DetectTagTypeFromATR(%s) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}
@@ -45,7 +45,7 @@ func TestDetectTagTypeFromATR_Unrecognized(t *testing.T) {
 	}
 	for name, atr := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := detectTagTypeFromATR(atr); got != DetectedUnknown {
+			if got := DetectTagTypeFromATR(atr); got != DetectedUnknown {
 				t.Errorf("expected DetectedUnknown for %s, got %v", name, got)
 			}
 		})
@@ -65,14 +65,17 @@ func TestParseGetVersionResponse(t *testing.T) {
 		{"NTAG213", mk(0x04, 0x0F), DetectedNTAG213},
 		{"NTAG215", mk(0x04, 0x11), DetectedNTAG215},
 		{"NTAG216", mk(0x04, 0x13), DetectedNTAG216},
-		{"Ultralight", mk(0x03, 0x0B), DetectedUltralight},
-		{"Ultralight C", mk(0x03, 0x0E), DetectedUltralightC},
-		{"Ultralight EV1", mk(0x03, 0x0F), DetectedUltralightEV1},
+		// The original Ultralight and the Ultralight C do not implement
+		// GET_VERSION, so an Ultralight product type in a reply is always an
+		// EV1; the storage size then says which one.
+		{"Ultralight EV1 48-byte", mk(0x03, 0x0B), DetectedUltralightEV1},
+		{"Ultralight EV1 128-byte", mk(0x03, 0x0E), DetectedUltralightEV1_128},
+		{"Ultralight EV1 unknown size", mk(0x03, 0x0F), DetectedUltralightEV1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseGetVersionResponse(tt.resp); got != tt.want {
-				t.Errorf("parseGetVersionResponse(%s) = %v, want %v", tt.name, got, tt.want)
+			if got := ParseGetVersionResponse(tt.resp); got != tt.want {
+				t.Errorf("ParseGetVersionResponse(%s) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}
@@ -85,7 +88,7 @@ func TestParseGetVersionResponse_Invalid(t *testing.T) {
 	}
 	for name, resp := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := parseGetVersionResponse(resp); got != DetectedUnknown {
+			if got := ParseGetVersionResponse(resp); got != DetectedUnknown {
 				t.Errorf("expected DetectedUnknown for %s, got %v", name, got)
 			}
 		})

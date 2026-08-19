@@ -137,3 +137,24 @@ type ClassicTag interface {
 	// keyType: KeyTypeA or KeyTypeB
 	Write(sector, block uint8, data []byte, key []byte, keyType int) error
 }
+
+// NewTagForType returns the Tag implementation for a detected tag type, driven
+// over transport, or nil if the type has no dedicated implementation. Reader
+// backends use it to turn a detection result into a usable tag without knowing
+// which concrete type implements it.
+func NewTagForType(tagType DetectedTagType, transport CardTransport, uid string) Tag {
+	switch tagType {
+	case DetectedClassic1K, DetectedClassic4K:
+		return newPCSCClassicTag(transport, uid, tagType)
+	case DetectedUltralight, DetectedUltralightC, DetectedUltralightEV1, DetectedUltralightEV1_128:
+		return newPCSCUltralightTag(transport, uid, tagType)
+	case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
+		return newPCSCNtagTag(transport, uid, tagType)
+	case DetectedDESFire:
+		return newPCSCDESFireTag(transport, uid)
+	case DetectedISO14443_4:
+		return newPCSCISO14443Tag(transport, uid)
+	default:
+		return nil
+	}
+}

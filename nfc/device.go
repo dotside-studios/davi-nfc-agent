@@ -8,7 +8,7 @@ package nfc
 //
 // Example:
 //
-//	manager := nfc.NewManager()
+//	manager := pcsc.NewManager()
 //	device, err := manager.OpenDevice("")
 //	defer device.Close()
 type Device interface {

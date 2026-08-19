@@ -497,3 +497,42 @@ func TestMockTag_CompleteReadOnlyWorkflow(t *testing.T) {
 		t.Error("Expected WriteData() to fail on read-only tag")
 	}
 }
+
+// TestNewTagForType_UltralightEV1 covers the reader path's handling of an
+// Ultralight EV1. Detection reaches DetectedUltralightEV1 through GET_VERSION,
+// and the factory used to have no case for it, so the reader fell through to
+// probing and finally reported the tag as unsupported.
+func TestNewTagForType_UltralightEV1(t *testing.T) {
+	for _, kind := range []DetectedTagType{DetectedUltralightEV1, DetectedUltralightEV1_128} {
+		tag := NewTagForType(kind, &stubTransport{}, "04112233445566")
+		if tag == nil {
+			t.Fatalf("NewTagForType(%v) = nil, want an Ultralight driver", kind)
+		}
+		if _, ok := tag.(*pcscUltralightTag); !ok {
+			t.Errorf("NewTagForType(%v) = %T, want *pcscUltralightTag", kind, tag)
+		}
+	}
+}
+
+// TestUltralightLayouts pins the memory bounds each Ultralight family gets: how
+// far a read runs, how much a write may fill, and whether every user page can
+// be locked.
+func TestUltralightLayouts(t *testing.T) {
+	tests := []struct {
+		name string
+		kind DetectedTagType
+		want ultralightLayout
+	}{
+		{"Ultralight", DetectedUltralight, ultralightLayout{endPage: 16, writablePages: 12, lockable: true}},
+		{"Ultralight C", DetectedUltralightC, ultralightLayout{endPage: 48, writablePages: 36, dynamicLockPage: 0x28, lockable: true}},
+		{"EV1 48-byte", DetectedUltralightEV1, ultralightLayout{endPage: 16, writablePages: 12, lockable: true}},
+		{"EV1 128-byte", DetectedUltralightEV1_128, ultralightLayout{endPage: 36, writablePages: 32, lockable: false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ultralightLayoutFor(tt.kind); got != tt.want {
+				t.Errorf("ultralightLayoutFor(%v) = %+v, want %+v", tt.kind, got, tt.want)
+			}
+		})
+	}
+}

@@ -7,7 +7,35 @@ import (
 
 type pcscUltralightTag struct {
 	pcscBaseTag
-	isC bool
+	layout ultralightLayout
+}
+
+// ultralightLayout describes an Ultralight-family tag's memory: where user
+// memory ends, how much of it a write may fill, and how to lock all of it.
+type ultralightLayout struct {
+	endPage         byte // first page past user memory
+	writablePages   int  // user pages a write may use
+	dynamicLockPage byte // page holding the dynamic lock bytes, 0 if none
+	lockable        bool // whether every user page can be made read-only
+}
+
+func ultralightLayoutFor(tagType DetectedTagType) ultralightLayout {
+	switch tagType {
+	case DetectedUltralightC:
+		// 48 pages, user memory 4-39. The dynamic lock bytes at page 0x28
+		// govern the pages the static lock does not reach.
+		return ultralightLayout{endPage: 48, writablePages: 36, dynamicLockPage: 0x28, lockable: true}
+	case DetectedUltralightEV1_128:
+		// MF0UL21: 41 pages, user memory 4-35. Its dynamic lock page is not
+		// wired up here, and setting only the static lock bytes would leave
+		// pages 16-35 writable, so a lock is refused rather than half done --
+		// lock bits are one-way, and a partial lock cannot be undone.
+		return ultralightLayout{endPage: 36, writablePages: 32, lockable: false}
+	default:
+		// Original Ultralight and the MF0UL11 EV1: 16 pages, user memory 4-15,
+		// all of it covered by the static lock bytes.
+		return ultralightLayout{endPage: 16, writablePages: 12, lockable: true}
+	}
 }
 
 func newPCSCUltralightTag(dev CardTransport, uid string, tagType DetectedTagType) *pcscUltralightTag {
@@ -17,7 +45,7 @@ func newPCSCUltralightTag(dev CardTransport, uid string, tagType DetectedTagType
 			uid:          uid,
 			detectedType: tagType,
 		},
-		isC: tagType == DetectedUltralightC,
+		layout: ultralightLayoutFor(tagType),
 	}
 }
 
@@ -30,7 +58,21 @@ func (t *pcscUltralightTag) NumericType() int {
 }
 
 func (t *pcscUltralightTag) Capabilities() TagCapabilities {
-	return InferTagCapabilities(t.Type())
+	caps := InferTagCapabilities(t.Type())
+
+	// The inference works from the type string, which reads "MIFARE
+	// Ultralight" for every variant in this family. The layout knows what the
+	// chip actually is, and MaxNDEFSize gates writes (see Reader.WriteMessage),
+	// so an EV1 has to report its own memory or its extra pages go unused.
+	caps.CanLock = t.layout.lockable
+	switch t.detectedType {
+	case DetectedUltralightEV1:
+		caps.MemorySize = 80 // MF0UL11: 20 pages
+	case DetectedUltralightEV1_128:
+		caps.MemorySize = 164 // MF0UL21: 41 pages
+		caps.MaxNDEFSize = t.layout.writablePages*4 - 2
+	}
+	return caps
 }
 
 func (t *pcscUltralightTag) Transceive(data []byte) ([]byte, error) {
@@ -57,12 +99,7 @@ func (t *pcscUltralightTag) ReadData() ([]byte, error) {
 	// Read pages 4 onwards (user data area)
 	var allData []byte
 	var lastError error
-	maxPages := byte(16) // Ultralight has 16 pages
-	if t.isC {
-		maxPages = 48 // Ultralight C has 48 pages
-	}
-
-	for page := byte(4); page < maxPages; page++ {
+	for page := byte(4); page < t.layout.endPage; page++ {
 		data, err := t.readPage(page)
 		if err != nil {
 			// If card was removed, propagate that error immediately
@@ -105,12 +142,8 @@ func (t *pcscUltralightTag) WriteData(data []byte) error {
 	requiredPages := (totalBytes + 3) / 4
 
 	// Check if it fits
-	maxPages := 12 // Pages 4-15 for Ultralight
-	if t.isC {
-		maxPages = 36 // Pages 4-39 for Ultralight C (excluding auth pages)
-	}
-	if requiredPages > maxPages {
-		return fmt.Errorf("data too large: need %d pages, have %d", requiredPages, maxPages)
+	if requiredPages > t.layout.writablePages {
+		return fmt.Errorf("data too large: need %d pages, have %d", requiredPages, t.layout.writablePages)
 	}
 
 	// Pad to 4-byte boundary
@@ -136,18 +169,21 @@ func (t *pcscUltralightTag) IsWritable() (bool, error) {
 }
 
 func (t *pcscUltralightTag) CanMakeReadOnly() (bool, error) {
-	return true, nil
+	return t.layout.lockable, nil
 }
 
 func (t *pcscUltralightTag) MakeReadOnly() error {
+	if !t.layout.lockable {
+		return NewNotSupportedError("MakeReadOnly")
+	}
+
 	// A complete lock needs both lock regions on an Ultralight C. The static
 	// lock bytes (page 2) only cover pages 3-15, but an UL-C has 48 pages;
 	// pages 16-47 are governed by the dynamic lock bytes at page 0x28. Setting
 	// only the static lock — as this previously did — left most of an UL-C
 	// writable. The original Ultralight has just 16 pages and no dynamic lock
 	// area, so the static lock alone is complete there.
-	if t.isC {
-		const dynamicLockPage = 0x28 // page 40
+	if dynamicLockPage := t.layout.dynamicLockPage; dynamicLockPage != 0 {
 		dyn, err := t.readPage(dynamicLockPage)
 		if err != nil {
 			return fmt.Errorf("failed to read dynamic lock page %d: %w", dynamicLockPage, err)

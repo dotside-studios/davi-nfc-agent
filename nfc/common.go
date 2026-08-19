@@ -71,6 +71,13 @@ func (e *noCardError) Error() string {
 	return "no card present in reader " + e.ReaderName
 }
 
+// NewNoCardError reports that a reader has no card on it, which IsNoCardError
+// recognises. Reader backends return it instead of a device error, because an
+// empty reader is an ordinary state rather than a fault.
+func NewNoCardError(readerName string) error {
+	return &noCardError{ReaderName: readerName}
+}
+
 // IsNoCardError checks if an error indicates no card is present in the reader.
 // This is a normal condition and should not be logged as a device error.
 func IsNoCardError(err error) bool {

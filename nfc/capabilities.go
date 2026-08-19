@@ -3,13 +3,41 @@ package nfc
 import (
 	"fmt"
 	"strings"
-
-	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
-// TagCapabilities describes what operations a tag supports. Defined in the
-// protocol package so external tools can consume it without pulling in this one.
-type TagCapabilities = protocol.TagCapabilities
+// TagCapabilities describes what operations a tag supports.
+//
+// It is defined here, with the tags it describes, and aliased as
+// protocol.TagCapabilities for the two protocols that carry it. The json tags
+// are part of that wire format: renaming one renames a field for every client.
+type TagCapabilities struct {
+	// Core capabilities
+	CanRead       bool `json:"canRead"`
+	CanWrite      bool `json:"canWrite"`
+	CanTransceive bool `json:"canTransceive"`
+
+	// Locking capabilities
+	CanLock    bool `json:"canLock"`
+	IsReadOnly bool `json:"isReadOnly,omitempty"`
+
+	// Memory info
+	MemorySize  int `json:"memorySize,omitempty"`  // Total memory in bytes
+	MaxNDEFSize int `json:"maxNdefSize,omitempty"` // Max NDEF message size
+
+	// Technology info
+	Technology string `json:"technology,omitempty"` // "ISO14443A", "ISO14443B", etc.
+	TagFamily  string `json:"tagFamily,omitempty"`  // "MIFARE Classic", "DESFire", "NTAG", etc.
+
+	// Optional features
+	SupportsNDEF           bool `json:"supportsNdef"`
+	SupportsCrypto         bool `json:"supportsCrypto,omitempty"`
+	SupportsAuthentication bool `json:"supportsAuthentication,omitempty"`
+
+	// SupportsPassword indicates the tag supports simple password protection
+	// (e.g. NTAG PWD/PACK/AUTH0). This is distinct from SupportsAuthentication,
+	// which covers crypto-based mutual authentication (DESFire, Ultralight C).
+	SupportsPassword bool `json:"supportsPassword,omitempty"`
+}
 
 // DeviceCapabilities describes what operations a device supports.
 type DeviceCapabilities struct {
@@ -28,7 +56,11 @@ type DeviceCapabilities struct {
 	SupportsEvents bool `json:"supportsEvents"` // Tag arrival/removal events
 }
 
-// TagCapabilityProvider is an optional interface for tags to report their capabilities.
+// TagCapabilityProvider is the part of Tag that reports what a tag supports.
+// Every Tag must answer: an implementation is the only thing that knows what it
+// can do, and a capability guessed from a tag's name is a promise nothing is
+// bound to keep. Embed BaseTag for a conservative default (read only) and
+// override it alongside the operations you implement.
 type TagCapabilityProvider interface {
 	Capabilities() TagCapabilities
 }
@@ -55,14 +87,9 @@ type DeviceTransceiver interface {
 	SupportsTransceive() bool
 }
 
-// GetTagCapabilities returns capabilities for any Tag.
-// If the tag implements TagCapabilityProvider, it uses that.
-// Otherwise, it infers capabilities from the tag type string.
+// GetTagCapabilities returns what a tag reports it can do.
 func GetTagCapabilities(tag Tag) TagCapabilities {
-	if provider, ok := tag.(TagCapabilityProvider); ok {
-		return provider.Capabilities()
-	}
-	return InferTagCapabilities(tag.Type())
+	return tag.Capabilities()
 }
 
 // GetDeviceCapabilities returns capabilities for any Device.
@@ -102,8 +129,12 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 	return caps
 }
 
-// InferTagCapabilities infers capabilities from a tag type string.
-// This is used as a fallback when the tag doesn't implement TagCapabilityProvider.
+// InferTagCapabilities guesses capabilities from a tag type string.
+//
+// It is a last resort, for when there is no tag left to ask: a Card decoded
+// from the wire, or one whose tag has gone. A tag that is present reports its
+// own capabilities, and the drivers in this package declare theirs in
+// tagProfiles rather than round-tripping through a name.
 func InferTagCapabilities(tagType string) TagCapabilities {
 	caps := TagCapabilities{
 		CanRead:      true, // All tags can read
@@ -175,9 +206,9 @@ func InferTagCapabilities(tagType string) TagCapabilities {
 	case strings.Contains(tagTypeLower, "type4") || strings.Contains(tagTypeLower, "iso14443"):
 		caps.CanWrite = true
 		caps.CanTransceive = true
-		caps.CanLock = true
+		caps.CanLock = false // Rewriting the CC WriteAccess byte is not implemented
 		caps.TagFamily = "Type 4"
-		caps.Technology = "ISO14443A"
+		caps.Technology = "ISO14443A/B" // A Type 4 tag may be either
 
 	default:
 		// Conservative defaults for unknown types

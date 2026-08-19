@@ -66,22 +66,27 @@ func newPCSCClassicTag(dev CardTransport, uid string, tagType DetectedTagType) *
 }
 
 func (t *pcscClassicTag) Type() string {
-	if t.is4K {
-		return CardTypeMifareClassic4K
-	}
-	return CardTypeMifareClassic1K
+	return t.profile().name
 }
 
 func (t *pcscClassicTag) NumericType() int {
-	return detectedTypeNumeric(t.detectedType)
-}
-
-func (t *pcscClassicTag) Transceive(data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("Transceive not supported for MIFARE Classic")
+	return t.profile().numericType
 }
 
 func (t *pcscClassicTag) Capabilities() TagCapabilities {
-	return InferTagCapabilities(t.Type())
+	return t.profile().capabilities()
+}
+
+func (t *pcscClassicTag) profile() tagProfile {
+	kind := DetectedClassic1K
+	if t.is4K {
+		kind = DetectedClassic4K
+	}
+	return tagProfiles[kind]
+}
+
+func (t *pcscClassicTag) Transceive(data []byte) ([]byte, error) {
+	return nil, NewNotSupportedError("Transceive (MIFARE Classic)")
 }
 
 // authenticateSector attempts to authenticate to a sector using multiple keys.

@@ -19,15 +19,15 @@ func newPCSCDESFireTag(dev CardTransport, uid string) *pcscDESFireTag {
 }
 
 func (t *pcscDESFireTag) Type() string {
-	return CardTypeDesfire
+	return tagProfiles[DetectedDESFire].name
 }
 
 func (t *pcscDESFireTag) NumericType() int {
-	return detectedTypeNumeric(t.detectedType)
+	return tagProfiles[DetectedDESFire].numericType
 }
 
 func (t *pcscDESFireTag) Capabilities() TagCapabilities {
-	return InferTagCapabilities(t.Type())
+	return tagProfiles[DetectedDESFire].capabilities()
 }
 
 func (t *pcscDESFireTag) Transceive(data []byte) ([]byte, error) {
@@ -49,7 +49,7 @@ const (
 // dfTransceive sends a wrapped DESFire command and returns the response data and
 // the DESFire native status byte. In ISO-wrapped mode DESFire returns its status
 // in SW2 with SW1=0x91 (0x00 = OK, 0xAF = additional frame), NOT the ISO 90 00
-// that the generic APDU layer treats as success — so DESFire must interpret its
+// that the generic APDU layer treats as success, so DESFire must interpret its
 // own status. A plain 90 00 is still accepted as OK for readers that unwrap.
 func (t *pcscDESFireTag) dfTransceive(cmd []byte) ([]byte, byte, error) {
 	resp, err := t.transmitRaw(cmd)
@@ -199,5 +199,5 @@ func (t *pcscDESFireTag) CanMakeReadOnly() (bool, error) {
 }
 
 func (t *pcscDESFireTag) MakeReadOnly() error {
-	return fmt.Errorf("DESFire MakeReadOnly not supported")
+	return NewNotSupportedError("DESFire MakeReadOnly")
 }

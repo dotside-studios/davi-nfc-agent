@@ -51,7 +51,7 @@ func NewCard(tag Tag) *Card {
 	return &Card{
 		UID:          tag.UID(),
 		Type:         tag.Type(),
-		Technology:   inferTechnology(tag.Type()),
+		Technology:   tagTechnology(tag),
 		ScannedAt:    now,
 		LastAccessed: now,
 		tag:          tag,
@@ -61,9 +61,9 @@ func NewCard(tag Tag) *Card {
 }
 
 // Capabilities reports what operations the card's tag supports (memory,
-// writability, lock/password support, read-only state). When the underlying
-// tag is available it is queried directly; otherwise capabilities are inferred
-// from the tag type string.
+// writability, lock/password support, read-only state). A card that still
+// holds its tag asks it; one decoded from the wire has only the type name to
+// go on, and falls back to guessing from that.
 func (c *Card) Capabilities() TagCapabilities {
 	if c.tag != nil {
 		return GetTagCapabilities(c.tag)
@@ -71,16 +71,33 @@ func (c *Card) Capabilities() TagCapabilities {
 	return InferTagCapabilities(c.Type)
 }
 
-// inferTechnology determines the NFC technology from the tag type string.
-func inferTechnology(tagType string) string {
-	// Simple heuristic based on tag type string
+// tagTechnology reports the tag's technology, preferring what the tag itself
+// says over a guess from its name. A backend that knows the technology (a
+// phone reports it with every scan, and the drivers set it in their
+// capabilities) should not have that answer replaced by string matching.
+func tagTechnology(tag Tag) string {
+	if tech := GetTagCapabilities(tag).Technology; tech != "" {
+		return tech
+	}
+	return InferTechnology(tag.Type())
+}
+
+// InferTechnology guesses a tag's technology from its type name, for the cases
+// where nothing better is on offer: a Card decoded from the wire, or a tag that
+// does not report one. A tag that is present answers for itself.
+func InferTechnology(tagType string) string {
+	upperType := strings.ToUpper(tagType)
 	switch {
-	case strings.Contains(tagType, "MIFARE"):
+	case strings.Contains(upperType, "MIFARE"),
+		strings.Contains(upperType, "NTAG"),
+		strings.Contains(upperType, "DESFIRE"):
 		return "ISO14443A"
-	case strings.Contains(tagType, "Type4"):
+	case strings.Contains(upperType, "TYPE4"):
 		return "ISO14443A/B"
-	case strings.Contains(tagType, "DESFire"):
-		return "ISO14443A"
+	case strings.Contains(upperType, "FELICA"):
+		return "ISO18092"
+	case strings.Contains(upperType, "ISO15693"):
+		return "ISO15693"
 	default:
 		return "Unknown"
 	}

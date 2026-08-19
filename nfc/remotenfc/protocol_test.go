@@ -152,7 +152,7 @@ func TestConvertNDEFRecordInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			record, err := nfc.ConvertNDEFRecordInput(tt.input)
+			record, err := protocol.ConvertNDEFRecordInput(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertNDEFRecordInput() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -241,7 +241,7 @@ func TestConvertNDEFInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, err := nfc.ConvertNDEFInput(tt.input)
+			msg, err := protocol.ConvertNDEFInput(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertNDEFInput() error = %v, wantErr %v", err, tt.wantErr)
 				return

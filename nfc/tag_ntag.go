@@ -30,28 +30,26 @@ func newPCSCNtagTag(dev CardTransport, uid string, tagType DetectedTagType) *pcs
 }
 
 func (t *pcscNtagTag) Type() string {
-	switch t.detectedType {
-	case DetectedNTAG213:
-		return CardTypeNtag213
-	case DetectedNTAG215:
-		return CardTypeNtag215
-	case DetectedNTAG216:
-		return CardTypeNtag216
-	default:
-		return CardTypeNtag215 // Default
-	}
+	return t.profile().name
 }
 
 func (t *pcscNtagTag) NumericType() int {
-	return detectedTypeNumeric(t.detectedType)
+	return t.profile().numericType
 }
 
 func (t *pcscNtagTag) Capabilities() TagCapabilities {
-	return InferTagCapabilities(t.Type())
+	return t.profile().capabilities()
+}
+
+func (t *pcscNtagTag) profile() tagProfile {
+	if p, ok := profileFor(t.detectedType); ok {
+		return p
+	}
+	return tagProfiles[DetectedNTAG215] // the driver's default model
 }
 
 func (t *pcscNtagTag) Transceive(data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("Transceive not supported for NTAG")
+	return nil, NewNotSupportedError("Transceive (NTAG)")
 }
 
 // readPage reads 4 bytes from the specified page
@@ -154,7 +152,7 @@ func (t *pcscNtagTag) MakeReadOnly() error {
 	// A complete lock needs BOTH lock regions. The static lock bytes (page 2)
 	// only cover pages 3-15; the bulk of an NTAG215/216's user memory (pages
 	// >=16) is governed by the dynamic lock bytes. Setting only the static lock
-	// bytes — as this previously did — leaves most of the tag writable.
+	// bytes, as this previously did, leaves most of the tag writable.
 	//
 	// Lock the dynamic area first, then the static area.
 	dynPage := t.dynamicLockPage()

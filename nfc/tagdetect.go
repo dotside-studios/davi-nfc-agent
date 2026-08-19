@@ -240,23 +240,3 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 	}
 }
 
-// detectedTypeNumeric returns numeric type code for detected tag type
-// These match the SAK values used for tag identification
-func detectedTypeNumeric(tagType DetectedTagType) int {
-	switch tagType {
-	case DetectedClassic1K:
-		return 0x08 // Classic 1K SAK
-	case DetectedClassic4K:
-		return 0x18 // Classic 4K SAK
-	case DetectedUltralight, DetectedUltralightC, DetectedUltralightEV1, DetectedUltralightEV1_128:
-		return 0x00 // Ultralight SAK
-	case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
-		return 0x00 // NTAG SAK
-	case DetectedDESFire, DetectedDESFireEV1, DetectedDESFireEV2:
-		return 0x20 // DESFire SAK
-	case DetectedISO14443_4:
-		return 0x20 // ISO14443-4 SAK
-	default:
-		return -1
-	}
-}

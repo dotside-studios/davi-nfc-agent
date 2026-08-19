@@ -649,7 +649,7 @@ func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, erro
 // per-operation label. A client can then tell "present the tag again" from
 // "this tag is locked".
 func (s *Server) sendOperationError(conn *server.SafeConn, requestID string, fallback protocol.ErrorCode, err error) {
-	payload := nfc.WireError(err)
+	payload := protocol.ErrorPayloadFor(err)
 	if payload.Code == protocol.ErrCodeUnknownError {
 		payload = protocol.NewErrorPayload(fallback)
 	}

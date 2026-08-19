@@ -107,7 +107,7 @@ func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
 	var ndefMsg *nfc.NDEFMessage
 	var ndefData []byte
 	if data.NDEFMessage != nil {
-		ndefMsg, err = nfc.ConvertNDEFInput(data.NDEFMessage)
+		ndefMsg, err = protocol.ConvertNDEFInput(data.NDEFMessage)
 		if err != nil {
 			return nil, wrapTagDataError(op, uid, "failed to parse NDEF message", err)
 		}

@@ -48,24 +48,3 @@ func ParseUID(uid string) (string, error) {
 
 	return result.String(), nil
 }
-
-// InferTechnology determines NFC technology from tag type string.
-func InferTechnology(tagType string) string {
-	upperType := strings.ToUpper(tagType)
-	switch {
-	case strings.Contains(upperType, "MIFARE"):
-		return "ISO14443A"
-	case strings.Contains(upperType, "NTAG"):
-		return "ISO14443A"
-	case strings.Contains(upperType, "DESFIRE"):
-		return "ISO14443A"
-	case strings.Contains(upperType, "TYPE4"):
-		return "ISO14443A/B"
-	case strings.Contains(upperType, "FELICA"):
-		return "ISO18092"
-	case strings.Contains(upperType, "ISO15693"):
-		return "ISO15693"
-	default:
-		return "Unknown"
-	}
-}

@@ -43,6 +43,13 @@ func (BaseTag) Transceive(data []byte) ([]byte, error) {
 	return nil, NewNotSupportedError("Transceive")
 }
 
+// Capabilities describes exactly what the defaults above do: a tag that can be
+// read, and nothing else. Override it in step with the operations you
+// implement, so what a tag advertises and what it does cannot drift apart.
+func (BaseTag) Capabilities() TagCapabilities {
+	return TagCapabilities{CanRead: true, SupportsNDEF: true}
+}
+
 func (BaseTag) IsWritable() (bool, error)      { return false, nil }
 func (BaseTag) CanMakeReadOnly() (bool, error) { return false, nil }
 func (BaseTag) MakeReadOnly() error            { return NewNotSupportedError("MakeReadOnly") }

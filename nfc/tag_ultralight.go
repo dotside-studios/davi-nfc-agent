@@ -76,7 +76,7 @@ func (t *pcscUltralightTag) Capabilities() TagCapabilities {
 }
 
 func (t *pcscUltralightTag) Transceive(data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("Transceive not supported for Ultralight")
+	return nil, NewNotSupportedError("Transceive (Ultralight)")
 }
 
 // readPage reads 4 bytes from the specified page

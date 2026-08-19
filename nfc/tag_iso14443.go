@@ -212,15 +212,14 @@ func (t *pcscISO14443Tag) IsWritable() (bool, error) {
 }
 
 func (t *pcscISO14443Tag) CanMakeReadOnly() (bool, error) {
-	writable, err := t.IsWritable()
-	if err != nil {
-		return false, err
-	}
-	return writable, nil
+	// Type 4 locking is not implemented (see MakeReadOnly). Report it honestly
+	// rather than deciding from writability, so callers don't offer a lock that
+	// is guaranteed to fail.
+	return false, nil
 }
 
 func (t *pcscISO14443Tag) MakeReadOnly() error {
-	// Modify CC WriteAccess byte to 0xFF
-	// This is a simplified implementation
-	return fmt.Errorf("ISO14443-4 MakeReadOnly not yet implemented")
+	// Locking a Type 4 tag means rewriting the CC file's WriteAccess byte,
+	// which is not implemented. Capabilities report CanLock=false to match.
+	return NewNotSupportedError("ISO14443-4 MakeReadOnly")
 }

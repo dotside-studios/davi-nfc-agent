@@ -3,8 +3,9 @@ package nfc
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
+
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // Card represents a detected NFC card with its metadata and provides
@@ -51,7 +52,7 @@ func NewCard(tag Tag) *Card {
 	return &Card{
 		UID:          tag.UID(),
 		Type:         tag.Type(),
-		Technology:   inferTechnology(tag.Type()),
+		Technology:   tagTechnology(tag),
 		ScannedAt:    now,
 		LastAccessed: now,
 		tag:          tag,
@@ -71,19 +72,15 @@ func (c *Card) Capabilities() TagCapabilities {
 	return InferTagCapabilities(c.Type)
 }
 
-// inferTechnology determines the NFC technology from the tag type string.
-func inferTechnology(tagType string) string {
-	// Simple heuristic based on tag type string
-	switch {
-	case strings.Contains(tagType, "MIFARE"):
-		return "ISO14443A"
-	case strings.Contains(tagType, "Type4"):
-		return "ISO14443A/B"
-	case strings.Contains(tagType, "DESFire"):
-		return "ISO14443A"
-	default:
-		return "Unknown"
+// tagTechnology reports the tag's technology, preferring what the tag itself
+// says over a guess from its name. A backend that knows the technology — a
+// phone reports it with every scan, and the drivers set it in their
+// capabilities — should not have that answer replaced by string matching.
+func tagTechnology(tag Tag) string {
+	if tech := GetTagCapabilities(tag).Technology; tech != "" {
+		return tech
 	}
+	return protocol.InferTechnology(tag.Type())
 }
 
 // Read implements io.Reader. Reads NDEF message data from the card.

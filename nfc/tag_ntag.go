@@ -51,7 +51,7 @@ func (t *pcscNtagTag) Capabilities() TagCapabilities {
 }
 
 func (t *pcscNtagTag) Transceive(data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("Transceive not supported for NTAG")
+	return nil, NewNotSupportedError("Transceive (NTAG)")
 }
 
 // readPage reads 4 bytes from the specified page

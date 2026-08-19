@@ -77,7 +77,7 @@ func (t *pcscClassicTag) NumericType() int {
 }
 
 func (t *pcscClassicTag) Transceive(data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("Transceive not supported for MIFARE Classic")
+	return nil, NewNotSupportedError("Transceive (MIFARE Classic)")
 }
 
 func (t *pcscClassicTag) Capabilities() TagCapabilities {

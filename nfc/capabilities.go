@@ -175,9 +175,9 @@ func InferTagCapabilities(tagType string) TagCapabilities {
 	case strings.Contains(tagTypeLower, "type4") || strings.Contains(tagTypeLower, "iso14443"):
 		caps.CanWrite = true
 		caps.CanTransceive = true
-		caps.CanLock = true
+		caps.CanLock = false // Rewriting the CC WriteAccess byte is not implemented
 		caps.TagFamily = "Type 4"
-		caps.Technology = "ISO14443A"
+		caps.Technology = "ISO14443A/B" // A Type 4 tag may be either
 
 	default:
 		// Conservative defaults for unknown types

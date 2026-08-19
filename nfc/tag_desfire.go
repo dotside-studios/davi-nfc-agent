@@ -27,7 +27,12 @@ func (t *pcscDESFireTag) NumericType() int {
 }
 
 func (t *pcscDESFireTag) Capabilities() TagCapabilities {
-	return InferTagCapabilities(t.Type())
+	caps := InferTagCapabilities(t.Type())
+	// The inference keeps raw exchange off for a tag known only by name. This
+	// driver does implement Transceive -- it forwards APDUs to the card, which
+	// is how a DESFire application is meant to be driven -- so it says so.
+	caps.CanTransceive = true
+	return caps
 }
 
 func (t *pcscDESFireTag) Transceive(data []byte) ([]byte, error) {
@@ -199,5 +204,5 @@ func (t *pcscDESFireTag) CanMakeReadOnly() (bool, error) {
 }
 
 func (t *pcscDESFireTag) MakeReadOnly() error {
-	return fmt.Errorf("DESFire MakeReadOnly not supported")
+	return NewNotSupportedError("DESFire MakeReadOnly")
 }

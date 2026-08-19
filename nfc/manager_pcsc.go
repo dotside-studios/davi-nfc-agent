@@ -1,17 +1,18 @@
 package nfc
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ebfe/scard"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 )
 
-// pcscManager implements Manager using PC/SC via ebfe/scard
+// pcscManager implements Manager using PC/SC via the nfc/pcsc adapter
 type pcscManager struct {
-	ctx   *scard.Context
+	ctx   pcsc.Context
 	ctxMu sync.Mutex
 }
 
@@ -38,7 +39,7 @@ func (m *pcscManager) ensureContext() error {
 	}
 
 	// Establish new context
-	ctx, err := scard.EstablishContext()
+	ctx, err := pcsc.EstablishContext()
 	if err != nil {
 		return fmt.Errorf("failed to establish PC/SC context: %w", err)
 	}
@@ -92,11 +93,14 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 	// Connect to the reader
 	// Use ShareShared to allow other apps to access the reader
 	// Use ProtocolAny to let the reader decide the protocol
-	card, err := ctx.Connect(readerName, scard.ShareShared, scard.ProtocolAny)
+	card, err := ctx.Connect(readerName, pcsc.ShareShared, pcsc.ProtocolAny)
 	if err != nil {
-		// Check if no card is present (case-insensitive match for various PC/SC error messages)
+		// Check if no card is present. The status code is the reliable signal;
+		// the string matches stay as a fallback for readers whose drivers
+		// report something else.
 		errLower := strings.ToLower(err.Error())
-		if strings.Contains(errLower, "no card") ||
+		if errors.Is(err, pcsc.ErrNoSmartcard) ||
+			strings.Contains(errLower, "no card") ||
 			strings.Contains(errLower, "no smart card") ||
 			strings.Contains(errLower, "card is not present") ||
 			strings.Contains(errLower, "card not present") {
@@ -108,7 +112,7 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 	// Create device wrapper
 	dev, err := newPCSCDevice(ctx, card, readerName)
 	if err != nil {
-		_ = card.Disconnect(scard.LeaveCard)
+		_ = card.Disconnect(pcsc.LeaveCard)
 		return nil, fmt.Errorf("failed to initialize device: %w", err)
 	}
 
@@ -118,12 +122,12 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 // isCardPresentLocked checks if a card is present in the reader using GetStatusChange
 // with a very short timeout to avoid blocking.
 // NOTE: Caller must hold ctxMu lock.
-func (m *pcscManager) isCardPresentLocked(ctx *scard.Context, readerName string) (bool, error) {
+func (m *pcscManager) isCardPresentLocked(ctx pcsc.Context, readerName string) (bool, error) {
 	// Create reader state for status check
-	readerStates := []scard.ReaderState{
+	readerStates := []pcsc.ReaderState{
 		{
 			Reader:       readerName,
-			CurrentState: scard.StateUnaware,
+			CurrentState: pcsc.StateUnaware,
 		},
 	}
 
@@ -132,15 +136,14 @@ func (m *pcscManager) isCardPresentLocked(ctx *scard.Context, readerName string)
 	err := ctx.GetStatusChange(readerStates, 0)
 	if err != nil {
 		// Timeout is expected - it means no state change, check current state
-		errLower := strings.ToLower(err.Error())
-		if !strings.Contains(errLower, "timeout") {
+		if !errors.Is(err, pcsc.ErrTimeout) {
 			return false, err
 		}
 	}
 
 	// Check if card is present in the reader
 	state := readerStates[0].EventState
-	return (state & scard.StatePresent) != 0, nil
+	return (state & pcsc.StatePresent) != 0, nil
 }
 
 // ListDevices lists available PC/SC readers

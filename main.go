@@ -22,6 +22,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
@@ -67,6 +68,9 @@ func main() {
 	// Handle --version flag
 	if versionFlag {
 		fmt.Println(buildinfo.BuildInfo())
+		// Which PC/SC backend this binary was built with; the first thing to
+		// know when a reader is not being detected.
+		fmt.Printf("  PC/SC: %s\n", pcsc.Backend)
 		os.Exit(0)
 	}
 

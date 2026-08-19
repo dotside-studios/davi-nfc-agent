@@ -345,3 +345,57 @@ func TestIndexShowsQR(t *testing.T) {
 		t.Errorf("install page does not embed /qr.png")
 	}
 }
+
+// TestNewBootstrapServerNormalisesTypedNilManager covers the shape of nil the
+// constructor actually receives. main holds a concrete *Manager, so under
+// -auto-tls=false or an externally provisioned -cert/-key it passes a nil
+// *Manager, which boxes into a non-nil caReader.
+func TestNewBootstrapServerNormalisesTypedNilManager(t *testing.T) {
+	var mgr *Manager // nil, but not a nil interface once passed in
+
+	s := NewBootstrapServer(mgr, 0)
+
+	if s.manager != nil {
+		t.Fatal("typed-nil *Manager survived into s.manager; the nil guards in this file are no-ops")
+	}
+}
+
+// TestBootstrapServerWithoutCA runs the endpoints a CA-less agent still needs.
+// These panicked with a nil pointer dereference before the constructor
+// normalised its input.
+func TestBootstrapServerWithoutCA(t *testing.T) {
+	var mgr *Manager
+	s := NewBootstrapServer(mgr, 0)
+
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	tests := []struct {
+		name string
+		path string
+		want int
+	}{
+		// The pairing flow works without a CA. The index page is where a
+		// phone lands after scanning the QR.
+		{"index page", "/", http.StatusOK},
+		{"install", "/install?pin=" + s.PIN(), http.StatusSeeOther},
+		{"qr", "/qr.png", http.StatusOK},
+		// The CA endpoints have nothing to hand out and must say so.
+		{"raw ca pem", "/ca.pem?pin=" + s.PIN(), http.StatusNotImplemented},
+		{"raw ca crt", "/ca.crt?pin=" + s.PIN(), http.StatusNotImplemented},
+		{"ios profile", "/install/ios?pin=" + s.PIN(), http.StatusInternalServerError},
+		{"android cert", "/install/android?pin=" + s.PIN(), http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.httpServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			if rec.Code != tt.want {
+				t.Errorf("GET %s = %d, want %d", tt.path, rec.Code, tt.want)
+			}
+		})
+	}
+}

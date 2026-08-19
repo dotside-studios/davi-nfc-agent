@@ -23,7 +23,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
@@ -48,7 +47,7 @@ func main() {
 	// distinguishes them.
 	manager := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
-		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: remotenfc.NewManager(30 * time.Second)},
+		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: remotenfc.NewManager(remotenfc.DeviceTimeout)},
 	)
 
 	rt, err := agent.Setup(opts, manager)
@@ -129,9 +128,9 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `agent/tray` | The system tray |
 | `nfc` | Readers, tag drivers, NDEF encoding and decoding |
 | `nfc/pcsc` | The PC/SC hardware backend |
-| `nfc/remotenfc` | Phones and WebNFC browsers, over the device bridge |
+| `nfc/remotenfc` | Phones and WebNFC browsers: the device WebSocket endpoint, its sessions and the tags behind them |
 | `nfc/multimanager` | Several backends behind one `nfc.Manager` |
-| `server/…` | The WebSocket device and client endpoints |
+| `server/…` | The client WebSocket endpoint, and the routing that picks a reader or a device per request |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
 
 Dependencies run in one direction. `agent/console` and `agent/tray` import
@@ -186,7 +185,9 @@ func main() {
 	if err := rt.Agent.Start(rt.DevicePath); err != nil {
 		log.Fatal(err)
 	}
-	defer rt.Agent.Stop()
+	// Shutdown stops the agent and then closes the manager. Stop alone leaves
+	// the manager open, since the agent can be started against it again.
+	defer rt.Agent.Shutdown()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -204,7 +205,7 @@ result requires no `libpcsclite` at build or run time and cross-compiles to any
 target.
 
 ```go
-manager := remotenfc.NewManager(30 * time.Second)
+manager := remotenfc.NewManager(remotenfc.DeviceTimeout)
 
 rt, err := agent.Setup(agent.DefaultOptions(), manager)
 ```
@@ -254,7 +255,7 @@ func main() {
 	if err := rt.Agent.Start(rt.DevicePath); err != nil {
 		log.Fatal(err)
 	}
-	defer rt.Agent.Stop()
+	defer rt.Agent.Shutdown()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

@@ -360,6 +360,11 @@ report the previous outcome rather than write again. The same request can arrive
 twice — the agent sends a write, the device applies it, and the response is lost
 to a dropped connection. Without the check, the retry writes a second time.
 
+**Lock-only requests.** A client `lockRequest` arrives as the same frame with
+`lock: true` and no `ndefBytes` or `ndefMessage` — the protocol has one
+tag-modifying frame, not two. Lock the tag as it stands and write nothing.
+Answer with `deviceWriteResponse` as for any other write.
+
 #### Transceive Request
 
 The agent asks the device to exchange raw data with the tag it is holding. Sent
@@ -714,6 +719,8 @@ false only when the exchange itself could not be performed.
 > with `READ_ONLY`. A raw command can also burn OTP bits or lock a tag
 > permanently, and the agent can neither recognise nor undo that.
 
+Accepts an optional `deviceID`. See [Targeting a device](#targeting-a-device).
+
 ### Tag Capabilities
 
 Every `tagData` broadcast includes a `capabilities` object describing what the
@@ -748,6 +755,12 @@ when supported, render a capacity meter, etc.) without a round-trip.
 | `supportsNdef` | Tag supports NDEF |
 | `supportsPassword` | Tag supports simple password protection (NTAG21x `PWD`/`PACK`) |
 
+`canWrite`, `canLock` and `canTransceive` describe what the agent will actually
+do, not just what the tag is built for: they are reported false while the agent
+is in read-only mode, and — for a tag held by a remote device — false unless
+that device declared the operation and is still connected. A capability the
+agent would refuse is never advertised.
+
 **Query on demand** — to fetch capabilities without waiting for the next scan,
 send a `capabilitiesRequest`:
 
@@ -771,8 +784,13 @@ Response (`type: "capabilitiesResponse"`):
 }
 ```
 
-The query requires exactly one tag to be present; if none (or several) are
-present, `success` is `false` with an error.
+The query is routed like a write: to the device holding a tag when no hardware
+reader has a card, otherwise to the reader. For a device-held tag it is answered
+from what the device declared at the scan, with no round trip, so it costs
+nothing to ask. Accepts an optional `deviceID`; see
+[Targeting a device](#targeting-a-device).
+
+If nothing is holding a tag, `success` is `false` with `NO_CARD`.
 
 ### Locking Tags (Make Read-Only)
 
@@ -821,6 +839,50 @@ Response (`type: "lockResponse"`):
 ```
 
 If the present tag does not support locking, `success` is `false` with an error.
+
+The request is routed like a write: to the remote device holding a tag when no
+hardware reader has a card present, otherwise to the reader. A device receives
+it as a `deviceWriteRequest` with `lock: true` and no message.
+
+Both accept an optional `deviceID` to name the device holding the tag, and an
+optional `idempotencyKey`. See [Targeting a device](#targeting-a-device).
+
+> **Refused in read-only mode.** Locking is irreversible, so the agent's
+> read-only mode refuses it with `READ_ONLY` on every route — a tag held by a
+> phone included. Writes are refused the same way.
+
+### Targeting a Device
+
+`writeRequest`, `lockRequest`, `transceiveRequest` and `capabilitiesRequest` all
+accept an optional `deviceID`:
+
+```json
+{
+  "id": "req_10",
+  "type": "writeRequest",
+  "payload": {
+    "deviceID": "dev_abc123",
+    "records": [{ "type": "text", "content": "Hello" }]
+  }
+}
+```
+
+Every `tagData` broadcast carries the `deviceID` of the device that scanned it,
+so a client watching two phones can name the one it means.
+
+Without `deviceID` the agent routes for you: its own reader while it holds a
+card, otherwise whichever device scanned most recently. That is fine for one
+device and ambiguous for several, which is what naming one resolves.
+
+Naming a device is decisive. The request goes to that device or fails with
+`NO_CARD`; it never falls back to the reader, since a tag on the reader is a
+different tag.
+
+**Idempotency.** `writeRequest` and `lockRequest` also accept an
+`idempotencyKey`, passed through to the device. Reuse it when retrying after a
+lost response and a device that already applied it reports the previous outcome
+instead of writing again. Omitted, the request `id` is used, so reusing that on
+a retry has the same effect.
 
 ### Password Protection (planned)
 
@@ -1015,7 +1077,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `WRITE_FAILED` | yes | Write failed |
 | `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
 | `TAG_NOT_CONNECTED` | yes | No tag connected |
-| `READ_ONLY` | no | Tag is locked |
+| `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
 | `NO_CARD` | yes | No card present on reader |

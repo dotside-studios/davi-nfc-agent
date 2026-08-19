@@ -301,10 +301,14 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 	}
 
 	msg := server.WriteRequestMessage{
-		RequestID:  requestID,
-		ClientID:   clientID,
-		Request:    writeReq,
-		ResponseCh: make(chan server.WriteResponseMessage, 1),
+		RequestID:    requestID,
+		ClientID:     clientID,
+		Request:      writeReq,
+		TargetDevice: writeReq.DeviceID,
+		// A client that wants a retry deduplicated supplies a stable key. The
+		// request ID stands in, which dedupes when the client reuses that too.
+		IdempotencyKey: firstNonEmpty(writeReq.IdempotencyKey, requestID),
+		ResponseCh:     make(chan server.WriteResponseMessage, 1),
 	}
 
 	// Send through bridge and wait for response
@@ -353,10 +357,14 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 		requestID = uuid.New().String()
 	}
 
+	target := tagTarget(req.Payload)
+
 	msg := server.LockRequestMessage{
-		RequestID:  requestID,
-		ClientID:   clientID,
-		ResponseCh: make(chan server.LockResponseMessage, 1),
+		RequestID:      requestID,
+		ClientID:       clientID,
+		TargetDevice:   target.DeviceID,
+		IdempotencyKey: firstNonEmpty(target.IdempotencyKey, requestID),
+		ResponseCh:     make(chan server.LockResponseMessage, 1),
 	}
 
 	// Send through bridge and wait for response
@@ -403,8 +411,9 @@ func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string,
 	}
 
 	var payload struct {
-		Data string `json:"data"`
-		Raw  bool   `json:"raw"`
+		Data     string `json:"data"`
+		Raw      bool   `json:"raw"`
+		DeviceID string `json:"deviceID"`
 	}
 	payloadBytes, err := json.Marshal(req.Payload)
 	if err == nil {
@@ -426,11 +435,12 @@ func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string,
 	}
 
 	response, err := s.bridge.SendTransceiveRequest(server.TransceiveRequestMessage{
-		RequestID:  requestID,
-		ClientID:   clientID,
-		Data:       data,
-		Raw:        payload.Raw,
-		ResponseCh: make(chan server.TransceiveResponseMessage, 1),
+		RequestID:    requestID,
+		ClientID:     clientID,
+		Data:         data,
+		Raw:          payload.Raw,
+		TargetDevice: payload.DeviceID,
+		ResponseCh:   make(chan server.TransceiveResponseMessage, 1),
 	})
 	if err != nil {
 		log.Printf("[client] Transceive request failed: %v", err)
@@ -465,9 +475,10 @@ func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID strin
 	}
 
 	msg := server.CapabilitiesRequestMessage{
-		RequestID:  requestID,
-		ClientID:   clientID,
-		ResponseCh: make(chan server.CapabilitiesResponseMessage, 1),
+		RequestID:    requestID,
+		ClientID:     clientID,
+		TargetDevice: tagTarget(req.Payload).DeviceID,
+		ResponseCh:   make(chan server.CapabilitiesResponseMessage, 1),
 	}
 
 	// Send through bridge and wait for response
@@ -495,6 +506,36 @@ func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID strin
 	if err := conn.WriteJSON(wsResponse); err != nil {
 		log.Printf("[client] Failed to send capabilities response: %v", err)
 	}
+}
+
+// requestTarget is what a request that acts on a tag may carry alongside its
+// own fields. A tagData broadcast reports deviceID, so a client watching two
+// phones can name the one it means.
+type requestTarget struct {
+	DeviceID       string `json:"deviceID"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+// tagTarget reads the target out of a request payload, tolerating its absence.
+func tagTarget(payload map[string]any) requestTarget {
+	var target requestTarget
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return target
+	}
+	_ = json.Unmarshal(raw, &target)
+
+	return target
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // listenBridgeTagData listens for tag data from the bridge and broadcasts to clients.

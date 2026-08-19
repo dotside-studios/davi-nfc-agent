@@ -30,8 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Setup` now also falls back to the default port rather than binding whatever
   the kernel offers
 
-### Added
-
 - **The pairing server is a component of the agent.** It was started inside
   `Setup` and stopped only by the command's signal handler, so `Agent.Stop` left
   it bound: stopping the agent from the tray left port 9472 listening, and an
@@ -41,10 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PairingConfig` instead, and `Config.Pairing` being nil disables it.
 
   One consequence worth knowing: the pairing listener now binds at `Start`
-  rather than during `Setup`. It also no longer crashes an agent launched with
-  `-auto-tls=false` or an external `-cert`/`-key`, because the component passes
-  an untyped nil rather than a nil `*tls.Manager` into an interface parameter.
-  The underlying fault in `tls` is unchanged and still worth fixing there
+  rather than during `Setup`, so a port already in use is reported when the
+  agent starts rather than when it is built
 
 - **The agent has an explicit lifecycle, and things can hook into it.** Its state
   was inferred from whether `Reader` and the servers happened to be nil, which
@@ -61,65 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into today: attach a console after `Start` and the agent reports having one
   while the listener has never heard of it
 
-### Fixed
-
-- **`Start` and `Stop` no longer race.** The tray, the console and the network
-  watcher all reach them from different goroutines, and only `RestartServers`
-  took a lock — `Start` and `Stop` mutated `Reader`, `Bridge` and the three
-  server fields with no synchronisation at all. Four concurrent start/stop pairs
-  under `-race` reported thirteen races. All lifecycle transitions now serialise
-  on one mutex, and the whole repository is race-clean
-
-- **A quick stop could crash the agent.** `startServers` launched a goroutine
-  that read the `UnifiedServer` field rather than a captured value, so a `Stop`
-  landing before the goroutine was scheduled left it calling `Start` on a nil
-  server. The unified server had the same shape internally: no mutex at all,
-  with `Start` and `Stop` both touching `httpServer`, `ctx` and `mdnsServer`
-  while overlapping by design — `Start` blocks until `Stop` cancels it. Both are
-  now guarded, and a `Stop` arriving before the listener binds prevents the bind
-  instead of racing it, rather than leaving an mDNS advertisement pointing at a
-  listener that never came up
-
-- **`-require-paired-devices` can no longer be withdrawn by a stored setting.**
-  The flag set the requirement, and then `applySettings` -- the last thing
-  startup did -- pushed the persisted value straight back over it. An operator
-  who launched with the flag while `requirePairedDevice` was false in
-  `settings.json` got an agent that logged *Paired devices required* and then
-  admitted unpaired devices anyway, which is the one direction of this setting
-  that costs security rather than convenience. The console had the same hole
-  from the other side: saving any preference re-applied the stored settings, so
-  a toggle unrelated to pairing could withdraw the requirement mid-run.
-
-  A requirement asked for on the command line or in the environment is now
-  locked for that run: `Config.RequirePairedDeviceLocked` records where it came
-  from, and `SetRequirePairedDevice` refuses to lower it, saying so in the log
-  rather than silently. A requirement that came only from settings stays the
-  operator's to toggle, which is what the console's switch is for. Either source
-  can still turn it on
-
-- **Package `agent` no longer writes to process-wide state.** Moving the CLI
-  into the agent took `flag.BoolVar`, `flag.Parse` and `log.SetOutput` with it,
-  all of which belong to a program rather than a library: registering flags
-  writes to `flag.CommandLine`, so an embedder with its own flags got a
-  collision, and `Setup` silently redirected the standard logger out from under
-  whatever logging its caller had arranged. The twelve flags now live in
-  `cmd/davi-nfc-agent/flags.go`, which fills the same `Options` the library
-  already exposed, and the command installs the log ring itself before calling
-  `Setup` — which is what keeps the startup sequence in the ring the console
-  reads. `Options.Logs` carries it in; `Options.DevicePortSet` carries in the
-  one piece of flag state `Setup` needs, and now lets an embedder assigning
-  `DevicePort` outrank a port persisted in settings, which it previously could
-  not
-
-- **A hand-built `nfc.Card` reports an error instead of faulting.** `Card` is
-  exported and its fields are settable, but `Read` assumed the unexported tag
-  every card built by `NewCard` has, so one composed field-by-field panicked
-  inside `io.ReadAll` — on the client server's broadcast goroutine, if such a
-  card ever reached it. Nothing in the agent constructs one that way, so this
-  was unreachable in the shipped binary; it stops being unreachable once
-  callers write against `nfc` directly
-
 ### Changed
+
+- **`Agent.Shutdown` is the way out; `Stop` is the way to pause.** Merged from
+  master, where `Stop` no longer closes the NFC manager: the manager is built
+  once for the process, and both the tray's stop button and its device switch
+  stop the agent expecting to start it again against the same one. Closing it
+  on the way down left that restart holding a manager already shut. `Shutdown`
+  stops the agent and then closes the manager, and is what the tray's exit path
+  calls. An embedder that runs the agent for the life of the process wants
+  `Shutdown`; one that starts and stops it wants `Stop`
 
 - **The binary moved to `cmd/davi-nfc-agent`.** With the agent, console and
   tray in packages of their own, the module root held one file whose only job
@@ -191,6 +138,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could drift apart. It now carries only what the agent does not: the settings
   store, the log ring and the reader to open at startup. Everything else is
   read through `rt.Agent`
+
+### Fixed
+
+- **The agent starts without auto-TLS again.** `-auto-tls=false` and an
+  externally provisioned `-cert`/`-key` both panicked at startup, before the
+  systray appeared. Neither configuration has a certificate authority, and the
+  bootstrap server is built to run without one so phones can still pair. Its
+  nil checks did not work: the caller passed a nil `*tls.Manager`, and a nil
+  pointer boxed into an interface is not a nil interface, so every check passed
+  and then dereferenced nil. `NewBootstrapServer` now unboxes it once, so those
+  checks hold
+
+- **`Start` and `Stop` no longer race.** The tray, the console and the network
+  watcher all reach them from different goroutines, and only `RestartServers`
+  took a lock — `Start` and `Stop` mutated `Reader`, `Bridge` and the three
+  server fields with no synchronisation at all. Four concurrent start/stop pairs
+  under `-race` reported thirteen races. All lifecycle transitions now serialise
+  on one mutex, and the whole repository is race-clean
+
+- **A quick stop could crash the agent.** `startServers` launched a goroutine
+  that read the `UnifiedServer` field rather than a captured value, so a `Stop`
+  landing before the goroutine was scheduled left it calling `Start` on a nil
+  server. The unified server had the same shape internally: no mutex at all,
+  with `Start` and `Stop` both touching `httpServer`, `ctx` and `mdnsServer`
+  while overlapping by design — `Start` blocks until `Stop` cancels it. Both are
+  now guarded, and a `Stop` arriving before the listener binds prevents the bind
+  instead of racing it, rather than leaving an mDNS advertisement pointing at a
+  listener that never came up
+
+- **`-require-paired-devices` can no longer be withdrawn by a stored setting.**
+  The flag set the requirement, and then `applySettings` -- the last thing
+  startup did -- pushed the persisted value straight back over it. An operator
+  who launched with the flag while `requirePairedDevice` was false in
+  `settings.json` got an agent that logged *Paired devices required* and then
+  admitted unpaired devices anyway, which is the one direction of this setting
+  that costs security rather than convenience. The console had the same hole
+  from the other side: saving any preference re-applied the stored settings, so
+  a toggle unrelated to pairing could withdraw the requirement mid-run.
+
+  A requirement asked for on the command line or in the environment is now
+  locked for that run: `Config.RequirePairedDeviceLocked` records where it came
+  from, and `SetRequirePairedDevice` refuses to lower it, saying so in the log
+  rather than silently. A requirement that came only from settings stays the
+  operator's to toggle, which is what the console's switch is for. Either source
+  can still turn it on
+
+- **Package `agent` no longer writes to process-wide state.** Moving the CLI
+  into the agent took `flag.BoolVar`, `flag.Parse` and `log.SetOutput` with it,
+  all of which belong to a program rather than a library: registering flags
+  writes to `flag.CommandLine`, so an embedder with its own flags got a
+  collision, and `Setup` silently redirected the standard logger out from under
+  whatever logging its caller had arranged. The twelve flags now live in
+  `cmd/davi-nfc-agent/flags.go`, which fills the same `Options` the library
+  already exposed, and the command installs the log ring itself before calling
+  `Setup` — which is what keeps the startup sequence in the ring the console
+  reads. `Options.Logs` carries it in; `Options.DevicePortSet` carries in the
+  one piece of flag state `Setup` needs, and now lets an embedder assigning
+  `DevicePort` outrank a port persisted in settings, which it previously could
+  not
+
+- **A hand-built `nfc.Card` reports an error instead of faulting.** `Card` is
+  exported and its fields are settable, but `Read` assumed the unexported tag
+  every card built by `NewCard` has, so one composed field-by-field panicked
+  inside `io.ReadAll` — on the client server's broadcast goroutine, if such a
+  card ever reached it. Nothing in the agent constructs one that way, so this
+  was unreachable in the shipped binary; it stops being unreachable once
+  callers write against `nfc` directly
+
 
 ## [1.1.3] - 2026-08-15
 

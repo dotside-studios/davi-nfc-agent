@@ -441,7 +441,7 @@ if (client.isConnected()) {
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `registered` | `{ deviceID, serverInfo }` | Successfully registered with server |
-| `writeRequest` | `{ requestID, deviceID, ndefMessage }` | Server requests a write operation |
+| `writeRequest` | `{ requestID, deviceID, ndefMessage, ndefBytes, tagUID, lock, idempotencyKey }` | Server requests a write operation. `lock` with no `ndefMessage`/`ndefBytes` is a lock-only request — lock the tag as it stands and write nothing |
 | `connected` | `{}` | WebSocket connected |
 | `disconnected` | `{}` | WebSocket disconnected |
 | `error` | `{ error, phase?, code? }` | Error occurred |

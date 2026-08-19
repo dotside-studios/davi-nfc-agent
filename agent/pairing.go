@@ -46,15 +46,7 @@ var _ Component = (*PairingServer)(nil)
 // NewPairingServer builds the component. It does not listen until the agent
 // starts it.
 func NewPairingServer(cfg PairingConfig) *PairingServer {
-	// Passing a nil *tls.Manager into the bootstrap server's interface-typed
-	// parameter would make a non-nil interface holding a nil pointer, which its
-	// own nil check cannot see. Build without a CA instead.
-	var srv *tlspkg.BootstrapServer
-	if cfg.CA != nil {
-		srv = tlspkg.NewBootstrapServer(cfg.CA, cfg.Port)
-	} else {
-		srv = tlspkg.NewBootstrapServer(nil, cfg.Port)
-	}
+	srv := tlspkg.NewBootstrapServer(cfg.CA, cfg.Port)
 
 	srv.SetAppName(cfg.AppName)
 	if cfg.Devices != nil {

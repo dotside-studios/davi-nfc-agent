@@ -339,12 +339,47 @@ func (a *Agent) stopLocked() {
 		a.Reader = nil
 	}
 
-	// Cleanup Manager if it's a remotenfc.Manager
-	if pm, ok := a.manager.(*remotenfc.Manager); ok {
-		pm.Close()
+	a.logger.Println("Agent stopped successfully")
+}
+
+// Shutdown stops the agent and releases what outlives a stop.
+//
+// The manager is built once for the process and survives Stop, since the tray
+// and the console can stop and start the agent again against the same one.
+// Closing it belongs here, on the way out.
+func (a *Agent) Shutdown() {
+	a.Stop()
+
+	if closer, ok := a.manager.(interface{ Close() }); ok {
+		closer.Close()
+	}
+}
+
+// findDeviceDriver locates the driver serving remote devices, whether the agent
+// holds it directly or behind a manager that holds others.
+func findDeviceDriver(m nfc.Manager) *remotenfc.Manager {
+	if m == nil {
+		return nil
 	}
 
-	a.logger.Println("Agent stopped successfully")
+	if driver, ok := m.(*remotenfc.Manager); ok {
+		return driver
+	}
+
+	holder, ok := m.(interface {
+		GetManager(string) (nfc.Manager, bool)
+	})
+	if !ok {
+		return nil
+	}
+
+	child, exists := holder.GetManager(nfc.ManagerTypeSmartphone)
+	if !exists {
+		return nil
+	}
+
+	driver, _ := child.(*remotenfc.Manager)
+	return driver
 }
 
 // watchNetworkChanges listens for network changes from TLS manager and restarts servers.
@@ -425,24 +460,10 @@ func (a *Agent) startServers() error {
 	// Create bridge for inter-server communication
 	a.Bridge = server.NewServerBridge()
 
-	// Get device manager
-	var deviceManager *remotenfc.Manager
-	if pm, ok := a.manager.(*remotenfc.Manager); ok {
-		deviceManager = pm
-	} else if mm, ok := a.manager.(interface {
-		GetManager(string) (nfc.Manager, bool)
-	}); ok {
-		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {
-			if pm, ok := mgr.(*remotenfc.Manager); ok {
-				deviceManager = pm
-			}
-		}
-	}
-
 	// Create device server (handles NFC device connections)
 	a.DeviceServer = deviceserver.New(deviceserver.Config{
 		Reader:           a.Reader,
-		DeviceManager:    deviceManager,
+		DeviceManager:    findDeviceDriver(a.manager),
 		APISecret:        a.apiSecret,
 		AllowedCardTypes: a.allowedCardTypes,
 		AllowedOrigins:   a.allowedOrigins,

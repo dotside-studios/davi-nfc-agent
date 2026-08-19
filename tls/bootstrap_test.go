@@ -346,24 +346,23 @@ func TestIndexShowsQR(t *testing.T) {
 	}
 }
 
-// TestNewBootstrapServerNormalisesTypedNilManager covers the shape of nil that
-// actually reaches this constructor. Callers hold a concrete *Manager, so with
-// -auto-tls=false (or an externally provisioned -cert/-key) they hand over a
-// nil *Manager, which boxes into a non-nil caReader — the whole reason
-// NewBootstrapServer normalises rather than trusting the caller.
+// TestNewBootstrapServerNormalisesTypedNilManager covers the shape of nil the
+// constructor actually receives. main holds a concrete *Manager, so under
+// -auto-tls=false or an externally provisioned -cert/-key it passes a nil
+// *Manager, which boxes into a non-nil caReader.
 func TestNewBootstrapServerNormalisesTypedNilManager(t *testing.T) {
 	var mgr *Manager // nil, but not a nil interface once passed in
 
 	s := NewBootstrapServer(mgr, 0)
 
 	if s.manager != nil {
-		t.Fatal("typed-nil *Manager survived into s.manager; every nil guard in this file is now a no-op")
+		t.Fatal("typed-nil *Manager survived into s.manager; the nil guards in this file are no-ops")
 	}
 }
 
 // TestBootstrapServerWithoutCA runs the endpoints a CA-less agent still needs.
-// Before the constructor normalised its input these panicked with a nil
-// pointer dereference instead of answering.
+// These panicked with a nil pointer dereference before the constructor
+// normalised its input.
 func TestBootstrapServerWithoutCA(t *testing.T) {
 	var mgr *Manager
 	s := NewBootstrapServer(mgr, 0)
@@ -378,9 +377,8 @@ func TestBootstrapServerWithoutCA(t *testing.T) {
 		path string
 		want int
 	}{
-		// The pairing flow works without a CA: the index page is what a
-		// phone lands on after scanning the QR, and it renders the CA
-		// fingerprint when there is one.
+		// The pairing flow works without a CA. The index page is where a
+		// phone lands after scanning the QR.
 		{"index page", "/", http.StatusOK},
 		{"install", "/install?pin=" + s.PIN(), http.StatusSeeOther},
 		{"qr", "/qr.png", http.StatusOK},

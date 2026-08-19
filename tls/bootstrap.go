@@ -69,12 +69,9 @@ type BootstrapServer struct {
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
 //
-// A nil manager is expected (see caReader) and must survive the trip through
-// the interface: a nil *Manager boxed into one is itself non-nil, so every
-// `s.manager != nil` guard below would pass and then dereference nothing.
-// *Manager is the only nil that can arrive here — it is what every caller
-// outside this package holds. Normalise it once rather than asking the four
-// call sites that read the field to remember.
+// manager may be nil (see caReader). A nil *Manager boxed into an interface
+// is not a nil interface, so it is unboxed here and the guards on s.manager
+// can stay simple.
 func NewBootstrapServer(manager caReader, port int) *BootstrapServer {
 	if m, ok := manager.(*Manager); ok && m == nil {
 		manager = nil

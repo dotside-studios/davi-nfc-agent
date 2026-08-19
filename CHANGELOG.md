@@ -9,16 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The agent starts without auto-TLS again.** `-auto-tls=false`, and an
-  externally provisioned `-cert`/`-key`, both panicked before the systray
-  appeared. The bootstrap server takes its CA source as an interface so it can
-  run without one — that deployment has no CA to hand out but still has phones
-  to pair — and every use of the field is nil-guarded. The guards never fired:
-  the caller built the argument as a concrete `*tls.Manager`, so a nil manager
-  arrived boxed in a non-nil interface, `s.manager != nil` passed, and the next
-  line dereferenced nothing. The nil is now normalised once in
-  `NewBootstrapServer` rather than at the four places that read the field, so a
-  guard added later cannot quietly inherit the same bug
+- **The agent starts without auto-TLS again.** `-auto-tls=false` and an
+  externally provisioned `-cert`/`-key` both panicked at startup, before the
+  systray appeared. Neither configuration has a certificate authority, and the
+  bootstrap server is built to run without one so phones can still pair. Its
+  nil checks did not work: the caller passed a nil `*tls.Manager`, and a nil
+  pointer boxed into an interface is not a nil interface, so every check passed
+  and then dereferenced nil. `NewBootstrapServer` now unboxes it once, so those
+  checks hold
 
 ## [1.1.3] - 2026-08-15
 

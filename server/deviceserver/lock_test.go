@@ -252,8 +252,8 @@ func TestWriteViaDeviceRefusedInReadOnlyMode(t *testing.T) {
 	assertDeviceGotNothing(t, conn)
 }
 
-// Read/write mode must not refuse on mode grounds — the request should reach
-// the device instead.
+// Read/write mode must not refuse on mode grounds; the request should reach the
+// device instead.
 func TestLockViaDeviceAllowedInReadWriteMode(t *testing.T) {
 	url, bridge := newModedTestServer(t, nfc.ModeReadWrite)
 
@@ -269,7 +269,7 @@ func TestLockViaDeviceAllowedInReadWriteMode(t *testing.T) {
 	}
 }
 
-// assertDeviceGotNothing checks the refusal never reached the wire — a mode
+// assertDeviceGotNothing checks the refusal never reached the wire. A mode
 // refusal the agent forwards anyway is not a refusal.
 func assertDeviceGotNothing(t *testing.T, conn *websocket.Conn) {
 	t.Helper()

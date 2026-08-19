@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/gorilla/websocket"
@@ -34,8 +35,13 @@ type Server struct {
 	devices    map[*websocket.Conn]string // conn -> deviceID
 	devicesMux sync.RWMutex
 
-	// deviceHandler serves remote devices; nil when none are configured.
-	deviceHandler *DeviceHandler
+	// remote is the remote-device driver, which serves their WebSocket
+	// endpoint and routes work to them. Nil when none are configured.
+	remote *remotenfc.Manager
+
+	// deviceEndpoint is the driver's HTTP handler, reached after this server's
+	// own auth check.
+	deviceEndpoint http.Handler
 
 	// requirePaired is read on every upgrade and settable at runtime, so the
 	// policy can be tried without restarting the agent.
@@ -73,18 +79,43 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 		nfcHandler.Register(s)
 	}
 
-	// Register device handler (external devices like phones)
+	// Register the remote-device driver. It owns the device protocol and the
+	// sessions; this server owns authentication and the choice between a
+	// device and the hardware reader.
 	if config.DeviceManager != nil {
-		s.deviceHandler = NewDeviceHandler(config.DeviceManager, config)
-		s.deviceHandler.Register(s)
+		s.remote = config.DeviceManager
+		s.deviceEndpoint = s.remote.Handler(remotenfc.ServerOptions{
+			CheckOrigin:          originChecker(config),
+			AllowTagModification: tagModificationPolicy(config.Reader),
+			PublicKeyPin:         config.PublicKeyPin,
+		})
 
-		// Give tags produced by the manager a route back to their device, so
-		// they can report and perform writes rather than looking read-only.
-		config.DeviceManager.SetTagWriter(s.deviceHandler)
+		s.HandleWebSocket(remotenfc.IsDeviceConnection, func(w http.ResponseWriter, r *http.Request) bool {
+			s.deviceEndpoint.ServeHTTP(w, r)
+			return true
+		})
+
+		s.StartLifecycle(func(ctx context.Context) {
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case data := <-s.remote.Data():
+						s.BroadcastTagData(data)
+					}
+				}
+			}()
+		})
 	}
 
 	return s
 }
+
+// IsDeviceConnection reports whether a request is a device asking to connect
+// rather than a client. The device protocol defines it; this is where the rest
+// of the agent reaches it.
+var IsDeviceConnection = remotenfc.IsDeviceConnection
 
 // Handle implements server.HandlerServer interface.
 func (s *Server) Handle(messageType string, handler server.HandlerFunc) error {
@@ -115,10 +146,9 @@ func (s *Server) BroadcastDeviceStatus(status nfc.DeviceStatus) {
 	}
 }
 
-// StartBackground starts the device-side background work — the NFC reader,
-// lifecycle handlers, and the write/lock/capabilities bridge consumers — under
-// the given parent context, without binding an HTTP listener. It returns
-// immediately once the goroutines are running.
+// StartBackground starts the device-side background work under the given parent
+// context, without binding an HTTP listener: the NFC reader, lifecycle handlers
+// and the bridge consumers. It returns once the goroutines are running.
 //
 // The unified server owns the HTTP listener and routes device WebSocket
 // connections here via ServeWS.
@@ -260,7 +290,7 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 
 	// The mode gates every route to a tag, not just the hardware one. The
 	// reader enforces it inside prepareCardForWrite, which a write routed to a
-	// remote device never reaches, so the check has to happen up here.
+	// device never reaches.
 	if !modeAllowsTagModification(reader) {
 		msg.ResponseCh <- server.WriteResponseMessage{
 			RequestID: msg.RequestID,
@@ -328,11 +358,11 @@ func (s *Server) executeWriteRequest(msg server.WriteRequestMessage) {
 // whether it handled the request; false means no device was available and the
 // caller should fall back to the hardware reader.
 func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
-	if s.deviceHandler == nil {
+	if s.remote == nil {
 		return false
 	}
 
-	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	deviceID, uid, ok := s.remote.ActiveTagDevice()
 	if !ok {
 		return false
 	}
@@ -361,7 +391,7 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage) bool {
 		return true
 	}
 
-	resp, err := s.deviceHandler.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+	resp, err := s.remote.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
 		RequestID:      msg.RequestID,
 		TagUID:         uid,
 		NDEFMessage:    server.BuildNDEFInput(msg.Request),
@@ -406,11 +436,10 @@ func (s *Server) handleLockRequests() {
 
 // executeLockRequest executes a lock request from the client server.
 //
-// Routing mirrors a write: the hardware reader keeps priority while it actually
-// holds a card, and otherwise the lock goes to the remote device holding a tag.
-// Without that fallback a lock aimed at a phone-held tag would be applied to
-// whatever card happened to be sitting on the hardware reader — and locking is
-// irreversible, so guessing the target is not an option.
+// Routing mirrors a write: the hardware reader keeps priority while it holds a
+// card, otherwise the lock goes to the remote device holding a tag. Without the
+// fallback, a lock aimed at a phone-held tag lands on whatever card is sitting
+// on the reader, irreversibly.
 func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 	reader := s.config.Reader
 
@@ -462,25 +491,24 @@ func (s *Server) executeLockRequest(msg server.LockRequestMessage) {
 // whether it handled the request; false means no device was available and the
 // caller should fall back to the hardware reader.
 //
-// A lock travels as a write request carrying no NDEF and Lock set, which is the
-// same shape DeviceHandler.LockTag sends — the device protocol has one
-// tag-modifying frame, not two.
+// A lock travels as a write request with Lock set and no NDEF. The device
+// protocol has one tag-modifying frame, not two.
 func (s *Server) lockViaDevice(msg server.LockRequestMessage) bool {
-	if s.deviceHandler == nil {
+	if s.remote == nil {
 		return false
 	}
 
-	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	deviceID, uid, ok := s.remote.ActiveTagDevice()
 	if !ok {
 		return false
 	}
 
-	resp, err := s.deviceHandler.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+	resp, err := s.remote.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
 		RequestID: msg.RequestID,
 		TagUID:    uid,
 		Lock:      true,
-		// The request ID already identifies this logical lock, so a device that
-		// applied it before a reconnect can report the earlier outcome.
+		// The request ID identifies this logical lock, so a device that applied
+		// it before a reconnect can report the earlier outcome.
 		IdempotencyKey: msg.RequestID,
 	})
 	if err != nil {
@@ -509,8 +537,7 @@ func (s *Server) lockViaDevice(msg server.LockRequestMessage) bool {
 	msg.ResponseCh <- server.LockResponseMessage{
 		RequestID: msg.RequestID,
 		Success:   true,
-		// The device reports the outcome, not the tag type, so only what was
-		// actually established is filled in.
+		// The device reports the outcome but not the tag type.
 		Payload: &nfc.LockResult{UID: uid, Locked: true},
 	}
 	return true
@@ -532,14 +559,13 @@ func (s *Server) handleTransceiveRequests() {
 }
 
 // executeTransceiveRequest exchanges raw bytes with whichever holds the tag,
-// preferring a remote device when the hardware reader has no card — the same
+// preferring a remote device when the hardware reader has no card. This is the
 // routing a write uses, so an APDU reaches the tag the operator is looking at.
 func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 	reader := s.config.Reader
 
-	// Refused in read-only mode. A raw exchange cannot be assumed harmless —
-	// the same call carries a SELECT and a write to a configuration page — so
-	// it is treated as a write for the purposes of the mode.
+	// A raw exchange cannot be assumed harmless: the same call carries a SELECT
+	// and a write to a configuration page, so the mode treats it as a write.
 	if !modeAllowsTagModification(reader) {
 		msg.ResponseCh <- server.TransceiveResponseMessage{
 			RequestID: msg.RequestID,
@@ -588,16 +614,16 @@ func (s *Server) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 // reports whether it handled the request; false means no device was available
 // and the caller should fall back to the hardware reader.
 func (s *Server) transceiveViaDevice(msg server.TransceiveRequestMessage) bool {
-	if s.deviceHandler == nil {
+	if s.remote == nil {
 		return false
 	}
 
-	deviceID, uid, ok := s.deviceHandler.ActiveTagDevice()
+	deviceID, uid, ok := s.remote.ActiveTagDevice()
 	if !ok {
 		return false
 	}
 
-	resp, err := s.deviceHandler.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
+	resp, err := s.remote.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
 		RequestID: msg.RequestID,
 		DeviceID:  deviceID,
 		TagUID:    uid,
@@ -680,12 +706,11 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 	}
 }
 
-// modeAllowsTagModification reports whether the agent's current mode permits an
-// operation that can change a tag — a write, a lock, or a raw exchange.
+// modeAllowsTagModification reports whether the agent's current mode permits a
+// write, a lock or a raw exchange.
 //
-// The mode is a property of the agent rather than of the reader, so it governs
-// tags held by remote devices too. A nil reader means there is no mode to
-// consult and nothing to restrict.
+// The mode belongs to the agent rather than to the reader, so it governs tags
+// held by remote devices too. A nil reader has no mode to consult.
 func modeAllowsTagModification(reader *nfc.NFCReader) bool {
 	return reader == nil || reader.GetMode() != nfc.ModeReadOnly
 }

@@ -8,20 +8,38 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/wsconn"
 	"github.com/google/uuid"
 )
 
-// Manager implements the nfc.Manager interface for managing smartphone connections.
+// Manager implements nfc.Manager for phones and other networked devices, and
+// serves the WebSocket endpoint they connect to. See Handler.
+//
+// It owns both the device registry and the sessions behind it, so a
+// registration and its connection cannot outlive one another.
 type Manager struct {
 	devices           map[string]*Device // deviceID -> device
-	mu                sync.RWMutex       // Protects devices map
-	cleanupTicker     *time.Ticker       // Periodic cleanup of inactive devices
+	mu                sync.RWMutex       // Protects devices and the policy fields
+	cleanupTicker     *time.Ticker       // Periodic sweep for silent devices
 	stopCleanup       chan struct{}      // Stop cleanup goroutine
 	inactivityTimeout time.Duration      // Device timeout duration
 	closed            bool               // Whether Close() has been called
-	dataChan          chan nfc.NFCData   // Channel for broadcasting tag data to server
-	deviceChangeChan  chan struct{}      // Channel for device registration/unregistration events
-	tagWriter         TagWriter          // Route for writes back to devices; nil until wired
+	dataChan          chan nfc.NFCData   // Broadcasts tag data to the server
+	deviceChangeChan  chan struct{}      // Signals registration and unregistration
+
+	// Policy supplied by the agent through Handler.
+	publicKeyPin         string
+	allowTagModification func() bool
+
+	sessions    map[string]*wsconn.SafeConn // deviceID -> connection
+	sessionConn map[*wsconn.SafeConn]string // reverse lookup
+	sessionsMu  sync.RWMutex
+
+	pending   map[string]pendingRequest // requestID -> waiter
+	pendingMu sync.Mutex
+
+	active   activeTag
+	activeMu sync.RWMutex
 }
 
 // NewManager creates a new smartphone manager.
@@ -36,6 +54,9 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 		stopCleanup:       make(chan struct{}),
 		dataChan:          make(chan nfc.NFCData, 10), // Buffered to prevent blocking
 		deviceChangeChan:  make(chan struct{}, 1),     // Buffered to prevent blocking
+		sessions:          make(map[string]*wsconn.SafeConn),
+		sessionConn:       make(map[*wsconn.SafeConn]string),
+		pending:           make(map[string]pendingRequest),
 	}
 
 	// Start cleanup routine
@@ -157,12 +178,7 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 		return fmt.Errorf("device not found: %s", deviceID)
 	}
 
-	// Convert tag data to internal format
-	m.mu.RLock()
-	writer := m.tagWriter
-	m.mu.RUnlock()
-
-	tag, err := ConvertTagDataWithWriter(tagData, writer)
+	tag, err := convertTagData(tagData, m)
 	if err != nil {
 		return fmt.Errorf("failed to convert tag data: %w", err)
 	}
@@ -179,14 +195,6 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	device.UpdateLastSeen()
 
 	return nil
-}
-
-// SetTagWriter wires the route used to write and lock tags held by devices.
-// Tags produced after this call can report and perform those operations.
-func (m *Manager) SetTagWriter(writer TagWriter) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.tagWriter = writer
 }
 
 // Data returns a channel that provides NFCData as tags are scanned.
@@ -248,7 +256,19 @@ func (m *Manager) Close() {
 	}
 	close(m.stopCleanup)
 
-	// Close all devices
+	// Drop the sessions first so their serve loops exit; each unregisters the
+	// device it owned on the way out.
+	m.sessionsMu.Lock()
+	conns := make([]*wsconn.SafeConn, 0, len(m.sessions))
+	for _, conn := range m.sessions {
+		conns = append(conns, conn)
+	}
+	m.sessionsMu.Unlock()
+
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+
 	m.mu.Lock()
 	for deviceID, device := range m.devices {
 		if err := device.Close(); err != nil {
@@ -277,30 +297,34 @@ func (m *Manager) startCleanupRoutine() {
 	}()
 }
 
-// cleanupInactiveDevices removes devices that exceeded inactivity timeout.
+// cleanupInactiveDevices drops devices that have gone silent, which covers the
+// half-open connection where the socket survives but heartbeats stop.
+//
+// A device that still has a session is reaped by closing it, so the ordinary
+// disconnect path does the unregistering. Deleting the registration on its own
+// would leave a live socket bound to a device the manager no longer knows.
 func (m *Manager) cleanupInactiveDevices() {
-	m.mu.Lock()
-
 	now := time.Now()
-	removedCount := 0
-	for deviceID, device := range m.devices {
-		timeSinceLastSeen := now.Sub(device.LastSeen())
-		if timeSinceLastSeen > m.inactivityTimeout {
-			log.Printf("[smartphone] Cleaning up inactive device: %s (last seen %v ago)", device.String(), timeSinceLastSeen)
 
-			// Close and remove device
-			if err := device.Close(); err != nil {
-				log.Printf("[smartphone] Error closing device %s: %v", deviceID, err)
-			}
-			delete(m.devices, deviceID)
-			removedCount++
+	m.mu.RLock()
+	var stale []string
+	for deviceID, device := range m.devices {
+		if since := now.Sub(device.LastSeen()); since > m.inactivityTimeout {
+			log.Printf("[smartphone] Device silent for %v, dropping: %s", since, device.String())
+			stale = append(stale, deviceID)
 		}
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 
-	// Notify listeners if any devices were removed
-	if removedCount > 0 {
-		m.notifyDeviceChange()
+	// Outside the lock: closing a session runs the disconnect path, which takes
+	// it to unregister.
+	for _, deviceID := range stale {
+		if m.closeSession(deviceID) {
+			continue
+		}
+		if err := m.UnregisterDevice(deviceID); err != nil {
+			log.Printf("[smartphone] Failed to unregister silent device %s: %v", deviceID, err)
+		}
 	}
 }
 

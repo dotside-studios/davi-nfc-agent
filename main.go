@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"fyne.io/systray"
 
@@ -152,7 +151,7 @@ func main() {
 	}
 
 	// Initialize smartphone manager
-	smartphoneManager := remotenfc.NewManager(30 * time.Second)
+	smartphoneManager := remotenfc.NewManager(remotenfc.DeviceTimeout)
 
 	// Create multi-manager combining hardware and smartphone
 	manager := multimanager.NewMultiManager(

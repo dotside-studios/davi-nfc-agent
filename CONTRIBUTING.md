@@ -111,12 +111,14 @@ davi-nfc-agent/
 │   ├── device.go        # Device interface
 │   ├── tag.go           # Tag interface
 │   ├── reader.go        # NFC reader implementation
-│   ├── remotenfc/       # Smartphone NFC support
+│   ├── remotenfc/       # Phones and other networked devices, and the
+│   │                    #   WebSocket endpoint they connect to
 │   └── multimanager/    # Multiple manager aggregation
 ├── server/              # WebSocket servers
 │   ├── unifiedserver/   # Single listener (port 9470) fronting both roles
-│   ├── deviceserver/    # Device connection handling logic
+│   ├── deviceserver/    # Auth, and routing between reader and device
 │   └── clientserver/    # Client connection handling logic
+├── wsconn/              # Write-safe WebSocket wrapper shared by the above
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
 ├── client/              # JavaScript client library

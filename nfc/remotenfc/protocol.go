@@ -32,18 +32,18 @@ type TagRemovedData = protocol.DeviceTagRemovedData
 // DeviceHeartbeat is what a device sends periodically to stay registered.
 type DeviceHeartbeat = protocol.DeviceHeartbeat
 
-// ConvertTagData converts mobile app tag data to internal nfc.Tag. The
-// resulting tag is read-only; use ConvertTagDataWithWriter to give it a route
-// back to the device for writes and locks.
+// ConvertTagData converts a device's tag report to an nfc.Tag. The result is
+// read-only, having no route back to the device that scanned it; a tag the
+// manager builds gets one.
 func ConvertTagData(data TagData) (nfc.Tag, error) {
-	return ConvertTagDataWithWriter(data, nil)
+	return convertTagData(data, nil)
 }
 
-// ConvertTagDataWithWriter converts mobile app tag data to internal nfc.Tag,
-// wiring writes and locks back to the device that scanned it.
-func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
-	// Validate required fields. These are all malformed-input failures, so they
-	// are reported as InvalidData — repeating the same payload cannot fix them.
+// convertTagData converts a device's tag report, wiring writes, locks and raw
+// exchanges back to the device that scanned it.
+func convertTagData(data TagData, route tagRoute) (nfc.Tag, error) {
+	// Malformed input, reported as InvalidData: resending the same payload
+	// cannot fix it.
 	const op = "ConvertTagData"
 
 	if data.UID == "" {
@@ -85,7 +85,7 @@ func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
 		scannedAt:    data.ScannedAt,
 		sourceDevice: data.DeviceID,
 		declaredCaps: data.Capabilities,
-		writer:       writer,
+		route:        route,
 	}
 
 	return tag, nil

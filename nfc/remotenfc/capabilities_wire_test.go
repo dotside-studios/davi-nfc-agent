@@ -46,7 +46,7 @@ func TestTagUsesDeclaredCapabilities(t *testing.T) {
 	}
 }
 
-// stubWriter stands in for the device server's route back to a device.
+// stubWriter stands in for the manager's route back to a device.
 type stubWriter struct {
 	canWrite bool
 	canLock  bool
@@ -55,7 +55,7 @@ type stubWriter struct {
 	err      error
 }
 
-func (w *stubWriter) WriteTag(_, _ string, ndef []byte, _ nfc.WriteOptions) error {
+func (w *stubWriter) writeTag(_, _ string, ndef []byte, _ nfc.WriteOptions) error {
 	if w.err != nil {
 		return w.err
 	}
@@ -63,7 +63,7 @@ func (w *stubWriter) WriteTag(_, _ string, ndef []byte, _ nfc.WriteOptions) erro
 	return nil
 }
 
-func (w *stubWriter) LockTag(_, _ string) error {
+func (w *stubWriter) lockTag(_, _ string) error {
 	if w.err != nil {
 		return w.err
 	}
@@ -71,20 +71,25 @@ func (w *stubWriter) LockTag(_, _ string) error {
 	return nil
 }
 
-func (w *stubWriter) DeviceCanWrite(string) bool { return w.canWrite }
-func (w *stubWriter) DeviceCanLock(string) bool  { return w.canLock }
+func (w *stubWriter) transceiveTag(_, _ string, _ []byte, _ bool) ([]byte, error) {
+	return nil, nfc.NewNotSupportedError("Transceive")
+}
 
-func declaredTag(t *testing.T, caps *protocol.TagCapabilities, writer TagWriter) nfc.Tag {
+func (w *stubWriter) deviceCanWrite(string) bool      { return w.canWrite }
+func (w *stubWriter) deviceCanLock(string) bool       { return w.canLock }
+func (w *stubWriter) deviceCanTransceive(string) bool { return false }
+
+func declaredTag(t *testing.T, caps *protocol.TagCapabilities, route tagRoute) nfc.Tag {
 	t.Helper()
 
-	tag, err := ConvertTagDataWithWriter(TagData{
+	tag, err := convertTagData(TagData{
 		UID:          "04:A1:B2:C3",
 		Technology:   "ISO14443A",
 		Type:         "NTAG215",
 		Capabilities: caps,
-	}, writer)
+	}, route)
 	if err != nil {
-		t.Fatalf("ConvertTagDataWithWriter: %v", err)
+		t.Fatalf("convertTagData: %v", err)
 	}
 	return tag
 }
@@ -266,7 +271,7 @@ type transceivingWriter struct {
 	reply         []byte
 }
 
-func (w *transceivingWriter) TransceiveTag(_, _ string, data []byte, raw bool) ([]byte, error) {
+func (w *transceivingWriter) transceiveTag(_, _ string, data []byte, raw bool) ([]byte, error) {
 	if w.err != nil {
 		return nil, w.err
 	}
@@ -275,7 +280,7 @@ func (w *transceivingWriter) TransceiveTag(_, _ string, data []byte, raw bool) (
 	return w.reply, nil
 }
 
-func (w *transceivingWriter) DeviceCanTransceive(string) bool { return w.canTransceive }
+func (w *transceivingWriter) deviceCanTransceive(string) bool { return w.canTransceive }
 
 func TestTagTransceivesThroughDevice(t *testing.T) {
 	writer := &transceivingWriter{canTransceive: true, reply: []byte{0x90, 0x00}}

@@ -17,7 +17,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
-	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
@@ -191,7 +190,7 @@ func (s *App) onExit() {
 // setupUI initializes all menu items
 func (s *App) setupUI() {
 	systray.SetIcon(iconData)
-	systray.SetTooltip(buildinfo.DisplayName)
+	systray.SetTooltip(s.agent.Info().DisplayName)
 
 	// Status section
 	s.mStatus = systray.AddMenuItem("Starting...", "Agent Status")

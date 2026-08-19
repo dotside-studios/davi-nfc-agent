@@ -97,6 +97,29 @@ running servers. The settings that may legitimately change while running have
 methods of their own — `SetRequirePairedDevice`, `SetAllowCardType`,
 `SetConsole`.
 
+## Naming your build
+
+A build that keeps the agent's identity also keeps its configuration directory,
+and two programs sharing that directory share their certificates and paired
+devices. `Options.Info` — or `Config.Info` when building the agent directly —
+replaces the identity for the whole tree:
+
+```go
+opts := agent.DefaultOptions()
+opts.Info = buildinfo.Info{
+	Name:        "gate-agent",
+	DirName:     "gate-agent",
+	DisplayName: "Gate Reader",
+	Version:     "2.1.0",
+}
+```
+
+That name follows through everywhere the agent presents itself: the
+configuration directory, the log banner, the control center header, the tray
+tooltip, the pairing pages and the iOS configuration profile, and the mDNS
+service the devices look for. Fields left blank fall back to the agent's own, so
+overriding only `DirName` is enough to stop two builds colliding on disk.
+
 ## Package layout
 
 | Package | Contents |

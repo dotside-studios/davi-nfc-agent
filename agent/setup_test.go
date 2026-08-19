@@ -2,7 +2,10 @@ package agent
 
 import (
 	"log"
+	"path/filepath"
 	"testing"
+
+	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -111,4 +114,63 @@ func TestDevicePortSetOutranksStoredPort(t *testing.T) {
 			t.Errorf("DevicePort = %d, want the requested 9123", rt.Agent.DevicePort())
 		}
 	})
+}
+
+// TestCustomIdentityReachesTheAgent is the point of Config.Info: a program
+// built on the agent carries its own name, and — the part that matters
+// operationally — keeps its configuration out of this agent's directory.
+func TestCustomIdentityReachesTheAgent(t *testing.T) {
+	opts := testOptions(t)
+	opts.Info = buildinfo.Info{
+		Name:        "turnstile",
+		DirName:     "turnstile",
+		DisplayName: "Gate Reader",
+		Version:     "2.1.0",
+	}
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	got := rt.Agent.Info()
+	if got.Name != "turnstile" || got.DisplayName != "Gate Reader" || got.DirName != "turnstile" {
+		t.Errorf("Info = %+v, want the supplied identity", got)
+	}
+	if got.FullVersion() != "2.1.0" {
+		t.Errorf("FullVersion = %q, want 2.1.0", got.FullVersion())
+	}
+	if got.IsDev() {
+		t.Error("a versioned build should not report itself as dev")
+	}
+
+	// Description was left blank, so it falls back rather than emptying out.
+	if got.Description != buildinfo.Default().Description {
+		t.Errorf("Description = %q, want the fallback", got.Description)
+	}
+}
+
+// TestBlankIdentityKeepsTheAgentsOwn guards the shipped binary: options that
+// say nothing about identity must behave exactly as before Info existed.
+func TestBlankIdentityKeepsTheAgentsOwn(t *testing.T) {
+	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if rt.Agent.Info() != buildinfo.Default() {
+		t.Errorf("Info = %+v, want buildinfo.Default() %+v", rt.Agent.Info(), buildinfo.Default())
+	}
+}
+
+// TestDefaultConfigDirUsesTheGivenName checks the directory an unconfigured
+// embedder would otherwise share with this agent.
+func TestDefaultConfigDirUsesTheGivenName(t *testing.T) {
+	mine := DefaultConfigDir("turnstile")
+	theirs := DefaultConfigDir(buildinfo.Default().DirName)
+	if mine == theirs {
+		t.Fatal("a different DirName must give a different config directory")
+	}
+	if filepath.Base(mine) != "turnstile" {
+		t.Errorf("DefaultConfigDir(%q) = %q", "turnstile", mine)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -41,6 +42,12 @@ type Config struct {
 	// Manager supplies the readers. Required; New panics without one, because
 	// an agent with no way to enumerate a reader cannot be started later.
 	Manager nfc.Manager
+
+	// Info is what this build calls itself. Blank fields fall back to the
+	// agent's own identity, so a program embedding it can rename just the
+	// parts it cares about -- and should at least set DirName, or its
+	// configuration lands in this agent's directory.
+	Info buildinfo.Info
 
 	// Logger receives the agent's diagnostics. Nil installs one writing to
 	// stderr with an [agent] prefix.
@@ -112,6 +119,7 @@ type Agent struct {
 	ClientServer  *clientserver.Server
 
 	// Settled at construction.
+	info                buildinfo.Info
 	logger              *log.Logger
 	manager             nfc.Manager
 	apiSecret           string
@@ -155,6 +163,7 @@ func New(cfg Config) *Agent {
 	}
 
 	return &Agent{
+		info:                cfg.Info.OrDefault(),
 		logger:              logger,
 		manager:             cfg.Manager,
 		apiSecret:           cfg.APISecret,
@@ -177,6 +186,9 @@ func New(cfg Config) *Agent {
 
 // Configuration readers. These exist because the tray and the console display
 // what the agent was built with; none of them can change it.
+
+// Info reports what this build calls itself.
+func (a *Agent) Info() buildinfo.Info { return a.info }
 
 func (a *Agent) Manager() nfc.Manager            { return a.manager }
 func (a *Agent) Logger() *log.Logger             { return a.logger }
@@ -420,11 +432,12 @@ func (a *Agent) startServers() error {
 
 	// Single listener fronts the device, client, control and console handlers.
 	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:           a.devicePort,
-		CertFile:       a.certFile,
-		KeyFile:        a.keyFile,
-		ControlHandler: a.consoleRoutes(),
-		UIHandler:      a.consoleAssets(),
+		Port:            a.devicePort,
+		CertFile:        a.certFile,
+		KeyFile:         a.keyFile,
+		ControlHandler:  a.consoleRoutes(),
+		UIHandler:       a.consoleAssets(),
+		MDNSServiceName: a.info.DisplayName + " Device",
 	}, a.DeviceServer, a.ClientServer)
 
 	go func() {

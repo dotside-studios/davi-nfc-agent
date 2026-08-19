@@ -55,6 +55,7 @@ type BootstrapServer struct {
 	port       int
 	httpServer *http.Server
 	logger     *log.Logger
+	appName    string
 
 	pinMu  sync.RWMutex
 	pin    string
@@ -72,9 +73,29 @@ func NewBootstrapServer(manager caReader, port int) *BootstrapServer {
 	return &BootstrapServer{
 		manager: manager,
 		port:    port,
+		appName: buildinfo.DisplayName,
 		logger:  log.New(os.Stderr, "[bootstrap] ", log.LstdFlags),
 		pin:     generatePIN(),
 	}
+}
+
+// SetAppName sets the name shown on the pairing pages and carried in the iOS
+// configuration profile. It defaults to this agent's own display name; a
+// program built on the agent sets its own so the page it serves does not
+// introduce itself as something else.
+func (s *BootstrapServer) SetAppName(name string) {
+	if name == "" {
+		return
+	}
+	s.appName = name
+}
+
+// AppName returns the name the pairing pages present.
+func (s *BootstrapServer) AppName() string {
+	if s.appName == "" {
+		return buildinfo.DisplayName
+	}
+	return s.appName
 }
 
 // PIN returns the current 6-digit pairing PIN.
@@ -357,7 +378,7 @@ func (s *BootstrapServer) buildAppleProfile() ([]byte, error) {
 	payloadUUID := uuid.NewString()
 	profileUUID := uuid.NewString()
 	caB64 := base64.StdEncoding.EncodeToString(der)
-	appName := buildinfo.DisplayName
+	appName := s.AppName()
 
 	profile := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -414,7 +435,7 @@ func (s *BootstrapServer) buildAppleProfile() ([]byte, error) {
 // no jargon, the most-skipped step (iOS Certificate Trust Settings)
 // is visually called out.
 func (s *BootstrapServer) serveInstallPage(w http.ResponseWriter) {
-	appName := buildinfo.DisplayName
+	appName := s.AppName()
 	caName := appName + " NFC CA"
 	var fingerprint string
 	if s.manager != nil {

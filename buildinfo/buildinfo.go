@@ -75,3 +75,96 @@ func BuildInfo() string {
 func IsDev() bool {
 	return Version == "dev"
 }
+
+// Info is one application's identity: what it calls itself, where it keeps its
+// configuration, and which build it is.
+//
+// The package-level variables above are this repository's own values, stamped
+// by its release ldflags, and Default returns them. A program built on top of
+// the agent supplies its own Info instead, so it can carry its own name into
+// the tray, the console, the pairing pages and the mDNS record — and, more
+// importantly, keep its configuration out of this agent's directory.
+type Info struct {
+	// Name is the technical application name.
+	Name string
+
+	// DirName is the configuration directory's name inside the user's config
+	// path. Two programs sharing it share their certificates and paired
+	// devices, which is rarely what either wants.
+	DirName string
+
+	// DisplayName is the user-facing name, used for UI, mDNS and titles.
+	DisplayName string
+
+	// Description is a short description, shown in the version banner.
+	Description string
+
+	// Version, Commit and BuildTime describe the build.
+	Version   string
+	Commit    string
+	BuildTime string
+}
+
+// Default returns this repository's own identity, as stamped at build time.
+func Default() Info {
+	return Info{
+		Name:        Name,
+		DirName:     DirName,
+		DisplayName: DisplayName,
+		Description: Description,
+		Version:     Version,
+		Commit:      Commit,
+		BuildTime:   BuildTime,
+	}
+}
+
+// OrDefault fills any field left blank from Default, so a caller can override
+// only what it cares about. Version is deliberately included: an Info with no
+// version reads as a development build, the same as an unstamped binary.
+func (i Info) OrDefault() Info {
+	d := Default()
+	if i.Name == "" {
+		i.Name = d.Name
+	}
+	if i.DirName == "" {
+		i.DirName = d.DirName
+	}
+	if i.DisplayName == "" {
+		i.DisplayName = d.DisplayName
+	}
+	if i.Description == "" {
+		i.Description = d.Description
+	}
+	if i.Version == "" {
+		i.Version = d.Version
+	}
+	return i
+}
+
+// FullVersion returns the version string with optional commit info.
+func (i Info) FullVersion() string {
+	if i.Commit != "" {
+		return fmt.Sprintf("%s (%s)", i.Version, i.Commit)
+	}
+	return i.Version
+}
+
+// UserAgent returns a user agent string for HTTP requests.
+func (i Info) UserAgent() string {
+	return fmt.Sprintf("%s/%s", i.Name, i.Version)
+}
+
+// IsDev reports whether this is a development build.
+func (i Info) IsDev() bool { return i.Version == "dev" }
+
+// String returns the multi-line banner shown by -version.
+func (i Info) String() string {
+	info := fmt.Sprintf("%s %s\n", i.Name, i.FullVersion())
+	info += fmt.Sprintf("  %s\n", i.Description)
+	info += fmt.Sprintf("  Go: %s\n", runtime.Version())
+	info += fmt.Sprintf("  OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH)
+	if i.BuildTime != "" {
+		info += fmt.Sprintf("\n  Built: %s", i.BuildTime)
+	}
+	return info
+}

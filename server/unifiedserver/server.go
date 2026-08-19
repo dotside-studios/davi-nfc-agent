@@ -46,6 +46,19 @@ type Config struct {
 	// UIHandler serves the control center's static assets at the root. Nil
 	// leaves the root as the plain-text agent banner.
 	UIHandler http.Handler
+
+	// MDNSServiceName is the name advertised over mDNS. Empty uses the agent's
+	// own, so a program built on the agent can announce itself under its own
+	// name rather than this one.
+	MDNSServiceName string
+}
+
+// mdnsServiceName returns the name to advertise, falling back to the agent's.
+func (c Config) mdnsServiceName() string {
+	if c.MDNSServiceName != "" {
+		return c.MDNSServiceName
+	}
+	return server.MDNSDeviceServiceName
 }
 
 // TLSEnabled returns true if TLS is configured.
@@ -217,7 +230,7 @@ func (s *Server) Stop() {
 func (s *Server) startMDNS() error {
 	var err error
 	s.mdnsServer, err = zeroconf.Register(
-		server.MDNSDeviceServiceName,
+		s.config.mdnsServiceName(),
 		server.MDNSDeviceServiceType,
 		server.MDNSDomain,
 		s.config.Port,

@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/webui"
@@ -27,13 +26,14 @@ var _ agent.Console = (*Server)(nil)
 // agent.Console and defeat that check.
 func New(a *agent.Agent, store *settings.Store, logs *logbuf.Ring) *Server {
 	h := &host{agent: a, settings: store}
+	info := a.Info()
 	return &Server{
 		Server: webui.New(webui.Config{
 			Host:    h,
 			Logs:    logs,
-			Name:    buildinfo.Name,
-			Version: buildinfo.FullVersion(),
-			Dev:     buildinfo.IsDev(),
+			Name:    info.Name,
+			Version: info.FullVersion(),
+			Dev:     info.IsDev(),
 		}),
 		host: h,
 	}

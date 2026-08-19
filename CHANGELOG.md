@@ -93,6 +93,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tray.New` takes the `agent.Runtime`** rather than four fields unpacked
   from it at the call site
 
+- **A custom build can carry its own identity.** `buildinfo` was a set of
+  package-level variables stamped by this repository's release ldflags, which
+  meant a program built on the agent announced itself as `davi-nfc-agent` and,
+  worse, wrote its certificates and paired devices into this agent's
+  configuration directory — two builds on one machine quietly sharing both.
+  `buildinfo.Info` makes that identity a value: set `Options.Info` (or
+  `Config.Info`) and it follows through the configuration directory, the log
+  banner, the control center header, the tray tooltip, the pairing pages and the
+  iOS profile, and the mDNS service devices look for. Blank fields fall back to
+  the agent's own, so overriding `DirName` alone is enough to stop two builds
+  colliding on disk. The shipped binary sets none of it and is unchanged; a test
+  pins `Info.String()` to the old `BuildInfo()` output, and another pins the
+  mDNS name an unconfigured agent advertises
+
 - **The agent's configuration is settled at construction.** `Agent` carried 22
   exported fields, twelve of which `Setup` assigned one at a time after
   `NewAgent`, so the object existed in a half-built state and anything holding

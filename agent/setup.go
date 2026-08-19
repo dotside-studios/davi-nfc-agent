@@ -44,6 +44,11 @@ type Options struct {
 	// assign DevicePort and mean it.
 	DevicePortSet bool
 
+	// Info is what this build calls itself; see agent.Config.Info. It decides
+	// the default config directory, so a program with its own identity should
+	// set it before Setup resolves any paths.
+	Info buildinfo.Info
+
 	// Logs, when set, is the ring the console reads the agent's log from. A
 	// caller that wants startup captured installs it as the log sink before
 	// calling Setup; Setup itself does not touch the process logger.
@@ -85,13 +90,14 @@ type Runtime struct {
 // this package. Wiring the two is the caller's job, and the only thing that
 // needs to know about both.
 func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
-	log.Printf("Starting %s %s", buildinfo.Name, buildinfo.FullVersion())
+	info := opts.Info.OrDefault()
+	log.Printf("Starting %s %s", info.Name, info.FullVersion())
 
 	// Resolve the config directory once — used by both the TLS manager
 	// and the persistent API secret.
 	configDir := opts.ConfigDir
 	if configDir == "" {
-		configDir = DefaultConfigDir()
+		configDir = DefaultConfigDir(info.DirName)
 	}
 
 	certFile, keyFile := opts.CertFile, opts.KeyFile
@@ -156,6 +162,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 			caReader = tlsMgr
 		}
 		bootstrapServer = tls.NewBootstrapServer(caReader, opts.BootstrapPort)
+		bootstrapServer.SetAppName(info.DisplayName)
 		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), opts.DevicePort)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)
@@ -222,6 +229,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// can be handed over in one piece.
 	a := New(Config{
 		Manager:             manager,
+		Info:                info,
 		DevicePort:          devicePort,
 		APISecret:           apiSecret,
 		ConfigDir:           configDir,
@@ -246,15 +254,17 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}, nil
 }
 
-// DefaultConfigDir returns the platform-specific config directory.
-func DefaultConfigDir() string {
+// DefaultConfigDir returns the platform-specific config directory for an
+// application of the given directory name. Pass buildinfo.Default().DirName for
+// the agent's own.
+func DefaultConfigDir(dirName string) string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		// Fallback to home directory
 		home, _ := os.UserHomeDir()
 		configDir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(configDir, buildinfo.DirName)
+	return filepath.Join(configDir, dirName)
 }
 
 // ParseAllowedOrigins turns the comma-separated flag (or DAVI_NFC_ALLOWED_ORIGINS)

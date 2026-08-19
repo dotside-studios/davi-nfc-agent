@@ -2,7 +2,8 @@
 
 The agent is a regular Go module. Importing it gives you the same pieces the
 shipped binary is built from, so a custom build is a `main.go` of your own
-rather than a fork.
+rather than a fork — the shipped one is `cmd/davi-nfc-agent/main.go`, and it is
+about sixty lines.
 
 ```bash
 go get github.com/dotside-studios/davi-nfc-agent
@@ -89,7 +90,7 @@ knowing before you wire anything up:
 
 - **`agent` pulls in no GUI.** `fyne.io/systray` arrives only with `agent/tray`.
 - **`agent` pulls in no NFC backend.** `nfc/pcsc` arrives only where you import
-  it, which for the shipped binary is `main.go`.
+  it, which for the shipped binary is `cmd/davi-nfc-agent/main.go`.
 
 So a headless build is not a stripped-down agent. It is the same agent, minus
 two imports.

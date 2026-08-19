@@ -26,7 +26,7 @@ or `-dev` package is involved; `libpcsclite-dev` is only needed to build the
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
 cd davi-nfc-agent
-go build .
+go build ./cmd/davi-nfc-agent
 ```
 
 ### Running Tests
@@ -102,7 +102,8 @@ git push origin v1.0.0
 
 ```
 davi-nfc-agent/
-├── main.go              # Composition root: picks the NFC backend, wires the rest
+├── cmd/
+│   └── davi-nfc-agent/  # The binary: picks the NFC backend and wires the rest
 │                        # (see docs/go-overview.md to build your own)
 ├── agent/               # The agent itself — orchestration, CLI flags, config
 │   ├── agent.go         # Core agent logic

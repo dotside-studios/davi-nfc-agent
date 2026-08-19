@@ -9,7 +9,7 @@ Download pre-built binaries from [releases](https://github.com/dotside-studios/d
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
 cd davi-nfc-agent
-go build .
+go build ./cmd/davi-nfc-agent
 ```
 
 ## Requirements

@@ -4,12 +4,12 @@
 all: build
 
 build:
-	go build .
+	go build ./cmd/davi-nfc-agent
 
 # Without the control center: no /control routes, no privileged API, and no
 # embedded console. The agent's own protocol is unchanged.
 build-nowebui:
-	go build -tags nowebui .
+	go build -tags nowebui ./cmd/davi-nfc-agent
 
 test:
 	go test ./...

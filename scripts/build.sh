@@ -65,7 +65,7 @@ if [ "$TARGET_OS" != "$CURRENT_OS" ] || [ "$TARGET_ARCH" != "$CURRENT_ARCH" ]; t
     fi
 fi
 
-GOOS=$TARGET_OS GOARCH=$TARGET_ARCH go build -ldflags="$LDFLAGS" -o "$BINARY_NAME" .
+GOOS=$TARGET_OS GOARCH=$TARGET_ARCH go build -ldflags="$LDFLAGS" -o "$BINARY_NAME" ./cmd/davi-nfc-agent
 
 echo "✓ Built: $BINARY_NAME"
 ls -lh "$BINARY_NAME"

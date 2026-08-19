@@ -104,7 +104,7 @@ try {
     $env:GOOS   = $TargetOS
     $env:GOARCH = $TargetArch
 
-    & go build "-ldflags=$LdFlags" -o $BinaryName .
+    & go build "-ldflags=$LdFlags" -o $BinaryName ./cmd/davi-nfc-agent
     if ($LASTEXITCODE -ne 0) {
         throw "go build failed (exit $LASTEXITCODE)"
     }

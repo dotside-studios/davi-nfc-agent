@@ -143,7 +143,7 @@ and origin allowlist keep their own.
 
 ## Building
 
-`webui/frontend/dist` is committed and embedded with `go:embed`, so `go build .`
+`webui/frontend/dist` is committed and embedded with `go:embed`, so `go build ./cmd/davi-nfc-agent`
 works with no Node installed. After changing anything under
 `webui/frontend/src`:
 
@@ -197,7 +197,8 @@ Nothing in `webui` imports the agent. It declares the ~35 methods it needs as
 entire reach into the agent is readable in one file, and its tests run against a
 fake host with no hardware behind them.
 
-`go build -tags nowebui .` produces an agent without the control center: no
+`go build -tags nowebui ./cmd/davi-nfc-agent` produces an agent without the
+control center: no
 `/control` routes, no privileged API, no tray entry, and no frontend in the
 binary. Roughly 820 KB smaller, and the console's strings are absent entirely.
 

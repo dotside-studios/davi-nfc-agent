@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The binary moved to `cmd/davi-nfc-agent`.** With the agent, console and
+  tray in packages of their own, the module root held one file whose only job
+  was to join them — so it becomes a `cmd`, and the module root now holds no Go
+  files at all. `go install` and `go build ./cmd/davi-nfc-agent` both produce a
+  binary named for the directory, exactly as before; the Makefile, both build
+  scripts and the cross-compile job follow the path
+
 - **The root package is now just the wiring.** `package main` held the agent,
   the CLI, the tray and the console adapter in one heap of 19 files, so
   everything reached everything: the tray read the agent's private fields, and

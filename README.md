@@ -253,7 +253,20 @@ ws.send(JSON.stringify({
 
 ## Extending
 
-The agent's modular NFC layer supports adding custom readers and tag types beyond the built-in PC/SC and smartphone support. See [Extending NFC Support](docs/extending-nfc-support.md) to integrate your own hardware or protocols.
+**Building your own agent.** The agent is a regular Go module: import it and
+`main.go` becomes yours, rather than the repository being something to fork. A
+headless build without the tray or control center, or one with no hardware
+backend at all, is a matter of which packages you import. See
+[Go overview](docs/go-overview.md).
+
+```bash
+go get github.com/dotside-studios/davi-nfc-agent
+```
+
+**Adding hardware.** The NFC layer is interfaces the whole way down, so custom
+readers and tag types sit beside the built-in PC/SC and smartphone support. See
+[Extending NFC Support](docs/extending-nfc-support.md) to integrate your own
+hardware or protocols.
 
 ## Contributing
 

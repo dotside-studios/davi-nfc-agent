@@ -116,6 +116,12 @@ func InferTechnology(tagType string) string {
 func (c *Card) Read(p []byte) (n int, err error) {
 	// Lazy load: fetch data on first read
 	if !c.hasRead {
+		// Every card the agent produces comes from NewCard and has a tag. One
+		// built literally does not, and this is an exported type: report that
+		// rather than faulting inside io.ReadAll on someone else's goroutine.
+		if c.tag == nil {
+			return 0, fmt.Errorf("card %s has no tag to read from: build it with NewCard", c.UID)
+		}
 		c.LastAccessed = time.Now()
 		c.readBuffer, err = c.tag.ReadData()
 		if err != nil {

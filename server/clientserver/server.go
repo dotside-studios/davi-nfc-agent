@@ -513,6 +513,14 @@ func (s *Server) listenBridgeTagData() {
 				s.lastCard = data.Card
 				s.cardMu.Unlock()
 			}
+			// Hand the scan to an in-process observer before the clients see
+			// it. This is the supported way to read tags from Go: the bridge
+			// channel has exactly one consumer -- this loop -- so a second
+			// reader would take scans away from the browsers rather than
+			// copying them.
+			if s.config.OnTag != nil {
+				s.config.OnTag(data)
+			}
 			// Broadcast to all clients
 			s.broadcastTagData(data)
 		}

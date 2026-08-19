@@ -88,6 +88,7 @@ type Agent struct {
 	TLSManager *tls.Manager // TLS manager for auto-TLS and network watching
 
 	// Internal state
+	onTag             []func(nfc.NFCData)
 	devicePath        string        // Current device path
 	serversMu         sync.Mutex    // Protects server restart operations
 	serverRestartChan chan struct{} // Signals when servers are restarted
@@ -316,6 +317,7 @@ func (a *Agent) startServers() error {
 		OriginPolicy:   a.originPolicy(),
 		TokenVerifier:  a.tokenVerifier(),
 		OnChange:       a.clientsChanged(),
+		OnTag:          a.tagObserver(),
 	}, a.Bridge)
 
 	// Single listener fronts the device, client, control and console handlers.
@@ -410,6 +412,35 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	a.RequirePairedDevice = on
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)
+	}
+}
+
+// OnTag registers fn to receive every scan the agent broadcasts, so a program
+// embedding the agent can act on cards without connecting to its own WebSocket
+// endpoint. Register before Start: the servers read the set once, when they are
+// built.
+//
+// fn runs on the goroutine that feeds every connected client, so it must not
+// block. Hand slow work to a channel of your own.
+func (a *Agent) OnTag(fn func(nfc.NFCData)) {
+	if fn == nil {
+		return
+	}
+	a.onTag = append(a.onTag, fn)
+}
+
+// tagObserver folds the registered observers into one callback, or nil when
+// there are none -- the client server checks for nil, and a non-nil func
+// calling an empty slice would defeat that.
+func (a *Agent) tagObserver() func(nfc.NFCData) {
+	if len(a.onTag) == 0 {
+		return nil
+	}
+	observers := a.onTag
+	return func(data nfc.NFCData) {
+		for _, fn := range observers {
+			fn(data)
+		}
 	}
 }
 

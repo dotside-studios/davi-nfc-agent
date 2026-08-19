@@ -22,9 +22,10 @@ const (
 	DefaultBootstrapPort = 9472
 )
 
-// Options is the command line as parsed. Every field has a flag, and Setup
-// treats the zero value as "not given" so a caller can build one directly
-// instead of going through ParseFlags.
+// Options is the command line as parsed. A program embedding the agent can
+// build one directly instead of calling ParseFlags — start from
+// DefaultOptions rather than the zero value, which would ask for no TLS and
+// port 0.
 type Options struct {
 	Version        bool
 	DevicePath     string
@@ -42,6 +43,17 @@ type Options struct {
 	// devicePortSet records whether -device-port was given, so a stored port
 	// does not override an explicit one.
 	devicePortSet bool
+}
+
+// DefaultOptions returns the settings the flags default to. It is the starting
+// point for building an agent without a command line: take it, change what you
+// need, and hand it to Setup.
+func DefaultOptions() *Options {
+	return &Options{
+		DevicePort:    DefaultDevicePort,
+		BootstrapPort: DefaultBootstrapPort,
+		AutoTLS:       true,
+	}
 }
 
 // ParseFlags defines the agent's flags on the default command line and parses
@@ -178,6 +190,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	a := NewAgent(manager)
 	a.DevicePort = opts.DevicePort
+	if a.DevicePort == 0 {
+		// A hand-built Options that never set a port means the default, not a
+		// listener on whatever the kernel hands out.
+		a.DevicePort = DefaultDevicePort
+	}
 	a.APISecret = apiSecret
 
 	// The allowlist persists in the config dir and starts with the first-party

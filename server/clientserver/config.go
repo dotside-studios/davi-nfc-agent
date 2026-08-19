@@ -1,6 +1,9 @@
 package clientserver
 
-import "github.com/dotside-studios/davi-nfc-agent/server"
+import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+)
 
 // Config holds configuration for the client handling logic. The HTTP listener
 // and TLS are owned by the unified server, so this carries only what the client
@@ -27,4 +30,13 @@ type Config struct {
 	// so an observer can refresh without polling. Called off the hot path but
 	// on the connection's own goroutine, so it must not block.
 	OnChange func()
+
+	// OnTag, when set, is called for every scan before it is broadcast, so a
+	// program embedding the agent can act on cards without pretending to be a
+	// WebSocket client. It observes rather than intercepts: the scan is
+	// broadcast either way, and returning changes nothing.
+	//
+	// Called on the goroutine draining the bridge, so it must not block --
+	// that goroutine also feeds every connected client.
+	OnTag func(nfc.NFCData)
 }

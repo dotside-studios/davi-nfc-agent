@@ -58,7 +58,7 @@ func main() {
 		rt.Devices.OnChange(consoleServer.NotifyChange)
 	}
 
-	app := tray.New(rt.Agent, rt.DevicePath, rt.BootstrapPort, rt.Bootstrap)
+	app := tray.New(rt)
 	app.AttachConsole(consoleServer)
 
 	// Set up signal handling for graceful shutdown

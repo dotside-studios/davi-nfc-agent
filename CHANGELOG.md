@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/go-overview.md`: building your own agent.** The package split left
+  the agent importable but undocumented, so the way to change what the binary
+  does was still to fork it. The new page is the counterpart to the refactor —
+  the shipped agent as a `main.go` you could have written, then the variations:
+  headless, no control center, no hardware backend, reacting to tags in Go.
+  Every Go sample on the page compiles against this tree.
+
+- **`(*Agent).OnTag` observes every scan.** Writing that page turned up a gap:
+  a program embedding the agent had no supported way to see a card. The obvious
+  move — reading `Agent.Bridge.TagData` — is wrong, because the client server is
+  that channel's only consumer, so a second reader takes scans away from the
+  browsers instead of copying them. Observers registered before `Start` are
+  called on each scan, in the order the clients see them, and the broadcast is
+  unaffected either way. Carried by `clientserver.Config.OnTag`, beside the
+  existing `OnChange`
+
+- **`agent.DefaultOptions`** returns what the flags default to, for building an
+  agent without a command line. The zero `Options` asked for no TLS and port 0;
+  `Setup` now also falls back to the default port rather than binding whatever
+  the kernel offers
+
+### Fixed
+
+- **A hand-built `nfc.Card` reports an error instead of faulting.** `Card` is
+  exported and its fields are settable, but `Read` assumed the unexported tag
+  every card built by `NewCard` has, so one composed field-by-field panicked
+  inside `io.ReadAll` — on the client server's broadcast goroutine, if such a
+  card ever reached it. Nothing in the agent constructs one that way, so this
+  was unreachable in the shipped binary; it stops being unreachable once
+  callers write against `nfc` directly
+
 ### Changed
 
 - **The root package is now just the wiring.** `package main` held the agent,
@@ -33,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   console drives are exported. `DEFAULT_DEVICE_PORT` and
   `DEFAULT_BOOTSTRAP_PORT` become `agent.DefaultDevicePort` and
   `agent.DefaultBootstrapPort` now that they are part of a package's API
+
+- **`tray.New` takes the `agent.Runtime`** rather than four fields unpacked
+  from it at the call site
 
 ## [1.1.3] - 2026-08-15
 

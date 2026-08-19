@@ -97,12 +97,15 @@ type App struct {
 // New creates a new systray application. bootstrap may be nil
 // if the pairing server is disabled (e.g. -bootstrap-port 0); the
 // pairing PIN menu item is hidden in that case.
-func New(a *agent.Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer) *App {
+// New builds the tray for a configured agent. Everything it needs is already in
+// the Runtime that agent.Setup returned, so it takes that rather than asking
+// the caller to unpack the same four fields at every call site.
+func New(rt *agent.Runtime) *App {
 	return &App{
-		agent:           a,
-		initialDevice:   initialDevice,
-		bootstrapPort:   bootstrapPort,
-		bootstrap:       bootstrap,
+		agent:           rt.Agent,
+		initialDevice:   rt.DevicePath,
+		bootstrapPort:   rt.BootstrapPort,
+		bootstrap:       rt.Bootstrap,
 		deviceMenuItems: make(map[string]*systray.MenuItem),
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
 	}

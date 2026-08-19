@@ -103,6 +103,7 @@ git push origin v1.0.0
 ```
 davi-nfc-agent/
 ├── main.go              # Composition root: picks the NFC backend, wires the rest
+│                        # (see docs/go-overview.md to build your own)
 ├── agent/               # The agent itself — orchestration, CLI flags, config
 │   ├── agent.go         # Core agent logic
 │   ├── cli.go           # Flag parsing and startup wiring

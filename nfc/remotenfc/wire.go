@@ -1,6 +1,27 @@
-package protocol
+package remotenfc
 
-import "time"
+import (
+	"time"
+
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
+)
+
+// WebSocket message types of the device protocol. The client protocol keeps
+// its own in package protocol; these are only ever spoken to a device.
+const (
+	WSTypeHello                    = "hello"
+	WSTypeHelloResponse            = "helloResponse"
+	WSTypeGoodbye                  = "goodbye"
+	WSTypeRegisterDevice           = "registerDevice"
+	WSTypeRegisterDeviceResponse   = "registerDeviceResponse"
+	WSTypeTagScanned               = "tagScanned"
+	WSTypeTagRemoved               = "tagRemoved"
+	WSTypeDeviceHeartbeat          = "deviceHeartbeat"
+	WSTypeDeviceWriteRequest       = "deviceWriteRequest"
+	WSTypeDeviceWriteResponse      = "deviceWriteResponse"
+	WSTypeDeviceTransceiveRequest  = "deviceTransceiveRequest"
+	WSTypeDeviceTransceiveResponse = "deviceTransceiveResponse"
+)
 
 // DeviceCapabilities defines the capabilities of a connected NFC device.
 //
@@ -40,15 +61,6 @@ type DeviceCapabilities struct {
 	MaxHoldMs int `json:"maxHoldMs,omitempty"`
 }
 
-// DeviceRegistrationRequest is sent by a device to register with the server.
-type DeviceRegistrationRequest struct {
-	DeviceName   string             `json:"deviceName"`   // e.g., "John's iPhone 12"
-	Platform     string             `json:"platform"`     // "ios" or "android"
-	AppVersion   string             `json:"appVersion"`   // e.g., "1.0.0"
-	Capabilities DeviceCapabilities `json:"capabilities"` // Device capabilities
-	Metadata     map[string]string  `json:"metadata"`     // Optional metadata
-}
-
 // DeviceRegistrationResponse is sent by server after successful registration.
 type DeviceRegistrationResponse struct {
 	DeviceID     string     `json:"deviceID"`     // Unique device identifier (UUID)
@@ -72,18 +84,18 @@ type ServerInfo struct {
 
 // DeviceTagData is sent by a device when a tag is scanned.
 type DeviceTagData struct {
-	DeviceID    string            `json:"deviceID"`    // Device that scanned the tag
-	UID         string            `json:"uid"`         // Tag UID (hex format)
-	Technology  string            `json:"technology"`  // "ISO14443A", "ISO14443B", etc.
-	Type        string            `json:"type"`        // "MIFARE Classic 1K", "Type4", etc.
-	ATR         string            `json:"atr"`         // Answer to Reset (if applicable)
-	ScannedAt   time.Time         `json:"scannedAt"`   // Timestamp of scan
-	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
-	RawData     []byte            `json:"rawData"`     // Raw tag data (base64 encoded)
+	DeviceID    string                     `json:"deviceID"`    // Device that scanned the tag
+	UID         string                     `json:"uid"`         // Tag UID (hex format)
+	Technology  string                     `json:"technology"`  // "ISO14443A", "ISO14443B", etc.
+	Type        string                     `json:"type"`        // "MIFARE Classic 1K", "Type4", etc.
+	ATR         string                     `json:"atr"`         // Answer to Reset (if applicable)
+	ScannedAt   time.Time                  `json:"scannedAt"`   // Timestamp of scan
+	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
+	RawData     []byte                     `json:"rawData"`     // Raw tag data (base64 encoded)
 
 	// Capabilities is what the device determined about this specific tag. When
 	// omitted the agent infers them from Type, which is all a v0 device allows.
-	Capabilities *TagCapabilities `json:"capabilities,omitempty"`
+	Capabilities *protocol.TagCapabilities `json:"capabilities,omitempty"`
 }
 
 // DeviceHeartbeat is sent by a device periodically.
@@ -101,11 +113,11 @@ type DeviceTagRemovedData struct {
 
 // DeviceWriteRequest is sent by the agent to a device to write a tag.
 type DeviceWriteRequest struct {
-	RequestID   string            `json:"requestID"`   // Unique request ID for correlation
-	DeviceID    string            `json:"deviceID"`    // Target device
-	NDEFMessage *NDEFMessageInput `json:"ndefMessage"` // Data to write, as records
-	TagUID      string            `json:"tagUID,omitempty"`
-	Lock        bool              `json:"lock,omitempty"` // Make read-only after writing
+	RequestID   string                     `json:"requestID"`   // Unique request ID for correlation
+	DeviceID    string                     `json:"deviceID"`    // Target device
+	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Data to write, as records
+	TagUID      string                     `json:"tagUID,omitempty"`
+	Lock        bool                       `json:"lock,omitempty"` // Make read-only after writing
 
 	// NDEFBytes is the same message already encoded, and is authoritative where
 	// the two disagree. A device that can write raw NDEF should prefer it; the
@@ -142,17 +154,17 @@ type DeviceTransceiveRequest struct {
 
 // DeviceTransceiveResponse carries the tag's reply.
 type DeviceTransceiveResponse struct {
-	RequestID string    `json:"requestID"`
-	Success   bool      `json:"success"`
-	Data      []byte    `json:"data,omitempty"` // Response bytes, base64 in transit
-	Error     string    `json:"error,omitempty"`
-	ErrorCode ErrorCode `json:"errorCode,omitempty"`
+	RequestID string             `json:"requestID"`
+	Success   bool               `json:"success"`
+	Data      []byte             `json:"data,omitempty"` // Response bytes, base64 in transit
+	Error     string             `json:"error,omitempty"`
+	ErrorCode protocol.ErrorCode `json:"errorCode,omitempty"`
 }
 
 // DeviceWriteResponse is sent by a device after a write operation.
 type DeviceWriteResponse struct {
-	RequestID string    `json:"requestID"`
-	Success   bool      `json:"success"`
-	Error     string    `json:"error,omitempty"`
-	ErrorCode ErrorCode `json:"errorCode,omitempty"` // Preferred over parsing Error
+	RequestID string             `json:"requestID"`
+	Success   bool               `json:"success"`
+	Error     string             `json:"error,omitempty"`
+	ErrorCode protocol.ErrorCode `json:"errorCode,omitempty"` // Preferred over parsing Error
 }

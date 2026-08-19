@@ -1,6 +1,7 @@
 package tagrouter_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"testing"
 	"time"
 
@@ -68,7 +69,7 @@ func TestLockRoutesToDeviceHoldingTag(t *testing.T) {
 
 	requestID, _ := req.Payload["requestID"].(string)
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeDeviceWriteResponse,
+		Type: remotenfc.WSTypeDeviceWriteResponse,
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   true,
@@ -107,7 +108,7 @@ func TestLockReportsDeviceFailure(t *testing.T) {
 	requestID, _ := req.Payload["requestID"].(string)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeDeviceWriteResponse,
+		Type: remotenfc.WSTypeDeviceWriteResponse,
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   false,
@@ -276,7 +277,7 @@ func scanLockableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBr
 	t.Helper()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeTagScanned,
+		Type: remotenfc.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
 			"uid":        scannedUID,

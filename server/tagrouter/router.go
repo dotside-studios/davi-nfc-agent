@@ -182,7 +182,7 @@ func (s *Router) writeViaDevice(msg server.WriteRequestMessage, active remotenfc
 		return
 	}
 
-	resp, err := s.remote.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+	resp, err := s.remote.WriteToDevice(deviceID, remotenfc.DeviceWriteRequest{
 		RequestID:      msg.RequestID,
 		TagUID:         uid,
 		NDEFMessage:    server.BuildNDEFInput(msg.Request),
@@ -287,7 +287,7 @@ func (s *Router) executeLockRequest(msg server.LockRequestMessage) {
 func (s *Router) lockViaDevice(msg server.LockRequestMessage, active remotenfc.ActiveTagInfo) {
 	deviceID, uid := active.DeviceID, active.UID
 
-	resp, err := s.remote.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+	resp, err := s.remote.WriteToDevice(deviceID, remotenfc.DeviceWriteRequest{
 		RequestID:      msg.RequestID,
 		TagUID:         uid,
 		Lock:           true,
@@ -398,7 +398,7 @@ func (s *Router) executeTransceiveRequest(msg server.TransceiveRequestMessage) {
 func (s *Router) transceiveViaDevice(msg server.TransceiveRequestMessage, active remotenfc.ActiveTagInfo) {
 	deviceID, uid := active.DeviceID, active.UID
 
-	resp, err := s.remote.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
+	resp, err := s.remote.TransceiveWithDevice(deviceID, remotenfc.DeviceTransceiveRequest{
 		RequestID: msg.RequestID,
 		DeviceID:  deviceID,
 		TagUID:    uid,

@@ -1,6 +1,7 @@
 package tagrouter_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"testing"
 	"time"
 
@@ -49,16 +50,16 @@ func readResponse(t *testing.T, conn *websocket.Conn) (protocol.WebSocketRespons
 func TestHelloHandshakeNegotiatesV1(t *testing.T) {
 	url := newDeviceTestServer(t)
 
-	conn, negotiated := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
-	if negotiated != protocol.SubprotocolDeviceV1 {
-		t.Errorf("negotiated subprotocol = %q, want %q", negotiated, protocol.SubprotocolDeviceV1)
+	conn, negotiated := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
+	if negotiated != remotenfc.SubprotocolDeviceV1 {
+		t.Errorf("negotiated subprotocol = %q, want %q", negotiated, remotenfc.SubprotocolDeviceV1)
 	}
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
 		ID:   "h1",
-		Type: protocol.WSTypeHello,
+		Type: remotenfc.WSTypeHello,
 		Payload: map[string]any{
-			"protocolVersion": protocol.DeviceProtocolV1,
+			"protocolVersion": remotenfc.DeviceProtocolV1,
 			"deviceName":      "Test Device",
 			"platform":        "android",
 		},
@@ -68,14 +69,14 @@ func TestHelloHandshakeNegotiatesV1(t *testing.T) {
 
 	out, payload := readResponse(t, conn)
 
-	if out.Type != protocol.WSTypeHelloResponse {
-		t.Errorf("response type = %q, want %q", out.Type, protocol.WSTypeHelloResponse)
+	if out.Type != remotenfc.WSTypeHelloResponse {
+		t.Errorf("response type = %q, want %q", out.Type, remotenfc.WSTypeHelloResponse)
 	}
 	if !out.Success {
 		t.Errorf("response success = false, error = %q", out.Error)
 	}
-	if got := payload["protocolVersion"]; got != float64(protocol.DeviceProtocolV1) {
-		t.Errorf("protocolVersion = %v, want %d", got, protocol.DeviceProtocolV1)
+	if got := payload["protocolVersion"]; got != float64(remotenfc.DeviceProtocolV1) {
+		t.Errorf("protocolVersion = %v, want %d", got, remotenfc.DeviceProtocolV1)
 	}
 	if id, _ := payload["deviceID"].(string); id == "" {
 		t.Error("helloResponse carried no deviceID")
@@ -87,9 +88,9 @@ func TestHelloHandshakeNegotiatesV1(t *testing.T) {
 func TestHelloClampsFutureVersion(t *testing.T) {
 	url := newDeviceTestServer(t)
 
-	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeHello,
+		Type: remotenfc.WSTypeHello,
 		Payload: map[string]any{
 			"protocolVersion": 99,
 			"deviceName":      "Future Device",
@@ -100,8 +101,8 @@ func TestHelloClampsFutureVersion(t *testing.T) {
 	}
 
 	_, payload := readResponse(t, conn)
-	if got := payload["protocolVersion"]; got != float64(protocol.DeviceProtocolMax) {
-		t.Errorf("protocolVersion = %v, want %d", got, protocol.DeviceProtocolMax)
+	if got := payload["protocolVersion"]; got != float64(remotenfc.DeviceProtocolMax) {
+		t.Errorf("protocolVersion = %v, want %d", got, remotenfc.DeviceProtocolMax)
 	}
 }
 
@@ -116,18 +117,18 @@ func TestHelloWithoutSubprotocolOffer(t *testing.T) {
 	}
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type:    protocol.WSTypeHello,
+		Type:    remotenfc.WSTypeHello,
 		Payload: map[string]any{"deviceName": "Bare Device", "platform": "ios"},
 	}); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
 
 	out, payload := readResponse(t, conn)
-	if out.Type != protocol.WSTypeHelloResponse {
-		t.Errorf("response type = %q, want %q", out.Type, protocol.WSTypeHelloResponse)
+	if out.Type != remotenfc.WSTypeHelloResponse {
+		t.Errorf("response type = %q, want %q", out.Type, remotenfc.WSTypeHelloResponse)
 	}
-	if got := payload["protocolVersion"]; got != float64(protocol.DeviceProtocolV1) {
-		t.Errorf("protocolVersion = %v, want %d", got, protocol.DeviceProtocolV1)
+	if got := payload["protocolVersion"]; got != float64(remotenfc.DeviceProtocolV1) {
+		t.Errorf("protocolVersion = %v, want %d", got, remotenfc.DeviceProtocolV1)
 	}
 }
 
@@ -143,7 +144,7 @@ func TestLegacyRegisterDeviceUnchanged(t *testing.T) {
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
 		ID:   "r1",
-		Type: protocol.WSTypeRegisterDevice,
+		Type: remotenfc.WSTypeRegisterDevice,
 		Payload: map[string]any{
 			"deviceName": "Legacy Device",
 			"platform":   "ios",
@@ -154,8 +155,8 @@ func TestLegacyRegisterDeviceUnchanged(t *testing.T) {
 
 	out, payload := readResponse(t, conn)
 
-	if out.Type != protocol.WSTypeRegisterDeviceResponse {
-		t.Errorf("response type = %q, want %q", out.Type, protocol.WSTypeRegisterDeviceResponse)
+	if out.Type != remotenfc.WSTypeRegisterDeviceResponse {
+		t.Errorf("response type = %q, want %q", out.Type, remotenfc.WSTypeRegisterDeviceResponse)
 	}
 	if out.ID != "r1" {
 		t.Errorf("response ID = %q, want r1", out.ID)
@@ -171,9 +172,9 @@ func TestLegacyRegisterDeviceUnchanged(t *testing.T) {
 func TestRegistrationRequiresDeviceName(t *testing.T) {
 	url := newDeviceTestServer(t)
 
-	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type:    protocol.WSTypeHello,
+		Type:    remotenfc.WSTypeHello,
 		Payload: map[string]any{"protocolVersion": 1},
 	}); err != nil {
 		t.Fatalf("write hello: %v", err)
@@ -191,7 +192,7 @@ func TestRegistrationRequiresDeviceName(t *testing.T) {
 func TestFirstFrameMustBeHelloOrRegister(t *testing.T) {
 	url := newDeviceTestServer(t)
 
-	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: "tagScanned"}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -209,11 +210,11 @@ func TestFirstFrameMustBeHelloOrRegister(t *testing.T) {
 func registerV1(t *testing.T, url string) (*websocket.Conn, string) {
 	t.Helper()
 
-	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeHello,
+		Type: remotenfc.WSTypeHello,
 		Payload: map[string]any{
-			"protocolVersion": protocol.DeviceProtocolV1,
+			"protocolVersion": remotenfc.DeviceProtocolV1,
 			"deviceName":      "Test Device",
 			"platform":        "android",
 		},
@@ -237,7 +238,7 @@ func TestMalformedTagScanIsNotRetryable(t *testing.T) {
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
 		ID:   "scan1",
-		Type: protocol.WSTypeTagScanned,
+		Type: remotenfc.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
 			"uid":        "not a valid uid",
@@ -290,7 +291,7 @@ func TestGoodbyeIsAcknowledged(t *testing.T) {
 	conn, deviceID := registerV1(t, url)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type:    protocol.WSTypeGoodbye,
+		Type:    remotenfc.WSTypeGoodbye,
 		Payload: map[string]any{"deviceID": deviceID, "reason": "user stopped scanning"},
 	}); err != nil {
 		t.Fatalf("write goodbye: %v", err)
@@ -307,13 +308,13 @@ func TestGoodbyeIsAcknowledged(t *testing.T) {
 }
 
 func TestDisconnectReasonExpected(t *testing.T) {
-	if !protocol.DisconnectGoodbye.Expected() {
+	if !remotenfc.DisconnectGoodbye.Expected() {
 		t.Error("goodbye should be an expected departure")
 	}
-	if !protocol.DisconnectClosed.Expected() {
+	if !remotenfc.DisconnectClosed.Expected() {
 		t.Error("a clean close should be an expected departure")
 	}
-	if protocol.DisconnectDropped.Expected() {
+	if remotenfc.DisconnectDropped.Expected() {
 		t.Error("a dropped connection is not an expected departure")
 	}
 }
@@ -322,11 +323,11 @@ func TestDisconnectReasonExpected(t *testing.T) {
 func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
 	t.Helper()
 
-	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeHello,
+		Type: remotenfc.WSTypeHello,
 		Payload: map[string]any{
-			"protocolVersion": protocol.DeviceProtocolV1,
+			"protocolVersion": remotenfc.DeviceProtocolV1,
 			"deviceName":      "Capable Device",
 			"platform":        "android",
 			"capabilities": map[string]any{
@@ -354,12 +355,12 @@ func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
 func TestHelloReportsPublicKeyPin(t *testing.T) {
 	const pin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	url := newStack(t, stackConfig{PublicKeyPin: pin}).URL
-	conn, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeHello,
+		Type: remotenfc.WSTypeHello,
 		Payload: map[string]any{
-			"protocolVersion": protocol.DeviceProtocolV1,
+			"protocolVersion": remotenfc.DeviceProtocolV1,
 			"deviceName":      "Pinning Device",
 			"platform":        "android",
 		},
@@ -386,11 +387,11 @@ func TestHelloOmitsAbsentPin(t *testing.T) {
 
 	// registerV1 already read the response; re-register on a fresh connection
 	// to inspect the payload.
-	conn2, _ := dialDevice(t, url, []string{protocol.SubprotocolDeviceV1})
+	conn2, _ := dialDevice(t, url, []string{remotenfc.SubprotocolDeviceV1})
 	if err := conn2.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeHello,
+		Type: remotenfc.WSTypeHello,
 		Payload: map[string]any{
-			"protocolVersion": protocol.DeviceProtocolV1,
+			"protocolVersion": remotenfc.DeviceProtocolV1,
 			"deviceName":      "Unpinned Device",
 			"platform":        "ios",
 		},

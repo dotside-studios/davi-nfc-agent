@@ -15,7 +15,8 @@ func serveManager(t *testing.T, timeout time.Duration) (*Manager, string) {
 	t.Helper()
 
 	m := NewManager(timeout)
-	ts := httptest.NewServer(m.Handler(ServerOptions{}))
+	// Exercising the protocol, not the credential.
+	ts := httptest.NewServer(m.Handler(ServerOptions{AllowUnauthenticated: true}))
 
 	t.Cleanup(func() {
 		ts.Close()
@@ -36,9 +37,9 @@ func connectDevice(t *testing.T, url string) (*websocket.Conn, string) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeHello,
+		Type: WSTypeHello,
 		Payload: map[string]any{
-			"protocolVersion": protocol.DeviceProtocolV1,
+			"protocolVersion": DeviceProtocolV1,
 			"deviceName":      "Test Device",
 			"platform":        "android",
 		},
@@ -129,7 +130,7 @@ func TestHeartbeatSurvivesTheSweep(t *testing.T) {
 	awaitDeviceCount(t, m, "after connect", 1)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type:    protocol.WSTypeDeviceHeartbeat,
+		Type:    WSTypeDeviceHeartbeat,
 		Payload: map[string]any{"deviceID": deviceID},
 	}); err != nil {
 		t.Fatalf("write heartbeat: %v", err)

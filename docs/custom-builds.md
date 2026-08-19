@@ -128,12 +128,13 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `agent/tray` | The system tray |
 | `nfc` | Readers, tag drivers, NDEF encoding and decoding |
 | `nfc/pcsc` | The PC/SC hardware backend |
-| `nfc/remotenfc` | Phones and WebNFC browsers: the device WebSocket endpoint, its sessions and the tags behind them |
+| `nfc/remotenfc` | Phones and WebNFC browsers: the device protocol, its WebSocket endpoint, the sessions and the tags behind them |
 | `nfc/multimanager` | Several backends behind one `nfc.Manager` |
 | `server` | The bridge between tag sources and clients, and the device credential check |
 | `server/clientserver` | The client WebSocket endpoint |
 | `server/tagrouter` | Picks the reader or a device for each client request |
 | `server/unifiedserver` | One listener fronting all of the above |
+| `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
 
 Dependencies run in one direction. `agent/console` and `agent/tray` import

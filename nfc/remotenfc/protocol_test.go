@@ -79,7 +79,7 @@ func TestParseUID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := protocol.ParseUID(tt.input)
+			got, err := ParseUID(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseUID() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -152,7 +152,7 @@ func TestConvertNDEFRecordInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			record, err := protocol.ConvertNDEFRecordInput(tt.input)
+			record, err := ConvertNDEFRecordInput(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertNDEFRecordInput() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -241,7 +241,7 @@ func TestConvertNDEFInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, err := protocol.ConvertNDEFInput(tt.input)
+			msg, err := ConvertNDEFInput(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertNDEFInput() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -339,7 +339,7 @@ func TestConvertTagData(t *testing.T) {
 					// Verify tag fields
 					if tag.UID() != tt.input.UID {
 						// UID might be normalized
-						normalizedUID, _ := protocol.ParseUID(tt.input.UID)
+						normalizedUID, _ := ParseUID(tt.input.UID)
 						if tag.UID() != normalizedUID {
 							t.Errorf("Tag UID = %v, want %v", tag.UID(), normalizedUID)
 						}

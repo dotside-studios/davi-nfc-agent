@@ -1,6 +1,7 @@
 package tagrouter_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func scanTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, de
 	t.Helper()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeTagScanned,
+		Type: remotenfc.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
 			"uid":        uid,
@@ -73,7 +74,7 @@ func readDeviceWriteRequest(t *testing.T, conn *websocket.Conn) protocol.WebSock
 		if err := conn.ReadJSON(&msg); err != nil {
 			t.Fatalf("read device message: %v", err)
 		}
-		if msg.Type == protocol.WSTypeDeviceWriteRequest {
+		if msg.Type == remotenfc.WSTypeDeviceWriteRequest {
 			return msg
 		}
 	}
@@ -106,7 +107,7 @@ func TestWriteRoutesToDeviceHoldingTag(t *testing.T) {
 
 	requestID, _ := req.Payload["requestID"].(string)
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeDeviceWriteResponse,
+		Type: remotenfc.WSTypeDeviceWriteResponse,
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   true,
@@ -138,7 +139,7 @@ func TestWriteReportsDeviceFailure(t *testing.T) {
 	requestID, _ := req.Payload["requestID"].(string)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeDeviceWriteResponse,
+		Type: remotenfc.WSTypeDeviceWriteResponse,
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   false,
@@ -218,7 +219,7 @@ func TestTagRemovalClearsWriteTarget(t *testing.T) {
 	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeTagRemoved,
+		Type: remotenfc.WSTypeTagRemoved,
 		Payload: map[string]any{
 			"deviceID":  deviceID,
 			"uid":       scannedUID,
@@ -267,7 +268,7 @@ func scanCapableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBri
 	t.Helper()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeTagScanned,
+		Type: remotenfc.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
 			"uid":        scannedUID,
@@ -312,7 +313,7 @@ func TestTransceiveRoundTrip(t *testing.T) {
 		if err := conn.ReadJSON(&req); err != nil {
 			t.Fatalf("read device message: %v", err)
 		}
-		if req.Type == protocol.WSTypeDeviceTransceiveRequest {
+		if req.Type == remotenfc.WSTypeDeviceTransceiveRequest {
 			break
 		}
 	}
@@ -326,7 +327,7 @@ func TestTransceiveRoundTrip(t *testing.T) {
 
 	requestID, _ := req.Payload["requestID"].(string)
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeDeviceTransceiveResponse,
+		Type: remotenfc.WSTypeDeviceTransceiveResponse,
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   true,
@@ -369,14 +370,14 @@ func TestTransceiveFailureKeepsCode(t *testing.T) {
 		if err := conn.ReadJSON(&req); err != nil {
 			t.Fatalf("read device message: %v", err)
 		}
-		if req.Type == protocol.WSTypeDeviceTransceiveRequest {
+		if req.Type == remotenfc.WSTypeDeviceTransceiveRequest {
 			break
 		}
 	}
 
 	requestID, _ := req.Payload["requestID"].(string)
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeDeviceTransceiveResponse,
+		Type: remotenfc.WSTypeDeviceTransceiveResponse,
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   false,

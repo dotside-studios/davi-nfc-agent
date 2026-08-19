@@ -1,6 +1,7 @@
 package tagrouter_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"testing"
 	"time"
 
@@ -217,7 +218,7 @@ func TestTagRemovalLeavesTheOtherDeviceRoutable(t *testing.T) {
 	scanTag(t, second, bridge, secondID, "04:BB:BB:BB")
 
 	if err := second.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeTagRemoved,
+		Type: remotenfc.WSTypeTagRemoved,
 		Payload: map[string]any{
 			"deviceID": secondID,
 			"uid":      "04:BB:BB:BB",

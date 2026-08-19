@@ -59,6 +59,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The device protocol lives with the driver that speaks it.** `protocol` held
+  both wire formats, so the browser-facing client API and the phone driver drew
+  from one package and neither could be read without the other. The device half
+  moves into `nfc/remotenfc`: its message types, the version negotiation, the
+  UID and NDEF conversion, and the twelve device WebSocket message types.
+  `protocol` keeps what both actually share, dropping from 657 to 267 lines.
+
+  Moving it wholesale was not possible and would have been wrong: `clientserver`
+  uses only the envelope and the error taxonomy, with no device symbol at all,
+  so it would have imported the phone driver to serve a browser.
+
+  `remotenfc` already aliased several of these types back into itself, with a
+  comment saying the duplication "bought a hand-written translation step and
+  nothing else". It had: two definitions of `DeviceRegistrationRequest` differed
+  by a `protocolVersion` field. The aliases are gone and the superset is the one
+  definition
+
+- **The device endpoint requires an authenticator.** `Manager.Handler` took an
+  origin check and nothing else, so mounting it without wrapping it served an
+  open device endpoint: the upgrade succeeded, the device registered, and
+  nothing said otherwise. `ServerOptions.Authenticate` is now required, and a
+  handler built without it refuses every connection with 503 unless
+  `AllowUnauthenticated` says that is deliberate. The driver still knows nothing
+  about API secrets or pairing; it asks for a check and `server.DeviceAuth.Check`
+  is the agent's
+
 - **`deviceserver` is gone, split into the two things it was.** It had not been
   a server for a while: no listener, no port, and one HTTP method that was a
   credential check in front of somebody else's handler. What remained was

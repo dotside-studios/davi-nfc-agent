@@ -9,22 +9,6 @@ const (
 	WSTypeError         = "error"
 )
 
-// WebSocket message type constants for device communication
-const (
-	WSTypeHello                  = "hello"
-	WSTypeHelloResponse          = "helloResponse"
-	WSTypeGoodbye                = "goodbye"
-	WSTypeRegisterDevice         = "registerDevice"
-	WSTypeRegisterDeviceResponse = "registerDeviceResponse"
-	WSTypeTagScanned             = "tagScanned"
-	WSTypeTagRemoved             = "tagRemoved"
-	WSTypeDeviceHeartbeat        = "deviceHeartbeat"
-	WSTypeDeviceWriteRequest      = "deviceWriteRequest"
-	WSTypeDeviceWriteResponse     = "deviceWriteResponse"
-	WSTypeDeviceTransceiveRequest = "deviceTransceiveRequest"
-	WSTypeDeviceTransceiveResponse = "deviceTransceiveResponse"
-)
-
 // WebSocketMessage is the generic message envelope for WebSocket communication.
 type WebSocketMessage struct {
 	ID      string `json:"id,omitempty"`
@@ -50,13 +34,13 @@ type WebSocketResponse struct {
 
 // TagDataPayload is the payload structure broadcast when a tag is scanned.
 type TagDataPayload struct {
-	UID        string                 `json:"uid"`
-	Type       string                 `json:"type"`
-	Technology string                 `json:"technology"`
-	ScannedAt  string                 `json:"scannedAt"` // RFC3339 format
-	Text       string                 `json:"text"`      // Extracted text content
+	UID        string         `json:"uid"`
+	Type       string         `json:"type"`
+	Technology string         `json:"technology"`
+	ScannedAt  string         `json:"scannedAt"` // RFC3339 format
+	Text       string         `json:"text"`      // Extracted text content
 	Message    map[string]any `json:"message,omitempty"`
-	Error      *string                `json:"err"`
+	Error      *string        `json:"err"`
 }
 
 // DeviceStatusPayload is the payload for device status updates.

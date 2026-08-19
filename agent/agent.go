@@ -482,19 +482,20 @@ func (a *Agent) startServers() error {
 	a.Reader.Start()
 	go a.pumpReader(a.pumpCtx, a.Reader, a.Bridge)
 
-	// The device endpoint is the driver's own handler behind the agent's
-	// credential check. The driver speaks the device protocol and knows nothing
-	// about API secrets or pairing; the agent knows nothing about the protocol.
+	// The device endpoint is the driver's own handler, checking the agent's
+	// credential. The driver requires an authenticator but knows nothing about
+	// API secrets or pairing; the agent knows nothing about the protocol.
 	remote := findDeviceDriver(a.manager)
 	a.DeviceAuth = server.NewDeviceAuth(a.apiSecret, a.tokenVerifier(), a.requirePairedDevice)
 	var deviceEndpoint http.Handler
 	if remote != nil {
 		go server.PumpTagData(a.pumpCtx, remote.Data(), a.Bridge)
-		deviceEndpoint = a.DeviceAuth.Wrap(remote.Handler(remotenfc.ServerOptions{
+		deviceEndpoint = remote.Handler(remotenfc.ServerOptions{
+			Authenticate:         a.DeviceAuth.Check,
 			CheckOrigin:          a.checkOrigin(),
 			AllowTagModification: a.tagModificationPolicy(),
 			PublicKeyPin:         a.publicKeyPin,
-		}))
+		})
 	}
 
 	// Routes each client request to whichever source holds the tag it names.

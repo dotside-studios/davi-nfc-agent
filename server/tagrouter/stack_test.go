@@ -48,6 +48,7 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	if !cfg.NoDriver {
 		remote = remotenfc.NewManager(30 * time.Second)
 		endpoint = remote.Handler(remotenfc.ServerOptions{
+			Authenticate:         auth.Check,
 			AllowTagModification: tagModificationPolicy(cfg.Reader),
 			PublicKeyPin:         cfg.PublicKeyPin,
 		})
@@ -61,7 +62,7 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		go server.PumpTagData(ctx, remote.Data(), bridge)
 	}
 
-	ts := httptest.NewServer(auth.Wrap(endpoint))
+	ts := httptest.NewServer(endpoint)
 
 	t.Cleanup(func() {
 		ts.Close()

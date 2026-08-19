@@ -1,4 +1,4 @@
-package protocol
+package remotenfc
 
 // Device bridge protocol versions. Version 0 is the original dialect
 // (registerDevice/registerDeviceResponse) spoken by every device shipped before

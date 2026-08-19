@@ -214,23 +214,23 @@ func (m *Manager) request(deviceID, requestID, msgType string, payload any, time
 
 // WriteToDevice asks a device to write the tag it holds and waits for the
 // outcome. A request with Lock set and no message is a lock.
-func (m *Manager) WriteToDevice(deviceID string, req protocol.DeviceWriteRequest) (protocol.DeviceWriteResponse, error) {
+func (m *Manager) WriteToDevice(deviceID string, req DeviceWriteRequest) (DeviceWriteResponse, error) {
 	req.DeviceID = deviceID
 
-	payload, err := m.request(deviceID, req.RequestID, protocol.WSTypeDeviceWriteRequest, req, DeviceWriteTimeout)
+	payload, err := m.request(deviceID, req.RequestID, WSTypeDeviceWriteRequest, req, DeviceWriteTimeout)
 	if err != nil {
-		return protocol.DeviceWriteResponse{}, err
+		return DeviceWriteResponse{}, err
 	}
 
-	var resp protocol.DeviceWriteResponse
+	var resp DeviceWriteResponse
 	if err := decodePayload(payload, &resp); err != nil {
-		return protocol.DeviceWriteResponse{}, fmt.Errorf("failed to parse write response: %w", err)
+		return DeviceWriteResponse{}, fmt.Errorf("failed to parse write response: %w", err)
 	}
 	return resp, nil
 }
 
 // TransceiveWithDevice sends a raw exchange to the tag a device is holding.
-func (m *Manager) TransceiveWithDevice(deviceID string, req protocol.DeviceTransceiveRequest) (protocol.DeviceTransceiveResponse, error) {
+func (m *Manager) TransceiveWithDevice(deviceID string, req DeviceTransceiveRequest) (DeviceTransceiveResponse, error) {
 	req.DeviceID = deviceID
 	if req.TimeoutMS == 0 {
 		req.TimeoutMS = int(DeviceTransceiveTimeout / time.Millisecond)
@@ -240,14 +240,14 @@ func (m *Manager) TransceiveWithDevice(deviceID string, req protocol.DeviceTrans
 	// honouring its own deadline reports a real error rather than racing ours.
 	timeout := time.Duration(req.TimeoutMS)*time.Millisecond + time.Second
 
-	payload, err := m.request(deviceID, req.RequestID, protocol.WSTypeDeviceTransceiveRequest, req, timeout)
+	payload, err := m.request(deviceID, req.RequestID, WSTypeDeviceTransceiveRequest, req, timeout)
 	if err != nil {
-		return protocol.DeviceTransceiveResponse{}, err
+		return DeviceTransceiveResponse{}, err
 	}
 
-	var resp protocol.DeviceTransceiveResponse
+	var resp DeviceTransceiveResponse
 	if err := decodePayload(payload, &resp); err != nil {
-		return protocol.DeviceTransceiveResponse{}, fmt.Errorf("failed to parse transceive response: %w", err)
+		return DeviceTransceiveResponse{}, fmt.Errorf("failed to parse transceive response: %w", err)
 	}
 	return resp, nil
 }
@@ -307,7 +307,7 @@ func (m *Manager) writeTag(deviceID, tagUID string, ndef []byte, opts nfc.WriteO
 		return readOnlyModeError("WriteData", tagUID)
 	}
 
-	resp, err := m.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+	resp, err := m.WriteToDevice(deviceID, DeviceWriteRequest{
 		RequestID: uuid.NewString(),
 		TagUID:    tagUID,
 		NDEFBytes: ndef,
@@ -332,7 +332,7 @@ func (m *Manager) lockTag(deviceID, tagUID string) error {
 		return readOnlyModeError("MakeReadOnly", tagUID)
 	}
 
-	resp, err := m.WriteToDevice(deviceID, protocol.DeviceWriteRequest{
+	resp, err := m.WriteToDevice(deviceID, DeviceWriteRequest{
 		RequestID:      uuid.NewString(),
 		TagUID:         tagUID,
 		Lock:           true,
@@ -354,7 +354,7 @@ func (m *Manager) transceiveTag(deviceID, tagUID string, data []byte, raw bool) 
 		return nil, readOnlyModeError("Transceive", tagUID)
 	}
 
-	resp, err := m.TransceiveWithDevice(deviceID, protocol.DeviceTransceiveRequest{
+	resp, err := m.TransceiveWithDevice(deviceID, DeviceTransceiveRequest{
 		RequestID: uuid.NewString(),
 		TagUID:    tagUID,
 		Data:      data,
@@ -379,22 +379,22 @@ func (m *Manager) transceiveTag(deviceID, tagUID string, data []byte, raw bool) 
 }
 
 func (m *Manager) deviceCanWrite(deviceID string) bool {
-	return m.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanWrite })
+	return m.deviceDeclared(deviceID, func(c DeviceCapabilities) bool { return c.CanWrite })
 }
 
 func (m *Manager) deviceCanLock(deviceID string) bool {
-	return m.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanLock })
+	return m.deviceDeclared(deviceID, func(c DeviceCapabilities) bool { return c.CanLock })
 }
 
 func (m *Manager) deviceCanTransceive(deviceID string) bool {
-	return m.deviceDeclared(deviceID, func(c protocol.DeviceCapabilities) bool { return c.CanTransceive })
+	return m.deviceDeclared(deviceID, func(c DeviceCapabilities) bool { return c.CanTransceive })
 }
 
 // deviceDeclared reports whether a still-connected device declared a
 // capability. Every capability routed through a session modifies a tag, so
 // read-only mode withdraws all of them: a tag must not advertise an operation
 // the manager would refuse.
-func (m *Manager) deviceDeclared(deviceID string, want func(protocol.DeviceCapabilities) bool) bool {
+func (m *Manager) deviceDeclared(deviceID string, want func(DeviceCapabilities) bool) bool {
 	if !m.tagModificationAllowed() {
 		return false
 	}
@@ -462,7 +462,7 @@ func readOnlyModeError(op, tagUID string) error {
 
 // writeResponseError turns a device's refusal into a typed error, so the code
 // it reported survives.
-func writeResponseError(op, tagUID string, resp protocol.DeviceWriteResponse) error {
+func writeResponseError(op, tagUID string, resp DeviceWriteResponse) error {
 	message := resp.Error
 	if message == "" {
 		message = "device reported the operation failed"

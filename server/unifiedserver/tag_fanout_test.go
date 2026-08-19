@@ -1,6 +1,7 @@
 package unifiedserver_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ func registerDevice(t *testing.T, conn *websocket.Conn) string {
 	t.Helper()
 
 	err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeRegisterDevice,
+		Type: remotenfc.WSTypeRegisterDevice,
 		Payload: map[string]any{
 			"deviceName": "Test Phone",
 			"platform":   "android",
@@ -76,7 +77,7 @@ func TestPhoneScanReachesAClient(t *testing.T) {
 	deviceID := registerDevice(t, device)
 
 	err := device.WriteJSON(protocol.WebSocketRequest{
-		Type: protocol.WSTypeTagScanned,
+		Type: remotenfc.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
 			"uid":        "04:A2:B3:C4",

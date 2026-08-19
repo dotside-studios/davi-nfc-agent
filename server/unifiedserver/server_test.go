@@ -29,7 +29,7 @@ func newTestServer(t *testing.T) string {
 	// The device endpoint is the driver's handler behind the credential check,
 	// which is how the agent mounts it.
 	auth := server.NewDeviceAuth("", nil, false)
-	device := auth.Wrap(deviceMgr.Handler(remotenfc.ServerOptions{}))
+	device := deviceMgr.Handler(remotenfc.ServerOptions{Authenticate: auth.Check})
 	client := clientserver.New(clientserver.Config{}, bridge)
 	router := tagrouter.New(tagrouter.Config{Remote: deviceMgr}, bridge)
 

@@ -1,13 +1,14 @@
-package protocol
+package remotenfc
 
 import (
 	"fmt"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
 // ConvertNDEFInput converts protocol NDEF format to internal nfc.NDEFMessage.
-func ConvertNDEFInput(data *NDEFMessageInput) (*nfc.NDEFMessage, error) {
+func ConvertNDEFInput(data *protocol.NDEFMessageInput) (*nfc.NDEFMessage, error) {
 	if data == nil || len(data.Records) == 0 {
 		return nil, fmt.Errorf("empty NDEF message")
 	}
@@ -25,7 +26,7 @@ func ConvertNDEFInput(data *NDEFMessageInput) (*nfc.NDEFMessage, error) {
 }
 
 // ConvertNDEFRecordInput converts protocol NDEF record to internal nfc.NDEFRecord.
-func ConvertNDEFRecordInput(data NDEFRecordInput) (*nfc.NDEFRecord, error) {
+func ConvertNDEFRecordInput(data protocol.NDEFRecordInput) (*nfc.NDEFRecord, error) {
 	// If TNF is provided (low-level format), use it directly
 	if data.TNF != nil {
 		if *data.TNF > 0x07 {

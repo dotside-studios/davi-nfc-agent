@@ -253,20 +253,16 @@ ws.send(JSON.stringify({
 
 ## Extending
 
-**Building your own agent.** The agent is a regular Go module: import it and
-`main.go` becomes yours, rather than the repository being something to fork. A
-headless build without the tray or control center, or one with no hardware
-backend at all, is a matter of which packages you import. See
-[Go overview](docs/go-overview.md).
+The agent is a Go module, and the binary is an ordinary program built from the
+packages it exports. A build without the tray or the control center, or one with
+no hardware backend at all, is a matter of which packages you import. See
+[Custom Builds](docs/custom-builds.md).
 
 ```bash
 go get github.com/dotside-studios/davi-nfc-agent
 ```
 
-**Adding hardware.** The NFC layer is interfaces the whole way down, so custom
-readers and tag types sit beside the built-in PC/SC and smartphone support. See
-[Extending NFC Support](docs/extending-nfc-support.md) to integrate your own
-hardware or protocols.
+The agent's modular NFC layer supports adding custom readers and tag types beyond the built-in PC/SC and smartphone support. See [Extending NFC Support](docs/extending-nfc-support.md) to integrate your own hardware or protocols.
 
 ## Contributing
 

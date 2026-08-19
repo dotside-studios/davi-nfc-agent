@@ -22,7 +22,7 @@ func startWithOnTag(t *testing.T, onTag func(nfc.NFCData)) *server.ServerBridge 
 	return bridge
 }
 
-// TestOnTagObservesScans is the contract the Go overview documents: an embedder
+// TestOnTagObservesScans is the contract docs/custom-builds.md documents: an embedder
 // sees every scan without connecting a WebSocket client of its own.
 func TestOnTagObservesScans(t *testing.T) {
 	var mu sync.Mutex

@@ -104,7 +104,7 @@ git push origin v1.0.0
 davi-nfc-agent/
 ├── cmd/
 │   └── davi-nfc-agent/  # The binary: picks the NFC backend and wires the rest
-│                        # (see docs/go-overview.md to build your own)
+│                        # (see docs/custom-builds.md to build your own)
 ├── agent/               # The agent itself — orchestration, CLI flags, config
 │   ├── agent.go         # Core agent logic
 │   ├── cli.go           # Flag parsing and startup wiring

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`docs/go-overview.md`: building your own agent.** The package split left
+- **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary
   does was still to fork it. The new page is the counterpart to the refactor —
   the shipped agent as a `main.go` you could have written, then the variations:

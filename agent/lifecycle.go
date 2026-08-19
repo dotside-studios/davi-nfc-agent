@@ -141,12 +141,7 @@ func (a *Agent) fireState(s State) {
 // startComponents brings the registered components up in order. On the first
 // failure it stops the ones already started and reports which failed.
 func (a *Agent) startComponents(ctx context.Context) error {
-	// The agent's own server stack runs last: it should not accept connections
-	// until whatever else was registered is ready, and it should be the first
-	// thing to stop.
-	a.runComponents = append(append([]Component{}, a.components...), &serverStack{agent: a})
-
-	for i, c := range a.runComponents {
+	for i, c := range a.components {
 		if err := c.Start(ctx); err != nil {
 			a.logger.Printf("Component %q failed to start: %v", c.Name(), err)
 			a.stopComponentRange(i - 1)
@@ -160,10 +155,7 @@ func (a *Agent) startComponents(ctx context.Context) error {
 // stopComponentRange stops components from index last down to zero.
 func (a *Agent) stopComponentRange(last int) {
 	for i := last; i >= 0; i-- {
-		if i >= len(a.runComponents) {
-			continue
-		}
-		c := a.runComponents[i]
+		c := a.components[i]
 		if err := c.Stop(); err != nil {
 			a.logger.Printf("Component %q failed to stop: %v", c.Name(), err)
 		}
@@ -188,7 +180,7 @@ func (a *Agent) Start(devicePath string) error {
 
 	a.state.Store(int32(StateStarting))
 
-	err := a.openReader(devicePath)
+	err := a.startLocked(devicePath)
 	if err == nil {
 		a.runCtx, a.runCancel = context.WithCancel(context.Background())
 		err = a.startComponents(a.runCtx)
@@ -201,7 +193,7 @@ func (a *Agent) Start(devicePath string) error {
 	if err != nil {
 		// Never leave a half-started agent behind: whatever came up before the
 		// failure comes back down, so the next Start begins from stopped.
-		a.closeReader()
+		a.stopLocked()
 		a.state.Store(int32(StateStopped))
 		a.lifecycleMu.Unlock()
 		a.fireState(StateStopped)
@@ -230,10 +222,10 @@ func (a *Agent) Stop() {
 	if a.runCancel != nil {
 		a.runCancel()
 	}
-	a.stopComponentRange(len(a.runComponents) - 1)
+	a.stopComponentRange(len(a.components) - 1)
 	a.runCtx, a.runCancel = nil, nil
 
-	a.closeReader()
+	a.stopLocked()
 
 	a.state.Store(int32(StateStopped))
 	a.lifecycleMu.Unlock()
@@ -252,8 +244,7 @@ type lifecycle struct {
 	hooksMu    sync.Mutex
 	stateHooks []func(State)
 
-	components    []Component
-	runComponents []Component
-	runCtx        context.Context
-	runCancel     context.CancelFunc
+	components []Component
+	runCtx     context.Context
+	runCancel  context.CancelFunc
 }

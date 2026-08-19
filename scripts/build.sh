@@ -31,21 +31,21 @@ echo "  Version: $BUILD_VERSION"
 echo "  Commit: $BUILD_COMMIT"
 echo "  Build Time: $BUILD_TIME"
 
+# PC/SC is reached without cgo (see docs/pure-go-pcsc.md), so only macOS still
+# needs a C toolchain: fyne.io/systray talks to Cocoa there.
+if [ "$TARGET_OS" = "darwin" ]; then
+    export CGO_ENABLED=1
+else
+    export CGO_ENABLED=0
+fi
+echo "  CGO_ENABLED: $CGO_ENABLED"
+
 # Determine if we need cross-compilation setup
 CURRENT_OS=$(go env GOOS)
 CURRENT_ARCH=$(go env GOARCH)
 
 if [ "$TARGET_OS" != "$CURRENT_OS" ] || [ "$TARGET_ARCH" != "$CURRENT_ARCH" ]; then
     echo "  Cross-compiling from $CURRENT_OS/$CURRENT_ARCH to $TARGET_OS/$TARGET_ARCH"
-    export CGO_ENABLED=1
-
-    # Linux arm64 cross-compilation: set library paths
-    if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "arm64" ]; then
-        LIB_PATH="/usr/lib/aarch64-linux-gnu"
-        export PKG_CONFIG_PATH="$LIB_PATH/pkgconfig"
-        export CGO_LDFLAGS="-L$LIB_PATH"
-        echo "  Library path: $LIB_PATH"
-    fi
 
     # macOS can cross-compile between arm64/amd64 with native clang
     if [ "$TARGET_OS" = "darwin" ] && [ "$CURRENT_OS" = "darwin" ]; then

@@ -34,8 +34,6 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: arm64
-            cross: true
-            cc: aarch64-linux-gnu-gcc
           - os: macos-latest
             goos: darwin
             goarch: amd64
@@ -55,38 +53,10 @@ jobs:
         with:
           go-version: '1.25.13'
 
-      - name: Install PC/SC development libraries (Linux amd64)
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
-
-      - name: Install cross-compilation toolchain (Linux arm64)
-        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
-        run: |
-          sudo dpkg --add-architecture arm64
-          # Ubuntu 24.04+ uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            # Add Architectures: amd64 to each stanza to prevent fetching arm64 from main repos
-            sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-            # Create arm64 source pointing to ports.ubuntu.com
-            printf '%s\n' \
-              "Types: deb" \
-              "URIs: http://ports.ubuntu.com/ubuntu-ports" \
-              "Suites: noble noble-updates noble-security" \
-              "Components: main restricted universe multiverse" \
-              "Architectures: arm64" | sudo tee /etc/apt/sources.list.d/arm64.sources
-          else
-            sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
-          fi
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libpcsclite-dev:arm64
-
       - name: Build
         env:
           BUILD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
           BUILD_COMMIT: ${{ github.sha }}
-          CC: ${{ matrix.cc }}
         shell: bash
         run: ./scripts/build.sh ${{ matrix.goos }} ${{ matrix.goarch }}
 

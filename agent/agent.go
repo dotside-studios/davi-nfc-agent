@@ -83,10 +83,10 @@ type Config struct {
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
 
-	// Bootstrap is the pairing server, or nil when pairing is disabled, and
-	// BootstrapPort is the port it listens on.
-	Bootstrap     *tls.BootstrapServer
-	BootstrapPort int
+	// Pairing is the pairing server, registered as a component so it starts and
+	// stops with the agent. Nil disables pairing entirely. Everything it needs
+	// lives on PairingConfig rather than here.
+	Pairing *PairingServer
 
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
@@ -134,8 +134,7 @@ type Agent struct {
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
-	bootstrap           *tls.BootstrapServer
-	bootstrapPort       int
+	pairing             *PairingServer
 	certFile            string
 	keyFile             string
 	tlsManager          *tls.Manager
@@ -169,7 +168,7 @@ func New(cfg Config) *Agent {
 		port = DefaultDevicePort
 	}
 
-	return &Agent{
+	a := &Agent{
 		info:                cfg.Info.OrDefault(),
 		logger:              logger,
 		manager:             cfg.Manager,
@@ -180,8 +179,7 @@ func New(cfg Config) *Agent {
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
-		bootstrap:           cfg.Bootstrap,
-		bootstrapPort:       cfg.BootstrapPort,
+		pairing:             cfg.Pairing,
 		certFile:            cfg.CertFile,
 		keyFile:             cfg.KeyFile,
 		tlsManager:          cfg.TLSManager,
@@ -190,6 +188,15 @@ func New(cfg Config) *Agent {
 		allowedCardTypes:    make(map[string]bool),
 		serverRestartChan:   make(chan struct{}, 1),
 	}
+
+	// Registered here rather than left to the caller: the pairing server's
+	// lifetime is the agent's, and forgetting to wire it is exactly the class
+	// of mistake this component list exists to remove.
+	if cfg.Pairing != nil {
+		a.components = append(a.components, cfg.Pairing)
+	}
+
+	return a
 }
 
 // Configuration readers. These exist because the tray and the console display
@@ -198,20 +205,38 @@ func New(cfg Config) *Agent {
 // Info reports what this build calls itself.
 func (a *Agent) Info() buildinfo.Info { return a.info }
 
-func (a *Agent) Manager() nfc.Manager            { return a.manager }
-func (a *Agent) Logger() *log.Logger             { return a.logger }
-func (a *Agent) APISecret() string               { return a.apiSecret }
-func (a *Agent) ConfigDir() string               { return a.configDir }
-func (a *Agent) Origins() *OriginStore           { return a.origins }
-func (a *Agent) Devices() *DeviceRegistry        { return a.devices }
-func (a *Agent) DevicePort() int                 { return a.devicePort }
-func (a *Agent) PublicKeyPin() string            { return a.publicKeyPin }
-func (a *Agent) Bootstrap() *tls.BootstrapServer { return a.bootstrap }
-func (a *Agent) BootstrapPort() int              { return a.bootstrapPort }
-func (a *Agent) CertFile() string                { return a.certFile }
-func (a *Agent) KeyFile() string                 { return a.keyFile }
-func (a *Agent) TLSManager() *tls.Manager        { return a.tlsManager }
-func (a *Agent) RequirePairedDevice() bool       { return a.requirePairedDevice }
+func (a *Agent) Manager() nfc.Manager     { return a.manager }
+func (a *Agent) Logger() *log.Logger      { return a.logger }
+func (a *Agent) APISecret() string        { return a.apiSecret }
+func (a *Agent) ConfigDir() string        { return a.configDir }
+func (a *Agent) Origins() *OriginStore    { return a.origins }
+func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+func (a *Agent) DevicePort() int          { return a.devicePort }
+func (a *Agent) PublicKeyPin() string     { return a.publicKeyPin }
+
+// Pairing returns the pairing component, or nil when pairing is disabled.
+func (a *Agent) Pairing() *PairingServer { return a.pairing }
+
+// Bootstrap returns the pairing server itself, for the PIN and the URLs the
+// tray and console show. Nil when pairing is disabled.
+func (a *Agent) Bootstrap() *tls.BootstrapServer {
+	if a.pairing == nil {
+		return nil
+	}
+	return a.pairing.Server()
+}
+
+// BootstrapPort reports the pairing server's port, 0 when disabled.
+func (a *Agent) BootstrapPort() int {
+	if a.pairing == nil {
+		return 0
+	}
+	return a.pairing.Port()
+}
+func (a *Agent) CertFile() string          { return a.certFile }
+func (a *Agent) KeyFile() string           { return a.keyFile }
+func (a *Agent) TLSManager() *tls.Manager  { return a.tlsManager }
+func (a *Agent) RequirePairedDevice() bool { return a.requirePairedDevice }
 
 // RequirePairedDeviceLocked reports that the requirement came from the command
 // line and cannot be lowered while this agent runs.

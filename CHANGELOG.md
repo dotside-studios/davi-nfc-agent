@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The pairing server is a component of the agent.** It was started inside
+  `Setup` and stopped only by the command's signal handler, so `Agent.Stop` left
+  it bound: stopping the agent from the tray left port 9472 listening, and an
+  embedder calling `Stop` leaked a listener. It now starts and stops with the
+  agent like anything else registered through `Use`. `agent.Config` loses
+  `Bootstrap` and `BootstrapPort`; what the pairing server needs lives on
+  `PairingConfig` instead, and `Config.Pairing` being nil disables it.
+
+  One consequence worth knowing: the pairing listener now binds at `Start`
+  rather than during `Setup`. It also no longer crashes an agent launched with
+  `-auto-tls=false` or an external `-cert`/`-key`, because the component passes
+  an untyped nil rather than a nil `*tls.Manager` into an interface parameter.
+  The underlying fault in `tls` is unchanged and still worth fixing there
+
 - **The agent has an explicit lifecycle, and things can hook into it.** Its state
   was inferred from whether `Reader` and the servers happened to be nil, which
   two callers could disagree about halfway through a teardown. `Agent.State`

@@ -76,9 +76,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		if rt.Agent.Bootstrap() != nil {
-			rt.Agent.Bootstrap().Stop()
-		}
+		// The pairing server is a component of the agent now, so the tray's
+		// quit path takes it down with everything else.
 		app.Quit()
 	}()
 

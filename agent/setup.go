@@ -149,24 +149,23 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		devices, _ = NewDeviceRegistry("")
 	}
 
-	// Start the pairing/bootstrap server. It runs whenever pairing is possible,
+	// Build the pairing server. It is available whenever pairing is possible,
 	// not only under auto-TLS: an agent using an externally provisioned
 	// certificate has no CA to hand out but still has devices to pair, and
 	// coupling the two left that deployment with no way to authenticate one.
-	var bootstrapServer *tls.BootstrapServer
+	//
+	// It is not started here. It is a component now, so the agent starts it
+	// with everything else and stops it again on the way down.
+	var pairing *PairingServer
 	if opts.BootstrapPort > 0 {
-		// tlsMgr may be nil here; the CA endpoints report that there is nothing
-		// to install and the pairing endpoint works regardless.
-		var caReader *tls.Manager
-		if tlsMgr != nil {
-			caReader = tlsMgr
-		}
-		bootstrapServer = tls.NewBootstrapServer(caReader, opts.BootstrapPort)
-		bootstrapServer.SetAppName(info.DisplayName)
-		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), opts.DevicePort)
-		if err := bootstrapServer.Start(); err != nil {
-			log.Printf("Warning: Failed to start bootstrap server: %v", err)
-		}
+		pairing = NewPairingServer(PairingConfig{
+			Port:         opts.BootstrapPort,
+			CA:           tlsMgr,
+			Devices:      devices,
+			PublicKeyPin: agentPublicKeyPin,
+			AppName:      info.DisplayName,
+			AgentPort:    opts.DevicePort,
+		})
 	}
 
 	// The allowlist persists in the config dir and starts with the first-party
@@ -238,8 +237,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Origins:                   origins,
 		Devices:                   devices,
 		PublicKeyPin:              agentPublicKeyPin,
-		Bootstrap:                 bootstrapServer,
-		BootstrapPort:             opts.BootstrapPort,
+		Pairing:                   pairing,
 		RequirePairedDevice:       requirePaired,
 		RequirePairedDeviceLocked: askedForPairing,
 		CertFile:                  certFile,

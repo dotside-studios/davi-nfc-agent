@@ -104,3 +104,42 @@ func TestPumpTagDataForwardsUntilCancelled(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// A scan has to travel reader-or-device, bridge, client server, clients. The
+// client server's leg is background work that something must start, and when
+// the unified server stopped doing it as a side effect of binding, nothing did:
+// clients connected, counts looked right, and every scan was dropped. OnTag is
+// called on that leg, so it fires only when the leg is running.
+func TestScanReachesTheClientServerAfterStart(t *testing.T) {
+	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	a := rt.Agent
+
+	seen := make(chan string, 1)
+	a.OnTag(func(data nfc.NFCData) {
+		if data.Card != nil {
+			select {
+			case seen <- data.Card.UID:
+			default:
+			}
+		}
+	})
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	a.Bridge.TagData <- nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04ABCDEF"))}
+
+	select {
+	case uid := <-seen:
+		if uid != "04ABCDEF" {
+			t.Errorf("got %q, want the scan", uid)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the scan never reached the client server: its bridge listeners are not running")
+	}
+}

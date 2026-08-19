@@ -59,6 +59,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Routes are mounted on the server rather than configured into it.**
+  `unifiedserver` took the control API and the console as `Config` fields, read
+  once when the mux was built, so a console attached afterwards was never
+  served: the agent reported having one while the listener had never heard of
+  it. It now takes `Mount(pattern, handler)`, refuses a mount once started
+  rather than accepting one nothing will reach, and stops importing
+  `clientserver` entirely. It is a listener, a mux and an mDNS advertisement.
+
+- **The agent no longer knows what a console is.** `agent.Console`,
+  `SetConsole` and the accessors are gone. A program mounts the control
+  center's routes on the server it already holds, and a build that wants none
+  mounts none. `NotifyChange` becomes `OnClientsChange`, beside the existing
+  `OnTag`. `Runtime.Server` carries the listener so a caller can mount before
+  anything starts.
+
+- **CORS is applied per route, at the mount.** It used to wrap everything the
+  unified server built except two routes singled out in its own code. The
+  routes are not alike: the client endpoint and the health checks are called
+  cross-origin by web apps, while the control API administers the agent and the
+  console is a page. `server.CORS` wraps the first kind at the point of
+  mounting, which makes the asymmetry visible instead of a comment.
+
 - **The device protocol lives with the driver that speaks it.** `protocol` held
   both wire formats, so the browser-facing client API and the phone driver drew
   from one package and neither could be read without the other. The device half
@@ -204,6 +226,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read through `rt.Agent`
 
 ### Fixed
+
+- **A port already in use fails the start.** `unifiedserver.Start` blocked for
+  the server's lifetime, so the agent ran it on a goroutine and dropped its
+  error. Occupying the port left `Start` returning nil, the state reading
+  running, and nothing listening. It now binds before returning and serves
+  afterwards, so the failure reaches the caller.
 
 - **The card-type filter no longer races.** It was a bare `map[string]bool`
   handed to the device server at construction and mutated in place afterwards

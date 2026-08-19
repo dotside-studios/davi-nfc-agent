@@ -10,6 +10,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
@@ -80,6 +81,11 @@ type Runtime struct {
 	// DevicePath is the reader to open at startup, once the caller's choice
 	// and the stored preference have been reconciled.
 	DevicePath string
+
+	// Server is the listener the agent serves from, with the agent's own routes
+	// already mounted. Mount anything else on it before starting the agent: a
+	// control center, or whatever else belongs on the same port.
+	Server *unifiedserver.Server
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -226,9 +232,19 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
+	// The listener is built here so the caller can mount on it before anything
+	// starts. The agent's own routes go on inside New.
+	srv := unifiedserver.New(unifiedserver.Config{
+		Port:            devicePort,
+		CertFile:        certFile,
+		KeyFile:         keyFile,
+		MDNSServiceName: info.DisplayName + " Device",
+	})
+
 	// Everything the agent runs on is settled by this point, which is why it
 	// can be handed over in one piece.
 	a := New(Config{
+		Server:                    srv,
 		Manager:                   manager,
 		Info:                      info,
 		DevicePort:                devicePort,
@@ -252,6 +268,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Settings:   settingsStore,
 		Logs:       opts.Logs,
 		DevicePath: devicePath,
+		Server:     srv,
 	}, nil
 }
 

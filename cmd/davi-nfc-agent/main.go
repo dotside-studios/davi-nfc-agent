@@ -56,15 +56,25 @@ func main() {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
-	// Nil in a -tags nowebui build. Assigned only after a real nil check: a
-	// typed nil would satisfy agent.Console and defeat every check downstream.
+	// Nil in a -tags nowebui build, where the control center is not compiled
+	// in. Mounting is all there is to attaching one: a build that wants none
+	// mounts none, and the agent is no wiser either way.
 	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if consoleServer != nil {
-		rt.Agent.SetConsole(consoleServer)
+		// The control API and the console page are deliberately not wrapped in
+		// CORS: one administers the agent and the other is a page, so no other
+		// origin has business calling them.
+		if err := rt.Server.Mount("/control/", consoleServer.Routes()); err != nil {
+			log.Fatalf("Failed to mount the control API: %v", err)
+		}
+		if err := rt.Server.Mount("/", consoleServer.Assets()); err != nil {
+			log.Fatalf("Failed to mount the console: %v", err)
+		}
 
 		// Redraw the console whenever something changes it from elsewhere.
 		rt.Agent.Origins().OnChange(consoleServer.NotifyChange)
 		rt.Agent.Devices().OnChange(consoleServer.NotifyChange)
+		rt.Agent.OnClientsChange(consoleServer.NotifyChange)
 	}
 
 	app := tray.New(rt)

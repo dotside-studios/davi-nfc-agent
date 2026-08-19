@@ -2,7 +2,6 @@ package unifiedserver_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,7 +32,13 @@ func newTestServer(t *testing.T) string {
 	client := clientserver.New(clientserver.Config{}, bridge)
 	router := tagrouter.New(tagrouter.Config{Remote: deviceMgr}, bridge)
 
-	u := unifiedserver.New(unifiedserver.Config{}, device, client)
+	u := unifiedserver.New(unifiedserver.Config{})
+	if err := u.Mount("/ws", server.CORS(server.RouteByMode(
+		http.HandlerFunc(client.ServeWS),
+		map[string]http.Handler{server.ModeDevice: device},
+	))); err != nil {
+		t.Fatalf("mount /ws: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	router.Start(ctx)
@@ -102,30 +107,5 @@ func TestWSDispatch(t *testing.T) {
 	// yields the device handler's INVALID_MESSAGE_TYPE.
 	if code := dialAndProbe(t, base+"/ws?mode=device"); code != "INVALID_MESSAGE_TYPE" {
 		t.Errorf("device /ws?mode=device routed to wrong handler: got code %q, want INVALID_MESSAGE_TYPE", code)
-	}
-}
-
-// TestHealthEndpoints verifies both health endpoints are served on the single
-// port and report the unified agent type.
-func TestHealthEndpoints(t *testing.T) {
-	base := newTestServer(t)
-	httpBase := "http" + strings.TrimPrefix(base, "ws")
-
-	for _, path := range []string{"/health", "/api/v1/health"} {
-		resp, err := http.Get(httpBase + path)
-		if err != nil {
-			t.Fatalf("GET %s failed: %v", path, err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("GET %s status = %d, want 200", path, resp.StatusCode)
-		}
-		var body map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			t.Fatalf("decode %s body failed: %v", path, err)
-		}
-		_ = resp.Body.Close()
-		if body["type"] != "agent" {
-			t.Errorf("GET %s type = %v, want agent", path, body["type"])
-		}
 	}
 }

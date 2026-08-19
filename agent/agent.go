@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
@@ -38,7 +39,7 @@ func GetCardTypeFilterTooltip(cardType string) string {
 // Agent, so a caller holding a running agent cannot rebind its port, swap its
 // origin allowlist or withdraw its pairing requirement behind the servers'
 // backs. The few settings that may legitimately change while running have
-// methods of their own -- SetRequirePairedDevice, SetAllowCardType, SetConsole.
+// methods of their own -- SetRequirePairedDevice, SetAllowCardType.
 type Config struct {
 	// Manager supplies the readers. Required; New panics without one, because
 	// an agent with no way to enumerate a reader cannot be started later.
@@ -96,6 +97,14 @@ type Config struct {
 	// through SetRequirePairedDevice, which also tells the running server.
 	RequirePairedDevice bool
 
+	// Server is the listener the agent serves from. The caller builds it and
+	// mounts whatever else it wants served from the same port, which is how a
+	// control center is attached: mount it, or do not and there is none.
+	//
+	// Nil is an agent with no HTTP surface, for a program driving the reader
+	// directly. New mounts the agent's own routes on a non-nil one.
+	Server *unifiedserver.Server
+
 	// RequirePairedDeviceLocked stops anything lowering that requirement for
 	// the rest of the run. Set it when the requirement came from the command
 	// line or the environment: an operator who asked for it there should not
@@ -124,8 +133,12 @@ type Agent struct {
 	Bridge        *server.ServerBridge
 	UnifiedServer *unifiedserver.Server
 	ClientServer  *clientserver.Server
-	Router        *tagrouter.Router
-	DeviceAuth    *server.DeviceAuth
+
+	// serving is what the mounted routes dispatch to, replaced on every start
+	// and cleared on stop.
+	serving    atomic.Pointer[endpoints]
+	Router     *tagrouter.Router
+	DeviceAuth *server.DeviceAuth
 
 	// Settled at construction.
 	info                buildinfo.Info
@@ -155,8 +168,8 @@ type Agent struct {
 	// they feed.
 	pumpCtx           context.Context
 	pumpCancel        context.CancelFunc
-	console           Console
 	onTag             []func(nfc.NFCData)
+	clientHooks       []func()
 	devicePath        string
 	serverRestartChan chan struct{} // Signals when servers are restarted
 }
@@ -206,6 +219,15 @@ func New(cfg Config) *Agent {
 		a.components = append(a.components, cfg.Pairing)
 	}
 
+	// The agent's own routes go on before the caller's, so a mount cannot
+	// displace /ws or the health checks.
+	if cfg.Server != nil {
+		a.UnifiedServer = cfg.Server
+		if err := a.MountOn(cfg.Server); err != nil {
+			logger.Printf("Failed to mount the agent's routes: %v", err)
+		}
+	}
+
 	return a
 }
 
@@ -251,15 +273,6 @@ func (a *Agent) RequirePairedDevice() bool { return a.requirePairedDevice }
 // RequirePairedDeviceLocked reports that the requirement came from the command
 // line and cannot be lowered while this agent runs.
 func (a *Agent) RequirePairedDeviceLocked() bool { return a.requirePairedLocked }
-
-// Console returns the control center, or nil when there is none.
-func (a *Agent) Console() Console { return a.console }
-
-// SetConsole attaches the control center. Pass a nil Console to detach.
-//
-// Check the concrete value for nil before calling: a typed nil satisfies
-// Console and would defeat every nil check downstream.
-func (a *Agent) SetConsole(c Console) { a.console = c }
 
 // ServerRestarts returns a channel that signals when servers are restarted
 // due to network changes or certificate regeneration.
@@ -338,6 +351,8 @@ func (a *Agent) stopLocked() {
 		a.Router.Stop()
 		a.Router = nil
 	}
+
+	a.serving.Store(nil)
 
 	if a.Bridge != nil {
 		a.Bridge.Close()
@@ -460,6 +475,8 @@ func (a *Agent) stopServers() {
 		a.Router = nil
 	}
 
+	a.serving.Store(nil)
+
 	if a.Bridge != nil {
 		a.Bridge.Close()
 		a.Bridge = nil
@@ -487,15 +504,9 @@ func (a *Agent) startServers() error {
 	// API secrets or pairing; the agent knows nothing about the protocol.
 	remote := findDeviceDriver(a.manager)
 	a.DeviceAuth = server.NewDeviceAuth(a.apiSecret, a.tokenVerifier(), a.requirePairedDevice)
-	var deviceEndpoint http.Handler
+	deviceEndpoint := a.buildDeviceEndpoint(remote)
 	if remote != nil {
 		go server.PumpTagData(a.pumpCtx, remote.Data(), a.Bridge)
-		deviceEndpoint = remote.Handler(remotenfc.ServerOptions{
-			Authenticate:         a.DeviceAuth.Check,
-			CheckOrigin:          a.checkOrigin(),
-			AllowTagModification: a.tagModificationPolicy(),
-			PublicKeyPin:         a.publicKeyPin,
-		})
 	}
 
 	// Routes each client request to whichever source holds the tag it names.
@@ -512,25 +523,32 @@ func (a *Agent) startServers() error {
 		OnTag:          a.tagObserver(),
 	}, a.Bridge)
 
-	// Single listener fronts the device, client, control and console handlers.
-	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:            a.devicePort,
-		CertFile:        a.certFile,
-		KeyFile:         a.keyFile,
-		ControlHandler:  a.consoleRoutes(),
-		UIHandler:       a.consoleAssets(),
-		MDNSServiceName: a.info.DisplayName + " Device",
-	}, deviceEndpoint, a.ClientServer)
+	// The client server's bridge listeners. Started here because nothing else
+	// does: the unified server used to start them as a side effect of binding,
+	// which is why taking it out dropped every scan on the floor while the
+	// clients still connected and the counts still looked right.
+	a.ClientServer.StartBackground(a.pumpCtx)
 
-	// Captured, not read from the field: a Stop that lands before this
-	// goroutine is scheduled sets a.UnifiedServer to nil, and the goroutine
-	// would then call Start on a nil server.
-	unified := a.UnifiedServer
-	go func() {
-		if err := unified.Start(); err != nil {
-			a.logger.Printf("Unified server error: %v", err)
-		}
-	}()
+	// Published as a pair, so a request never sees a client from one start
+	// beside a device from the next.
+	a.serving.Store(&endpoints{
+		client: http.HandlerFunc(a.ClientServer.ServeWS),
+		device: deviceEndpoint,
+	})
+
+	// The listener is the caller's, mounted before the agent starts. A nil one
+	// is an agent with no HTTP surface at all, which is what a program driving
+	// the reader directly wants.
+	if a.UnifiedServer == nil {
+		a.logger.Println("No server mounted; serving no HTTP")
+		return nil
+	}
+
+	// Binds before returning, so a port already in use fails the start rather
+	// than leaving the agent reporting itself running with nothing listening.
+	if err := a.UnifiedServer.Start(); err != nil {
+		return err
+	}
 
 	a.logger.Printf("Server started on port %d (NFC devices + web clients)", a.devicePort)
 	return nil
@@ -667,13 +685,21 @@ func (a *Agent) tagObserver() func(nfc.NFCData) {
 	}
 }
 
-// clientsChanged returns a hook that refreshes the console when the client list
-// moves, or nil when there is no console to refresh.
+// clientsChanged returns the hook that runs when the client list moves, or nil
+// when nothing registered one.
 func (a *Agent) clientsChanged() func() {
-	if a.console == nil {
+	a.hooksMu.Lock()
+	defer a.hooksMu.Unlock()
+	if len(a.clientHooks) == 0 {
 		return nil
 	}
-	return a.console.NotifyChange
+	hooks := make([]func(), len(a.clientHooks))
+	copy(hooks, a.clientHooks)
+	return func() {
+		for _, fn := range hooks {
+			fn()
+		}
+	}
 }
 
 // tokenVerifier returns the device registry as a token verifier, or nil when

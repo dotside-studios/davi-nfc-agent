@@ -11,19 +11,15 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
-// Server is the control center bound to one agent. It satisfies agent.Console,
-// and embeds the webui server so NotifyChange and ConsoleURL come through
-// unchanged.
+// Server is the control center bound to one agent. It embeds the webui server,
+// so NotifyChange and ConsoleURL come through unchanged.
 type Server struct {
 	*webui.Server
 	host *host
 }
 
-var _ agent.Console = (*Server)(nil)
-
-// New builds the console for a. It does not assign a.Console itself — the
-// caller nil-checks the result first, because a typed nil would satisfy
-// agent.Console and defeat that check.
+// New builds the console for a. The caller mounts its routes; a build that
+// wants no control center mounts none.
 func New(a *agent.Agent, store *settings.Store, logs *logbuf.Ring) *Server {
 	h := &host{agent: a, settings: store}
 	info := a.Info()

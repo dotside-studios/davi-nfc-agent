@@ -55,13 +55,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Nil in a -tags nowebui build. Assign only after a real nil check: a typed
-	// nil satisfies agent.Console and would defeat every check downstream.
+	// Nil in a -tags nowebui build. Mounting is all there is to attaching a
+	// control center, so a build that wants none mounts none.
 	c := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if c != nil {
-		rt.Agent.SetConsole(c)
+		_ = rt.Server.Mount("/control/", c.Routes())
+		_ = rt.Server.Mount("/", c.Assets())
 		rt.Agent.Origins().OnChange(c.NotifyChange)
 		rt.Agent.Devices().OnChange(c.NotifyChange)
+		rt.Agent.OnClientsChange(c.NotifyChange)
 	}
 
 	app := tray.New(rt)
@@ -93,8 +95,7 @@ leaving the certificate, secret and store loading to you. Either way the
 configuration is fixed once the agent exists: it is read back through methods,
 so nothing can rebind the port or withdraw the pairing requirement behind the
 running servers. The settings that may legitimately change while running have
-methods of their own — `SetRequirePairedDevice`, `SetAllowCardType`,
-`SetConsole`.
+methods of their own: `SetRequirePairedDevice` and `SetAllowCardType`.
 
 ## Naming your build
 
@@ -199,8 +200,9 @@ func main() {
 }
 ```
 
-Leaving `agent.Console` nil disables the control center at runtime.
-`-tags nowebui` additionally removes it from the binary.
+Mounting no console routes leaves the agent serving its own: `/ws` and the two
+health checks, with the root falling back to a plain-text banner. `-tags nowebui`
+additionally removes the console from the binary.
 
 ## Building without a hardware backend
 

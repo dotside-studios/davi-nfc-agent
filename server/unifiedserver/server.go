@@ -14,16 +14,14 @@ package unifiedserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/grandcat/zeroconf"
 )
 
@@ -36,17 +34,6 @@ type Config struct {
 	// HTTPS/WSS.
 	CertFile string
 	KeyFile  string
-
-	// ControlHandler serves the control center's privileged API under
-	// /control/. It is mounted ahead of everything else and, unlike the client
-	// and device endpoints, is deliberately not wrapped in CORS: it administers
-	// the agent rather than serving applications, so no other origin has any
-	// business calling it. Nil disables the control surface entirely.
-	ControlHandler http.Handler
-
-	// UIHandler serves the control center's static assets at the root. Nil
-	// leaves the root as the plain-text agent banner.
-	UIHandler http.Handler
 
 	// MDNSServiceName is the name advertised over mDNS. Empty uses the agent's
 	// own, so a program built on the agent can announce itself under its own
@@ -73,8 +60,10 @@ func (c Config) TLSEnabled() bool {
 // shared health/CORS handling.
 type Server struct {
 	config Config
-	device http.Handler
-	client *clientserver.Server
+	// mux is built from the mounts at Start. Nothing is served until then, so
+	// a route registered afterwards would never be reached; Mount says so
+	// rather than accepting it.
+	mounts []mount
 
 	// mu guards the lifecycle fields below. Start runs on its own goroutine
 	// and blocks until Stop cancels it, so the two overlap by design: without
@@ -89,21 +78,57 @@ type Server struct {
 	mdnsServer *zeroconf.Server
 }
 
-// New creates a unified server fronting the device endpoint and the client
-// server. The device endpoint is an ordinary http.Handler: the driver serving
-// devices supplies it, and whoever mounts it decides what stands in front,
-// which is where authentication goes.
-func New(config Config, device http.Handler, client *clientserver.Server) *Server {
-	return &Server{
-		config: config,
-		device: device,
-		client: client,
-	}
+// New creates a unified server. It serves nothing until routes are mounted.
+func New(config Config) *Server {
+	return &Server{config: config}
 }
 
-// Start starts the unified server. It launches the device and client background
-// workers, binds a single HTTP listener, advertises the service over mDNS, and
-// blocks until the server context is cancelled (via Stop).
+// mount is one route.
+type mount struct {
+	pattern string
+	handler http.Handler
+}
+
+// Mount registers a handler at a pattern, as http.ServeMux would.
+//
+// Whoever mounts a route decides what stands in front of it. That is where
+// authentication and CORS go, because the answer differs per route: the client
+// endpoint and the health checks are called cross-origin by web apps, while the
+// control API and the console are deliberately reachable only same-origin.
+//
+// Routes must be mounted before Start. Mounting afterwards returns an error
+// rather than being accepted and never served, which is the trap the console
+// used to fall into: the agent reported having one while the listener had never
+// heard of it.
+func (s *Server) Mount(pattern string, handler http.Handler) error {
+	if pattern == "" {
+		return fmt.Errorf("unifiedserver: empty mount pattern")
+	}
+	if handler == nil {
+		return fmt.Errorf("unifiedserver: nil handler for %q", pattern)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.httpServer != nil || s.stopped {
+		return fmt.Errorf("unifiedserver: cannot mount %q once started", pattern)
+	}
+	for _, m := range s.mounts {
+		if m.pattern == pattern {
+			return fmt.Errorf("unifiedserver: %q is already mounted", pattern)
+		}
+	}
+	s.mounts = append(s.mounts, mount{pattern: pattern, handler: handler})
+	return nil
+}
+
+// Start binds the listener and serves on it.
+//
+// It binds before returning, so a port already in use is an error the caller
+// sees rather than a message in a log: the agent used to launch this on a
+// goroutine and drop the error, reporting itself running with nothing
+// listening. Serving continues on a goroutine until Stop.
 func (s *Server) Start() error {
 	log.Printf("[unified] Starting NFC Agent server on port %d (device + client)...", s.config.Port)
 
@@ -115,111 +140,70 @@ func (s *Server) Start() error {
 		return nil
 	}
 
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	ctx := s.ctx
-
-	// The client server's background work runs under the shared context. It
-	// binds no listener; this server owns the single listener below.
-	s.client.StartBackground(ctx)
-
-	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.Port),
-		Handler: s.Handler(),
+	addr := fmt.Sprintf(":%d", s.config.Port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("unifiedserver: listen on %s: %w", addr, err)
 	}
+
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.httpServer = &http.Server{Addr: addr, Handler: s.handlerLocked()}
 	httpServer := s.httpServer
 	s.mu.Unlock()
 
-	// Start HTTP server in goroutine. It reads the captured server, not the
-	// field, which Stop may already have cleared.
+	// Reads the captured server, not the field, which Stop may already have
+	// cleared.
 	go func() {
 		var err error
 		if s.config.TLSEnabled() {
 			log.Printf("[unified] Listening on :%d (TLS)", s.config.Port)
-			err = httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
+			err = httpServer.ServeTLS(listener, s.config.CertFile, s.config.KeyFile)
 		} else {
 			log.Printf("[unified] Listening on :%d", s.config.Port)
-			err = httpServer.ListenAndServe()
+			err = httpServer.Serve(listener)
 		}
 		if err != nil && err != http.ErrServerClosed {
 			log.Printf("[unified] HTTP server error: %v", err)
 		}
 	}()
 
-	// Advertise over mDNS on the single port.
 	if err := s.startMDNS(); err != nil {
 		log.Printf("[unified] Warning: Failed to start mDNS: %v", err)
 	}
 
-	// Block until shutdown.
-	<-ctx.Done()
-	log.Printf("[unified] Server context cancelled, shutting down...")
-
 	return nil
 }
 
-// Handler builds the HTTP routes for the unified server: a single /ws endpoint
-// that dispatches to the device or client handler, both health endpoints, and
-// the root. It is exported so the routing can be exercised in tests without
-// binding a listener.
+// Handler builds the mux from the mounted routes. Exported so the routing can
+// be exercised without binding a listener.
+//
+// A build that mounts nothing at the root gets the plain-text banner that has
+// always been served there.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handlerLocked()
+}
 
-	// Control center API. Registered first and without the CORS wrapper: these
-	// routes are privileged, and the permissive headers the client endpoints
-	// need would invite a browser to call them cross-site and read the replies.
-	if s.config.ControlHandler != nil {
-		mux.Handle("/control/", s.config.ControlHandler)
+// handlerLocked builds the mux with s.mu already held, which is how Start uses
+// it: taking the lock again there would deadlock against itself.
+func (s *Server) handlerLocked() http.Handler {
+	mounts := s.mounts
+
+	mux := http.NewServeMux()
+	rooted := false
+	for _, m := range mounts {
+		mux.Handle(m.pattern, m.handler)
+		if m.pattern == "/" {
+			rooted = true
+		}
 	}
 
-	// Single WebSocket endpoint. Device connections (?mode=device or the
-	// X-Device-Mode header) route to the device handler; everything else routes
-	// to the client handler. Each handler performs its own API-secret and origin
-	// checks, so auth is not duplicated here.
-	mux.HandleFunc("/ws", enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		if remotenfc.IsDeviceConnection(r) && s.device != nil {
-			s.device.ServeHTTP(w, r)
-			return
-		}
-		s.client.ServeWS(w, r)
-	}))
-
-	// Device-style health check (kept for backward compatibility).
-	mux.HandleFunc("/health", enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "ok",
-			"type":    "agent",
-			"clients": s.client.ClientCount(),
-		})
-	}))
-
-	// Client-style health check (kept for backward compatibility).
-	mux.HandleFunc("/api/v1/health", enableCORS(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":    "ok",
-			"type":      "agent",
-			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
-			"clients":   s.client.ClientCount(),
-		})
-	}))
-
-	// Root: the control center when it is built in, otherwise the banner that
-	// has always been here.
-	//
-	// The UI is served without CORS for the same reason the control API is. It
-	// is a page, not an API — nothing should be embedding or fetching it from
-	// another origin.
-	if s.config.UIHandler != nil {
-		mux.Handle("/", s.config.UIHandler)
-	} else {
-		mux.HandleFunc("/", enableCORS(func(w http.ResponseWriter, r *http.Request) {
+	if !rooted {
+		mux.Handle("/", server.CORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("NFC Agent"))
-		}))
+		})))
 	}
 
 	return mux
@@ -299,21 +283,4 @@ func (s *Server) startMDNS() error {
 	s.mu.Unlock()
 	log.Printf("[unified] mDNS service registered: %s on port %d", server.MDNSDeviceServiceType, s.config.Port)
 	return nil
-}
-
-// enableCORS adds permissive CORS headers, matching the device/client handlers'
-// previous behavior.
-func enableCORS(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", server.CORSAllowOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", server.CORSAllowMethods)
-		w.Header().Set("Access-Control-Allow-Headers", server.CORSAllowHeaders)
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next(w, r)
-	}
 }

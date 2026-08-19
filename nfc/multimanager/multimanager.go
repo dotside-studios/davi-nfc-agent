@@ -8,16 +8,19 @@ import (
 	"sync"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // MultiManager aggregates multiple Manager implementations.
+//
+// The set of managers is fixed at construction. Nothing adds or removes one at
+// runtime, so the map needs no lock and callers can hold a manager without
+// worrying that it will be swapped underneath them.
 type MultiManager struct {
 	managers         map[string]nfc.Manager // managerName -> Manager instance
-	managerOrder     []string               // Ordered list of manager names (for fallback)
-	mu               sync.RWMutex           // Protects managers map
+	managerOrder     []string               // Fallback order
 	deviceChangeChan chan struct{}          // Aggregated device change channel
 	stopForward      chan struct{}          // Stop channel forwarding
+	closeOnce        sync.Once              // Close is idempotent
 
 	// listErrMu guards lastListErr, which holds the last ListDevices error
 	// reported per manager so a persistent one is logged once rather than on
@@ -75,94 +78,23 @@ func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 	return mm
 }
 
-// Register implements server.ServerHandler interface.
-// It iterates through all registered managers and calls Register() on any
-// that also implement server.ServerHandler.
-func (mm *MultiManager) Register(s server.HandlerServer) {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-
-	for name, manager := range mm.managers {
-		// Check if this manager also implements ServerHandler
-		if handler, ok := manager.(server.ServerHandler); ok {
-			log.Printf("[multi] Registering server handler for manager: %s", name)
-			handler.Register(s)
-		}
-	}
-}
-
-// AddManager adds a manager with the given name (for dynamic registration).
-// Managers are tried in the order they are added.
-func (mm *MultiManager) AddManager(name string, manager nfc.Manager) error {
-	if name == "" {
-		return fmt.Errorf("manager name cannot be empty")
-	}
-	if manager == nil {
-		return fmt.Errorf("manager cannot be nil")
-	}
-
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
-	// Check if manager already exists
-	if _, exists := mm.managers[name]; exists {
-		return fmt.Errorf("manager with name '%s' already exists", name)
-	}
-
-	mm.managers[name] = manager
-	mm.managerOrder = append(mm.managerOrder, name)
-
-	log.Printf("[multi] Manager added: %s", name)
-
-	return nil
-}
-
-// RemoveManager removes a manager by name.
-func (mm *MultiManager) RemoveManager(name string) error {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
-	if _, exists := mm.managers[name]; !exists {
-		return fmt.Errorf("manager not found: %s", name)
-	}
-
-	delete(mm.managers, name)
-
-	// Remove from order list
-	for i, n := range mm.managerOrder {
-		if n == name {
-			mm.managerOrder = append(mm.managerOrder[:i], mm.managerOrder[i+1:]...)
-			break
-		}
-	}
-
-	log.Printf("[multi] Manager removed: %s", name)
-
-	return nil
-}
-
 // GetManager retrieves a specific manager by name.
 func (mm *MultiManager) GetManager(name string) (nfc.Manager, bool) {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-
 	manager, exists := mm.managers[name]
 	return manager, exists
 }
 
 // RemoteDevice reports whether a device path names one held by a manager whose
-// devices are remote — a phone rather than a reader attached to this machine.
-// It answers from the path's manager prefix, so a device that is not currently
-// connected is still recognized for what it is.
+// devices are remote, meaning a phone rather than a reader attached to this
+// machine. It answers from the path's manager prefix, so a device that is not
+// currently connected is still recognized for what it is.
 func (mm *MultiManager) RemoteDevice(devicePath string) bool {
 	name, _, found := strings.Cut(devicePath, ":")
 	if !found {
 		return false
 	}
 
-	mm.mu.RLock()
 	manager, exists := mm.managers[name]
-	mm.mu.RUnlock()
 	if !exists {
 		return false
 	}
@@ -176,14 +108,8 @@ func (mm *MultiManager) RemoteDevice(devicePath string) bool {
 //   - "manager:deviceID" - explicit manager (e.g., "smartphone:abc123", "hardware:pn532")
 //   - "deviceID" or "" - try all managers in order
 func (mm *MultiManager) OpenDevice(deviceStr string) (nfc.Device, error) {
-	mm.mu.RLock()
-	managers := make(map[string]nfc.Manager)
-	for k, v := range mm.managers {
-		managers[k] = v
-	}
-	order := make([]string, len(mm.managerOrder))
-	copy(order, mm.managerOrder)
-	mm.mu.RUnlock()
+	managers := mm.managers
+	order := mm.managerOrder
 
 	if len(managers) == 0 {
 		return nil, fmt.Errorf("no managers registered")
@@ -244,16 +170,13 @@ func (mm *MultiManager) ListReaders() ([]string, error) {
 }
 
 func (mm *MultiManager) list(readersOnly bool) ([]string, error) {
-	mm.mu.RLock()
-	managers := make(map[string]nfc.Manager)
-	for k, v := range mm.managers {
-		managers[k] = v
-	}
-	mm.mu.RUnlock()
-
 	var allDevices []string
 
-	for name, manager := range managers {
+	// In registration order. The result picks the agent's reader when none is
+	// pinned, so map order would let that vary between runs.
+	for _, name := range mm.managerOrder {
+		manager := mm.managers[name]
+
 		if readersOnly {
 			if remote, ok := manager.(nfc.RemoteManager); ok && remote.RemoteDevices() {
 				continue
@@ -282,38 +205,22 @@ func (mm *MultiManager) list(readersOnly bool) ([]string, error) {
 	return allDevices, nil
 }
 
-// GetManagerCount returns the number of registered managers.
-func (mm *MultiManager) GetManagerCount() int {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-	return len(mm.managers)
-}
-
-// GetManagerNames returns the names of all registered managers in order.
-func (mm *MultiManager) GetManagerNames() []string {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-
-	names := make([]string, len(mm.managerOrder))
-	copy(names, mm.managerOrder)
-	return names
-}
-
-// Close implements server.ServerHandlerCloser interface.
-// It propagates Close() to all registered managers that support it.
+// Close stops forwarding and closes every manager that can be closed.
+//
+// The test is a bare Close method rather than an interface from the server
+// package. Requiring a server-side interface meant no manager ever matched, so
+// this propagated to nothing.
 func (mm *MultiManager) Close() {
-	// Stop forwarding goroutines
-	close(mm.stopForward)
+	mm.closeOnce.Do(func() {
+		close(mm.stopForward)
 
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-
-	for name, manager := range mm.managers {
-		if closer, ok := manager.(server.ServerHandlerCloser); ok {
-			log.Printf("[multi] Closing manager: %s", name)
-			closer.Close()
+		for name, manager := range mm.managers {
+			if closer, ok := manager.(interface{ Close() }); ok {
+				log.Printf("[multi] Closing manager: %s", name)
+				closer.Close()
+			}
 		}
-	}
+	})
 }
 
 // DeviceChanges returns a channel that signals when devices are registered or unregistered

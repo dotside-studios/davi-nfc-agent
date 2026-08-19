@@ -17,6 +17,17 @@ Two bugs surfaced while building and were fixed in passing: `ServerBridge.Close`
 closed channels producers could still be sending on, and `handleTagScanned`
 published a scan before registering the route a write would need.
 
+Two more surfaced in review afterwards. `lockRequest` had no device route at
+all: it went straight to the hardware reader, which locks whatever card it is
+holding, so a lock aimed at a phone-held tag was applied to a different tag
+entirely — irreversibly. And read-only mode was enforced inside the reader's own
+write path, which a request routed to a device never reaches, so writes and
+locks escaped the mode while transceive alone honoured it. Both are fixed: lock
+routes like a write, and the mode is checked once for all three operations on
+both routes, including the `remotenfc.Tag` route that reaches devices through
+`TagWriter`. Capabilities follow the mode too, so a tag never advertises an
+operation the agent would refuse.
+
 ## Diagnosis
 
 Reading the code, the defects are not scattered — they are four instances of one
@@ -38,7 +49,8 @@ Plus one wrong coupling and one stub:
   that `remotenfc.Device` does not implement it, and a capability declared over
   the wire never reaches this code. A PN532 and an iPhone therefore land in the
   same tier as a Web NFC browser.
-- **`server/deviceserver/device_handler.go`** — `WSTypeDeviceWriteResponse`
+- **the device session layer** (then `server/deviceserver/device_handler.go`,
+  now `nfc/remotenfc/server.go`) — `WSTypeDeviceWriteResponse`
   handling is `log.Printf("Write response received (not yet implemented)")`.
   The constants and payload structs exist; the path does not.
 
@@ -79,7 +91,7 @@ inspection.
 
 *Touches:* `protocol/websocket.go`, `protocol/device.go`,
 `nfc/remotenfc/protocol.go`, `nfc/errors.go`,
-`server/deviceserver/device_handler.go`, plus `docs/api.md`, `client/`.
+the device session layer, plus `docs/api.md`, `client/`.
 
 ## Phase 2 — Decouple events from transceive, finish the write path ✅
 
@@ -199,6 +211,18 @@ deletes the `.mobileconfig` and Android cert paths rather than adding to them.
 For the MCU tier this supersedes the earlier note preferring PSK: pinning an
 SPKI hash is a 32-byte comparison, cheaper than both X.509 path building and
 PSK key management, and it leaves no symmetric secret on the agent per device.
+
+## Structure
+
+The device protocol now lives with the driver that speaks it. `nfc/remotenfc`
+owns the WebSocket endpoint (`Manager.Handler`), the sessions behind it, and the
+request/response correlation for writes, locks and raw exchanges, alongside the
+device registry it already held. One object owns both, so a registration and its
+connection cannot outlive one another.
+
+`server/deviceserver` keeps what is the agent's rather than the driver's:
+authentication, and the choice between the hardware reader and a remote device
+for each client request.
 
 ## Phase 5 — Reach (not started, demand-driven)
 

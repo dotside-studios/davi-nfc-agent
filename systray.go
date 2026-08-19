@@ -208,7 +208,7 @@ func (s *SystrayApp) onReady() {
 
 // onExit is called when the systray is exiting
 func (s *SystrayApp) onExit() {
-	s.agent.Stop()
+	s.agent.Shutdown()
 }
 
 // setupUI initializes all menu items

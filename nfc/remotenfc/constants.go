@@ -2,22 +2,14 @@ package remotenfc
 
 import "time"
 
-// Device timing constants
+// Device timing constants.
+//
+// DeviceTimeout allows three missed heartbeats at HeartbeatInterval. They were
+// previously both 30s, so a device that only heartbeats sat exactly on the
+// sweep boundary and could be dropped mid-interval.
 const (
-	DeviceTimeout     = 30 * time.Second       // Device inactivity timeout
-	HeartbeatInterval = 10 * time.Second       // Expected heartbeat frequency
-	TagChannelBuffer  = 10                     // Tag channel buffer size
+	HeartbeatInterval = 30 * time.Second       // Expected heartbeat frequency
+	DeviceTimeout     = 90 * time.Second       // Silence after which a device is dropped
+	CleanupInterval   = 15 * time.Second       // How often silence is checked
 	GetTagsTimeout    = 500 * time.Millisecond // GetTags blocking timeout
-	CleanupInterval   = 15 * time.Second       // Cleanup check interval
-)
-
-// WebSocket message types for smartphone device communication
-const (
-	MessageTypeRegisterDevice         = "registerDevice"
-	MessageTypeRegisterDeviceResponse = "registerDeviceResponse"
-	MessageTypeTagScanned             = "tagScanned"
-	MessageTypeTagRemoved             = "tagRemoved"
-	MessageTypeDeviceHeartbeat        = "deviceHeartbeat"
-	MessageTypeWriteResponse          = "writeResponse"
-	MessageTypeError                  = "error"
 )

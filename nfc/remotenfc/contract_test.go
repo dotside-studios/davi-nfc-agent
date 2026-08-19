@@ -15,7 +15,7 @@ func TestRemoteTagsKeepTheContract(t *testing.T) {
 	tests := []struct {
 		name   string
 		caps   *protocol.TagCapabilities
-		writer TagWriter
+		writer tagRoute
 	}{
 		{
 			name: "no route back to the device",

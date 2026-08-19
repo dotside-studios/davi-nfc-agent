@@ -426,21 +426,28 @@ if writer, ok := tag.(nfc.AdvancedWriter); ok {
 }
 ```
 
-## Optional: Server Integration
+## Optional: Serving Your Own Connections
 
-If your device needs WebSocket handlers (like smartphone NFC):
+A manager whose devices connect over the network, rather than being attached to
+this machine, owns that transport itself. `remotenfc` is the worked example: it
+serves the WebSocket endpoint phones connect to.
+
+Expose an `http.Handler` and let the agent mount it. Keep authentication out of
+it, since that is the agent's policy rather than the driver's, and take anything
+else the agent decides as options:
 
 ```go
-import "github.com/dotside-studios/davi-nfc-agent/server"
-
-// Implement server.ServerHandler
-func (m *MyManager) Register(s server.HandlerServer) {
-    s.HandleMessage("myreader:scan", m.handleScan)
+func (m *MyManager) Handler(opts MyServerOptions) http.Handler {
+    // ...
 }
+```
 
-// Implement server.ServerHandlerCloser for cleanup
+For cleanup, implement `Close()`. `MultiManager` calls it on every manager that
+has one:
+
+```go
 func (m *MyManager) Close() {
-    // Cleanup resources
+    // Stop goroutines, drop connections
 }
 ```
 
@@ -581,8 +588,8 @@ your tag supports:
 | `SupportsEvents()` | DeviceEventEmitter | Whether device emits tag events |
 | `SupportsTransceive()` | DeviceTransceiver | Whether device supports raw transceive |
 | `IsHealthy()` | DeviceHealthChecker | Connection health validation |
-| `Register()` | server.ServerHandler | WebSocket integration |
-| `Close()` | server.ServerHandlerCloser | Cleanup on shutdown |
+| `Close()` | (bare method) | Cleanup on shutdown, called by MultiManager |
+| `RemoteDevices()` | RemoteManager | Devices are remote, so none is a candidate reader |
 
 ### DeviceInfoProvider Interface
 

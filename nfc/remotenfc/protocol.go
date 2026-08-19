@@ -1,8 +1,6 @@
 package remotenfc
 
 import (
-	"time"
-
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
@@ -20,74 +18,32 @@ type DeviceRegistrationRequest struct {
 	Metadata        map[string]string  `json:"metadata"`        // Optional metadata
 }
 
-// DeviceRegistrationResponse is sent by server after successful registration.
-type DeviceRegistrationResponse struct {
-	DeviceID     string     `json:"deviceID"`     // Unique device identifier (UUID)
-	SessionToken string     `json:"sessionToken"` // Authentication token (optional future use)
-	ServerInfo   ServerInfo `json:"serverInfo"`
-}
+// TagData is what a device reports when it scans a tag.
+//
+// This and the two below are aliases rather than copies. They duplicated the
+// wire shapes field for field and JSON tag for JSON tag, which bought a
+// hand-written translation step in the device server and nothing else: two
+// names for one thing drift, and these had already begun to.
+type TagData = protocol.DeviceTagData
 
-// ServerInfo contains information about the server.
-type ServerInfo struct {
-	Version      string   `json:"version"`
-	SupportedNFC []string `json:"supportedNFC"` // ["mifare", "desfire", etc.]
-}
+// TagRemovedData is what a device reports when a tag leaves its field.
+type TagRemovedData = protocol.DeviceTagRemovedData
 
-// TagData is sent by mobile app when a tag is scanned.
-type TagData struct {
-	DeviceID    string                     `json:"deviceID"`    // Device that scanned the tag
-	UID         string                     `json:"uid"`         // Tag UID (hex format)
-	Technology  string                     `json:"technology"`  // "ISO14443A", "ISO14443B", etc.
-	Type        string                     `json:"type"`        // "MIFARE Classic 1K", "Type4", etc.
-	ATR         string                     `json:"atr"`         // Answer to Reset (if applicable)
-	ScannedAt   time.Time                  `json:"scannedAt"`   // Timestamp of scan
-	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
-	RawData     []byte                     `json:"rawData"`     // Raw tag data (base64 encoded)
+// DeviceHeartbeat is what a device sends periodically to stay registered.
+type DeviceHeartbeat = protocol.DeviceHeartbeat
 
-	// Capabilities as declared by the device for this tag, if it knows them.
-	Capabilities *protocol.TagCapabilities `json:"capabilities,omitempty"`
-}
-
-// DeviceHeartbeat is sent by mobile app periodically.
-type DeviceHeartbeat struct {
-	DeviceID  string    `json:"deviceID"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// TagRemovedData is sent by mobile app when a tag leaves the NFC field.
-type TagRemovedData struct {
-	DeviceID  string    `json:"deviceID"`
-	UID       string    `json:"uid"`       // UID of the removed tag
-	RemovedAt time.Time `json:"removedAt"` // Timestamp of removal
-}
-
-// DeviceWriteRequest is sent by server to mobile app (future feature).
-type DeviceWriteRequest struct {
-	RequestID   string                     `json:"requestID"`   // Unique request ID for correlation
-	DeviceID    string                     `json:"deviceID"`    // Target device
-	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Data to write
-	Options     nfc.WriteOptions           `json:"options"`     // Write options
-}
-
-// DeviceWriteResponse is sent by mobile app to server (future feature).
-type DeviceWriteResponse struct {
-	RequestID string `json:"requestID"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
-}
-
-// ConvertTagData converts mobile app tag data to internal nfc.Tag. The
-// resulting tag is read-only; use ConvertTagDataWithWriter to give it a route
-// back to the device for writes and locks.
+// ConvertTagData converts a device's tag report to an nfc.Tag. The result is
+// read-only, having no route back to the device that scanned it; a tag the
+// manager builds gets one.
 func ConvertTagData(data TagData) (nfc.Tag, error) {
-	return ConvertTagDataWithWriter(data, nil)
+	return convertTagData(data, nil)
 }
 
-// ConvertTagDataWithWriter converts mobile app tag data to internal nfc.Tag,
-// wiring writes and locks back to the device that scanned it.
-func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
-	// Validate required fields. These are all malformed-input failures, so they
-	// are reported as InvalidData — repeating the same payload cannot fix them.
+// convertTagData converts a device's tag report, wiring writes, locks and raw
+// exchanges back to the device that scanned it.
+func convertTagData(data TagData, route tagRoute) (nfc.Tag, error) {
+	// Malformed input, reported as InvalidData: resending the same payload
+	// cannot fix it.
 	const op = "ConvertTagData"
 
 	if data.UID == "" {
@@ -129,7 +85,7 @@ func ConvertTagDataWithWriter(data TagData, writer TagWriter) (nfc.Tag, error) {
 		scannedAt:    data.ScannedAt,
 		sourceDevice: data.DeviceID,
 		declaredCaps: data.Capabilities,
-		writer:       writer,
+		route:        route,
 	}
 
 	return tag, nil

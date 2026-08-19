@@ -51,122 +51,62 @@ func (m *mockDevice) Transceive(txData []byte) ([]byte, error) { return nil, nil
 func (m *mockDevice) GetTags() ([]nfc.Tag, error)              { return []nfc.Tag{}, nil }
 
 func TestNewMultiManager(t *testing.T) {
-	// Test empty constructor
-	mm := NewMultiManager()
-
-	if mm == nil {
-		t.Fatal("NewMultiManager() returned nil")
-	}
-
-	if mm.GetManagerCount() != 0 {
-		t.Errorf("New MultiManager should have 0 managers, got %d", mm.GetManagerCount())
-	}
-
-	// Test with managers
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
 
-	mm2 := NewMultiManager(
+	mm := NewMultiManager(
 		ManagerEntry{Name: "hardware", Manager: mock1},
 		ManagerEntry{Name: "smartphone", Manager: mock2},
 	)
 
-	if mm2.GetManagerCount() != 2 {
-		t.Errorf("NewMultiManager with entries should have 2 managers, got %d", mm2.GetManagerCount())
+	for _, name := range []string{"hardware", "smartphone"} {
+		if _, ok := mm.GetManager(name); !ok {
+			t.Errorf("manager %q was not registered", name)
+		}
 	}
 
-	// Test with invalid entries
-	mm3 := NewMultiManager(
-		ManagerEntry{Name: "", Manager: mock1}, // Invalid - empty name
+	// An entry missing a name or a manager is skipped rather than registered
+	// under something unusable.
+	mm2 := NewMultiManager(
+		ManagerEntry{Name: "", Manager: mock1},
+		ManagerEntry{Name: "nilled", Manager: nil},
 		ManagerEntry{Name: "valid", Manager: mock2},
 	)
 
-	if mm3.GetManagerCount() != 1 {
-		t.Errorf("NewMultiManager should skip invalid entries, got %d managers", mm3.GetManagerCount())
+	if _, ok := mm2.GetManager(""); ok {
+		t.Error("an entry with no name was registered")
+	}
+	if _, ok := mm2.GetManager("nilled"); ok {
+		t.Error("an entry with no manager was registered")
+	}
+	if _, ok := mm2.GetManager("valid"); !ok {
+		t.Error("the valid entry was not registered")
 	}
 }
 
-func TestMultiManagerAddManager(t *testing.T) {
-	mm := NewMultiManager()
+// A duplicate name keeps the first manager, since the later entry would
+// otherwise silently take over the name the first is already reachable by.
+func TestNewMultiManagerSkipsDuplicateNames(t *testing.T) {
+	first := &mockManager{name: "first", devices: []string{"device1"}}
+	second := &mockManager{name: "second", devices: []string{"device2"}}
 
-	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}}
-	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
+	mm := NewMultiManager(
+		ManagerEntry{Name: "hardware", Manager: first},
+		ManagerEntry{Name: "hardware", Manager: second},
+	)
 
-	// Add first manager
-	err := mm.AddManager("manager1", mock1)
-	if err != nil {
-		t.Errorf("AddManager() failed: %v", err)
+	got, ok := mm.GetManager("hardware")
+	if !ok {
+		t.Fatal("hardware was not registered")
 	}
-
-	if mm.GetManagerCount() != 1 {
-		t.Errorf("Should have 1 manager, got %d", mm.GetManagerCount())
-	}
-
-	// Add second manager
-	err = mm.AddManager("manager2", mock2)
-	if err != nil {
-		t.Errorf("AddManager() failed: %v", err)
-	}
-
-	if mm.GetManagerCount() != 2 {
-		t.Errorf("Should have 2 managers, got %d", mm.GetManagerCount())
-	}
-
-	// Try to add duplicate
-	err = mm.AddManager("manager1", mock1)
-	if err == nil {
-		t.Error("AddManager() should fail for duplicate name")
-	}
-
-	// Try to add with empty name
-	err = mm.AddManager("", mock1)
-	if err == nil {
-		t.Error("AddManager() should fail for empty name")
-	}
-
-	// Try to add nil manager
-	err = mm.AddManager("manager3", nil)
-	if err == nil {
-		t.Error("AddManager() should fail for nil manager")
-	}
-}
-
-func TestMultiManagerRemoveManager(t *testing.T) {
-	mm := NewMultiManager()
-
-	mock := &mockManager{name: "mock", devices: []string{"device1"}}
-
-	err := mm.AddManager("manager1", mock)
-	if err != nil {
-		t.Fatalf("AddManager() failed: %v", err)
-	}
-
-	// Remove manager
-	err = mm.RemoveManager("manager1")
-	if err != nil {
-		t.Errorf("RemoveManager() failed: %v", err)
-	}
-
-	if mm.GetManagerCount() != 0 {
-		t.Errorf("Should have 0 managers after remove, got %d", mm.GetManagerCount())
-	}
-
-	// Try to remove non-existent manager
-	err = mm.RemoveManager("non-existent")
-	if err == nil {
-		t.Error("RemoveManager() should fail for non-existent manager")
+	if got != nfc.Manager(first) {
+		t.Error("a duplicate entry replaced the manager registered first")
 	}
 }
 
 func TestMultiManagerGetManager(t *testing.T) {
-	mm := NewMultiManager()
-
 	mock := &mockManager{name: "mock", devices: []string{"device1"}}
-
-	err := mm.AddManager("manager1", mock)
-	if err != nil {
-		t.Fatalf("AddManager() failed: %v", err)
-	}
+	mm := NewMultiManager(ManagerEntry{Name: "manager1", Manager: mock})
 
 	// Get existing manager
 	manager, exists := mm.GetManager("manager1")
@@ -185,13 +125,14 @@ func TestMultiManagerGetManager(t *testing.T) {
 }
 
 func TestMultiManagerOpenDeviceWithPrefix(t *testing.T) {
-	mm := NewMultiManager()
 
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1", "device2"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device3", "device4"}}
 
-	_ = mm.AddManager("hardware", mock1)
-	_ = mm.AddManager("smartphone", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "hardware", Manager: mock1},
+		ManagerEntry{Name: "smartphone", Manager: mock2},
+	)
 
 	// Open device with explicit manager prefix
 	device, err := mm.OpenDevice("hardware:device1")
@@ -231,15 +172,16 @@ func TestMultiManagerOpenDeviceWithPrefix(t *testing.T) {
 // (like libnfc format "acr122_usb:001:003") are handled correctly when the first part
 // is NOT a registered manager name.
 func TestMultiManagerOpenDeviceWithColonInDeviceID(t *testing.T) {
-	mm := NewMultiManager()
 
 	// Register managers with names "hardware" and "smartphone"
 	// The mock hardware manager accepts libnfc-style device IDs with colons
 	mock1 := &mockManager{name: "mock1", devices: []string{"acr122_usb:001:003", "pn532_uart:/dev/ttyUSB0"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"phone123"}}
 
-	_ = mm.AddManager("hardware", mock1)
-	_ = mm.AddManager("smartphone", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "hardware", Manager: mock1},
+		ManagerEntry{Name: "smartphone", Manager: mock2},
+	)
 
 	// Open device with colon in ID - "acr122_usb" is NOT a registered manager,
 	// so it should fall through and try all managers with the full device string
@@ -278,14 +220,15 @@ func TestMultiManagerOpenDeviceWithColonInDeviceID(t *testing.T) {
 }
 
 func TestMultiManagerOpenDeviceWithoutPrefix(t *testing.T) {
-	mm := NewMultiManager()
 
 	// Add managers in specific order
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
 
-	_ = mm.AddManager("first", mock1)
-	_ = mm.AddManager("second", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "first", Manager: mock1},
+		ManagerEntry{Name: "second", Manager: mock2},
+	)
 
 	// Open device without prefix (should try in order)
 	device, err := mm.OpenDevice("device1")
@@ -313,15 +256,16 @@ func TestMultiManagerOpenDeviceWithoutPrefix(t *testing.T) {
 }
 
 func TestMultiManagerOpenDeviceFallback(t *testing.T) {
-	mm := NewMultiManager()
 
 	// First manager doesn't have the device
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}}
 	// Second manager has it
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2", "target"}}
 
-	_ = mm.AddManager("first", mock1)
-	_ = mm.AddManager("second", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "first", Manager: mock1},
+		ManagerEntry{Name: "second", Manager: mock2},
+	)
 
 	// Open device without prefix - should fallback to second manager
 	device, err := mm.OpenDevice("target")
@@ -337,13 +281,14 @@ func TestMultiManagerOpenDeviceFallback(t *testing.T) {
 }
 
 func TestMultiManagerListDevices(t *testing.T) {
-	mm := NewMultiManager()
 
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1", "device2"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device3"}}
 
-	_ = mm.AddManager("hardware", mock1)
-	_ = mm.AddManager("smartphone", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "hardware", Manager: mock1},
+		ManagerEntry{Name: "smartphone", Manager: mock2},
+	)
 
 	// List all devices
 	devices, err := mm.ListDevices()
@@ -373,13 +318,14 @@ func TestMultiManagerListDevices(t *testing.T) {
 }
 
 func TestMultiManagerListDevicesWithErrors(t *testing.T) {
-	mm := NewMultiManager()
 
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}, failList: true}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
 
-	_ = mm.AddManager("failing", mock1)
-	_ = mm.AddManager("working", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "failing", Manager: mock1},
+		ManagerEntry{Name: "working", Manager: mock2},
+	)
 
 	// Should still return devices from working manager
 	devices, err := mm.ListDevices()
@@ -411,32 +357,36 @@ func TestMultiManagerNoManagers(t *testing.T) {
 	}
 }
 
-func TestMultiManagerGetManagerNames(t *testing.T) {
-	mm := NewMultiManager()
+// The listing picks the agent's reader when none is pinned, so it has to follow
+// registration order rather than map order.
+func TestListDevicesFollowsRegistrationOrder(t *testing.T) {
+	mm := NewMultiManager(
+		ManagerEntry{Name: "first", Manager: &mockManager{name: "mock1", devices: []string{"a"}}},
+		ManagerEntry{Name: "second", Manager: &mockManager{name: "mock2", devices: []string{"b"}}},
+		ManagerEntry{Name: "third", Manager: &mockManager{name: "mock3", devices: []string{"c"}}},
+	)
 
-	mock1 := &mockManager{name: "mock1"}
-	mock2 := &mockManager{name: "mock2"}
-	mock3 := &mockManager{name: "mock3"}
+	want := []string{"first:a", "second:b", "third:c"}
 
-	_ = mm.AddManager("first", mock1)
-	_ = mm.AddManager("second", mock2)
-	_ = mm.AddManager("third", mock3)
-
-	names := mm.GetManagerNames()
-
-	if len(names) != 3 {
-		t.Errorf("GetManagerNames() returned %d names, want 3", len(names))
-	}
-
-	// Check order is preserved
-	if names[0] != "first" || names[1] != "second" || names[2] != "third" {
-		t.Errorf("GetManagerNames() = %v, want [first, second, third]", names)
+	// Repeated, because map iteration only sometimes disagrees with insertion
+	// order and a single pass can pass by luck.
+	for i := 0; i < 20; i++ {
+		got, err := mm.ListDevices()
+		if err != nil {
+			t.Fatalf("ListDevices: %v", err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("ListDevices() = %v, want %v", got, want)
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("ListDevices() = %v, want %v", got, want)
+			}
+		}
 	}
 }
 
 func TestMultiManagerEmptyDeviceString(t *testing.T) {
-	mm := NewMultiManager()
-
 	// Make mock manager that accepts empty string
 	mock1 := &mockManager{
 		name:    "mock1",
@@ -444,8 +394,10 @@ func TestMultiManagerEmptyDeviceString(t *testing.T) {
 	}
 	mock2 := &mockManager{name: "mock2", devices: []string{"other-device"}}
 
-	_ = mm.AddManager("first", mock1)
-	_ = mm.AddManager("second", mock2)
+	mm := NewMultiManager(
+		ManagerEntry{Name: "first", Manager: mock1},
+		ManagerEntry{Name: "second", Manager: mock2},
+	)
 
 	// Open with empty string (should try first manager with empty string)
 	device, err := mm.OpenDevice("")
@@ -490,5 +442,39 @@ func TestListDevicesLogsAPersistentFailureOnce(t *testing.T) {
 	mm.clearListError("hardware")
 	if !mm.logListError("hardware", boom) {
 		t.Error("failure after a recovery was suppressed")
+	}
+}
+
+// closableManager records whether Close reached it.
+type closableManager struct {
+	mockManager
+	closed int
+}
+
+func (m *closableManager) Close() { m.closed++ }
+
+// Close used to test for an interface from the server package that no manager
+// implemented, so it propagated to nothing and the drivers were never stopped.
+func TestCloseReachesTheManagers(t *testing.T) {
+	closable := &closableManager{mockManager: mockManager{name: "closable"}}
+	plain := &mockManager{name: "plain"}
+
+	mm := NewMultiManager(
+		ManagerEntry{Name: "smartphone", Manager: closable},
+		ManagerEntry{Name: "hardware", Manager: plain},
+	)
+
+	mm.Close()
+
+	if closable.closed != 1 {
+		t.Errorf("manager closed %d times, want 1", closable.closed)
+	}
+
+	// A second call must not close twice, nor panic on the already-closed
+	// forwarding channel.
+	mm.Close()
+
+	if closable.closed != 1 {
+		t.Errorf("second Close reached the manager again: %d calls", closable.closed)
 	}
 }

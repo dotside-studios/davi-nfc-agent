@@ -1,6 +1,7 @@
 package remotenfc
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -55,6 +56,9 @@ func TestDeviceImplementsNFCDevice(t *testing.T) {
 	var _ nfc.Device = (*Device)(nil)
 }
 
+// A phone pushes its scans rather than being polled, so GetTags exists only to
+// satisfy nfc.Device: it reports no tags for as long as the device is open, and
+// reports a close as one.
 func TestDeviceGetTags(t *testing.T) {
 	req := DeviceRegistrationRequest{
 		DeviceName: "Test Device",
@@ -63,36 +67,34 @@ func TestDeviceGetTags(t *testing.T) {
 	}
 
 	device := NewDevice("test-id", req)
-	defer func() { _ = device.Close() }()
 
-	// Test timeout (no tags sent)
 	tags, err := device.GetTags()
 	if err != nil {
-		t.Errorf("GetTags() with timeout should not return error, got: %v", err)
+		t.Errorf("GetTags() on an open device should not error, got: %v", err)
 	}
 	if len(tags) != 0 {
-		t.Errorf("GetTags() with timeout should return empty slice, got %d tags", len(tags))
+		t.Errorf("GetTags() returned %d tags, want none", len(tags))
 	}
 
-	// Test sending tags
-	mockTag := &Tag{
-		uid:        "04:AB:CD:EF",
-		tagType:    "Type4",
-		technology: "ISO14443A",
+	// A close releases a poller waiting on it, rather than making it sit out
+	// the timeout.
+	done := make(chan error, 1)
+	go func() {
+		_, err := device.GetTags()
+		done <- err
+	}()
+
+	if err := device.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
 	}
 
-	err = device.SendTags([]nfc.Tag{mockTag})
-	if err != nil {
-		t.Errorf("SendTags() failed: %v", err)
-	}
-
-	// Retrieve tags
-	tags, err = device.GetTags()
-	if err != nil {
-		t.Errorf("GetTags() failed: %v", err)
-	}
-	if len(tags) != 1 {
-		t.Errorf("GetTags() returned %d tags, want 1", len(tags))
+	select {
+	case err := <-done:
+		if !errors.Is(err, nfc.ErrDeviceClosed) {
+			t.Errorf("GetTags() after close = %v, want ErrDeviceClosed", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing the device did not release GetTags")
 	}
 }
 

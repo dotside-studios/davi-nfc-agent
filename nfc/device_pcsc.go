@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 )
@@ -119,7 +120,7 @@ func (d *pcscDevice) startCardMonitor() {
 
 			// Block for up to 500ms waiting for state change
 			// Timeout allows checking stopMonitor channel periodically
-			err := ctx.GetStatusChange(readerStates, 500)
+			err := ctx.GetStatusChange(readerStates, 500*time.Millisecond)
 			if err != nil {
 				// Check if context was cancelled
 				if errors.Is(err, pcsc.ErrCancelled) {

@@ -146,7 +146,7 @@ func NewTagForType(tagType DetectedTagType, transport CardTransport, uid string)
 	switch tagType {
 	case DetectedClassic1K, DetectedClassic4K:
 		return newPCSCClassicTag(transport, uid, tagType)
-	case DetectedUltralight, DetectedUltralightC:
+	case DetectedUltralight, DetectedUltralightC, DetectedUltralightEV1, DetectedUltralightEV1_128:
 		return newPCSCUltralightTag(transport, uid, tagType)
 	case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
 		return newPCSCNtagTag(transport, uid, tagType)

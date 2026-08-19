@@ -11,7 +11,12 @@ const (
 	DetectedMini
 	DetectedUltralight
 	DetectedUltralightC
+	// DetectedUltralightEV1 is an MF0UL11: 48 bytes of user memory, laid out
+	// like the original Ultralight.
 	DetectedUltralightEV1
+	// DetectedUltralightEV1_128 is an MF0UL21: 128 bytes of user memory, which
+	// reaches past the pages the static lock bytes cover.
+	DetectedUltralightEV1_128
 	DetectedNTAG213
 	DetectedNTAG215
 	DetectedNTAG216
@@ -180,7 +185,13 @@ func containsISO14443_4Indicator(atr []byte) bool {
 	return false
 }
 
-// ParseGetVersionResponse parses GET_VERSION response to determine tag type
+// ParseGetVersionResponse parses GET_VERSION response to determine tag type.
+//
+// Only the EV1 generations answer GET_VERSION at all: the original Ultralight
+// and the Ultralight C do not implement the command, so a reply carrying the
+// Ultralight product type identifies an Ultralight EV1 rather than either of
+// those.
+//
 // Response format for NTAG/Ultralight EV1:
 // Byte 0: Fixed header 0x00
 // Byte 1: Vendor ID (0x04 = NXP)
@@ -205,16 +216,13 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 	}
 
 	switch productType {
-	case 0x03: // Ultralight family
+	case 0x03: // Ultralight EV1 family
 		switch storageSize {
-		case 0x0B: // 48 bytes (Ultralight)
-			return DetectedUltralight
-		case 0x0E: // 128 bytes (Ultralight C)
-			return DetectedUltralightC
-		case 0x0F, 0x11: // Ultralight EV1 variants
+		case 0x0E: // 128 bytes of user memory (MF0UL21)
+			return DetectedUltralightEV1_128
+		default: // 48 bytes (MF0UL11); read an unknown variant conservatively
 			return DetectedUltralightEV1
 		}
-		return DetectedUltralight
 
 	case 0x04: // NTAG family
 		switch storageSize {
@@ -240,7 +248,7 @@ func detectedTypeNumeric(tagType DetectedTagType) int {
 		return 0x08 // Classic 1K SAK
 	case DetectedClassic4K:
 		return 0x18 // Classic 4K SAK
-	case DetectedUltralight, DetectedUltralightC, DetectedUltralightEV1:
+	case DetectedUltralight, DetectedUltralightC, DetectedUltralightEV1, DetectedUltralightEV1_128:
 		return 0x00 // Ultralight SAK
 	case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
 		return 0x00 // NTAG SAK

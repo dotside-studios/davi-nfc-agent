@@ -65,9 +65,12 @@ func TestParseGetVersionResponse(t *testing.T) {
 		{"NTAG213", mk(0x04, 0x0F), DetectedNTAG213},
 		{"NTAG215", mk(0x04, 0x11), DetectedNTAG215},
 		{"NTAG216", mk(0x04, 0x13), DetectedNTAG216},
-		{"Ultralight", mk(0x03, 0x0B), DetectedUltralight},
-		{"Ultralight C", mk(0x03, 0x0E), DetectedUltralightC},
-		{"Ultralight EV1", mk(0x03, 0x0F), DetectedUltralightEV1},
+		// The original Ultralight and the Ultralight C do not implement
+		// GET_VERSION, so an Ultralight product type in a reply is always an
+		// EV1; the storage size then says which one.
+		{"Ultralight EV1 48-byte", mk(0x03, 0x0B), DetectedUltralightEV1},
+		{"Ultralight EV1 128-byte", mk(0x03, 0x0E), DetectedUltralightEV1_128},
+		{"Ultralight EV1 unknown size", mk(0x03, 0x0F), DetectedUltralightEV1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

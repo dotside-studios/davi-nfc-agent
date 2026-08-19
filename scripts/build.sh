@@ -31,8 +31,8 @@ echo "  Version: $BUILD_VERSION"
 echo "  Commit: $BUILD_COMMIT"
 echo "  Build Time: $BUILD_TIME"
 
-# PC/SC is reached without cgo (see docs/pure-go-pcsc.md), so only macOS still
-# needs a C toolchain: fyne.io/systray talks to Cocoa there.
+# PC/SC is reached without cgo, so only macOS still needs a C toolchain:
+# fyne.io/systray talks to Cocoa there.
 if [ "$TARGET_OS" = "darwin" ]; then
     export CGO_ENABLED=1
 else

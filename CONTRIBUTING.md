@@ -19,7 +19,7 @@ sudo apt install pcscd libpcsclite1
 No additional dependencies needed for **macOS** and **Windows**. The agent
 resolves the PC/SC library at runtime and builds without cgo, so no C toolchain
 or `-dev` package is involved; `libpcsclite-dev` is only needed to build the
-`-tags cgopcsc` fallback backend (see `docs/pure-go-pcsc.md`).
+`-tags cgopcsc` fallback backend.
 
 ### Building
 

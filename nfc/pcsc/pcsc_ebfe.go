@@ -2,7 +2,7 @@
 
 // ebfe/scard backend: the historical cgo binding, kept as a fallback for the
 // goscard backend. Selected with -tags cgopcsc, which needs libpcsclite-dev on
-// Linux and the PCSC framework on macOS. See docs/pure-go-pcsc.md.
+// Linux and the PCSC framework on macOS.
 
 package pcsc
 

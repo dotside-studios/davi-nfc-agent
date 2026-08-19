@@ -8,7 +8,7 @@
 // at runtime (winscard.dll, libpcsclite.so.1, PCSC.framework) and needs no cgo,
 // so the agent builds with CGO_ENABLED=0 and cross-compiles without a C
 // toolchain. Building with -tags cgopcsc selects the previous ebfe/scard
-// binding instead; see docs/pure-go-pcsc.md.
+// binding instead.
 //
 // The constants below carry the same numeric values as the PC/SC SCARD_*
 // definitions, so both backends map onto them by conversion rather than by

@@ -1,7 +1,7 @@
 //go:build !cgopcsc
 
 // goscard backend: calls the platform's PC/SC library through purego, so no
-// cgo and no C toolchain are involved. See docs/pure-go-pcsc.md.
+// cgo and no C toolchain are involved.
 
 package pcsc
 

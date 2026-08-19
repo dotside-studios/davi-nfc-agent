@@ -1,6 +1,9 @@
 # Davi NFC Agent
 
-A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Reads and writes NDEF formatted data from NFC tags and broadcasts to connected clients in real-time. This is for use for the NFC-related functionality integrated into the [Davi](https://davi.social) platform.
+A lightweight NFC card reader agent with WebSocket broadcasting. It reads and
+writes NDEF-formatted data from NFC tags and broadcasts it to connected clients
+in real time, and provides the NFC functionality used by the
+[Davi](https://davi.social) platform.
 
 ## Features
 
@@ -12,7 +15,7 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 - **Tag Capabilities**: Memory size, usable capacity, and write/lock/password support reported with every scan
 - **Real-time WebSocket**: Instant tag data broadcasting
 - **Secure by Default**: Automatic TLS (WSS) with key pinning for devices, an origin allowlist for browsers, plus optional API-secret authentication
-- **Per-device Pairing**: each device gets its own revocable credential, issued against a PIN
+- **Per-device Pairing**: Each device gets its own revocable credential, issued against a PIN
 - **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
 - **Cross-platform**: Linux, macOS, Windows
 - **System Tray UI**: Device management and status
@@ -47,17 +50,23 @@ for pairing a phone.
 
 ### Control Center
 
-Choose **Open Control Center** from the tray menu to manage the agent in a
-browser: read its log, inspect and write tags, revoke a single paired device,
-edit the origin allowlist, and set preferences that survive a restart.
+Choose **Open Control Center** from the tray to manage the agent in a browser:
+read its log, inspect and write tags, revoke a paired device, edit the origin
+allowlist, and change settings that survive a restart.
 
-It is reachable only over loopback, only from a page the agent served, and only
-with a token minted by that tray entry — the origin allowlist plays no part in
-it. See [Control Center](docs/control-center.md).
+The console is privileged — it can rotate the API secret, revoke a device's
+credential and lock a tag irreversibly — so every request to it must clear three
+checks. It has to come from loopback, from a page the agent itself served, and
+carry a session opened through that tray entry. There is no other way in, which
+is deliberate. See [Control Center](docs/control-center.md) for the detail.
 
-It is a self-contained package (`webui/`, frontend included) that reaches the
-agent through one interface, so `go build -tags nowebui ./cmd/davi-nfc-agent` omits the routes, the
-privileged API and the embedded console without touching anything else.
+To leave it out of the binary entirely, build with `-tags nowebui`. Neither the
+privileged API nor the console's frontend is compiled in, and `/control` serves
+the same plain-text banner as `/`:
+
+```bash
+go build -tags nowebui ./cmd/davi-nfc-agent
+```
 
 ### Command-line Options
 

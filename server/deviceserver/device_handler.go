@@ -502,7 +502,7 @@ func (h *DeviceHandler) TransceiveTag(deviceID, tagUID string, data []byte, raw 
 			message = "device reported the exchange failed"
 		}
 		return nil, &nfc.NFCError{
-			Code:    nfc.InternalErrorCode(resp.ErrorCode, nfc.ErrCodeTransceiveFailed),
+			Code:    protocol.InternalErrorCode(resp.ErrorCode, nfc.ErrCodeTransceiveFailed),
 			Op:      "Transceive",
 			TagUID:  tagUID,
 			Message: message,
@@ -575,7 +575,7 @@ func writeResponseError(op, tagUID string, resp protocol.DeviceWriteResponse) er
 	}
 
 	return &nfc.NFCError{
-		Code:    nfc.InternalErrorCode(resp.ErrorCode, fallback),
+		Code:    protocol.InternalErrorCode(resp.ErrorCode, fallback),
 		Op:      op,
 		TagUID:  tagUID,
 		Message: message,
@@ -821,7 +821,7 @@ func (h *DeviceHandler) sendError(conn *server.SafeConn, requestID string, error
 // NFCError keeps its code, operation, and tag; anything else is a transient
 // delivery failure, which is what TAG_SEND_FAILED has always meant.
 func (h *DeviceHandler) sendTagError(conn *server.SafeConn, requestID string, err error) {
-	payload := nfc.WireError(err)
+	payload := protocol.ErrorPayloadFor(err)
 	if payload.Code == protocol.ErrCodeUnknownError {
 		payload = protocol.NewErrorPayload(protocol.ErrCodeTagSendFailed)
 	}

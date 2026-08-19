@@ -1,32 +1,32 @@
-package nfc
+package protocol
 
 import (
 	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-func TestWireErrorMapsEveryCode(t *testing.T) {
-	for code := ErrCodeNotSupported; code <= ErrCodeInvalidData; code++ {
+func TestErrorPayloadMapsEveryCode(t *testing.T) {
+	for code := nfc.ErrCodeNotSupported; code <= nfc.ErrCodeInvalidData; code++ {
 		wire, ok := wireErrorCodes[code]
 		if !ok {
 			t.Errorf("internal code %d has no wire mapping", code)
 			continue
 		}
-		if wire == protocol.ErrCodeUnknownError {
+		if wire == ErrCodeUnknownError {
 			t.Errorf("internal code %d maps to UNKNOWN_ERROR", code)
 		}
 	}
 }
 
-func TestWireErrorPreservesContext(t *testing.T) {
-	err := NewCapacityExceededError("WriteData", "04:A1:B2:C3", 900, 504)
+func TestErrorPayloadPreservesContext(t *testing.T) {
+	err := nfc.NewCapacityExceededError("WriteData", "04:A1:B2:C3", 900, 504)
 
-	payload := WireError(err)
+	payload := ErrorPayloadFor(err)
 
-	if payload.Code != protocol.ErrCodeCapacityExceeded {
+	if payload.Code != ErrCodeCapacityExceeded {
 		t.Errorf("Code = %s, want CAPACITY_EXCEEDED", payload.Code)
 	}
 	if payload.Retryable {
@@ -40,24 +40,24 @@ func TestWireErrorPreservesContext(t *testing.T) {
 	}
 }
 
-func TestWireErrorThroughWrapping(t *testing.T) {
-	err := fmt.Errorf("sending to bridge: %w", NewTagRemovedError("ReadData", errors.New("gone")))
+func TestErrorPayloadThroughWrapping(t *testing.T) {
+	err := fmt.Errorf("sending to bridge: %w", nfc.NewTagRemovedError("ReadData", errors.New("gone")))
 
-	payload := WireError(err)
+	payload := ErrorPayloadFor(err)
 
-	if payload.Code != protocol.ErrCodeTagRemoved {
+	if payload.Code != ErrCodeTagRemoved {
 		t.Errorf("Code = %s, want TAG_REMOVED through the wrap", payload.Code)
 	}
 	if !payload.Retryable {
-		t.Error("TAG_REMOVED should be retryable — the tag can be presented again")
+		t.Error("TAG_REMOVED should be retryable, the tag can be presented again")
 	}
 }
 
 // An error we cannot classify must not be advertised as worth retrying.
-func TestWireErrorUnclassified(t *testing.T) {
-	payload := WireError(errors.New("something went wrong"))
+func TestErrorPayloadUnclassified(t *testing.T) {
+	payload := ErrorPayloadFor(errors.New("something went wrong"))
 
-	if payload.Code != protocol.ErrCodeUnknownError {
+	if payload.Code != ErrCodeUnknownError {
 		t.Errorf("Code = %s, want UNKNOWN_ERROR", payload.Code)
 	}
 	if payload.Retryable {

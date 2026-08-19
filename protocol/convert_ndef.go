@@ -1,18 +1,18 @@
-package nfc
+package protocol
 
 import (
 	"fmt"
 
-	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// ConvertNDEFInput converts protocol NDEF format to internal NDEFMessage.
-func ConvertNDEFInput(data *protocol.NDEFMessageInput) (*NDEFMessage, error) {
+// ConvertNDEFInput converts protocol NDEF format to internal nfc.NDEFMessage.
+func ConvertNDEFInput(data *NDEFMessageInput) (*nfc.NDEFMessage, error) {
 	if data == nil || len(data.Records) == 0 {
 		return nil, fmt.Errorf("empty NDEF message")
 	}
 
-	msg := NewNDEFMessage()
+	msg := nfc.NewNDEFMessage()
 	for i, recordData := range data.Records {
 		record, err := ConvertNDEFRecordInput(recordData)
 		if err != nil {
@@ -24,14 +24,14 @@ func ConvertNDEFInput(data *protocol.NDEFMessageInput) (*NDEFMessage, error) {
 	return msg, nil
 }
 
-// ConvertNDEFRecordInput converts protocol NDEF record to internal NDEFRecord.
-func ConvertNDEFRecordInput(data protocol.NDEFRecordInput) (*NDEFRecord, error) {
+// ConvertNDEFRecordInput converts protocol NDEF record to internal nfc.NDEFRecord.
+func ConvertNDEFRecordInput(data NDEFRecordInput) (*nfc.NDEFRecord, error) {
 	// If TNF is provided (low-level format), use it directly
 	if data.TNF != nil {
 		if *data.TNF > 0x07 {
 			return nil, fmt.Errorf("invalid TNF value: 0x%02X", *data.TNF)
 		}
-		return &NDEFRecord{
+		return &nfc.NDEFRecord{
 			TNF:     *data.TNF,
 			Type:    data.Type,
 			ID:      data.ID,
@@ -49,7 +49,7 @@ func ConvertNDEFRecordInput(data protocol.NDEFRecordInput) (*NDEFRecord, error) 
 		if lang == "" {
 			lang = "en"
 		}
-		text := &NDEFText{Content: data.Content, Language: lang}
+		text := &nfc.NDEFText{Content: data.Content, Language: lang}
 		record := text.ToRecord()
 		return &record, nil
 
@@ -57,7 +57,7 @@ func ConvertNDEFRecordInput(data protocol.NDEFRecordInput) (*NDEFRecord, error) 
 		if data.Content == "" {
 			return nil, fmt.Errorf("URI record requires content")
 		}
-		uri := &NDEFURI{Content: data.Content}
+		uri := &nfc.NDEFURI{Content: data.Content}
 		record := uri.ToRecord()
 		return &record, nil
 
@@ -66,7 +66,7 @@ func ConvertNDEFRecordInput(data protocol.NDEFRecordInput) (*NDEFRecord, error) 
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-		mime := &NDEFMIME{Type: mimeType, Data: data.Payload}
+		mime := &nfc.NDEFMIME{Type: mimeType, Data: data.Payload}
 		record := mime.ToRecord()
 		return &record, nil
 
@@ -74,7 +74,7 @@ func ConvertNDEFRecordInput(data protocol.NDEFRecordInput) (*NDEFRecord, error) 
 		if data.Content == "" {
 			return nil, fmt.Errorf("external record requires domain in content field")
 		}
-		ext := &NDEFExternal{Domain: data.Content, Data: data.Payload}
+		ext := &nfc.NDEFExternal{Domain: data.Content, Data: data.Payload}
 		record := ext.ToRecord()
 		return &record, nil
 

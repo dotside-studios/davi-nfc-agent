@@ -588,7 +588,7 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 // operationErrorCode classifies a reader failure, falling back to the
 // operation's own label when the error carries no code of its own.
 func operationErrorCode(err error, fallback protocol.ErrorCode) protocol.ErrorCode {
-	if payload := nfc.WireError(err); payload.Code != protocol.ErrCodeUnknownError {
+	if payload := protocol.ErrorPayloadFor(err); payload.Code != protocol.ErrCodeUnknownError {
 		return payload.Code
 	}
 	return fallback

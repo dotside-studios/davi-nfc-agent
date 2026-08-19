@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -75,6 +76,12 @@ type Server struct {
 	device *deviceserver.Server
 	client *clientserver.Server
 
+	// mu guards the lifecycle fields below. Start runs on its own goroutine
+	// and blocks until Stop cancels it, so the two overlap by design: without
+	// this they raced on httpServer, and a Stop arriving before Start had
+	// finished binding could miss the listener entirely.
+	mu         sync.Mutex
+	stopped    bool
 	httpServer *http.Server
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -97,27 +104,39 @@ func New(config Config, device *deviceserver.Server, client *clientserver.Server
 func (s *Server) Start() error {
 	log.Printf("[unified] Starting NFC Agent server on port %d (device + client)...", s.config.Port)
 
+	s.mu.Lock()
+	if s.stopped {
+		// Stop landed first. Binding now would leave a listener nobody holds.
+		s.mu.Unlock()
+		log.Printf("[unified] Stopped before startup completed; not binding")
+		return nil
+	}
+
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	ctx := s.ctx
 
 	// Start device and client background work under the shared context. Neither
 	// binds a listener; this server owns the single listener below.
-	s.device.StartBackground(s.ctx)
-	s.client.StartBackground(s.ctx)
+	s.device.StartBackground(ctx)
+	s.client.StartBackground(ctx)
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.config.Port),
 		Handler: s.Handler(),
 	}
+	httpServer := s.httpServer
+	s.mu.Unlock()
 
-	// Start HTTP server in goroutine.
+	// Start HTTP server in goroutine. It reads the captured server, not the
+	// field, which Stop may already have cleared.
 	go func() {
 		var err error
 		if s.config.TLSEnabled() {
 			log.Printf("[unified] Listening on :%d (TLS)", s.config.Port)
-			err = s.httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
+			err = httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
 		} else {
 			log.Printf("[unified] Listening on :%d", s.config.Port)
-			err = s.httpServer.ListenAndServe()
+			err = httpServer.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
 			log.Printf("[unified] HTTP server error: %v", err)
@@ -130,7 +149,7 @@ func (s *Server) Start() error {
 	}
 
 	// Block until shutdown.
-	<-s.ctx.Done()
+	<-ctx.Done()
 	log.Printf("[unified] Server context cancelled, shutting down...")
 
 	return nil
@@ -208,19 +227,28 @@ func (s *Server) Handler() http.Handler {
 // cancels the shared context (which stops the device and client background
 // workers running under it).
 func (s *Server) Stop() {
-	if s.mdnsServer != nil {
-		s.mdnsServer.Shutdown()
-		s.mdnsServer = nil
+	// Take what needs shutting down under the lock, then do the shutting down
+	// outside it: Shutdown blocks, and Start must not be held up behind it.
+	s.mu.Lock()
+	s.stopped = true
+	mdns := s.mdnsServer
+	s.mdnsServer = nil
+	httpServer := s.httpServer
+	cancel := s.cancel
+	s.mu.Unlock()
+
+	if mdns != nil {
+		mdns.Shutdown()
 	}
 
-	if s.httpServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = s.httpServer.Shutdown(ctx)
+	if httpServer != nil {
+		ctx, cancelTimeout := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelTimeout()
+		_ = httpServer.Shutdown(ctx)
 	}
 
-	if s.cancel != nil {
-		s.cancel()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -228,8 +256,7 @@ func (s *Server) Stop() {
 // device service type (_nfc-device._tcp) so existing device clients continue to
 // discover the agent, now on the single unified port.
 func (s *Server) startMDNS() error {
-	var err error
-	s.mdnsServer, err = zeroconf.Register(
+	registered, err := zeroconf.Register(
 		s.config.mdnsServiceName(),
 		server.MDNSDeviceServiceType,
 		server.MDNSDomain,
@@ -245,6 +272,18 @@ func (s *Server) startMDNS() error {
 	if err != nil {
 		return fmt.Errorf("failed to register mDNS service: %w", err)
 	}
+
+	// Registration happens on the Start goroutine, which overlaps Stop. Publish
+	// the handle under the lock, and withdraw it immediately if Stop already
+	// ran -- otherwise the advertisement outlives the listener it points at.
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		registered.Shutdown()
+		return nil
+	}
+	s.mdnsServer = registered
+	s.mu.Unlock()
 	log.Printf("[unified] mDNS service registered: %s on port %d", server.MDNSDeviceServiceType, s.config.Port)
 	return nil
 }

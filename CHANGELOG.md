@@ -30,7 +30,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Setup` now also falls back to the default port rather than binding whatever
   the kernel offers
 
+### Added
+
+- **The agent has an explicit lifecycle, and things can hook into it.** Its state
+  was inferred from whether `Reader` and the servers happened to be nil, which
+  two callers could disagree about halfway through a teardown. `Agent.State`
+  now reports `stopped`, `starting`, `running` or `stopping`; `OnStateChange`
+  registers an observer of settled transitions; and `Use` registers a
+  `Component` — anything with a `Start(ctx)`/`Stop()` — that the agent brings up
+  once the reader and servers are ready and takes down first, in reverse order.
+  A component that fails to start aborts the start and unwinds what came before
+  it, so a failed `Start` leaves the agent stopped rather than half up.
+
+  `Use` refuses registration while the agent is running rather than accepting it
+  and never starting it. That is the trap the console's attach mechanism falls
+  into today: attach a console after `Start` and the agent reports having one
+  while the listener has never heard of it
+
 ### Fixed
+
+- **`Start` and `Stop` no longer race.** The tray, the console and the network
+  watcher all reach them from different goroutines, and only `RestartServers`
+  took a lock — `Start` and `Stop` mutated `Reader`, `Bridge` and the three
+  server fields with no synchronisation at all. Four concurrent start/stop pairs
+  under `-race` reported thirteen races. All lifecycle transitions now serialise
+  on one mutex, and the whole repository is race-clean
+
+- **A quick stop could crash the agent.** `startServers` launched a goroutine
+  that read the `UnifiedServer` field rather than a captured value, so a `Stop`
+  landing before the goroutine was scheduled left it calling `Start` on a nil
+  server. The unified server had the same shape internally: no mutex at all,
+  with `Start` and `Stop` both touching `httpServer`, `ctx` and `mdnsServer`
+  while overlapping by design — `Start` blocks until `Stop` cancels it. Both are
+  now guarded, and a `Stop` arriving before the listener binds prevents the bind
+  instead of racing it, rather than leaving an mDNS advertisement pointing at a
+  listener that never came up
 
 - **`-require-paired-devices` can no longer be withdrawn by a stored setting.**
   The flag set the requirement, and then `applySettings` -- the last thing

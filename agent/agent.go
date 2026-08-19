@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
@@ -143,13 +142,14 @@ type Agent struct {
 	requirePairedDevice bool
 	requirePairedLocked bool
 
-	// Mutable state.
+	// Mutable state. lifecycle carries the state machine, the hooks and the
+	// registered components; every transition below runs under its lock.
+	lifecycle
 	allowedCardTypes  map[string]bool
 	console           Console
 	onTag             []func(nfc.NFCData)
 	devicePath        string
-	serversMu         sync.Mutex
-	serverRestartChan chan struct{}
+	serverRestartChan chan struct{} // Signals when servers are restarted
 }
 
 // New builds an agent from cfg. The configuration is copied, so later changes
@@ -232,15 +232,9 @@ func (a *Agent) ServerRestarts() <-chan struct{} {
 	return a.serverRestartChan
 }
 
-func (a *Agent) Start(devicePath string) error {
-	if a.Reader != nil {
-		if devicePath == a.Reader.DevicePath() {
-			a.logger.Printf("NFC reader already running on device: %s", devicePath)
-			return nil
-		}
-		return errors.New("agent is already running")
-	}
-
+// startLocked opens the reader and brings the servers up. The caller holds the
+// lifecycle lock and owns the state transition; see Start.
+func (a *Agent) startLocked(devicePath string) error {
 	// A pinned phone is not a reader that has gone missing, it is one that
 	// never existed: a phone reports its scans over the device bridge and is
 	// never opened here. Left in place it becomes a connection retried for as
@@ -285,9 +279,11 @@ func (a *Agent) Start(devicePath string) error {
 	return a.startServers()
 }
 
-func (a *Agent) Stop() {
+// stopLocked tears down the servers and the reader. The caller holds the
+// lifecycle lock and owns the state transition; see Stop. It is safe to call on
+// a partly started agent, which is what makes an aborted Start recoverable.
+func (a *Agent) stopLocked() {
 	if a.Reader == nil && a.DeviceServer == nil {
-		a.logger.Println("Agent is not running")
 		return
 	}
 
@@ -344,8 +340,8 @@ func (a *Agent) watchNetworkChanges() {
 // RestartServers stops and restarts the HTTP/WebSocket servers with current TLS configuration.
 // The NFC reader continues running during the restart.
 func (a *Agent) RestartServers() error {
-	a.serversMu.Lock()
-	defer a.serversMu.Unlock()
+	a.lifecycleMu.Lock()
+	defer a.lifecycleMu.Unlock()
 
 	a.logger.Println("Restarting servers...")
 
@@ -452,8 +448,12 @@ func (a *Agent) startServers() error {
 		MDNSServiceName: a.info.DisplayName + " Device",
 	}, a.DeviceServer, a.ClientServer)
 
+	// Captured, not read from the field: a Stop that lands before this
+	// goroutine is scheduled sets a.UnifiedServer to nil, and the goroutine
+	// would then call Start on a nil server.
+	unified := a.UnifiedServer
 	go func() {
-		if err := a.UnifiedServer.Start(); err != nil {
+		if err := unified.Start(); err != nil {
 			a.logger.Printf("Unified server error: %v", err)
 		}
 	}()

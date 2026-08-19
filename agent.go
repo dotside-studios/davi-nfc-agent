@@ -85,6 +85,11 @@ type Agent struct {
 	// connections. Browser clients are unaffected.
 	RequirePairedDevice bool
 
+	// ReaderFeedback has the reader flash its LED and sound its buzzer at what
+	// it reads and writes. Held here too because the reader is built in Start,
+	// after the stored settings have been applied.
+	ReaderFeedback bool
+
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
 	KeyFile    string       // Path to TLS private key file
@@ -155,6 +160,7 @@ func (a *Agent) Start(devicePath string) error {
 	}
 
 	a.Reader = nfcReader
+	a.Reader.SetFeedback(a.ReaderFeedback)
 
 	// Start network watcher if TLS manager is configured
 	if a.TLSManager != nil {
@@ -434,6 +440,15 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	a.RequirePairedDevice = on
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)
+	}
+}
+
+// SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
+// running reader as well as on the next one the agent starts.
+func (a *Agent) SetReaderFeedback(on bool) {
+	a.ReaderFeedback = on
+	if a.Reader != nil {
+		a.Reader.SetFeedback(on)
 	}
 }
 

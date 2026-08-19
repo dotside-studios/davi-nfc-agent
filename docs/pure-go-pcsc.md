@@ -4,9 +4,12 @@ Research notes on getting rid of the cgo dependency in the reader path. The
 question this answers: does a pure-Go PC/SC stack already exist, and if not,
 what would it cost us to write one?
 
-## 1. What cgo costs us today
+**Status: adopted.** Sections 1-4 are the survey; section 5 is what we built and
+what it turned out to cost.
 
-`nfc/manager_pcsc.go` and `nfc/device_pcsc.go` go through
+## 1. What cgo cost us
+
+`nfc/manager_pcsc.go` and `nfc/device_pcsc.go` went through
 [`github.com/ebfe/scard`](https://github.com/ebfe/scard), which is a cgo
 binding. Per platform:
 
@@ -26,7 +29,7 @@ scard.go:35:12: undefined: scardEstablishContext
 ...
 ```
 
-The bill this leaves in `.github/workflows/build.yml`:
+The bill that left in `.github/workflows/build.yml`:
 
 - `libpcsclite-dev` must be installed on the Linux runners.
 - linux/arm64 needs a full cross toolchain — `gcc-aarch64-linux-gnu`,
@@ -178,35 +181,59 @@ handling for contactless readers) plus the per-reader quirk database that makes
 plus a large device table, precisely because real readers misbehave in specific
 ways. For an agent whose value is NDEF handling, this is the wrong mountain.
 
-## 5. Recommendation
+## 5. What we did
 
-Adopt **goscard** behind our existing interfaces — `nfc.Manager` and
-`nfc.Device` already isolate the PC/SC calls to two files, so this is a
-contained change:
+Adopted goscard, behind an adapter in `nfc/pcsc`. `nfc.Manager` and
+`nfc.Device` already isolated the PC/SC calls to two files, so the change was
+contained:
 
-1. Add a thin internal adapter exposing the eight calls and five sentinel errors
-   we use, so the rest of `nfc/` keeps compiling unchanged.
-2. Implement it with goscard; keep the `ebfe/scard` implementation behind a
-   build tag (`-tags cgopcsc`) as an escape hatch for a release or two.
-3. Map goscard's `SCardError` values onto our sentinels — the codes are the same
-   `0x8010xxxx` numbers, so this is a lookup table.
-4. Drop `libpcsclite-dev`, the arm64 apt/cross-gcc block, and `CC` from
-   `build.yml`; build everything with `CGO_ENABLED=0`.
+- `nfc/pcsc` exposes the eight calls and six status codes the reader path uses.
+  The default backend is goscard; `-tags cgopcsc` still selects `ebfe/scard`,
+  and `--version` reports which one a binary carries.
+- Status codes travel as `pcsc.Error` and compare by code, so `errors.Is` gives
+  the same answer on both backends. The reader path's "is there a card?" and
+  "did it time out?" checks are typed now rather than substring matches against
+  whatever the platform library happened to say.
+- `libpcsclite-dev`, the linux/arm64 cross toolchain and `CC` are gone from the
+  build and release workflows; Linux and Windows build with `CGO_ENABLED=0`.
 
-Expected payoff: one static binary per target, no C toolchain, a much shorter
-build workflow, and darwin/windows builds that could in principle cross-compile
-from Linux runners.
+Two things turned up that section 4 did not predict:
 
-Risks to check on real hardware before committing to it:
+**macOS still needs cgo, just not for PC/SC.** `fyne.io/systray` calls Cocoa, so
+darwin builds keep `CGO_ENABLED=1`. They run on macOS runners with a native
+toolchain, so this costs nothing — but "one static binary for every target" is
+not what we got. Linux and Windows are static; macOS is not.
 
-- `GetStatusChange` behaviour under purego. Our monitor polls with a 500 ms
-  bound (`nfc/device_pcsc.go`) rather than blocking on `INFINITE`, which keeps
-  us away from the worst case, but the reader-disconnect and `Cancel` paths need
-  a real reader to validate.
-- macOS: verify against `PCSC.framework` on both arm64 and amd64, including the
-  reader-unplugged path.
-- goscard's staleness: pin the version, and consider vendoring the ~4 files we
-  depend on if upstream stays quiet.
+**The backends disagreed about a machine with no reader.** `ebfe/scard` returns
+`SCARD_E_NO_READERS_AVAILABLE` from `ListReaders`, which made `ensureContext`
+tear down and re-establish its context on every poll; goscard swallows that code
+and returns an empty list. goscard also swallows `SCARD_E_SERVICE_STOPPED` the
+same way, which would have been worse — that is exactly the error
+`ensureContext` needs to see to notice pcscd died and reconnect. The adapter
+settles it: no readers is an empty list, a dead daemon is an error, and both
+backends now report both cases identically.
+
+### Validated
+
+Against pcscd 2.0.3 on Linux, both backends, with `CGO_ENABLED=0` for goscard:
+`ListReaders`, a bounded `GetStatusChange` that times out (and honours the
+duration), a zero-timeout poll that returns immediately, a blocking
+`GetStatusChange` unblocked by `Cancel` from another goroutine, and `Connect` to
+an unknown reader — identical behaviour on both, including the status codes.
+
+That retires the biggest risk in section 4: purego's blocking calls and
+`SCardCancel` behave. Cross-compilation is verified for all six targets.
+
+### Still to check on hardware
+
+- The card-present paths: `Status`, `Transmit` and the ATR round trip (goscard
+  hands ATRs back as hex strings, which the adapter decodes), plus the
+  reader-disconnect path. None of these can be exercised without a reader.
+- macOS against `PCSC.framework` on both architectures.
+- goscard's staleness: pinned at v1.0.0, last upstream activity January 2025.
+  Consider vendoring the four files we depend on if it stays quiet. Its
+  `SCardReaderState` conversion hands PC/SC a reader name that is not
+  NUL-terminated; the adapter terminates it before passing it down.
 
 ## 6. References
 

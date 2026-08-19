@@ -21,14 +21,17 @@ The agent uses PC/SC for NFC reader communication. PC/SC is built into all major
 - **Linux**: Install `pcsclite`:
   ```bash
   # Debian/Ubuntu
-  sudo apt install pcscd libpcsclite-dev
+  sudo apt install pcscd libpcsclite1
 
   # Fedora/RHEL
-  sudo dnf install pcsc-lite pcsc-lite-devel
+  sudo dnf install pcsc-lite
 
   # Arch Linux
   sudo pacman -S pcsclite
   ```
+
+  The agent loads the PC/SC library at runtime, so the `-dev` headers are not
+  needed to build or run it.
 
 ## Supported Readers
 

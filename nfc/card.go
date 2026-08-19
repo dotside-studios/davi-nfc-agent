@@ -3,9 +3,8 @@ package nfc
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
-
-	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // Card represents a detected NFC card with its metadata and provides
@@ -80,7 +79,28 @@ func tagTechnology(tag Tag) string {
 	if tech := GetTagCapabilities(tag).Technology; tech != "" {
 		return tech
 	}
-	return protocol.InferTechnology(tag.Type())
+	return InferTechnology(tag.Type())
+}
+
+// InferTechnology guesses a tag's technology from its type name, for the cases
+// where nothing better is on offer: a Card decoded from the wire, or a tag that
+// does not report one. A tag that is present answers for itself.
+func InferTechnology(tagType string) string {
+	upperType := strings.ToUpper(tagType)
+	switch {
+	case strings.Contains(upperType, "MIFARE"),
+		strings.Contains(upperType, "NTAG"),
+		strings.Contains(upperType, "DESFIRE"):
+		return "ISO14443A"
+	case strings.Contains(upperType, "TYPE4"):
+		return "ISO14443A/B"
+	case strings.Contains(upperType, "FELICA"):
+		return "ISO18092"
+	case strings.Contains(upperType, "ISO15693"):
+		return "ISO15693"
+	default:
+		return "Unknown"
+	}
 }
 
 // Read implements io.Reader. Reads NDEF message data from the card.

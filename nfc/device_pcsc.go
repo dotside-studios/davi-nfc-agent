@@ -6,22 +6,23 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/ebfe/scard"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 )
 
-// pcscDevice implements Device using PC/SC via ebfe/scard
+// pcscDevice implements Device using PC/SC via the nfc/pcsc adapter
 type pcscDevice struct {
-	ctx        *scard.Context
-	card       *scard.Card
+	ctx        pcsc.Context
+	card       pcsc.Card
 	readerName string
 	uid        string
 	atr        []byte
 	mu         sync.Mutex
 
 	// Card presence tracking for reliable removal detection
-	lastEventState scard.StateFlag // Last known EventState from GetStatusChange
-	lastEventCount uint16          // Event counter from upper 16 bits of EventState
+	lastEventState pcsc.StateFlag // Last known EventState from GetStatusChange
+	lastEventCount uint16         // Event counter from upper 16 bits of EventState
 
 	// Background monitoring for card removal
 	stopMonitor chan struct{} // Signals the monitor goroutine to stop
@@ -32,10 +33,10 @@ type pcscDevice struct {
 }
 
 // newPCSCDevice creates a new PC/SC device from a connected card
-func newPCSCDevice(ctx *scard.Context, card *scard.Card, readerName string) (*pcscDevice, error) {
+func newPCSCDevice(ctx pcsc.Context, card pcsc.Card, readerName string) (*pcscDevice, error) {
 	// Validate protocol before any operations - the scard library panics on invalid protocol
 	proto := card.ActiveProtocol()
-	if proto != scard.ProtocolT0 && proto != scard.ProtocolT1 {
+	if proto != pcsc.ProtocolT0 && proto != pcsc.ProtocolT1 {
 		return nil, fmt.Errorf("unsupported card protocol: %d", proto)
 	}
 
@@ -54,11 +55,11 @@ func newPCSCDevice(ctx *scard.Context, card *scard.Card, readerName string) (*pc
 
 	// Initialize card presence tracking state
 	// This captures the initial event counter and state for reliable detection
-	readerStates := []scard.ReaderState{
-		{Reader: readerName, CurrentState: scard.StateUnaware},
+	readerStates := []pcsc.ReaderState{
+		{Reader: readerName, CurrentState: pcsc.StateUnaware},
 	}
 	if err := ctx.GetStatusChange(readerStates, 0); err == nil {
-		dev.lastEventState = readerStates[0].EventState & ^scard.StateChanged
+		dev.lastEventState = readerStates[0].EventState & ^pcsc.StateChanged
 		dev.lastEventCount = uint16(readerStates[0].EventState >> 16)
 	}
 
@@ -84,7 +85,7 @@ func (d *pcscDevice) Close() error {
 	defer d.mu.Unlock()
 
 	if d.card != nil {
-		err := d.card.Disconnect(scard.LeaveCard)
+		err := d.card.Disconnect(pcsc.LeaveCard)
 		d.card = nil
 		return err
 	}
@@ -100,7 +101,7 @@ func (d *pcscDevice) startCardMonitor() {
 	go func() {
 		// Start with current state
 		d.mu.Lock()
-		readerStates := []scard.ReaderState{
+		readerStates := []pcsc.ReaderState{
 			{Reader: d.readerName, CurrentState: d.lastEventState},
 		}
 		ctx := d.ctx
@@ -119,15 +120,14 @@ func (d *pcscDevice) startCardMonitor() {
 
 			// Block for up to 500ms waiting for state change
 			// Timeout allows checking stopMonitor channel periodically
-			err := ctx.GetStatusChange(readerStates, 500)
+			err := ctx.GetStatusChange(readerStates, 500*time.Millisecond)
 			if err != nil {
 				// Check if context was cancelled
-				if errors.Is(err, scard.ErrCancelled) {
+				if errors.Is(err, pcsc.ErrCancelled) {
 					return
 				}
 				// Timeout is normal - just loop again
-				errLower := strings.ToLower(err.Error())
-				if strings.Contains(errLower, "timeout") {
+				if errors.Is(err, pcsc.ErrTimeout) {
 					continue
 				}
 				// Other errors may indicate reader disconnection
@@ -143,7 +143,7 @@ func (d *pcscDevice) startCardMonitor() {
 
 			// Check if card was removed - only use StateEmpty as the definitive indicator
 			// StatePresent being absent during transitions can cause false positives
-			if (eventState & scard.StateEmpty) != 0 {
+			if (eventState & pcsc.StateEmpty) != 0 {
 				select {
 				case d.cardRemoved <- struct{}{}:
 				default:
@@ -152,7 +152,7 @@ func (d *pcscDevice) startCardMonitor() {
 			}
 
 			// Update state for next iteration (clear StateChanged flag)
-			readerStates[0].CurrentState = eventState & ^scard.StateChanged
+			readerStates[0].CurrentState = eventState & ^pcsc.StateChanged
 		}
 	}()
 }
@@ -262,7 +262,7 @@ func (d *pcscDevice) Transceive(txData []byte) ([]byte, error) {
 
 	// Validate protocol before transmit - the scard library panics on invalid protocol
 	proto := d.card.ActiveProtocol()
-	if proto != scard.ProtocolT0 && proto != scard.ProtocolT1 {
+	if proto != pcsc.ProtocolT0 && proto != pcsc.ProtocolT1 {
 		return nil, NewCardRemovedError(fmt.Errorf("invalid card protocol"))
 	}
 
@@ -287,16 +287,16 @@ func isCardRemovedPCSCError(err error) bool {
 	}
 
 	// Check typed errors first (most reliable)
-	if errors.Is(err, scard.ErrRemovedCard) {
+	if errors.Is(err, pcsc.ErrRemovedCard) {
 		return true
 	}
-	if errors.Is(err, scard.ErrResetCard) {
+	if errors.Is(err, pcsc.ErrResetCard) {
 		return true // Often means removed on macOS
 	}
-	if errors.Is(err, scard.ErrNoSmartcard) {
+	if errors.Is(err, pcsc.ErrNoSmartcard) {
 		return true
 	}
-	if errors.Is(err, scard.ErrUnpoweredCard) {
+	if errors.Is(err, pcsc.ErrUnpoweredCard) {
 		return true
 	}
 

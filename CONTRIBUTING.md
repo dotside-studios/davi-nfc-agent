@@ -13,10 +13,13 @@ Thanks for your interest in contributing to the NFC Agent!
 
 **Linux:**
 ```bash
-sudo apt install pcscd libpcsclite-dev
+sudo apt install pcscd libpcsclite1
 ```
 
-No additional dependencies needed for **macOS** and **Windows**.
+No additional dependencies needed for **macOS** and **Windows**. The agent
+resolves the PC/SC library at runtime and builds without cgo, so no C toolchain
+or `-dev` package is involved; `libpcsclite-dev` is only needed to build the
+`-tags cgopcsc` fallback backend.
 
 ### Building
 

@@ -17,7 +17,6 @@ type Device struct {
 	appVersion   string             // Mobile app version
 	protoVersion int                // Negotiated bridge protocol version
 	isActive     bool               // Whether device is connected
-	tagChannel   chan []nfc.Tag     // Channel to receive tags from smartphone
 	closeChannel chan struct{}      // Signal to close device
 	mu           sync.RWMutex       // Protects device state
 	lastSeen     time.Time          // Last activity timestamp (for health monitoring)
@@ -35,7 +34,6 @@ func NewDevice(deviceID string, req DeviceRegistrationRequest) *Device {
 		appVersion:   req.AppVersion,
 		protoVersion: req.ProtocolVersion,
 		isActive:     true,
-		tagChannel:   make(chan []nfc.Tag, TagChannelBuffer),
 		closeChannel: make(chan struct{}),
 		lastSeen:     time.Now(),
 		capabilities: req.Capabilities,
@@ -54,7 +52,6 @@ func (d *Device) Close() error {
 
 	d.isActive = false
 	close(d.closeChannel)
-	close(d.tagChannel)
 
 	return nil
 }
@@ -132,48 +129,28 @@ func (d *Device) Transceive(txData []byte) ([]byte, error) {
 	return nil, nfc.NewNotSupportedError("Transceive")
 }
 
-// GetTags returns tags from the tag channel with timeout.
-// Returns empty slice (not error) on timeout to maintain compatibility with polling loop.
+// GetTags satisfies nfc.Device and never returns a tag.
+//
+// A phone is not polled the way a reader is: it pushes its scans, which reach
+// the agent through Manager.Data, and nfc.IsRemoteDevice keeps a remote device
+// from ever being opened as the agent's reader. So there is nothing here to
+// return. The wait is what a poller would expect of a reader with no card in
+// the field, and keeps a caller that polls anyway from spinning; a close is
+// still reported as one.
 func (d *Device) GetTags() ([]nfc.Tag, error) {
 	d.mu.RLock()
-	if !d.isActive {
-		d.mu.RUnlock()
-		return nil, nfc.ErrDeviceClosed
-	}
+	active := d.isActive
 	d.mu.RUnlock()
 
-	// Wait for tags with timeout
+	if !active {
+		return nil, nfc.ErrDeviceClosed
+	}
+
 	select {
-	case tags, ok := <-d.tagChannel:
-		if !ok {
-			// Channel closed
-			return nil, nfc.ErrDeviceClosed
-		}
-		return tags, nil
 	case <-time.After(GetTagsTimeout):
-		// Timeout - return empty slice (not error) for compatibility
 		return []nfc.Tag{}, nil
 	case <-d.closeChannel:
 		return nil, nfc.ErrDeviceClosed
-	}
-}
-
-// SendTags sends tags to the device's tag channel (called by manager).
-func (d *Device) SendTags(tags []nfc.Tag) error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if !d.isActive {
-		return fmt.Errorf("device is not active")
-	}
-
-	// Non-blocking send
-	select {
-	case d.tagChannel <- tags:
-		return nil
-	default:
-		// Channel full - skip this update
-		return fmt.Errorf("tag channel full, skipping update")
 	}
 }
 

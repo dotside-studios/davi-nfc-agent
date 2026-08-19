@@ -75,7 +75,7 @@ func New(config Config, bridge *server.ServerBridge) *Server {
 
 	// Register device handler (external devices like phones)
 	if config.DeviceManager != nil {
-		s.deviceHandler = NewDeviceHandler(config.DeviceManager, bridge, config)
+		s.deviceHandler = NewDeviceHandler(config.DeviceManager, config)
 		s.deviceHandler.Register(s)
 
 		// Give tags produced by the manager a route back to their device, so
@@ -688,6 +688,12 @@ func (s *Server) executeCapabilitiesRequest(msg server.CapabilitiesRequestMessag
 // consult and nothing to restrict.
 func modeAllowsTagModification(reader *nfc.NFCReader) bool {
 	return reader == nil || reader.GetMode() != nfc.ModeReadOnly
+}
+
+// tagModificationPolicy captures the mode as a predicate, so a consumer can
+// honour it without holding the reader it is read from.
+func tagModificationPolicy(reader *nfc.NFCReader) func() bool {
+	return func() bool { return modeAllowsTagModification(reader) }
 }
 
 // readOnlyModeMessage explains a mode refusal for the named operation.

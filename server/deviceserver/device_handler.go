@@ -49,7 +49,6 @@ type activeTag struct {
 // DeviceHandler handles all device WebSocket connections and management.
 type DeviceHandler struct {
 	manager           *remotenfc.Manager
-	bridge            *server.ServerBridge
 	deviceSessions    map[string]*server.SafeConn // deviceID -> websocket conn
 	deviceSessionsMux sync.RWMutex
 	connToDeviceID    map[*server.SafeConn]string // reverse lookup: conn -> deviceID
@@ -58,11 +57,16 @@ type DeviceHandler struct {
 	// publicKeyPin lets a device recognize this agent on later connections.
 	publicKeyPin string
 
-	// reader supplies the agent's current mode. Tags held by remote devices are
-	// reached through this handler rather than through the reader, so the mode
-	// has to be consulted here or it would not apply to them at all. Nil when
-	// the agent has no reader, which imposes no restriction.
-	reader *nfc.NFCReader
+	// allowTagModification reports whether the agent's mode currently permits an
+	// operation that can change a tag. Tags held by remote devices are reached
+	// through this handler rather than through the reader, so the mode has to be
+	// consulted here or it would not apply to them at all.
+	//
+	// It is a predicate rather than the reader itself: the mode is the agent's
+	// policy, and a handler serving phones has no business depending on the
+	// hardware reader that policy happens to live on. Nil imposes no
+	// restriction.
+	allowTagModification func() bool
 
 	pending    map[string]pendingRequest // requestID -> waiter
 	pendingMux sync.Mutex
@@ -72,16 +76,21 @@ type DeviceHandler struct {
 }
 
 // NewDeviceHandler creates a new device handler. The config supplies the origin
-// policy applied to the device WebSocket upgrade.
-func NewDeviceHandler(manager *remotenfc.Manager, bridge *server.ServerBridge, config Config) *DeviceHandler {
+// policy applied to the device WebSocket upgrade, and the reader whose mode
+// governs whether tags may be modified.
+//
+// It takes no bridge: a device session is a request/response conversation with
+// one device, and the bridge only carries traffic between the client and device
+// servers. What does cross the bridge — a tag scan, a write routed to whichever
+// device holds a tag — goes through Server, which owns it.
+func NewDeviceHandler(manager *remotenfc.Manager, config Config) *DeviceHandler {
 	return &DeviceHandler{
-		manager:        manager,
-		bridge:         bridge,
-		publicKeyPin:   config.PublicKeyPin,
-		reader:         config.Reader,
-		deviceSessions: make(map[string]*server.SafeConn),
-		connToDeviceID: make(map[*server.SafeConn]string),
-		pending:        make(map[string]pendingRequest),
+		manager:              manager,
+		publicKeyPin:         config.PublicKeyPin,
+		allowTagModification: tagModificationPolicy(config.Reader),
+		deviceSessions:       make(map[string]*server.SafeConn),
+		connToDeviceID:       make(map[*server.SafeConn]string),
+		pending:              make(map[string]pendingRequest),
 		upgrader: websocket.Upgrader{
 			CheckOrigin:  originChecker(config),
 			Subprotocols: protocol.DeviceSubprotocols,
@@ -360,24 +369,11 @@ func (h *DeviceHandler) handleTagScanned(conn *server.SafeConn, deviceID string,
 	}
 	tagData.DeviceID = deviceID
 
-	// Convert to remotenfc.TagData and send
-	phoneTagData := remotenfc.TagData{
-		DeviceID:     tagData.DeviceID,
-		UID:          tagData.UID,
-		Technology:   tagData.Technology,
-		Type:         tagData.Type,
-		ATR:          tagData.ATR,
-		ScannedAt:    tagData.ScannedAt,
-		NDEFMessage:  tagData.NDEFMessage,
-		RawData:      tagData.RawData,
-		Capabilities: tagData.Capabilities,
-	}
-
 	// Route before publishing: a client reacting to the tagData broadcast with an
 	// immediate write must find the device already registered as holding the tag.
 	h.setActiveTag(deviceID, tagData.UID)
 
-	if err := h.manager.SendTagData(deviceID, phoneTagData); err != nil {
+	if err := h.manager.SendTagData(deviceID, tagData); err != nil {
 		log.Printf("[device] Failed to send tag data: %v", err)
 		h.clearActiveTag(deviceID, tagData.UID)
 		h.sendTagError(conn, req.ID, err)
@@ -411,16 +407,9 @@ func (h *DeviceHandler) handleTagRemoved(conn *server.SafeConn, deviceID string,
 	}
 	removedData.DeviceID = deviceID
 
-	// Convert to remotenfc type
-	phoneRemovedData := remotenfc.TagRemovedData{
-		DeviceID:  removedData.DeviceID,
-		UID:       removedData.UID,
-		RemovedAt: removedData.RemovedAt,
-	}
-
 	h.clearActiveTag(deviceID, removedData.UID)
 
-	if err := h.manager.SendTagRemoved(deviceID, phoneRemovedData); err != nil {
+	if err := h.manager.SendTagRemoved(deviceID, removedData); err != nil {
 		log.Printf("[device] Failed to send tag removed: %v", err)
 		h.sendTagError(conn, req.ID, err)
 		return err
@@ -550,7 +539,7 @@ func (h *DeviceHandler) DeviceCanLock(deviceID string) bool {
 // modeAllowsTagModification reports whether the agent's mode currently permits
 // an operation that can change a tag.
 func (h *DeviceHandler) modeAllowsTagModification() bool {
-	return modeAllowsTagModification(h.reader)
+	return h.allowTagModification == nil || h.allowTagModification()
 }
 
 // readOnlyModeError refuses a tag-modifying operation on mode grounds, typed so

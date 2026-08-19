@@ -7,20 +7,28 @@ in real time, and provides the NFC functionality used by the
 
 ## Features
 
-- **Multiple Device Support**: Hardware NFC readers and remote devices simultaneously
-- **Remote NFC Devices**: Smartphones, browsers with WebNFC, or any device that can connect to the API
-- **Rich NDEF Read/Write**: Text, URI, smart poster, vCard, MIME, geo, tel/sms/mailto, Android Application Records, and fully custom raw records
-- **Reliable Writes**: Read-after-write verification, automatic retry on transient failures, and pre-flight capacity checks
-- **Tag Locking & Erase**: Make tags read-only or wipe them back to an empty NDEF message
-- **Tag Capabilities**: Memory size, usable capacity, and write/lock/password support reported with every scan
-- **Real-time WebSocket**: Instant tag data broadcasting
-- **Secure by Default**: Automatic TLS (WSS) with key pinning for devices, an origin allowlist for browsers, plus optional API-secret authentication
-- **Per-device Pairing**: Each device gets its own revocable credential, issued against a PIN
-- **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
-- **Cross-platform**: Linux, macOS, Windows
-- **System Tray UI**: Device management and status
-- **Control Center**: A built-in web console for logs, tag inspection, NDEF
-  writing, per-device revocation and persistent settings
+- **Readers and phones at once**: PC/SC readers, smartphones and WebNFC
+  browsers feed the same agent, and clients read every scan from one WebSocket
+- **Rich NDEF read and write**: Text, URI, smart poster, vCard, MIME, geo,
+  tel/sms/mailto, Android Application Records, and raw records built by hand
+- **Reliable writes**: Read-after-write verification, bounded retries on
+  transient failures, and a pre-flight check that the message fits
+- **Tag locking and erase**: Make a tag read-only, or wipe it back to an empty
+  NDEF message
+- **Capabilities with every scan**: Memory size, usable NDEF capacity, and
+  whether the tag supports writing, locking and password protection
+- **TLS by default**: WSS with key pinning for devices, an origin allowlist for
+  browsers, and optional API-secret authentication
+- **Per-device pairing**: Each device gets its own revocable credential, issued
+  against a PIN
+- **Zero-config discovery**: Advertised over mDNS/Bonjour, so a device finds
+  the agent without being told where it is
+- **System tray**: Reader selection, status, and device management
+- **Control Center**: A built-in web console for the log, tag inspection, NDEF
+  writing, device revocation and settings that survive a restart
+- **Buildable as a library**: Import the agent and write your own `main.go`, in
+  any shape from the full tray application to a headless service
+- **Cross-platform**: Linux, macOS and Windows
 
 ## Supported Devices
 

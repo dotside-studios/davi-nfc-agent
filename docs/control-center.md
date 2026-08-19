@@ -193,9 +193,9 @@ webui/
 ```
 
 Nothing in `webui` imports the agent. It declares the ~35 methods it needs as
-`webui.Host`, and `webui_host.go` in `package main` implements them — so the
-console's entire reach into the agent is readable in one file, and its tests run
-against a fake host with no hardware behind them.
+`webui.Host`, and `agent/console/host.go` implements them — so the console's
+entire reach into the agent is readable in one file, and its tests run against a
+fake host with no hardware behind them.
 
 `go build -tags nowebui .` produces an agent without the control center: no
 `/control` routes, no privileged API, no tray entry, and no frontend in the
@@ -206,20 +206,25 @@ make build-nowebui
 make test-nowebui     # the suite under the same tag
 ```
 
-Only three files in `package main` carry `//go:build !nowebui`:
+Only three files carry `//go:build !nowebui`:
 
 ```
-webui_enabled.go      the one wiring entry point
-webui_host.go         the Host implementation
-systray_console.go    the tray entry
+agent/console/console.go         the one wiring entry point
+agent/console/host.go            the Host implementation
+agent/tray/systray_console.go    the tray entry
 ```
 
-`webui_disabled.go` supplies the stubs under the opposite tag. Call sites in
-`agent.go`, `main.go` and `systray.go` hold a nil `*Console` and tolerate it, so
-none of them needs a build tag of its own.
+`agent/console/console_nowebui.go` and `agent/tray/console_nowebui.go` supply
+the stubs under the opposite tag.
+
+The agent itself needs no tag either way. It knows the console only as
+`agent.Console` — two handlers to mount and a redraw signal — so the dependency
+runs one way: `agent/console` imports `agent`, never the reverse, and `main` is
+the only place that wires the two together. A build without a console leaves
+that interface nil, and every call site already tolerates it.
 
 Dropping the console from a custom build is therefore a tag, not a patch — and
-deleting `webui/` outright leaves only those four files to remove.
+deleting `webui/` outright leaves only `agent/console/` to remove.
 
 **The agent's protocol is unaffected.** Raw tag exchanges, settings
 persistence and the log ring stay in either build — each is reachable without

@@ -1,4 +1,4 @@
-package main
+package tray
 
 import (
 	"log"
@@ -11,16 +11,16 @@ import (
 // It sits beside the origin allowlist because the two are the pair of things a
 // browser needs: the allowlist decides who may connect, this decides whether the
 // connection can be opened at all.
-func (s *SystrayApp) setupTrustMenu() {
+func (s *App) setupTrustMenu() {
 	s.mTrustBrowsers = systray.AddMenuItem(
 		"Trust This Agent in Browsers",
 		"Install a local certificate authority so web pages on this machine can reach the reader",
 	)
-	s.refreshTrustMenu()
+	s.RefreshTrustMenu()
 }
 
-// refreshTrustMenu hides the entry once there is nothing left for it to do.
-func (s *SystrayApp) refreshTrustMenu() {
+// RefreshTrustMenu hides the entry once there is nothing left for it to do.
+func (s *App) RefreshTrustMenu() {
 	if s.mTrustBrowsers == nil {
 		return
 	}
@@ -36,7 +36,7 @@ func (s *SystrayApp) refreshTrustMenu() {
 //
 // The OS prompts for a password, which blocks, so this runs off the menu
 // goroutine — a stalled handler would freeze every other menu item.
-func (s *SystrayApp) handleTrustBrowsers() {
+func (s *App) handleTrustBrowsers() {
 	if s.agent.TLSManager == nil {
 		log.Printf("[systray] Cannot trust this agent: it is not managing its own certificates")
 		return
@@ -55,7 +55,7 @@ func (s *SystrayApp) handleTrustBrowsers() {
 		}
 
 		log.Printf("[systray] Browsers on this machine now trust this agent; reload any page that uses the reader")
-		s.refreshTrustMenu()
+		s.RefreshTrustMenu()
 		if s.console != nil {
 			s.console.NotifyChange()
 		}

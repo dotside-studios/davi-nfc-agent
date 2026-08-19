@@ -1,4 +1,4 @@
-package main
+package tray
 
 import (
 	"log"
@@ -21,7 +21,7 @@ type originSlot struct {
 }
 
 // setupOriginsMenu builds the Allowed Origins submenu.
-func (s *SystrayApp) setupOriginsMenu() {
+func (s *App) setupOriginsMenu() {
 	s.mOriginsMenu = systray.AddMenuItem("Allowed Origins", "Web pages permitted to use this reader")
 
 	for i := 0; i < originSlotCount; i++ {
@@ -41,7 +41,7 @@ func (s *SystrayApp) setupOriginsMenu() {
 
 // refreshOriginsMenu redraws the submenu from the store: allowed origins first,
 // then anything refused since start, offered for one-click approval.
-func (s *SystrayApp) refreshOriginsMenu() {
+func (s *App) refreshOriginsMenu() {
 	if s.agent.Origins == nil || len(s.originSlots) == 0 {
 		return
 	}
@@ -78,7 +78,7 @@ func (s *SystrayApp) refreshOriginsMenu() {
 	}
 }
 
-func (s *SystrayApp) setOriginSlot(slot *originSlot, origin string, blocked bool) {
+func (s *App) setOriginSlot(slot *originSlot, origin string, blocked bool) {
 	slot.origin = origin
 	slot.blocked = blocked
 
@@ -96,7 +96,7 @@ func (s *SystrayApp) setOriginSlot(slot *originSlot, origin string, blocked bool
 
 // handleOriginSelection polls the origin slots, matching how device and card
 // filter items are handled: a fixed select cannot cover a changing set.
-func (s *SystrayApp) handleOriginSelection() {
+func (s *App) handleOriginSelection() {
 	if s.agent.Origins == nil {
 		return
 	}
@@ -127,7 +127,7 @@ func (s *SystrayApp) handleOriginSelection() {
 }
 
 // handleOriginAllowAny toggles the session-only escape hatch.
-func (s *SystrayApp) handleOriginAllowAny() {
+func (s *App) handleOriginAllowAny() {
 	if s.agent.Origins == nil {
 		return
 	}
@@ -146,7 +146,7 @@ func (s *SystrayApp) handleOriginAllowAny() {
 
 // startOriginWatcher redraws the menu when an origin is refused, so a blocked
 // console becomes a visible one-click prompt instead of a silent failure.
-func (s *SystrayApp) startOriginWatcher() {
+func (s *App) startOriginWatcher() {
 	if s.agent.Origins == nil {
 		return
 	}

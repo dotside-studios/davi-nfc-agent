@@ -1,4 +1,4 @@
-package main
+package tray
 
 // Icon data from icons/ folder
 // Using .ico format which works cross-platform

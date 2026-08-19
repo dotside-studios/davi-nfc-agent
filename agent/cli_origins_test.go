@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"os"
@@ -26,13 +26,13 @@ func TestParseAllowedOrigins(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseAllowedOrigins(tt.in)
+			got := ParseAllowedOrigins(tt.in)
 			if len(got) != len(tt.want) {
-				t.Fatalf("parseAllowedOrigins(%q) = %v, want %v", tt.in, got, tt.want)
+				t.Fatalf("ParseAllowedOrigins(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 			for i := range got {
 				if got[i] != tt.want[i] {
-					t.Errorf("parseAllowedOrigins(%q)[%d] = %q, want %q", tt.in, i, got[i], tt.want[i])
+					t.Errorf("ParseAllowedOrigins(%q)[%d] = %q, want %q", tt.in, i, got[i], tt.want[i])
 				}
 			}
 		})
@@ -42,12 +42,12 @@ func TestParseAllowedOrigins(t *testing.T) {
 func TestParseAllowedOriginsFallsBackToEnv(t *testing.T) {
 	t.Setenv("DAVI_NFC_ALLOWED_ORIGINS", "env.example:443")
 
-	if got := parseAllowedOrigins(""); len(got) != 1 || got[0] != "env.example:443" {
-		t.Errorf("parseAllowedOrigins(\"\") = %v, want [env.example:443]", got)
+	if got := ParseAllowedOrigins(""); len(got) != 1 || got[0] != "env.example:443" {
+		t.Errorf("ParseAllowedOrigins(\"\") = %v, want [env.example:443]", got)
 	}
 
 	// An explicit flag wins over the environment.
-	if got := parseAllowedOrigins("flag.example:443"); len(got) != 1 || got[0] != "flag.example:443" {
+	if got := ParseAllowedOrigins("flag.example:443"); len(got) != 1 || got[0] != "flag.example:443" {
 		t.Errorf("flag did not take precedence: got %v", got)
 	}
 

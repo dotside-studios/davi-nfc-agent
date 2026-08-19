@@ -1,10 +1,10 @@
-package main
+package agent
 
 import "github.com/dotside-studios/davi-nfc-agent/settings"
 
-// applySettings pushes stored settings onto a running agent. The port is not
+// ApplySettings pushes stored settings onto a running agent. The port is not
 // applied: rebinding the listener belongs in an explicit restart.
-func applySettings(agent *Agent, s settings.Settings) {
+func (agent *Agent) ApplySettings(s settings.Settings) {
 	if agent == nil {
 		return
 	}

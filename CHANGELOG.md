@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The root package is now just the wiring.** `package main` held the agent,
+  the CLI, the tray and the console adapter in one heap of 19 files, so
+  everything reached everything: the tray read the agent's private fields, and
+  the console adapter found the tray by type-asserting an `any`. None of it
+  could be imported, and none of it could be built without a system tray.
+  The agent now lives in `agent`, the control center in `agent/console` and the
+  tray in `agent/tray`, leaving `main.go` as the composition root — the one
+  place that picks an NFC backend and joins the three. Behaviour, flags and the
+  on-disk config are unchanged.
+
+  The dependencies run one way. `agent` knows the console only as an interface
+  of two handlers and a redraw signal, so `agent/console` imports `agent` and
+  never the reverse; the console reaches the tray through a `Tray` interface it
+  declares itself, which replaces the `consoleHost any` type assertion. Nothing
+  below `main` imports both. The upshot is that `agent` pulls in neither
+  `fyne.io/systray` nor a PC/SC backend, so it can be embedded headless — and
+  choosing the backend stays in `main`, where moving PC/SC into `nfc/pcsc` put
+  it.
+
+  `SystrayApp` is `tray.App`, `applySettings` is now the `(*Agent).ApplySettings`
+  method, `getLocalIPs` is `agent.LocalIPs`, and the five tray actions the
+  console drives are exported. `DEFAULT_DEVICE_PORT` and
+  `DEFAULT_BOOTSTRAP_PORT` become `agent.DefaultDevicePort` and
+  `agent.DefaultBootstrapPort` now that they are part of a package's API
+
 ## [1.1.3] - 2026-08-15
 
 ### Fixed

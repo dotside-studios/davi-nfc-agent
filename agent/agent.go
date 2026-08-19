@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"errors"
@@ -69,10 +69,7 @@ type Agent struct {
 	Devices *DeviceRegistry
 
 	// Console serves the control center's privileged API. Nil disables it.
-	Console *Console
-
-	// consoleHost is the adapter the console administers the agent through.
-	consoleHost any
+	Console Console
 
 	// Bootstrap is the pairing server, or nil when pairing is disabled.
 	Bootstrap *tls.BootstrapServer
@@ -326,8 +323,8 @@ func (a *Agent) startServers() error {
 		Port:           a.DevicePort,
 		CertFile:       a.CertFile,
 		KeyFile:        a.KeyFile,
-		ControlHandler: consoleRoutes(a.Console),
-		UIHandler:      consoleAssets(),
+		ControlHandler: a.consoleRoutes(),
+		UIHandler:      a.consoleAssets(),
 	}, a.DeviceServer, a.ClientServer)
 
 	go func() {

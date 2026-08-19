@@ -121,13 +121,15 @@ jobs:
           done
 
       - name: Build the macOS packages
-        # The agent itself needs cgo on darwin (fyne.io/systray talks to Cocoa),
-        # which an Ubuntu runner cannot do; everything below the systray can
-        # still be type-checked here.
+        # Only the tray needs cgo on darwin (fyne.io/systray talks to Cocoa),
+        # which an Ubuntu runner cannot do. Everything else — including the
+        # agent and the console, which import no GUI — is type-checked here, so
+        # the root package and agent/tray are the only darwin gaps.
         env:
           CGO_ENABLED: '0'
         run: |
           for arch in amd64 arm64; do
             echo "== darwin/$arch"
-            GOOS=darwin GOARCH=$arch go build ./nfc/... ./server/... ./tls/... ./protocol/...
+            GOOS=darwin GOARCH=$arch go build \
+              ./agent ./agent/console ./nfc/... ./server/... ./tls/... ./protocol/...
           done

@@ -1,6 +1,6 @@
 //go:build !nowebui
 
-package main
+package tray
 
 import (
 	"fmt"
@@ -9,18 +9,18 @@ import (
 	"runtime"
 
 	"fyne.io/systray"
+
+	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 )
 
-// AttachConsole gives the tray the console it opens, and gives the console's
-// host the tray, so an action taken in either runs through the same code.
-func (s *SystrayApp) AttachConsole(console *Console) {
-	s.console = console
-	if host, ok := s.agent.consoleHost.(*webuiHost); ok && host != nil {
-		host.app = s
-	}
+// AttachConsole gives the tray the console it opens, and gives the console the
+// tray, so an action taken in either runs through the same code.
+func (s *App) AttachConsole(c *console.Server) {
+	s.console = c
+	c.AttachTray(s)
 }
 
-func (s *SystrayApp) setupConsoleMenu() {
+func (s *App) setupConsoleMenu() {
 	s.mConsole = systray.AddMenuItem("Open Control Center", "Manage this agent in a browser")
 	if s.console == nil {
 		s.mConsole.Hide()
@@ -28,7 +28,7 @@ func (s *SystrayApp) setupConsoleMenu() {
 }
 
 // handleOpenConsole mints a single-use token and opens the console.
-func (s *SystrayApp) handleOpenConsole() {
+func (s *App) handleOpenConsole() {
 	if s.console == nil {
 		return
 	}

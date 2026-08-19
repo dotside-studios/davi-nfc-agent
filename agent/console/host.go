@@ -1,64 +1,67 @@
 //go:build !nowebui
 
-package main
+package console
 
 import (
 	"errors"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
-// webuiHost adapts the agent to webui.Host. Every reach the console makes into
-// the agent is a method here.
-type webuiHost struct {
-	agent    *Agent
+// host adapts the agent to webui.Host. Every reach the console makes into the
+// agent is a method here. app is the tray, when there is one: actions that
+// must also move the tray's menu go through it rather than straight to the
+// agent.
+type host struct {
+	agent    *agent.Agent
 	settings *settings.Store
-	app      *SystrayApp
+	app      Tray
 }
 
-var _ webui.Host = (*webuiHost)(nil)
+var _ webui.Host = (*host)(nil)
 
 // ---- identity and lifecycle ----
 
-func (h *webuiHost) Running() bool     { return h.agent.Reader != nil }
-func (h *webuiHost) ConfigDir() string { return h.agent.ConfigDir }
+func (h *host) Running() bool     { return h.agent.Reader != nil }
+func (h *host) ConfigDir() string { return h.agent.ConfigDir }
 
-func (h *webuiHost) StartAgent() error {
+func (h *host) StartAgent() error {
 	return h.agent.Start(h.agent.CurrentDevicePath())
 }
 
-func (h *webuiHost) StopAgent() {
+func (h *host) StopAgent() {
 	if h.app != nil {
 		// Through the tray, so its menu state follows.
-		h.app.handleStopAgent()
+		h.app.StopAgent()
 		return
 	}
 	h.agent.Stop()
 }
 
-func (h *webuiHost) QuitAgent() {
+func (h *host) QuitAgent() {
 	if h.app != nil {
 		h.app.Quit()
 	}
 }
 
-func (h *webuiHost) RestartServers() error { return h.agent.RestartServers() }
+func (h *host) RestartServers() error { return h.agent.RestartServers() }
 
 // ---- reader ----
 
-func (h *webuiHost) ReaderMode() string {
+func (h *host) ReaderMode() string {
 	if h.agent.Reader == nil {
 		return settings.ModeReadWrite
 	}
 	return settings.FormatMode(h.agent.Reader.GetMode())
 }
 
-func (h *webuiHost) DevicePath() string { return h.agent.CurrentDevicePath() }
+func (h *host) DevicePath() string { return h.agent.CurrentDevicePath() }
 
-func (h *webuiHost) AvailableDevices() []string {
+func (h *host) AvailableDevices() []string {
 	if h.agent.Manager == nil {
 		return nil
 	}
@@ -72,9 +75,9 @@ func (h *webuiHost) AvailableDevices() []string {
 	return devices
 }
 
-func (h *webuiHost) AllCardTypes() []string { return nfc.GetAllCardTypes() }
+func (h *host) AllCardTypes() []string { return nfc.GetAllCardTypes() }
 
-func (h *webuiHost) CurrentCard() (uid, cardType string, present bool) {
+func (h *host) CurrentCard() (uid, cardType string, present bool) {
 	if h.agent.ClientServer == nil {
 		return "", "", false
 	}
@@ -85,7 +88,7 @@ func (h *webuiHost) CurrentCard() (uid, cardType string, present bool) {
 	return card.UID, card.Type, true
 }
 
-func (h *webuiHost) RemoteDevices() (total, active int) {
+func (h *host) RemoteDevices() (total, active int) {
 	mgr := h.remoteManager()
 	if mgr == nil {
 		return 0, 0
@@ -93,7 +96,7 @@ func (h *webuiHost) RemoteDevices() (total, active int) {
 	return mgr.GetDeviceCount(), mgr.GetActiveDeviceCount()
 }
 
-func (h *webuiHost) SelectDevice(devicePath string) error {
+func (h *host) SelectDevice(devicePath string) error {
 	if h.app == nil {
 		return errors.New("device cannot be changed from here")
 	}
@@ -103,26 +106,26 @@ func (h *webuiHost) SelectDevice(devicePath string) error {
 	if nfc.IsRemoteDevice(h.agent.Manager, devicePath) {
 		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
 	}
-	h.app.switchDevice(devicePath)
+	h.app.SwitchDevice(devicePath)
 	return nil
 }
 
 // ---- server ----
 
-func (h *webuiHost) Port() int          { return h.agent.DevicePort }
-func (h *webuiHost) BootstrapPort() int { return h.agent.BootstrapPort }
-func (h *webuiHost) CertFile() string   { return h.agent.CertFile }
-func (h *webuiHost) TLSEnabled() bool   { return h.agent.CertFile != "" && h.agent.KeyFile != "" }
-func (h *webuiHost) LocalIPs() []string { return getLocalIPs() }
+func (h *host) Port() int          { return h.agent.DevicePort }
+func (h *host) BootstrapPort() int { return h.agent.BootstrapPort }
+func (h *host) CertFile() string   { return h.agent.CertFile }
+func (h *host) TLSEnabled() bool   { return h.agent.CertFile != "" && h.agent.KeyFile != "" }
+func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
-func (h *webuiHost) ClientCount() int {
+func (h *host) ClientCount() int {
 	if h.agent.ClientServer == nil {
 		return 0
 	}
 	return h.agent.ClientServer.ClientCount()
 }
 
-func (h *webuiHost) Clients() []webui.Client {
+func (h *host) Clients() []webui.Client {
 	if h.agent.ClientServer == nil {
 		return nil
 	}
@@ -142,7 +145,7 @@ func (h *webuiHost) Clients() []webui.Client {
 	return out
 }
 
-func (h *webuiHost) DisconnectClient(id string) error {
+func (h *host) DisconnectClient(id string) error {
 	if h.agent.ClientServer == nil {
 		return errors.New("agent is not running")
 	}
@@ -154,37 +157,37 @@ func (h *webuiHost) DisconnectClient(id string) error {
 
 // ---- credentials and trust ----
 
-func (h *webuiHost) APISecret() string    { return h.agent.APISecret }
-func (h *webuiHost) PublicKeyPin() string { return h.agent.PublicKeyPin }
+func (h *host) APISecret() string    { return h.agent.APISecret }
+func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin }
 
-func (h *webuiHost) RotateAPISecret() (string, error) { return h.agent.RotateAPISecret() }
+func (h *host) RotateAPISecret() (string, error) { return h.agent.RotateAPISecret() }
 
-func (h *webuiHost) PairingPIN() string {
+func (h *host) PairingPIN() string {
 	if h.agent.Bootstrap == nil {
 		return ""
 	}
 	return h.agent.Bootstrap.PIN()
 }
 
-func (h *webuiHost) RotatePairingPIN() (string, error) {
+func (h *host) RotatePairingPIN() (string, error) {
 	if h.agent.Bootstrap == nil {
 		return "", errors.New("pairing server is disabled")
 	}
 	return h.agent.Bootstrap.RotatePIN(), nil
 }
 
-func (h *webuiHost) CAInstalled() bool {
+func (h *host) CAInstalled() bool {
 	return h.agent.TLSManager != nil && h.agent.TLSManager.CAInstalled()
 }
 
-func (h *webuiHost) CAFingerprint() (string, error) {
+func (h *host) CAFingerprint() (string, error) {
 	if h.agent.TLSManager == nil {
 		return "", errors.New("no certificate authority")
 	}
 	return h.agent.TLSManager.GetCAFingerprint()
 }
 
-func (h *webuiHost) InstallCA() error {
+func (h *host) InstallCA() error {
 	if h.agent.TLSManager == nil {
 		return errors.New("agent is not managing its own certificates")
 	}
@@ -193,12 +196,12 @@ func (h *webuiHost) InstallCA() error {
 	}
 	if h.app != nil {
 		// The tray offers the same action; it has nothing left to offer now.
-		h.app.refreshTrustMenu()
+		h.app.RefreshTrustMenu()
 	}
 	return nil
 }
 
-func (h *webuiHost) RegenerateCertificate() error {
+func (h *host) RegenerateCertificate() error {
 	if h.agent.TLSManager == nil {
 		return errors.New("agent is not managing its own certificates")
 	}
@@ -207,7 +210,7 @@ func (h *webuiHost) RegenerateCertificate() error {
 
 // ---- paired devices ----
 
-func (h *webuiHost) PairedDevices() []webui.PairedDevice {
+func (h *host) PairedDevices() []webui.PairedDevice {
 	if h.agent.Devices == nil {
 		return nil
 	}
@@ -238,57 +241,57 @@ func (h *webuiHost) PairedDevices() []webui.PairedDevice {
 	return out
 }
 
-func (h *webuiHost) RevokeDevice(id string) error {
+func (h *host) RevokeDevice(id string) error {
 	if h.agent.Devices == nil {
 		return errors.New("no device registry")
 	}
 	return h.agent.Devices.Revoke(id)
 }
 
-func (h *webuiHost) RevokeAllDevices() error {
+func (h *host) RevokeAllDevices() error {
 	if h.agent.Devices == nil {
 		return errors.New("no device registry")
 	}
 	return h.agent.Devices.RevokeAll()
 }
 
-func (h *webuiHost) RequirePairedDevice() bool { return h.agent.RequirePairedDevice }
+func (h *host) RequirePairedDevice() bool { return h.agent.RequirePairedDevice }
 
 // ---- browser origins ----
 
-func (h *webuiHost) AllowedOrigins() []string {
+func (h *host) AllowedOrigins() []string {
 	if h.agent.Origins == nil {
 		return nil
 	}
 	return h.agent.Origins.List()
 }
 
-func (h *webuiHost) BlockedOrigins() []string {
+func (h *host) BlockedOrigins() []string {
 	if h.agent.Origins == nil {
 		return nil
 	}
 	return h.agent.Origins.Blocked()
 }
 
-func (h *webuiHost) OriginCheckDisabled() bool {
+func (h *host) OriginCheckDisabled() bool {
 	return h.agent.Origins != nil && h.agent.Origins.IsSessionAllowAny()
 }
 
-func (h *webuiHost) AllowOrigin(origin string) error {
+func (h *host) AllowOrigin(origin string) error {
 	if h.agent.Origins == nil {
 		return errors.New("no origin store")
 	}
 	return h.agent.Origins.Allow(origin)
 }
 
-func (h *webuiHost) RevokeOrigin(origin string) error {
+func (h *host) RevokeOrigin(origin string) error {
 	if h.agent.Origins == nil {
 		return errors.New("no origin store")
 	}
 	return h.agent.Origins.Revoke(origin)
 }
 
-func (h *webuiHost) SetOriginCheckDisabled(on bool) {
+func (h *host) SetOriginCheckDisabled(on bool) {
 	if h.agent.Origins != nil {
 		h.agent.Origins.SessionAllowAny(on)
 	}
@@ -296,24 +299,24 @@ func (h *webuiHost) SetOriginCheckDisabled(on bool) {
 
 // ---- settings ----
 
-func (h *webuiHost) Settings() settings.Settings { return h.settings.Get() }
+func (h *host) Settings() settings.Settings { return h.settings.Get() }
 
-func (h *webuiHost) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
+func (h *host) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
 	saved, err := h.settings.Update(mutate)
 	if err != nil {
 		return saved, err
 	}
 
-	applySettings(h.agent, saved)
+	h.agent.ApplySettings(saved)
 	if h.app != nil {
-		h.app.syncSettingsToMenu(saved)
+		h.app.SyncSettingsToMenu(saved)
 	}
 	return saved, nil
 }
 
 // remoteManager returns the remote device manager, held either directly or
 // behind the multi-manager.
-func (h *webuiHost) remoteManager() *remotenfc.Manager {
+func (h *host) remoteManager() *remotenfc.Manager {
 	if h.agent.Manager == nil {
 		return nil
 	}

@@ -1,4 +1,4 @@
-package main
+package tray
 
 import (
 	"fmt"
@@ -15,6 +15,8 @@ import (
 
 	"fyne.io/systray"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
@@ -27,46 +29,18 @@ type cardTypeFilterItem struct {
 	cardType string
 }
 
-// getLocalIPs returns local non-loopback IP addresses (both IPv4 and IPv6 globals).
-// IPv4 addresses come first so callers that pick ips[0] get the most broadly
-// compatible address. Link-local and unspecified addresses are skipped.
-func getLocalIPs() []string {
-	var v4, v6 []string
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil
-	}
-
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		ip := ipNet.IP
-		if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			continue
-		}
-		if ip.To4() != nil {
-			v4 = append(v4, ip.String())
-		} else {
-			v6 = append(v6, ip.String())
-		}
-	}
-	return append(v4, v6...)
-}
-
 // hostPort joins a host and port using bracket notation for IPv6 literals.
 func hostPort(host string, port int) string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
-// SystrayApp manages the system tray interface for the NFC agent
-type SystrayApp struct {
-	agent         *Agent
+// App manages the system tray interface for the NFC agent
+type App struct {
+	agent         *agent.Agent
 	initialDevice string
 	bootstrapPort int
 	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
-	console       *Console             // nil if the control center is not built in
+	console       *console.Server      // nil if the control center is not built in
 
 	// Menu items
 	mStatus     *systray.MenuItem
@@ -120,12 +94,12 @@ type SystrayApp struct {
 	mConsole *systray.MenuItem
 }
 
-// NewSystrayApp creates a new systray application. bootstrap may be nil
+// New creates a new systray application. bootstrap may be nil
 // if the pairing server is disabled (e.g. -bootstrap-port 0); the
 // pairing PIN menu item is hidden in that case.
-func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer) *SystrayApp {
-	return &SystrayApp{
-		agent:           agent,
+func New(a *agent.Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer) *App {
+	return &App{
+		agent:           a,
 		initialDevice:   initialDevice,
 		bootstrapPort:   bootstrapPort,
 		bootstrap:       bootstrap,
@@ -134,8 +108,8 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 	}
 }
 
-// syncSettingsToMenu reflects a settings change made in the console.
-func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
+// SyncSettingsToMenu reflects a settings change made in the console.
+func (s *App) SyncSettingsToMenu(next settings.Settings) {
 	if s.mModeMenu == nil {
 		return
 	}
@@ -188,15 +162,15 @@ func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 }
 
 // Quit tears the tray down, which stops the agent on the way out.
-func (s *SystrayApp) Quit() { systray.Quit() }
+func (s *App) Quit() { systray.Quit() }
 
 // Run starts the systray application
-func (s *SystrayApp) Run() {
+func (s *App) Run() {
 	systray.Run(s.onReady, s.onExit)
 }
 
 // onReady is called when the systray is ready
-func (s *SystrayApp) onReady() {
+func (s *App) onReady() {
 	s.setupUI()
 	s.autoStartAgent()
 	s.startCardInfoUpdater()
@@ -207,12 +181,12 @@ func (s *SystrayApp) onReady() {
 }
 
 // onExit is called when the systray is exiting
-func (s *SystrayApp) onExit() {
+func (s *App) onExit() {
 	s.agent.Stop()
 }
 
 // setupUI initializes all menu items
-func (s *SystrayApp) setupUI() {
+func (s *App) setupUI() {
 	systray.SetIcon(iconData)
 	systray.SetTooltip(buildinfo.DisplayName)
 
@@ -283,9 +257,9 @@ func (s *SystrayApp) setupUI() {
 	s.mFilterAll = s.mCardFilterMenu.AddSubMenuItemCheckbox("All Types", "Allow all card types", true)
 
 	// Create card type filter menu items for each card type
-	for _, cardType := range GetAllCardTypeFilterNames() {
-		displayName := GetCardTypeFilterDisplayName(cardType)
-		tooltip := GetCardTypeFilterTooltip(cardType)
+	for _, cardType := range agent.GetAllCardTypeFilterNames() {
+		displayName := agent.GetCardTypeFilterDisplayName(cardType)
+		tooltip := agent.GetCardTypeFilterTooltip(cardType)
 		menuItem := s.mCardFilterMenu.AddSubMenuItemCheckbox(displayName, tooltip, false)
 		s.cardTypeFilters[cardType] = &cardTypeFilterItem{
 			menuItem: menuItem,
@@ -324,7 +298,7 @@ func (s *SystrayApp) setupUI() {
 }
 
 // autoStartAgent starts the agent automatically
-func (s *SystrayApp) autoStartAgent() {
+func (s *App) autoStartAgent() {
 	// Set up device change listener
 	s.setupDeviceChangeListener()
 
@@ -343,7 +317,7 @@ func (s *SystrayApp) autoStartAgent() {
 }
 
 // setupDeviceChangeListener sets up automatic device list refresh on device changes
-func (s *SystrayApp) setupDeviceChangeListener() {
+func (s *App) setupDeviceChangeListener() {
 	notifier, ok := s.agent.Manager.(nfc.DeviceChangeNotifier)
 	if !ok {
 		return
@@ -358,7 +332,7 @@ func (s *SystrayApp) setupDeviceChangeListener() {
 }
 
 // startCardInfoUpdater starts a goroutine to update card information
-func (s *SystrayApp) startCardInfoUpdater() {
+func (s *App) startCardInfoUpdater() {
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
@@ -388,7 +362,7 @@ func (s *SystrayApp) startCardInfoUpdater() {
 
 // startServerRestartListener listens for server restart events from the Agent
 // and updates the displayed URLs accordingly.
-func (s *SystrayApp) startServerRestartListener() {
+func (s *App) startServerRestartListener() {
 	go func() {
 		for range s.agent.ServerRestarts() {
 			log.Printf("[systray] Server restart detected, updating URLs")
@@ -398,12 +372,12 @@ func (s *SystrayApp) startServerRestartListener() {
 }
 
 // startEventHandler starts the main event handling loop
-func (s *SystrayApp) startEventHandler() {
+func (s *App) startEventHandler() {
 	// This will be called from handleMenuEvents
 }
 
 // handleMenuEvents processes all menu click events
-func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
+func (s *App) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
 	// Nil in a build without the console, and a receive on a nil channel simply
 	// never fires — so this case costs nothing rather than needing a build tag.
 	var controlClicks <-chan struct{}
@@ -416,7 +390,7 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 		case <-s.mStart.ClickedCh:
 			s.handleStartAgent()
 		case <-s.mStop.ClickedCh:
-			s.handleStopAgent()
+			s.StopAgent()
 		case <-mRefreshDevices.ClickedCh:
 			s.updateDeviceList()
 		case <-controlClicks:
@@ -511,7 +485,7 @@ func (s *SystrayApp) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) 
 }
 
 // handleStartAgent starts the agent
-func (s *SystrayApp) handleStartAgent() {
+func (s *App) handleStartAgent() {
 	// Use agent's stored device path (or empty for auto-discovery)
 	devicePath := s.agent.CurrentDevicePath()
 	if err := s.agent.Start(devicePath); err == nil {
@@ -525,8 +499,8 @@ func (s *SystrayApp) handleStartAgent() {
 	}
 }
 
-// handleStopAgent stops the agent
-func (s *SystrayApp) handleStopAgent() {
+// StopAgent stops the agent
+func (s *App) StopAgent() {
 	s.agent.Stop()
 	s.updateStatus("Stopped")
 	s.clearURLs()
@@ -535,7 +509,7 @@ func (s *SystrayApp) handleStopAgent() {
 }
 
 // handleModeSwitch switches the reader mode
-func (s *SystrayApp) handleModeSwitch(mode nfc.ReaderMode, modeName string) {
+func (s *App) handleModeSwitch(mode nfc.ReaderMode, modeName string) {
 	if s.agent.Reader == nil {
 		return
 	}
@@ -561,7 +535,7 @@ func (s *SystrayApp) handleModeSwitch(mode nfc.ReaderMode, modeName string) {
 }
 
 // handleFilterAll enables all card type filters
-func (s *SystrayApp) handleFilterAll() {
+func (s *App) handleFilterAll() {
 	s.mFilterAll.Check()
 
 	// Uncheck all individual filters
@@ -573,7 +547,7 @@ func (s *SystrayApp) handleFilterAll() {
 }
 
 // handleCardFilterSelection processes card type filter menu selections
-func (s *SystrayApp) handleCardFilterSelection() {
+func (s *App) handleCardFilterSelection() {
 	for _, filter := range s.cardTypeFilters {
 		select {
 		case <-filter.menuItem.ClickedCh:
@@ -585,7 +559,7 @@ func (s *SystrayApp) handleCardFilterSelection() {
 }
 
 // handleCardTypeToggle toggles a card type filter
-func (s *SystrayApp) handleCardTypeToggle(filter *cardTypeFilterItem) {
+func (s *App) handleCardTypeToggle(filter *cardTypeFilterItem) {
 	s.mFilterAll.Uncheck()
 
 	// Toggle the card type
@@ -605,13 +579,13 @@ func (s *SystrayApp) handleCardTypeToggle(filter *cardTypeFilterItem) {
 }
 
 // handleDeviceSelection processes device menu selections
-func (s *SystrayApp) handleDeviceSelection() {
+func (s *App) handleDeviceSelection() {
 	currentDevice := s.agent.CurrentDevicePath()
 	for deviceName, menuItem := range s.deviceMenuItems {
 		select {
 		case <-menuItem.ClickedCh:
 			if currentDevice != deviceName {
-				s.switchDevice(deviceName)
+				s.SwitchDevice(deviceName)
 			}
 		default:
 			// No click event for this menu item
@@ -619,8 +593,8 @@ func (s *SystrayApp) handleDeviceSelection() {
 	}
 }
 
-// switchDevice switches to a different NFC device
-func (s *SystrayApp) switchDevice(deviceName string) {
+// SwitchDevice switches to a different NFC device
+func (s *App) SwitchDevice(deviceName string) {
 	// Restart agent with new device
 	s.agent.Stop()
 	if err := s.agent.Start(deviceName); err == nil {
@@ -647,7 +621,7 @@ func (s *SystrayApp) switchDevice(deviceName string) {
 }
 
 // updateDeviceList refreshes the list of available devices
-func (s *SystrayApp) updateDeviceList() {
+func (s *App) updateDeviceList() {
 	// Clear existing device menu items
 	for _, item := range s.deviceMenuItems {
 		item.Hide()
@@ -667,7 +641,7 @@ func (s *SystrayApp) updateDeviceList() {
 	// If agent is running but no device selected, auto-select first available
 	if s.agent.Reader != nil && currentDevice == "" && len(devices) > 0 {
 		log.Printf("[systray] Auto-selecting discovered device: %s", devices[0])
-		s.switchDevice(devices[0])
+		s.SwitchDevice(devices[0])
 		currentDevice = s.agent.CurrentDevicePath()
 	}
 
@@ -681,7 +655,7 @@ func (s *SystrayApp) updateDeviceList() {
 }
 
 // updateStatus updates the status menu item and icon
-func (s *SystrayApp) updateStatus(status string) {
+func (s *App) updateStatus(status string) {
 	s.mStatus.SetTitle(status)
 
 	// Update icon based on status
@@ -699,7 +673,7 @@ func (s *SystrayApp) updateStatus(status string) {
 }
 
 // getCardInfo extracts UID and type from a card
-func (s *SystrayApp) getCardInfo(card *nfc.Card) (uid, cardType string) {
+func (s *App) getCardInfo(card *nfc.Card) (uid, cardType string) {
 	if card != nil {
 		uid = card.UID
 		cardType = card.Type
@@ -708,7 +682,7 @@ func (s *SystrayApp) getCardInfo(card *nfc.Card) (uid, cardType string) {
 }
 
 // updateCardUID updates the card UID display
-func (s *SystrayApp) updateCardUID(uid string) {
+func (s *App) updateCardUID(uid string) {
 	if uid == "" {
 		s.mCardUID.SetTitle("Card UID: None")
 	} else {
@@ -717,7 +691,7 @@ func (s *SystrayApp) updateCardUID(uid string) {
 }
 
 // updateCardType updates the card type display
-func (s *SystrayApp) updateCardType(cardType string) {
+func (s *App) updateCardType(cardType string) {
 	if cardType == "" {
 		s.mCardType.SetTitle("Card Type: None")
 	} else {
@@ -726,8 +700,8 @@ func (s *SystrayApp) updateCardType(cardType string) {
 }
 
 // updateURLs updates all server URL displays
-func (s *SystrayApp) updateURLs() {
-	ips := getLocalIPs()
+func (s *App) updateURLs() {
+	ips := agent.LocalIPs()
 	ip := "localhost"
 	if len(ips) > 0 {
 		ip = ips[0]
@@ -743,7 +717,7 @@ func (s *SystrayApp) updateURLs() {
 	// Device server URL
 	devicePort := s.agent.DevicePort
 	if devicePort == 0 {
-		devicePort = DEFAULT_DEVICE_PORT
+		devicePort = agent.DefaultDevicePort
 	}
 	// Devices and clients share the single agent port. Devices connect with
 	// ?mode=device; clients use plain /ws.
@@ -773,7 +747,7 @@ func (s *SystrayApp) updateURLs() {
 
 // updateAPISecretLabel updates the systray label with a redacted view
 // of the API secret. The full secret is available via Copy.
-func (s *SystrayApp) updateAPISecretLabel(secret string) {
+func (s *App) updateAPISecretLabel(secret string) {
 	if secret == "" {
 		s.mAPISecret.SetTitle("API Secret: not set")
 		return
@@ -788,15 +762,15 @@ func (s *SystrayApp) updateAPISecretLabel(secret string) {
 }
 
 // clearURLs resets all URL displays to "Not running"
-func (s *SystrayApp) clearURLs() {
+func (s *App) clearURLs() {
 	s.mDeviceURL.SetTitle("Device: Not running")
 	s.mClientURL.SetTitle("Client: Not running")
 	s.mBootstrapURL.SetTitle("CA Cert: Not running")
 }
 
 // getDeviceURL returns the current DeviceServer URL
-func (s *SystrayApp) getDeviceURL() string {
-	ips := getLocalIPs()
+func (s *App) getDeviceURL() string {
+	ips := agent.LocalIPs()
 	ip := "localhost"
 	if len(ips) > 0 {
 		ip = ips[0]
@@ -810,14 +784,14 @@ func (s *SystrayApp) getDeviceURL() string {
 
 	devicePort := s.agent.DevicePort
 	if devicePort == 0 {
-		devicePort = DEFAULT_DEVICE_PORT
+		devicePort = agent.DefaultDevicePort
 	}
 	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
 }
 
 // getClientURL returns the current ClientServer URL
-func (s *SystrayApp) getClientURL() string {
-	ips := getLocalIPs()
+func (s *App) getClientURL() string {
+	ips := agent.LocalIPs()
 	ip := "localhost"
 	if len(ips) > 0 {
 		ip = ips[0]
@@ -831,7 +805,7 @@ func (s *SystrayApp) getClientURL() string {
 
 	clientPort := s.agent.DevicePort
 	if clientPort == 0 {
-		clientPort = DEFAULT_DEVICE_PORT
+		clientPort = agent.DefaultDevicePort
 	}
 	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
 }
@@ -839,12 +813,12 @@ func (s *SystrayApp) getClientURL() string {
 // getBootstrapURL returns the phone-pairing page URL with the PIN
 // pre-filled so a colleague clicking it from chat lands on the QR
 // directly. Returns "" if the pairing server is disabled.
-func (s *SystrayApp) getBootstrapURL() string {
+func (s *App) getBootstrapURL() string {
 	if s.bootstrapPort <= 0 {
 		return ""
 	}
 
-	ips := getLocalIPs()
+	ips := agent.LocalIPs()
 	ip := "localhost"
 	if len(ips) > 0 {
 		ip = ips[0]

@@ -102,9 +102,13 @@ git push origin v1.0.0
 
 ```
 davi-nfc-agent/
-├── main.go              # Entry point, CLI flags
-├── agent.go             # Core agent logic
-├── systray.go           # System tray UI
+├── main.go              # Composition root: picks the NFC backend, wires the rest
+├── agent/               # The agent itself — orchestration, CLI flags, config
+│   ├── agent.go         # Core agent logic
+│   ├── cli.go           # Flag parsing and startup wiring
+│   ├── console.go       # The console as the agent sees it (an interface)
+│   ├── console/         # Control center: webui.Host adapter (-tags nowebui drops it)
+│   └── tray/            # System tray UI (the only fyne.io/systray dependency)
 ├── buildinfo/           # Version and build metadata
 ├── nfc/                 # NFC abstraction layer
 │   ├── manager.go       # Device manager interface

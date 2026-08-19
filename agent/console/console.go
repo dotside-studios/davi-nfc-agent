@@ -1,0 +1,66 @@
+//go:build !nowebui
+
+package console
+
+import (
+	"net/http"
+
+	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
+	"github.com/dotside-studios/davi-nfc-agent/webui"
+)
+
+// Server is the control center bound to one agent. It satisfies agent.Console,
+// and embeds the webui server so NotifyChange and ConsoleURL come through
+// unchanged.
+type Server struct {
+	*webui.Server
+	host *host
+}
+
+var _ agent.Console = (*Server)(nil)
+
+// New builds the console for a. It does not assign a.Console itself — the
+// caller nil-checks the result first, because a typed nil would satisfy
+// agent.Console and defeat that check.
+func New(a *agent.Agent, store *settings.Store, logs *logbuf.Ring) *Server {
+	h := &host{agent: a, settings: store}
+	return &Server{
+		Server: webui.New(webui.Config{
+			Host:    h,
+			Logs:    logs,
+			Name:    buildinfo.Name,
+			Version: buildinfo.FullVersion(),
+			Dev:     buildinfo.IsDev(),
+		}),
+		host: h,
+	}
+}
+
+// Routes serves the privileged control API.
+func (s *Server) Routes() http.Handler {
+	if s == nil {
+		return nil
+	}
+	return s.Handler()
+}
+
+// Assets serves the embedded console frontend.
+func (s *Server) Assets() http.Handler {
+	if s == nil {
+		return nil
+	}
+	return webui.Console()
+}
+
+// AttachTray gives the console a tray to act through, so a change made in the
+// console moves the tray's menu state too. Without one the console drives the
+// agent directly, which is what a headless run wants.
+func (s *Server) AttachTray(t Tray) {
+	if s == nil || s.host == nil {
+		return
+	}
+	s.host.app = t
+}

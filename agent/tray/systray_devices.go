@@ -1,4 +1,4 @@
-package main
+package tray
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ type deviceSlot struct {
 }
 
 // setupDevicesMenu builds the Paired Devices submenu.
-func (s *SystrayApp) setupDevicesMenu() {
+func (s *App) setupDevicesMenu() {
 	s.mDevicesMenu = systray.AddMenuItem("Paired Devices", "Phones and readers that have paired with this agent")
 
 	for i := 0; i < deviceSlotCount; i++ {
@@ -41,7 +41,7 @@ func (s *SystrayApp) setupDevicesMenu() {
 }
 
 // refreshDevicesMenu redraws the submenu from the registry.
-func (s *SystrayApp) refreshDevicesMenu() {
+func (s *App) refreshDevicesMenu() {
 	if s.agent.Devices == nil || len(s.deviceSlots) == 0 {
 		return
 	}
@@ -88,7 +88,7 @@ func (s *SystrayApp) refreshDevicesMenu() {
 
 // handleRequirePaired toggles the paired-device requirement live, so it can be
 // tried against a real device without restarting the agent.
-func (s *SystrayApp) handleRequirePaired() {
+func (s *App) handleRequirePaired() {
 	on := !s.mRequirePaired.Checked()
 
 	if on && s.agent.Devices != nil && s.agent.Devices.Count() == 0 {
@@ -112,7 +112,7 @@ func (s *SystrayApp) handleRequirePaired() {
 
 // handleDeviceRevokeSelection polls the device slots, matching how the other
 // dynamic menus are handled.
-func (s *SystrayApp) handleDeviceRevokeSelection() {
+func (s *App) handleDeviceRevokeSelection() {
 	if s.agent.Devices == nil {
 		return
 	}
@@ -135,7 +135,7 @@ func (s *SystrayApp) handleDeviceRevokeSelection() {
 }
 
 // handleRevokeAllDevices clears the registry.
-func (s *SystrayApp) handleRevokeAllDevices() {
+func (s *App) handleRevokeAllDevices() {
 	if s.agent.Devices == nil {
 		return
 	}
@@ -151,7 +151,7 @@ func (s *SystrayApp) handleRevokeAllDevices() {
 
 // startDeviceWatcher redraws the menu when a device pairs, so a completed
 // pairing shows up without the operator reopening the menu.
-func (s *SystrayApp) startDeviceWatcher() {
+func (s *App) startDeviceWatcher() {
 	if s.agent.Devices == nil {
 		return
 	}

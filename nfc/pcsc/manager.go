@@ -1,4 +1,14 @@
-package nfc
+// Package pcsc drives the NFC readers attached to this machine through the
+// platform's PC/SC stack. It implements nfc.Manager and nfc.Device, so the rest
+// of the agent works a reader without knowing PC/SC exists.
+//
+// The PC/SC calls go through a small adapter (scard.go) with two interchangeable
+// backends. The default is goscard, which resolves the platform's library
+// (winscard.dll, libpcsclite.so.1, PCSC.framework) at runtime through purego, so
+// the agent needs neither cgo nor a C toolchain. Building with -tags cgopcsc
+// selects the ebfe/scard binding instead; Backend reports which one a binary
+// carries.
+package pcsc
 
 import (
 	"errors"
@@ -7,22 +17,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// pcscManager implements Manager using PC/SC via the nfc/pcsc adapter
-type pcscManager struct {
-	ctx   pcsc.Context
+// Manager implements nfc.Manager for PC/SC readers.
+type Manager struct {
+	ctx   scardContext
 	ctxMu sync.Mutex
 }
 
-// newPCSCManager creates a new PC/SC manager
-func newPCSCManager() *pcscManager {
-	return &pcscManager{}
+// NewManager creates a manager for the PC/SC readers attached to this machine.
+//
+// Example:
+//
+//	manager := NewManager()
+func NewManager() *Manager {
+	return &Manager{}
 }
 
 // ensureContext ensures we have a valid PC/SC context
-func (m *pcscManager) ensureContext() error {
+func (m *Manager) ensureContext() error {
 	m.ctxMu.Lock()
 	defer m.ctxMu.Unlock()
 
@@ -32,14 +46,14 @@ func (m *pcscManager) ensureContext() error {
 		if err == nil {
 			return nil
 		}
-		// Context is invalid, release it; the release error is moot because
+		// scardContext is invalid, release it; the release error is moot because
 		// we replace the context below either way.
 		_ = m.ctx.Release()
 		m.ctx = nil
 	}
 
 	// Establish new context
-	ctx, err := pcsc.EstablishContext()
+	ctx, err := establishContext()
 	if err != nil {
 		return fmt.Errorf("failed to establish PC/SC context: %w", err)
 	}
@@ -48,7 +62,7 @@ func (m *pcscManager) ensureContext() error {
 }
 
 // OpenDevice opens a connection to a reader and waits for a card
-func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
+func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	if err := m.ensureContext(); err != nil {
 		return nil, err
 	}
@@ -87,32 +101,32 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 		return nil, fmt.Errorf("failed to check card presence: %w", err)
 	}
 	if !cardPresent {
-		return nil, &noCardError{ReaderName: readerName}
+		return nil, nfc.NewNoCardError(readerName)
 	}
 
 	// Connect to the reader
-	// Use ShareShared to allow other apps to access the reader
-	// Use ProtocolAny to let the reader decide the protocol
-	card, err := ctx.Connect(readerName, pcsc.ShareShared, pcsc.ProtocolAny)
+	// Use shareShared to allow other apps to access the reader
+	// Use protocolAny to let the reader decide the protocol
+	card, err := ctx.Connect(readerName, shareShared, protocolAny)
 	if err != nil {
 		// Check if no card is present. The status code is the reliable signal;
 		// the string matches stay as a fallback for readers whose drivers
 		// report something else.
 		errLower := strings.ToLower(err.Error())
-		if errors.Is(err, pcsc.ErrNoSmartcard) ||
+		if errors.Is(err, errNoSmartcard) ||
 			strings.Contains(errLower, "no card") ||
 			strings.Contains(errLower, "no smart card") ||
 			strings.Contains(errLower, "card is not present") ||
 			strings.Contains(errLower, "card not present") {
-			return nil, &noCardError{ReaderName: readerName}
+			return nil, nfc.NewNoCardError(readerName)
 		}
 		return nil, fmt.Errorf("failed to connect to reader %s: %w", readerName, err)
 	}
 
 	// Create device wrapper
-	dev, err := newPCSCDevice(ctx, card, readerName)
+	dev, err := newDevice(ctx, card, readerName)
 	if err != nil {
-		_ = card.Disconnect(pcsc.LeaveCard)
+		_ = card.Disconnect(leaveCard)
 		return nil, fmt.Errorf("failed to initialize device: %w", err)
 	}
 
@@ -122,12 +136,12 @@ func (m *pcscManager) OpenDevice(deviceStr string) (Device, error) {
 // isCardPresentLocked checks if a card is present in the reader using GetStatusChange
 // with a very short timeout to avoid blocking.
 // NOTE: Caller must hold ctxMu lock.
-func (m *pcscManager) isCardPresentLocked(ctx pcsc.Context, readerName string) (bool, error) {
+func (m *Manager) isCardPresentLocked(ctx scardContext, readerName string) (bool, error) {
 	// Create reader state for status check
-	readerStates := []pcsc.ReaderState{
+	readerStates := []readerState{
 		{
 			Reader:       readerName,
-			CurrentState: pcsc.StateUnaware,
+			CurrentState: stateUnaware,
 		},
 	}
 
@@ -136,22 +150,22 @@ func (m *pcscManager) isCardPresentLocked(ctx pcsc.Context, readerName string) (
 	err := ctx.GetStatusChange(readerStates, 0)
 	if err != nil {
 		// Timeout is expected - it means no state change, check current state
-		if !errors.Is(err, pcsc.ErrTimeout) {
+		if !errors.Is(err, errTimeout) {
 			return false, err
 		}
 	}
 
 	// Check if card is present in the reader
 	state := readerStates[0].EventState
-	return (state & pcsc.StatePresent) != 0, nil
+	return (state & statePresent) != 0, nil
 }
 
 // ListDevices lists available PC/SC readers
-func (m *pcscManager) ListDevices() ([]string, error) {
+func (m *Manager) ListDevices() ([]string, error) {
 	var readers []string
 	var lastErr error
 
-	for i := 0; i < DeviceEnumRetries; i++ {
+	for i := 0; i < nfc.DeviceEnumRetries; i++ {
 		if err := m.ensureContext(); err != nil {
 			lastErr = err
 			time.Sleep(time.Millisecond * 100)
@@ -184,12 +198,12 @@ func (m *pcscManager) ListDevices() ([]string, error) {
 		return readers, nil
 	}
 
-	return nil, fmt.Errorf("failed to list PC/SC readers after %d retries: %w", DeviceEnumRetries, lastErr)
+	return nil, fmt.Errorf("failed to list PC/SC readers after %d retries: %w", nfc.DeviceEnumRetries, lastErr)
 }
 
 // DeviceChanges returns a channel that signals when devices change
 // PC/SC doesn't have a native notification mechanism, so we poll
-func (m *pcscManager) DeviceChanges() <-chan struct{} {
+func (m *Manager) DeviceChanges() <-chan struct{} {
 	ch := make(chan struct{}, 1)
 
 	go func() {
@@ -232,7 +246,7 @@ func stringSlicesEqual(a, b []string) bool {
 }
 
 // Release releases the PC/SC context
-func (m *pcscManager) Release() error {
+func (m *Manager) Release() error {
 	m.ctxMu.Lock()
 	defer m.ctxMu.Unlock()
 

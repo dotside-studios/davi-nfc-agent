@@ -28,8 +28,8 @@ func TestDetectTagTypeFromATR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := detectTagTypeFromATR(atrWithCardType(tt.cardType)); got != tt.want {
-				t.Errorf("detectTagTypeFromATR(%s) = %v, want %v", tt.name, got, tt.want)
+			if got := DetectTagTypeFromATR(atrWithCardType(tt.cardType)); got != tt.want {
+				t.Errorf("DetectTagTypeFromATR(%s) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}
@@ -45,7 +45,7 @@ func TestDetectTagTypeFromATR_Unrecognized(t *testing.T) {
 	}
 	for name, atr := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := detectTagTypeFromATR(atr); got != DetectedUnknown {
+			if got := DetectTagTypeFromATR(atr); got != DetectedUnknown {
 				t.Errorf("expected DetectedUnknown for %s, got %v", name, got)
 			}
 		})
@@ -71,8 +71,8 @@ func TestParseGetVersionResponse(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseGetVersionResponse(tt.resp); got != tt.want {
-				t.Errorf("parseGetVersionResponse(%s) = %v, want %v", tt.name, got, tt.want)
+			if got := ParseGetVersionResponse(tt.resp); got != tt.want {
+				t.Errorf("ParseGetVersionResponse(%s) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}
@@ -85,7 +85,7 @@ func TestParseGetVersionResponse_Invalid(t *testing.T) {
 	}
 	for name, resp := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := parseGetVersionResponse(resp); got != DetectedUnknown {
+			if got := ParseGetVersionResponse(resp); got != DetectedUnknown {
 				t.Errorf("expected DetectedUnknown for %s, got %v", name, got)
 			}
 		})

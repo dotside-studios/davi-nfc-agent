@@ -1,7 +1,8 @@
 package nfc
 
 // CardTransport is the hardware boundary every PC/SC tag talks through: it sends
-// an APDU and reports card presence. *pcscDevice satisfies it in production; an
+// an APDU and reports card presence. The PC/SC reader device satisfies it in
+// production (see package nfc/pcsc); an
 // in-memory emulator satisfies it in tests (see package nfctest), letting the
 // real tag I/O logic (page math, lock bytes, TLV) run against emulated silicon
 // without hardware. Wrap one in a driver with NewEmulatedTag.

@@ -210,7 +210,7 @@ import (
 
 func main() {
     manager := multimanager.NewMultiManager(
-        multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: nfc.NewManager()},
+        multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
         multimanager.ManagerEntry{Name: "myreader", Manager: myreader.NewManager()},
     )
 

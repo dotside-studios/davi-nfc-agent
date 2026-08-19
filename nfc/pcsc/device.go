@@ -1,4 +1,4 @@
-package nfc
+package pcsc
 
 import (
 	"errors"
@@ -8,21 +8,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// pcscDevice implements Device using PC/SC via the nfc/pcsc adapter
-type pcscDevice struct {
-	ctx        pcsc.Context
-	card       pcsc.Card
+// device implements nfc.Device for a card on a PC/SC reader.
+type device struct {
+	ctx        scardContext
+	card       scardCard
 	readerName string
 	uid        string
 	atr        []byte
 	mu         sync.Mutex
 
-	// Card presence tracking for reliable removal detection
-	lastEventState pcsc.StateFlag // Last known EventState from GetStatusChange
-	lastEventCount uint16         // Event counter from upper 16 bits of EventState
+	// scardCard presence tracking for reliable removal detection
+	lastEventState stateFlag // Last known EventState from GetStatusChange
+	lastEventCount uint16    // Event counter from upper 16 bits of EventState
 
 	// Background monitoring for card removal
 	stopMonitor chan struct{} // Signals the monitor goroutine to stop
@@ -32,15 +32,15 @@ type pcscDevice struct {
 	unsupportedReported bool
 }
 
-// newPCSCDevice creates a new PC/SC device from a connected card
-func newPCSCDevice(ctx pcsc.Context, card pcsc.Card, readerName string) (*pcscDevice, error) {
+// newDevice creates a device for a card already connected on a reader.
+func newDevice(ctx scardContext, card scardCard, readerName string) (*device, error) {
 	// Validate protocol before any operations - the scard library panics on invalid protocol
 	proto := card.ActiveProtocol()
-	if proto != pcsc.ProtocolT0 && proto != pcsc.ProtocolT1 {
+	if proto != protocolT0 && proto != protocolT1 {
 		return nil, fmt.Errorf("unsupported card protocol: %d", proto)
 	}
 
-	dev := &pcscDevice{
+	dev := &device{
 		ctx:        ctx,
 		card:       card,
 		readerName: readerName,
@@ -55,11 +55,11 @@ func newPCSCDevice(ctx pcsc.Context, card pcsc.Card, readerName string) (*pcscDe
 
 	// Initialize card presence tracking state
 	// This captures the initial event counter and state for reliable detection
-	readerStates := []pcsc.ReaderState{
-		{Reader: readerName, CurrentState: pcsc.StateUnaware},
+	readerStates := []readerState{
+		{Reader: readerName, CurrentState: stateUnaware},
 	}
 	if err := ctx.GetStatusChange(readerStates, 0); err == nil {
-		dev.lastEventState = readerStates[0].EventState & ^pcsc.StateChanged
+		dev.lastEventState = readerStates[0].EventState & ^stateChanged
 		dev.lastEventCount = uint16(readerStates[0].EventState >> 16)
 	}
 
@@ -77,7 +77,7 @@ func newPCSCDevice(ctx pcsc.Context, card pcsc.Card, readerName string) (*pcscDe
 	return dev, nil
 }
 
-func (d *pcscDevice) Close() error {
+func (d *device) Close() error {
 	// Stop the background monitor first (outside the lock to avoid deadlock)
 	d.stopCardMonitor()
 
@@ -85,7 +85,7 @@ func (d *pcscDevice) Close() error {
 	defer d.mu.Unlock()
 
 	if d.card != nil {
-		err := d.card.Disconnect(pcsc.LeaveCard)
+		err := d.card.Disconnect(leaveCard)
 		d.card = nil
 		return err
 	}
@@ -94,14 +94,14 @@ func (d *pcscDevice) Close() error {
 
 // startCardMonitor starts a background goroutine that monitors for card removal.
 // This provides the most reliable detection by continuously checking card state.
-func (d *pcscDevice) startCardMonitor() {
+func (d *device) startCardMonitor() {
 	d.stopMonitor = make(chan struct{})
 	d.cardRemoved = make(chan struct{}, 1)
 
 	go func() {
 		// Start with current state
 		d.mu.Lock()
-		readerStates := []pcsc.ReaderState{
+		readerStates := []readerState{
 			{Reader: d.readerName, CurrentState: d.lastEventState},
 		}
 		ctx := d.ctx
@@ -123,11 +123,11 @@ func (d *pcscDevice) startCardMonitor() {
 			err := ctx.GetStatusChange(readerStates, 500*time.Millisecond)
 			if err != nil {
 				// Check if context was cancelled
-				if errors.Is(err, pcsc.ErrCancelled) {
+				if errors.Is(err, errCancelled) {
 					return
 				}
 				// Timeout is normal - just loop again
-				if errors.Is(err, pcsc.ErrTimeout) {
+				if errors.Is(err, errTimeout) {
 					continue
 				}
 				// Other errors may indicate reader disconnection
@@ -141,9 +141,9 @@ func (d *pcscDevice) startCardMonitor() {
 
 			eventState := readerStates[0].EventState
 
-			// Check if card was removed - only use StateEmpty as the definitive indicator
-			// StatePresent being absent during transitions can cause false positives
-			if (eventState & pcsc.StateEmpty) != 0 {
+			// Check if card was removed - only use stateEmpty as the definitive indicator
+			// statePresent being absent during transitions can cause false positives
+			if (eventState & stateEmpty) != 0 {
 				select {
 				case d.cardRemoved <- struct{}{}:
 				default:
@@ -151,40 +151,40 @@ func (d *pcscDevice) startCardMonitor() {
 				return
 			}
 
-			// Update state for next iteration (clear StateChanged flag)
-			readerStates[0].CurrentState = eventState & ^pcsc.StateChanged
+			// Update state for next iteration (clear stateChanged flag)
+			readerStates[0].CurrentState = eventState & ^stateChanged
 		}
 	}()
 }
 
 // stopCardMonitor stops the background card removal monitor
-func (d *pcscDevice) stopCardMonitor() {
+func (d *device) stopCardMonitor() {
 	if d.stopMonitor != nil {
 		close(d.stopMonitor)
 		d.stopMonitor = nil
 	}
 }
 
-func (d *pcscDevice) String() string {
+func (d *device) String() string {
 	return d.readerName
 }
 
-func (d *pcscDevice) Connection() string {
+func (d *device) Connection() string {
 	return d.readerName
 }
 
 // DeviceType returns the device type identifier (implements DeviceInfoProvider)
-func (d *pcscDevice) DeviceType() string {
+func (d *device) DeviceType() string {
 	return "pcsc"
 }
 
 // SupportedTagTypes returns the list of supported tag types (implements DeviceInfoProvider)
-func (d *pcscDevice) SupportedTagTypes() []string {
+func (d *device) SupportedTagTypes() []string {
 	return []string{"MIFARE Classic", "DESFire", "Ultralight", "NTAG", "ISO14443-4"}
 }
 
 // IsHealthy checks if the device is still connected (implements DeviceHealthChecker)
-func (d *pcscDevice) IsHealthy() error {
+func (d *device) IsHealthy() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -202,7 +202,7 @@ func (d *pcscDevice) IsHealthy() error {
 }
 
 // IsCardPresent checks if a card is still present on the reader (public, acquires lock)
-func (d *pcscDevice) IsCardPresent() bool {
+func (d *device) IsCardPresent() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.checkCardPresence() == nil
@@ -211,44 +211,44 @@ func (d *pcscDevice) IsCardPresent() bool {
 // checkCardPresence checks if card is still present (internal, caller must hold lock)
 // On macOS with ACR122U, card.Status() and GetStatusChange don't reliably detect
 // card removal. Instead, we send a GET_UID command which will fail if card is gone.
-func (d *pcscDevice) checkCardPresence() error {
+func (d *device) checkCardPresence() error {
 	if d.card == nil || d.ctx == nil {
-		return NewCardRemovedError(fmt.Errorf("device not connected"))
+		return nfc.NewCardRemovedError(fmt.Errorf("device not connected"))
 	}
 
 	// Send GET_UID command - this is a simple command that should always succeed
 	// if a card is present. If it fails, the card was likely removed.
-	cmd := GetUIDAPDU()
+	cmd := nfc.GetUIDAPDU()
 	resp, err := d.card.Transmit(cmd)
 	if err != nil {
 		if isCardRemovedPCSCError(err) {
-			return NewCardRemovedError(err)
+			return nfc.NewCardRemovedError(err)
 		}
-		return NewCardRemovedError(fmt.Errorf("card presence check failed: %w", err))
+		return nfc.NewCardRemovedError(fmt.Errorf("card presence check failed: %w", err))
 	}
 
 	// Check APDU response - GET_UID should return success (90 00)
 	if len(resp) < 2 {
-		return NewCardRemovedError(fmt.Errorf("invalid response length"))
+		return nfc.NewCardRemovedError(fmt.Errorf("invalid response length"))
 	}
 	sw1, sw2 := resp[len(resp)-2], resp[len(resp)-1]
 	if sw1 != 0x90 || sw2 != 0x00 {
-		return NewCardRemovedError(fmt.Errorf("card not responding"))
+		return nfc.NewCardRemovedError(fmt.Errorf("card not responding"))
 	}
 
 	return nil
 }
 
 // Transceive sends raw data to the card and returns the response.
-// Card removal is detected via:
+// scardCard removal is detected via:
 // 1. Background monitor signaling card removal
 // 2. Transmit errors indicating card was removed
-func (d *pcscDevice) Transceive(txData []byte) ([]byte, error) {
+func (d *device) Transceive(txData []byte) ([]byte, error) {
 	// Quick check if background monitor detected removal (non-blocking)
 	if d.cardRemoved != nil {
 		select {
 		case <-d.cardRemoved:
-			return nil, NewCardRemovedError(fmt.Errorf("card removed (detected by monitor)"))
+			return nil, nfc.NewCardRemovedError(fmt.Errorf("card removed (detected by monitor)"))
 		default:
 		}
 	}
@@ -257,13 +257,13 @@ func (d *pcscDevice) Transceive(txData []byte) ([]byte, error) {
 	defer d.mu.Unlock()
 
 	if d.card == nil {
-		return nil, NewCardRemovedError(fmt.Errorf("device not connected"))
+		return nil, nfc.NewCardRemovedError(fmt.Errorf("device not connected"))
 	}
 
 	// Validate protocol before transmit - the scard library panics on invalid protocol
 	proto := d.card.ActiveProtocol()
-	if proto != pcsc.ProtocolT0 && proto != pcsc.ProtocolT1 {
-		return nil, NewCardRemovedError(fmt.Errorf("invalid card protocol"))
+	if proto != protocolT0 && proto != protocolT1 {
+		return nil, nfc.NewCardRemovedError(fmt.Errorf("invalid card protocol"))
 	}
 
 	// Transmit APDU - let transmit errors indicate card removal
@@ -271,9 +271,9 @@ func (d *pcscDevice) Transceive(txData []byte) ([]byte, error) {
 	if err != nil {
 		// Check if this is a card removal error
 		if isCardRemovedPCSCError(err) {
-			return nil, NewCardRemovedError(err)
+			return nil, nfc.NewCardRemovedError(err)
 		}
-		return nil, fmt.Errorf("pcscDevice.Transceive: %w", err)
+		return nil, fmt.Errorf("pcsc device transceive: %w", err)
 	}
 
 	return rxData, nil
@@ -287,16 +287,16 @@ func isCardRemovedPCSCError(err error) bool {
 	}
 
 	// Check typed errors first (most reliable)
-	if errors.Is(err, pcsc.ErrRemovedCard) {
+	if errors.Is(err, errRemovedCard) {
 		return true
 	}
-	if errors.Is(err, pcsc.ErrResetCard) {
+	if errors.Is(err, errResetCard) {
 		return true // Often means removed on macOS
 	}
-	if errors.Is(err, pcsc.ErrNoSmartcard) {
+	if errors.Is(err, errNoSmartcard) {
 		return true
 	}
-	if errors.Is(err, pcsc.ErrUnpoweredCard) {
+	if errors.Is(err, errUnpoweredCard) {
 		return true
 	}
 
@@ -312,15 +312,15 @@ func isCardRemovedPCSCError(err error) bool {
 }
 
 // getUID retrieves the card UID using GET UID APDU
-func (d *pcscDevice) getUID() (string, error) {
+func (d *device) getUID() (string, error) {
 	// GET UID: FF CA 00 00 00
-	cmd := GetUIDAPDU()
+	cmd := nfc.GetUIDAPDU()
 	resp, err := d.card.Transmit(cmd)
 	if err != nil {
 		return "", fmt.Errorf("GET UID failed: %w", err)
 	}
 
-	parsed, err := ParseAPDUResponse(resp)
+	parsed, err := nfc.ParseAPDUResponse(resp)
 	if err != nil {
 		return "", err
 	}
@@ -329,18 +329,18 @@ func (d *pcscDevice) getUID() (string, error) {
 		return "", parsed.Error()
 	}
 
-	return BytesToHex(parsed.Data), nil
+	return nfc.BytesToHex(parsed.Data), nil
 }
 
 // GetTags returns the tags detected on this reader
 // For PC/SC, a card is already connected, so we detect its type and return it
-func (d *pcscDevice) GetTags() ([]Tag, error) {
+func (d *device) GetTags() ([]nfc.Tag, error) {
 	// Quick check if background monitor detected removal (non-blocking)
 	// This is critical for detecting when an unsupported tag is removed
 	if d.cardRemoved != nil {
 		select {
 		case <-d.cardRemoved:
-			return nil, NewCardRemovedError(fmt.Errorf("card removed (detected by monitor)"))
+			return nil, nfc.NewCardRemovedError(fmt.Errorf("card removed (detected by monitor)"))
 		default:
 		}
 	}
@@ -353,7 +353,7 @@ func (d *pcscDevice) GetTags() ([]Tag, error) {
 	}
 
 	// Detect tag type from ATR
-	tagType := detectTagTypeFromATR(d.atr)
+	tagType := nfc.DetectTagTypeFromATR(d.atr)
 
 	// If we couldn't get UID earlier, try again
 	if d.uid == "" {
@@ -365,78 +365,61 @@ func (d *pcscDevice) GetTags() ([]Tag, error) {
 	}
 
 	// Create appropriate tag wrapper based on detected type
-	var tag Tag
-	switch tagType {
-	case DetectedClassic1K, DetectedClassic4K:
-		tag = newPCSCClassicTag(d, d.uid, tagType)
-	case DetectedUltralight, DetectedUltralightC:
-		tag = newPCSCUltralightTag(d, d.uid, tagType)
-	case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
-		tag = newPCSCNtagTag(d, d.uid, tagType)
-	case DetectedDESFire:
-		tag = newPCSCDESFireTag(d, d.uid)
-	case DetectedISO14443_4:
-		tag = newPCSCISO14443Tag(d, d.uid)
-	default:
+	tag := nfc.NewTagForType(tagType, d, d.uid)
+	if tag == nil {
 		// Try to detect more precisely using commands
 		tag = d.detectTagWithCommands()
-		if tag == nil {
-			// Fall back to ISO14443-4 for unknown tags with SAK indicating ISO compliance
-			if isISO14443_4Compatible(d.atr) {
-				tag = newPCSCISO14443Tag(d, d.uid)
-			} else {
-				// Return error only once per card session to avoid log spam
-				if !d.unsupportedReported {
-					d.unsupportedReported = true
-					return nil, NewUnsupportedTagError(BytesToHex(d.atr))
-				}
-				// Already reported, return nil to indicate no tags without error
-				return nil, nil
+	}
+	if tag == nil {
+		// Fall back to ISO14443-4 for unknown tags with SAK indicating ISO compliance
+		if isISO14443_4Compatible(d.atr) {
+			tag = nfc.NewTagForType(nfc.DetectedISO14443_4, d, d.uid)
+		} else {
+			// Return error only once per card session to avoid log spam
+			if !d.unsupportedReported {
+				d.unsupportedReported = true
+				return nil, nfc.NewUnsupportedTagError(nfc.BytesToHex(d.atr))
 			}
+			// Already reported, return nil to indicate no tags without error
+			return nil, nil
 		}
 	}
 
 	if tag != nil {
-		return []Tag{tag}, nil
+		return []nfc.Tag{tag}, nil
 	}
 
 	return nil, nil
 }
 
 // detectTagWithCommands attempts to detect tag type using NFC commands
-func (d *pcscDevice) detectTagWithCommands() Tag {
+func (d *device) detectTagWithCommands() nfc.Tag {
 	// Try GET_VERSION for NTAG/Ultralight EV1
 	version, err := d.tryGetVersion()
 	if err == nil && len(version) >= 8 {
-		tagType := parseGetVersionResponse(version)
-		if tagType != DetectedUnknown {
-			switch tagType {
-			case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
-				return newPCSCNtagTag(d, d.uid, tagType)
-			case DetectedUltralight, DetectedUltralightC:
-				return newPCSCUltralightTag(d, d.uid, tagType)
-			}
+		if tag := nfc.NewTagForType(nfc.ParseGetVersionResponse(version), d, d.uid); tag != nil {
+			return tag
 		}
 	}
 
 	// Try MIFARE Classic authentication probe
 	if d.tryClassicAuth() {
-		return newPCSCClassicTag(d, d.uid, DetectedClassic1K)
+		return nfc.NewTagForType(nfc.DetectedClassic1K, d, d.uid)
 	}
 
 	return nil
 }
 
 // tryGetVersion sends GET_VERSION command
-func (d *pcscDevice) tryGetVersion() ([]byte, error) {
+func (d *device) tryGetVersion() ([]byte, error) {
 	// Direct transmit of GET_VERSION (0x60)
-	cmd := GetVersionAPDU()
+	cmd := nfc.GetVersionAPDU()
 	resp, err := d.card.Transmit(cmd)
 	if err != nil {
 		return nil, err
 	}
 
-	parsed, err := ParseAPDUResponse(resp)
+	parsed, err := nfc.ParseAPDUResponse(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +432,7 @@ func (d *pcscDevice) tryGetVersion() ([]byte, error) {
 }
 
 // tryClassicAuth tries to authenticate to sector 0 with default keys
-func (d *pcscDevice) tryClassicAuth() bool {
+func (d *device) tryClassicAuth() bool {
 	// Try default keys
 	keys := [][]byte{
 		{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, // Transport key
@@ -459,23 +442,23 @@ func (d *pcscDevice) tryClassicAuth() bool {
 
 	for _, key := range keys {
 		// Load key
-		loadCmd := LoadKeyAPDU(0x00, key)
+		loadCmd := nfc.LoadKeyAPDU(0x00, key)
 		resp, err := d.card.Transmit(loadCmd)
 		if err != nil {
 			continue
 		}
-		parsed, _ := ParseAPDUResponse(resp)
+		parsed, _ := nfc.ParseAPDUResponse(resp)
 		if !parsed.IsSuccess() {
 			continue
 		}
 
 		// Try auth to block 3 (sector 0 trailer)
-		authCmd := MIFAREAuthAPDU(0x03, MIFAREKeyA, 0x00)
+		authCmd := nfc.MIFAREAuthAPDU(0x03, nfc.MIFAREKeyA, 0x00)
 		resp, err = d.card.Transmit(authCmd)
 		if err != nil {
 			continue
 		}
-		parsed, _ = ParseAPDUResponse(resp)
+		parsed, _ = nfc.ParseAPDUResponse(resp)
 		if parsed.IsSuccess() {
 			return true
 		}

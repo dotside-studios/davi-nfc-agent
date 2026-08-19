@@ -8,16 +8,15 @@ package nfc
 // without hardware: build an emulator (a CardTransport), wrap it here, and the
 // returned Tag behaves as if it were a real card on a reader.
 func NewEmulatedTag(transport CardTransport, uid string, kind DetectedTagType) Tag {
-	switch kind {
-	case DetectedClassic1K, DetectedClassic4K:
-		return newPCSCClassicTag(transport, uid, kind)
-	case DetectedUltralight, DetectedUltralightC, DetectedUltralightEV1:
+	// Ultralight EV1 is driven as an Ultralight here, which the reader path
+	// does not do -- there an EV1 falls through to command probing.
+	if kind == DetectedUltralightEV1 {
 		return newPCSCUltralightTag(transport, uid, kind)
-	case DetectedNTAG213, DetectedNTAG215, DetectedNTAG216:
-		return newPCSCNtagTag(transport, uid, kind)
-	case DetectedDESFire:
-		return newPCSCDESFireTag(transport, uid)
-	default:
-		return newPCSCISO14443Tag(transport, uid)
 	}
+	if tag := NewTagForType(kind, transport, uid); tag != nil {
+		return tag
+	}
+	// Emulators always get a driver: anything unrecognised is driven as an
+	// ISO14443-4 card rather than refused.
+	return newPCSCISO14443Tag(transport, uid)
 }

@@ -189,9 +189,16 @@ func TestClassicTag_WriteDataFormatsTLV(t *testing.T) {
 	}
 }
 
+// stubTransport is a CardTransport that is never driven; the tests below only
+// inspect how a tag was constructed.
+type stubTransport struct{}
+
+func (*stubTransport) Transceive([]byte) ([]byte, error) { return nil, nil }
+func (*stubTransport) IsCardPresent() bool               { return true }
+
 // TestNewPCSCClassicTag tests tag creation
 func TestNewPCSCClassicTag(t *testing.T) {
-	mockDev := &pcscDevice{}
+	mockDev := &stubTransport{}
 
 	tests := []struct {
 		name     string

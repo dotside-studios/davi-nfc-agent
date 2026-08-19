@@ -38,8 +38,8 @@ below are evaluated against:
 
 **PC/SC + ISO 7816-4 APDU** — the universal vocabulary for "talk to a card
 through a reader": `connect` → `ATR` → `transmit(APDU) → response` →
-`disconnect`. We already speak it on the hardware side (`nfc/device_pcsc.go`,
-`manager_pcsc.go`), Android exposes it via `IsoDep.transceive()` /
+`disconnect`. We already speak it on the hardware side (`nfc/pcsc/device.go`,
+`nfc/pcsc/manager.go`), Android exposes it via `IsoDep.transceive()` /
 `NfcA.transceive()`, and iOS exposes a constrained form via
 `NFCISO7816Tag.sendCommand` / `NFCMiFareTag.sendMiFareCommand`. This is the
 single highest-value thing to adopt: it is the missing verb, and it is the one
@@ -286,7 +286,7 @@ targets do not. Static endpoint config, or a UDP broadcast beacon, as a fallback
   reuses the same agent-side code path as the phone apps. Consider promoting
   T3 ahead of T2 if DIY readers become a priority.
 - **USB CCID** is the zero-work path: an MCU that presents as a CCID device
-  shows up as an ordinary PC/SC reader, and our existing `device_pcsc.go` path
+  shows up as an ordinary PC/SC reader, and our existing `nfc/pcsc/device.go` path
   consumes it with no davi-specific protocol at all. vsmartcard ships a CCID
   emulator to build against. Worth documenting rather than implementing.
 - **MQTT** solves one thing better than we do: Last Will and Testament gives

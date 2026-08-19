@@ -10,11 +10,11 @@ func TestErrorMatchesSentinelByCode(t *testing.T) {
 	// Each backend words its messages differently; only the code should decide.
 	err := statusError(0x80100069, fmt.Errorf("scardTransmit() returned 0x80100069 [removed card]"))
 
-	if !errors.Is(err, ErrRemovedCard) {
-		t.Errorf("errors.Is(%v, ErrRemovedCard) = false, want true", err)
+	if !errors.Is(err, errRemovedCard) {
+		t.Errorf("errors.Is(%v, errRemovedCard) = false, want true", err)
 	}
-	if errors.Is(err, ErrTimeout) {
-		t.Errorf("errors.Is(%v, ErrTimeout) = true, want false", err)
+	if errors.Is(err, errTimeout) {
+		t.Errorf("errors.Is(%v, errTimeout) = true, want false", err)
 	}
 }
 
@@ -28,10 +28,10 @@ func TestErrorKeepsBackendMessage(t *testing.T) {
 }
 
 func TestErrorWrappedStillMatches(t *testing.T) {
-	err := fmt.Errorf("pcscDevice.Transceive: %w", statusError(0x80100068, errors.New("reset card")))
+	err := fmt.Errorf("pcsc device transceive: %w", statusError(0x80100068, errors.New("reset card")))
 
-	if !errors.Is(err, ErrResetCard) {
-		t.Errorf("errors.Is(%v, ErrResetCard) = false, want true", err)
+	if !errors.Is(err, errResetCard) {
+		t.Errorf("errors.Is(%v, errResetCard) = false, want true", err)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestStatusErrorPassesThroughWithoutCode(t *testing.T) {
 
 func TestSentinelErrorMessage(t *testing.T) {
 	// The sentinels carry no backend message of their own.
-	if got, want := ErrCancelled.Error(), "scard: SCARD_E_CANCELLED (0x80100002)"; got != want {
-		t.Errorf("ErrCancelled.Error() = %q, want %q", got, want)
+	if got, want := errCancelled.Error(), "scard: SCARD_E_CANCELLED (0x80100002)"; got != want {
+		t.Errorf("errCancelled.Error() = %q, want %q", got, want)
 	}
 }

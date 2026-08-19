@@ -209,7 +209,7 @@ PSK key management, and it leaves no symmetric secret on the agent per device.
   reuses the phone-side agent path. Promote ahead of Phase 4 if DIY readers
   become a priority.
 - **USB CCID** — document only. An MCU presenting as CCID already works through
-  `nfc/device_pcsc.go` with no davi protocol at all.
+  `nfc/pcsc/device.go` with no davi protocol at all.
 - **Relay for off-LAN** — only if a real requirement appears.
 
 ## Ordering rationale

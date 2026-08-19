@@ -1,6 +1,8 @@
 # NFC Package
 
-A Go package providing a unified, high-level abstraction for NFC operations across multiple card types. Built on top of PC/SC via ebfe/scard.
+A Go package providing a unified, high-level abstraction for NFC operations across multiple card types.
+
+The package itself is transport-agnostic: it defines the tag and device interfaces and the tag drivers, and the backends that implement them live beside it — `nfc/pcsc` for readers attached to this machine, `nfc/remotenfc` for a phone acting as a reader.
 
 ## Overview
 
@@ -47,8 +49,14 @@ The `nfc` package provides a modular architecture for working with NFC tags, abs
                    │
                    ↓
 ┌─────────────────────────────────────────┐
-│         PC/SC API (ebfe/scard)          │
-│     System: pcsclite / WinSCard         │
+│      Reader backend (nfc/pcsc)          │
+│  goscard by default, ebfe/scard with    │
+│  -tags cgopcsc                          │
+└─────────────────────────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────┐
+│  System: pcsclite / WinSCard / PCSC.fw  │
 └─────────────────────────────────────────┘
 ```
 
@@ -59,8 +67,10 @@ The `nfc` package provides a modular architecture for working with NFC tags, abs
 Device discovery and connection management.
 
 ```go
-// Create a manager
-manager := nfc.NewManager()
+import "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+
+// Create a manager for the PC/SC readers on this machine
+manager := pcsc.NewManager()
 
 // List available NFC readers
 devices, err := manager.ListDevices()
@@ -70,7 +80,7 @@ device, err := manager.OpenDevice(devices[0])
 defer device.Close()
 ```
 
-**File**: `manager.go`, `manager_pcsc.go`
+**File**: `manager.go`, `pcsc/manager.go`
 
 ### Device
 
@@ -87,7 +97,7 @@ connStr := device.Connection()
 device.Close()
 ```
 
-**Files**: `device.go`, `device_pcsc.go`
+**Files**: `device.go`, `pcsc/device.go`
 
 ### Tag
 
@@ -253,7 +263,7 @@ import (
 
 func main() {
     // Initialize manager and device
-    manager := nfc.NewManager()
+    manager := pcsc.NewManager()
     devices, _ := manager.ListDevices()
     device, _ := manager.OpenDevice(devices[0])
     defer device.Close()
@@ -335,7 +345,7 @@ if ultralight, ok := tag.(*nfc.UltralightTag); ok {
 ### Continuous Polling
 
 ```go
-manager := nfc.NewManager()
+manager := pcsc.NewManager()
 devices, _ := manager.ListDevices()
 device, _ := manager.OpenDevice(devices[0])
 defer device.Close()
@@ -423,7 +433,8 @@ The package is **not thread-safe**. If you need concurrent access:
 
 ## Dependencies
 
-- **github.com/ebfe/scard**: Go bindings for PC/SC
+- **github.com/ElMostafaIdrassi/goscard**: PC/SC without cgo (`nfc/pcsc`)
+- **github.com/ebfe/scard**: the cgo binding, used only with `-tags cgopcsc`
 - PC/SC runtime (built into macOS/Windows, `pcsclite` on Linux)
 
 ## Files Reference
@@ -431,9 +442,9 @@ The package is **not thread-safe**. If you need concurrent access:
 | File | Purpose |
 |------|---------|
 | `manager.go` | Manager interface |
-| `manager_pcsc.go` | PC/SC manager implementation |
+| `pcsc/manager.go` | PC/SC manager implementation |
 | `device.go` | Device interface |
-| `device_pcsc.go` | PC/SC device implementation |
+| `pcsc/device.go` | PC/SC device implementation |
 | `tag.go` | Tag interface and base types |
 | `tag_base.go` | Shared base tag struct |
 | `tag_classic.go` | MIFARE Classic implementation |

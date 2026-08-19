@@ -18,7 +18,7 @@ func TestNewTimeout(t *testing.T) {
 		{"poll", 0, 0},
 		{"bounded", 500 * time.Millisecond, 500},
 		{"sub-millisecond rounds down", 500 * time.Nanosecond, 0},
-		{"infinite", Infinite, infinite},
+		{"infinite", infiniteTimeout, infinite},
 		{"any negative is infinite", -3 * time.Second, infinite},
 	}
 

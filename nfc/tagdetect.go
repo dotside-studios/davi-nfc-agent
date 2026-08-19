@@ -38,8 +38,8 @@ var atrPatterns = map[byte]DetectedTagType{
 	0x26: DetectedDESFire, // DESFire (various versions)
 }
 
-// detectTagTypeFromATR parses ATR and returns detected tag type
-func detectTagTypeFromATR(atr []byte) DetectedTagType {
+// DetectTagTypeFromATR parses ATR and returns detected tag type
+func DetectTagTypeFromATR(atr []byte) DetectedTagType {
 	if len(atr) < 2 {
 		return DetectedUnknown
 	}
@@ -180,7 +180,7 @@ func containsISO14443_4Indicator(atr []byte) bool {
 	return false
 }
 
-// parseGetVersionResponse parses GET_VERSION response to determine tag type
+// ParseGetVersionResponse parses GET_VERSION response to determine tag type
 // Response format for NTAG/Ultralight EV1:
 // Byte 0: Fixed header 0x00
 // Byte 1: Vendor ID (0x04 = NXP)
@@ -190,7 +190,7 @@ func containsISO14443_4Indicator(atr []byte) bool {
 // Byte 5: Minor version
 // Byte 6: Storage size
 // Byte 7: Protocol type
-func parseGetVersionResponse(resp []byte) DetectedTagType {
+func ParseGetVersionResponse(resp []byte) DetectedTagType {
 	if len(resp) < 8 {
 		return DetectedUnknown
 	}

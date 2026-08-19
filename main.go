@@ -160,7 +160,7 @@ func main() {
 
 	// Create multi-manager combining hardware and smartphone
 	manager := multimanager.NewMultiManager(
-		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: nfc.NewManager()},
+		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: smartphoneManager},
 	)
 

@@ -34,9 +34,9 @@ type goscardCard struct {
 	card goscard.Card
 }
 
-// EstablishContext establishes a PC/SC context, loading the platform's PC/SC
+// establishContext establishes a PC/SC context, loading the platform's PC/SC
 // library on first use.
-func EstablishContext() (Context, error) {
+func establishContext() (scardContext, error) {
 	if err := initLib(); err != nil {
 		return nil, err
 	}
@@ -62,11 +62,11 @@ func (c *goscardContext) ListReaders() ([]string, error) {
 	case 0, statusNoReadersAvailable:
 		return readers, nil
 	default:
-		return nil, &Error{Code: code}
+		return nil, &scardError{Code: code}
 	}
 }
 
-func (c *goscardContext) GetStatusChange(states []ReaderState, timeout time.Duration) error {
+func (c *goscardContext) GetStatusChange(states []readerState, timeout time.Duration) error {
 	sys := make([]goscard.SCardReaderState, len(states))
 	for i, s := range states {
 		if s.Reader == "" {
@@ -89,8 +89,8 @@ func (c *goscardContext) GetStatusChange(states []ReaderState, timeout time.Dura
 	}
 
 	for i := range states {
-		states[i].CurrentState = StateFlag(sys[i].CurrentState)
-		states[i].EventState = StateFlag(sys[i].EventState)
+		states[i].CurrentState = stateFlag(sys[i].CurrentState)
+		states[i].EventState = stateFlag(sys[i].EventState)
 		atr, err := hex.DecodeString(sys[i].Atr)
 		if err != nil {
 			return fmt.Errorf("reader %s: bad ATR %q: %w", states[i].Reader, sys[i].Atr, err)
@@ -109,7 +109,7 @@ func newTimeout(d time.Duration) goscard.Timeout {
 	return goscard.NewTimeout(d)
 }
 
-func (c *goscardContext) Connect(reader string, mode ShareMode, proto Protocol) (Card, error) {
+func (c *goscardContext) Connect(reader string, mode shareMode, proto protocol) (scardCard, error) {
 	card, ret, err := c.ctx.Connect(reader, goscard.SCardShareMode(mode), goscard.SCardProtocol(proto))
 	if err != nil {
 		return nil, statusError(uint32(ret), err)
@@ -127,11 +127,11 @@ func (c *goscardContext) Release() error {
 	return statusError(uint32(ret), err)
 }
 
-func (c *goscardCard) ActiveProtocol() Protocol {
-	return Protocol(c.card.ActiveProtocol())
+func (c *goscardCard) ActiveProtocol() protocol {
+	return protocol(c.card.ActiveProtocol())
 }
 
-func (c *goscardCard) Status() (*CardStatus, error) {
+func (c *goscardCard) Status() (*cardStatus, error) {
 	status, ret, err := c.card.Status()
 	if err != nil {
 		return nil, statusError(uint32(ret), err)
@@ -146,9 +146,9 @@ func (c *goscardCard) Status() (*CardStatus, error) {
 	if len(status.ReaderNames) > 0 {
 		reader = status.ReaderNames[0]
 	}
-	return &CardStatus{
+	return &cardStatus{
 		Reader:         reader,
-		ActiveProtocol: Protocol(status.ActiveProtocol),
+		ActiveProtocol: protocol(status.ActiveProtocol),
 		Atr:            atr,
 	}, nil
 }
@@ -173,7 +173,7 @@ func (c *goscardCard) Transmit(cmd []byte) ([]byte, error) {
 	return resp, nil
 }
 
-func (c *goscardCard) Disconnect(d Disposition) error {
+func (c *goscardCard) Disconnect(d disposition) error {
 	ret, err := c.card.Disconnect(goscard.SCardDisposition(d))
 	return statusError(uint32(ret), err)
 }

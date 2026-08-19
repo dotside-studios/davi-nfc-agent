@@ -24,8 +24,8 @@ type ebfeCard struct {
 	card *scard.Card
 }
 
-// EstablishContext establishes a PC/SC context.
-func EstablishContext() (Context, error) {
+// establishContext establishes a PC/SC context.
+func establishContext() (scardContext, error) {
 	ctx, err := scard.EstablishContext()
 	if err != nil {
 		return nil, convertError(err)
@@ -46,7 +46,7 @@ func (c *ebfeContext) ListReaders() ([]string, error) {
 	return readers, nil
 }
 
-func (c *ebfeContext) GetStatusChange(states []ReaderState, timeout time.Duration) error {
+func (c *ebfeContext) GetStatusChange(states []readerState, timeout time.Duration) error {
 	sys := make([]scard.ReaderState, len(states))
 	for i, s := range states {
 		sys[i] = scard.ReaderState{
@@ -62,14 +62,14 @@ func (c *ebfeContext) GetStatusChange(states []ReaderState, timeout time.Duratio
 	}
 
 	for i := range states {
-		states[i].CurrentState = StateFlag(sys[i].CurrentState)
-		states[i].EventState = StateFlag(sys[i].EventState)
+		states[i].CurrentState = stateFlag(sys[i].CurrentState)
+		states[i].EventState = stateFlag(sys[i].EventState)
 		states[i].Atr = sys[i].Atr
 	}
 	return nil
 }
 
-func (c *ebfeContext) Connect(reader string, mode ShareMode, proto Protocol) (Card, error) {
+func (c *ebfeContext) Connect(reader string, mode shareMode, proto protocol) (scardCard, error) {
 	card, err := c.ctx.Connect(reader, scard.ShareMode(mode), scard.Protocol(proto))
 	if err != nil {
 		return nil, convertError(err)
@@ -85,18 +85,18 @@ func (c *ebfeContext) Release() error {
 	return convertError(c.ctx.Release())
 }
 
-func (c *ebfeCard) ActiveProtocol() Protocol {
-	return Protocol(c.card.ActiveProtocol())
+func (c *ebfeCard) ActiveProtocol() protocol {
+	return protocol(c.card.ActiveProtocol())
 }
 
-func (c *ebfeCard) Status() (*CardStatus, error) {
+func (c *ebfeCard) Status() (*cardStatus, error) {
 	status, err := c.card.Status()
 	if err != nil {
 		return nil, convertError(err)
 	}
-	return &CardStatus{
+	return &cardStatus{
 		Reader:         status.Reader,
-		ActiveProtocol: Protocol(status.ActiveProtocol),
+		ActiveProtocol: protocol(status.ActiveProtocol),
 		Atr:            status.Atr,
 	}, nil
 }
@@ -109,7 +109,7 @@ func (c *ebfeCard) Transmit(cmd []byte) ([]byte, error) {
 	return resp, nil
 }
 
-func (c *ebfeCard) Disconnect(d Disposition) error {
+func (c *ebfeCard) Disconnect(d disposition) error {
 	return convertError(c.card.Disconnect(scard.Disposition(d)))
 }
 

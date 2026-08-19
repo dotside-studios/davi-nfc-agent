@@ -7,7 +7,6 @@ package pcsc
 
 import (
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -63,7 +62,7 @@ func (c *goscardContext) ListReaders() ([]string, error) {
 	case 0, statusNoReadersAvailable:
 		return readers, nil
 	default:
-		return nil, statusError(code, errors.New(goscard.PcscStringifyError(ret)))
+		return nil, &Error{Code: code}
 	}
 }
 

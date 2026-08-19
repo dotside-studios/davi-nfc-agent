@@ -138,10 +138,27 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	if e.msg == "" {
-		return fmt.Sprintf("scard: status 0x%08X", e.Code)
+	if e.msg != "" {
+		return e.msg
 	}
-	return e.msg
+	if name, ok := statusNames[e.Code]; ok {
+		return fmt.Sprintf("scard: %s (0x%08X)", name, e.Code)
+	}
+	return fmt.Sprintf("scard: status 0x%08X", e.Code)
+}
+
+// statusNames spells the codes this package names itself, for the errors it
+// raises without a backend message behind them. Backends differ in which
+// helpers they expose per platform, so the adapter carries its own.
+var statusNames = map[uint32]string{
+	0x80100002: "SCARD_E_CANCELLED",
+	0x8010000A: "SCARD_E_TIMEOUT",
+	0x8010000C: "SCARD_E_NO_SMARTCARD",
+	0x8010001E: "SCARD_E_SERVICE_STOPPED",
+	0x8010002E: "SCARD_E_NO_READERS_AVAILABLE",
+	0x80100067: "SCARD_W_UNPOWERED_CARD",
+	0x80100068: "SCARD_W_RESET_CARD",
+	0x80100069: "SCARD_W_REMOVED_CARD",
 }
 
 // Is matches on the status code alone, so that errors.Is works against the

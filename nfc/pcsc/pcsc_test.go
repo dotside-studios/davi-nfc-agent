@@ -50,7 +50,7 @@ func TestStatusErrorPassesThroughWithoutCode(t *testing.T) {
 
 func TestSentinelErrorMessage(t *testing.T) {
 	// The sentinels carry no backend message of their own.
-	if got, want := ErrCancelled.Error(), "scard: status 0x80100002"; got != want {
+	if got, want := ErrCancelled.Error(), "scard: SCARD_E_CANCELLED (0x80100002)"; got != want {
 		t.Errorf("ErrCancelled.Error() = %q, want %q", got, want)
 	}
 }

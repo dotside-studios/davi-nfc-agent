@@ -345,3 +345,59 @@ func TestIndexShowsQR(t *testing.T) {
 		t.Errorf("install page does not embed /qr.png")
 	}
 }
+
+// TestNewBootstrapServerNormalisesTypedNilManager covers the shape of nil that
+// actually reaches this constructor. Callers hold a concrete *Manager, so with
+// -auto-tls=false (or an externally provisioned -cert/-key) they hand over a
+// nil *Manager, which boxes into a non-nil caReader — the whole reason
+// NewBootstrapServer normalises rather than trusting the caller.
+func TestNewBootstrapServerNormalisesTypedNilManager(t *testing.T) {
+	var mgr *Manager // nil, but not a nil interface once passed in
+
+	s := NewBootstrapServer(mgr, 0)
+
+	if s.manager != nil {
+		t.Fatal("typed-nil *Manager survived into s.manager; every nil guard in this file is now a no-op")
+	}
+}
+
+// TestBootstrapServerWithoutCA runs the endpoints a CA-less agent still needs.
+// Before the constructor normalised its input these panicked with a nil
+// pointer dereference instead of answering.
+func TestBootstrapServerWithoutCA(t *testing.T) {
+	var mgr *Manager
+	s := NewBootstrapServer(mgr, 0)
+
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	tests := []struct {
+		name string
+		path string
+		want int
+	}{
+		// The pairing flow works without a CA: the index page is what a
+		// phone lands on after scanning the QR, and it renders the CA
+		// fingerprint when there is one.
+		{"index page", "/", http.StatusOK},
+		{"install", "/install?pin=" + s.PIN(), http.StatusSeeOther},
+		{"qr", "/qr.png", http.StatusOK},
+		// The CA endpoints have nothing to hand out and must say so.
+		{"raw ca pem", "/ca.pem?pin=" + s.PIN(), http.StatusNotImplemented},
+		{"raw ca crt", "/ca.crt?pin=" + s.PIN(), http.StatusNotImplemented},
+		{"ios profile", "/install/ios?pin=" + s.PIN(), http.StatusInternalServerError},
+		{"android cert", "/install/android?pin=" + s.PIN(), http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.httpServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			if rec.Code != tt.want {
+				t.Errorf("GET %s = %d, want %d", tt.path, rec.Code, tt.want)
+			}
+		})
+	}
+}

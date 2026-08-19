@@ -1,14 +1,16 @@
 // Package main wires the agent together and runs it behind a system tray.
 //
 // It is deliberately thin. The agent itself lives in package agent, the control
-// center in agent/console and the tray in agent/tray; this file is the only
-// place that knows about all three, plus the one place that picks an NFC
-// backend. Choosing the backend here rather than inside package agent is what
-// lets the agent — and everything under nfc/ — build without one.
+// center in agent/console and the tray in agent/tray; this command is the only
+// place that knows about all three, the one place that picks an NFC backend,
+// and the one place that touches process-wide state — the flag set and the
+// standard logger. Keeping those here is what lets the agent be embedded in a
+// program with a command line and a logger of its own.
 package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -19,6 +21,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
@@ -26,7 +29,7 @@ import (
 )
 
 func main() {
-	opts := agent.ParseFlags()
+	opts := parseFlags()
 
 	if opts.Version {
 		fmt.Println(buildinfo.BuildInfo())
@@ -35,6 +38,13 @@ func main() {
 		fmt.Printf("  PC/SC: %s\n", pcsc.Backend)
 		os.Exit(0)
 	}
+
+	// Capture log output in memory before anything else logs. Started from a
+	// desktop launcher there is no stderr to read, so without this the agent's
+	// diagnostics are discarded as they are produced. Installed here, before
+	// Setup, so the startup sequence lands in the ring the console reads.
+	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
+	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
 	// Hardware readers and smartphones behind one manager.
 	manager := multimanager.NewMultiManager(
@@ -54,8 +64,8 @@ func main() {
 		rt.Agent.Console = consoleServer
 
 		// Redraw the console whenever something changes it from elsewhere.
-		rt.Origins.OnChange(consoleServer.NotifyChange)
-		rt.Devices.OnChange(consoleServer.NotifyChange)
+		rt.Agent.Origins.OnChange(consoleServer.NotifyChange)
+		rt.Agent.Devices.OnChange(consoleServer.NotifyChange)
 	}
 
 	app := tray.New(rt)
@@ -66,8 +76,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		if rt.Bootstrap != nil {
-			rt.Bootstrap.Stop()
+		if rt.Agent.Bootstrap != nil {
+			rt.Agent.Bootstrap.Stop()
 		}
 		app.Quit()
 	}()

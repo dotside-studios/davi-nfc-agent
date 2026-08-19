@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Package `agent` no longer writes to process-wide state.** Moving the CLI
+  into the agent took `flag.BoolVar`, `flag.Parse` and `log.SetOutput` with it,
+  all of which belong to a program rather than a library: registering flags
+  writes to `flag.CommandLine`, so an embedder with its own flags got a
+  collision, and `Setup` silently redirected the standard logger out from under
+  whatever logging its caller had arranged. The twelve flags now live in
+  `cmd/davi-nfc-agent/flags.go`, which fills the same `Options` the library
+  already exposed, and the command installs the log ring itself before calling
+  `Setup` — which is what keeps the startup sequence in the ring the console
+  reads. `Options.Logs` carries it in; `Options.DevicePortSet` carries in the
+  one piece of flag state `Setup` needs, and now lets an embedder assigning
+  `DevicePort` outrank a port persisted in settings, which it previously could
+  not
+
 - **A hand-built `nfc.Card` reports an error instead of faulting.** `Card` is
   exported and its fields are settable, but `Read` assumed the unexported tag
   every card built by `NewCard` has, so one composed field-by-field panicked
@@ -76,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`tray.New` takes the `agent.Runtime`** rather than four fields unpacked
   from it at the call site
+
+- **`agent.Runtime` stops duplicating the agent.** `Origins`, `Devices`,
+  `Bootstrap` and `BootstrapPort` were assigned twice by `Setup` — once on the
+  agent, once beside it — so half the struct was aliases of one object that
+  could drift apart. It now carries only what the agent does not: the settings
+  store, the log ring and the reader to open at startup. Everything else is
+  read through `rt.Agent`
 
 ## [1.1.3] - 2026-08-15
 

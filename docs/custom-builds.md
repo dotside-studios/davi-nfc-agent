@@ -11,21 +11,24 @@ go get github.com/dotside-studios/davi-nfc-agent
 Pin the version you build against. These packages follow the agent's releases
 and do not yet carry a compatibility guarantee.
 
-## The shipped agent as a program
+## A complete agent
 
-`cmd/davi-nfc-agent/main.go` is the whole binary: flags, TLS, pairing, the
-WebSocket API, the control center and the tray.
+This is the shipped binary with its flag set replaced by fixed options: TLS,
+pairing, the WebSocket API, the control center and the tray.
 
 ```go
 package main
 
 import (
+	"io"
 	"log"
+	"os"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
@@ -33,6 +36,14 @@ import (
 )
 
 func main() {
+	opts := agent.DefaultOptions()
+
+	// The console reads its log from this ring. Installing it as the log sink
+	// before Setup is what captures the startup sequence; the agent never
+	// touches the process logger itself.
+	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
+	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
+
 	// Hardware readers and smartphones behind one manager. Nothing downstream
 	// distinguishes them.
 	manager := multimanager.NewMultiManager(
@@ -40,7 +51,7 @@ func main() {
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: remotenfc.NewManager(30 * time.Second)},
 	)
 
-	rt, err := agent.Setup(agent.ParseFlags(), manager)
+	rt, err := agent.Setup(opts, manager)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,8 +61,8 @@ func main() {
 	c := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if c != nil {
 		rt.Agent.Console = c
-		rt.Origins.OnChange(c.NotifyChange)
-		rt.Devices.OnChange(c.NotifyChange)
+		rt.Agent.Origins.OnChange(c.NotifyChange)
+		rt.Agent.Devices.OnChange(c.NotifyChange)
 	}
 
 	app := tray.New(rt)
@@ -67,7 +78,14 @@ stored settings. It returns an `*agent.Runtime` holding the configured agent
 alongside the stores a front end needs.
 
 It does not choose an NFC backend. That is the second argument, and passing it
-in is what allows every package beneath `main` to build without one.
+in is what allows every package beneath `cmd` to build without one.
+
+Nor does it define flags or redirect the standard logger. Both belong to the
+program: registering flags writes to `flag.CommandLine`, which would collide
+with the flags of anything embedding the agent. The shipped command adds its
+own flag set on top of `Options` in
+[`cmd/davi-nfc-agent/flags.go`](../cmd/davi-nfc-agent/flags.go), and installs
+the log ring itself, as above.
 
 ## Package layout
 
@@ -117,9 +135,13 @@ import (
 func main() {
 	opts := agent.DefaultOptions()
 	opts.ConfigDir = "/var/lib/davi-nfc"
-	opts.DevicePort = 9470
 	opts.BootstrapPort = 0 // no pairing server
 	opts.AllowedOrigins = "console.example.com"
+
+	// DevicePortSet marks the port as a decision, so a port persisted in
+	// settings does not quietly replace it.
+	opts.DevicePort = 9470
+	opts.DevicePortSet = true
 
 	rt, err := agent.Setup(opts, pcsc.NewManager())
 	if err != nil {

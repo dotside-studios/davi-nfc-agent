@@ -104,8 +104,8 @@ func New(rt *agent.Runtime) *App {
 	return &App{
 		agent:           rt.Agent,
 		initialDevice:   rt.DevicePath,
-		bootstrapPort:   rt.BootstrapPort,
-		bootstrap:       rt.Bootstrap,
+		bootstrapPort:   rt.Agent.BootstrapPort,
+		bootstrap:       rt.Agent.Bootstrap,
 		deviceMenuItems: make(map[string]*systray.MenuItem),
 		cardTypeFilters: make(map[string]*cardTypeFilterItem),
 	}

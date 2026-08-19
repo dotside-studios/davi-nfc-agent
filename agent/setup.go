@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"flag"
-	"io"
 	"log"
 	"net/url"
 	"os"
@@ -22,8 +20,8 @@ const (
 	DefaultBootstrapPort = 9472
 )
 
-// Options is the command line as parsed. A program embedding the agent can
-// build one directly instead of calling ParseFlags — start from
+// Options is everything Setup needs. The shipped command fills it from its
+// flags; a program embedding the agent builds one directly, starting from
 // DefaultOptions rather than the zero value, which would ask for no TLS and
 // port 0.
 type Options struct {
@@ -40,14 +38,21 @@ type Options struct {
 	InstallCA      bool
 	RequirePaired  bool
 
-	// devicePortSet records whether -device-port was given, so a stored port
-	// does not override an explicit one.
-	devicePortSet bool
+	// DevicePortSet reports that DevicePort is a deliberate choice rather than
+	// a default, so a port persisted in settings must not override it. The
+	// command sets it when -device-port is given; set it yourself whenever you
+	// assign DevicePort and mean it.
+	DevicePortSet bool
+
+	// Logs, when set, is the ring the console reads the agent's log from. A
+	// caller that wants startup captured installs it as the log sink before
+	// calling Setup; Setup itself does not touch the process logger.
+	Logs *logbuf.Ring
 }
 
-// DefaultOptions returns the settings the flags default to. It is the starting
-// point for building an agent without a command line: take it, change what you
-// need, and hand it to Setup.
+// DefaultOptions returns the settings the shipped command's flags default to.
+// It is the starting point for building an agent without a command line: take
+// it, change what you need, and hand it to Setup.
 func DefaultOptions() *Options {
 	return &Options{
 		DevicePort:    DefaultDevicePort,
@@ -56,44 +61,19 @@ func DefaultOptions() *Options {
 	}
 }
 
-// ParseFlags defines the agent's flags on the default command line and parses
-// it. It does not act on -version: the caller prints that, because the version
-// banner names the PC/SC backend and choosing that backend is the caller's job.
-func ParseFlags() *Options {
-	opts := &Options{}
-	flag.BoolVar(&opts.Version, "version", false, "Print version information and exit")
-	flag.StringVar(&opts.DevicePath, "device", "", "Path to NFC device (optional)")
-	flag.IntVar(&opts.DevicePort, "device-port", DefaultDevicePort, "Port for the agent server (NFC devices and web clients share this port)")
-	flag.IntVar(&opts.BootstrapPort, "bootstrap-port", DefaultBootstrapPort, "Port for CA bootstrap server (0 to disable)")
-	flag.StringVar(&opts.APISecret, "api-secret", "", "API secret for session handshake (optional)")
-	flag.StringVar(&opts.CertFile, "cert", "", "Path to TLS certificate file (enables HTTPS/WSS)")
-	flag.StringVar(&opts.KeyFile, "key", "", "Path to TLS private key file (enables HTTPS/WSS)")
-	flag.BoolVar(&opts.AutoTLS, "auto-tls", true, "Automatically generate and manage TLS certificates")
-	flag.BoolVar(&opts.RequirePaired, "require-paired-devices", false, "Admit only devices that have paired, withdrawing the shared secret and loopback bypass for device connections. Browser clients are unaffected")
-	flag.BoolVar(&opts.InstallCA, "install-ca", false, "Install a local certificate authority into the system trust store so browsers trust this agent. Not needed for phones, readers, or an externally provisioned certificate")
-	flag.StringVar(&opts.ConfigDir, "config-dir", "", "Config directory (default: platform-specific)")
-	flag.StringVar(&opts.AllowedOrigins, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
-	flag.Parse()
-
-	opts.devicePortSet = isFlagSet("device-port")
-	return opts
-}
-
-// Runtime is everything Setup built: a configured agent, plus the stores and
-// servers a front end needs to drive and display it.
+// Runtime is what Setup built. It carries only what is not already reachable
+// through the agent: the origin and device stores, the pairing server and its
+// port all live on Agent, and reads of those go through rt.Agent so there is
+// one copy to keep true.
 type Runtime struct {
 	Agent    *Agent
 	Settings *settings.Store
-	Logs     *logbuf.Ring
-	Origins  *OriginStore
-	Devices  *DeviceRegistry
 
-	// Bootstrap is the pairing server, nil when pairing is disabled.
-	Bootstrap     *tls.BootstrapServer
-	BootstrapPort int
+	// Logs is the ring passed in through Options, for the console to display.
+	Logs *logbuf.Ring
 
-	// DevicePath is the reader to open at startup, once the flag and the
-	// stored preference have been reconciled.
+	// DevicePath is the reader to open at startup, once the caller's choice
+	// and the stored preference have been reconciled.
 	DevicePath string
 }
 
@@ -105,12 +85,6 @@ type Runtime struct {
 // this package. Wiring the two is the caller's job, and the only thing that
 // needs to know about both.
 func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
-	// Capture log output in memory before anything else logs. Started from a
-	// desktop launcher there is no stderr to read, so without this the agent's
-	// diagnostics are discarded as they are produced.
-	logRing := logbuf.New(logbuf.DefaultCapacity)
-	log.SetOutput(io.MultiWriter(os.Stderr, logRing))
-
 	log.Printf("Starting %s %s", buildinfo.Name, buildinfo.FullVersion())
 
 	// Resolve the config directory once — used by both the TLS manager
@@ -246,7 +220,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	if devicePath == "" {
 		devicePath = stored.DevicePath
 	}
-	if !opts.devicePortSet && stored.Port > 0 {
+	if !opts.DevicePortSet && stored.Port > 0 {
 		a.DevicePort = stored.Port
 	}
 	if !opts.RequirePaired && os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") != "1" && stored.RequirePairedDevice {
@@ -255,27 +229,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	a.ApplySettings(stored)
 
 	return &Runtime{
-		Agent:         a,
-		Settings:      settingsStore,
-		Logs:          logRing,
-		Origins:       origins,
-		Devices:       devices,
-		Bootstrap:     bootstrapServer,
-		BootstrapPort: opts.BootstrapPort,
-		DevicePath:    devicePath,
+		Agent:      a,
+		Settings:   settingsStore,
+		Logs:       opts.Logs,
+		DevicePath: devicePath,
 	}, nil
-}
-
-// isFlagSet reports whether a flag was given on the command line, as opposed to
-// holding its default. A stored port must not override an explicit -device-port.
-func isFlagSet(name string) bool {
-	found := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			found = true
-		}
-	})
-	return found
 }
 
 // DefaultConfigDir returns the platform-specific config directory.

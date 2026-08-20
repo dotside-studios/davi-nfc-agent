@@ -221,6 +221,28 @@ func TestAClientWriteRoutesToThePhoneHoldingTheTag(t *testing.T) {
 	if !reply.Success {
 		t.Fatalf("the client was told the write failed: %s", reply.Error)
 	}
+
+	// What the agent claims about a write it did not perform itself. The phone
+	// confirms it wrote, but nothing read the tag back: its ReadData answers
+	// with the snapshot taken at the scan, so a read-back would compare against
+	// data that cannot have changed. Reporting verified here would be a claim
+	// the agent has no basis for.
+	var result struct {
+		UID      string `json:"uid"`
+		Verified bool   `json:"verified"`
+		Locked   bool   `json:"locked"`
+	}
+	decode(t, reply.Payload, &result)
+
+	if result.UID != phoneUID {
+		t.Errorf("the response named tag %q, want the phone's %q", result.UID, phoneUID)
+	}
+	if result.Verified {
+		t.Error("the write was reported verified, but nothing read the tag back")
+	}
+	if result.Locked {
+		t.Error("the write was reported locked, but the client did not ask for one")
+	}
 }
 
 // A raw exchange with a tag a phone is holding, base64 in both directions.

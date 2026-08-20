@@ -740,12 +740,23 @@ func (r *NFCReader) prepareCardForWrite(expectUID string) (*Card, error) {
 // handling, a pre-flight capacity check, bounded retries, and read-after-write
 // verification. Supports overwrite mode and partial update (append/replace at
 // index). It returns a WriteResult describing the outcome on success.
-func (r *NFCReader) writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
+// writeMessageToCard encodes msg onto the card and confirms it landed.
+//
+// A free function over the card rather than a method on the reader: every step
+// works through nfc.Tag, and the clock is the only thing it needed a reader
+// for. That is what lets a tag a device is holding take the same path as one on
+// the reader, instead of a second implementation beside this one.
+//
+// The steps a tag cannot support are skipped rather than branched around. A tag
+// reporting no capacity is not capacity-checked; a tag whose contents cannot be
+// re-read is written once and reported unverified, because reading it back
+// would compare against data that never changes.
+func writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions, clock Clock) (*WriteResult, error) {
 	log.Printf("writeMessageToCard (UID: %s, Type: %s): overwrite=%v, index=%d",
 		card.UID, card.Type, opts.Overwrite, opts.Index)
 
 	// Resolve the final NDEF message to write (overwrite vs partial merge).
-	finalMsg, err := r.resolveWriteMessage(card, msg, opts)
+	finalMsg, err := resolveWriteMessage(card, msg, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -774,11 +785,11 @@ func (r *NFCReader) writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteO
 		if attempt > 1 {
 			log.Printf("writeMessageToCard (UID: %s): retry attempt %d/%d (last error: %v)",
 				card.UID, attempt, attempts, lastErr)
-			r.clock.Sleep(time.Duration(attempt-1) * WriteRetryBackoff)
+			clock.Sleep(time.Duration(attempt-1) * WriteRetryBackoff)
 		}
 
 		// Perform the write.
-		if err := r.writeOnce(card, data, opts); err != nil {
+		if err := writeOnce(card, data, opts); err != nil {
 			if isPermanentWriteError(err) {
 				return nil, err
 			}
@@ -793,7 +804,7 @@ func (r *NFCReader) writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteO
 		}
 
 		// Read back and confirm the data landed.
-		verified, err := r.verifyWrite(card, data)
+		verified, err := verifyWrite(card, data)
 		if err != nil {
 			if isPermanentWriteError(err) {
 				return nil, err
@@ -818,7 +829,7 @@ func (r *NFCReader) writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteO
 // resolveWriteMessage determines the final NDEF message to write, applying
 // overwrite vs partial-update (append/replace) semantics against the card's
 // current contents. A card with no usable NDEF content is always overwritten.
-func (r *NFCReader) resolveWriteMessage(card *Card, msg *NDEFMessage, opts WriteOptions) (*NDEFMessage, error) {
+func resolveWriteMessage(card *Card, msg *NDEFMessage, opts WriteOptions) (*NDEFMessage, error) {
 	cachedMsg, _ := card.ReadMessage()
 	cachedNdef, isNDEF := cachedMsg.(*NDEFMessage)
 
@@ -860,7 +871,7 @@ func (r *NFCReader) resolveWriteMessage(card *Card, msg *NDEFMessage, opts Write
 // writeOnce performs a single write of the encoded NDEF data to the tag. It
 // writes the bytes directly (rather than through the Card's buffer) so that a
 // failed attempt leaves no partial buffer behind for the next retry.
-func (r *NFCReader) writeOnce(card *Card, data []byte, opts WriteOptions) error {
+func writeOnce(card *Card, data []byte, opts WriteOptions) error {
 	// Clear any cached read state so the verification read hits the tag.
 	card.Reset()
 
@@ -877,7 +888,7 @@ func (r *NFCReader) writeOnce(card *Card, data []byte, opts WriteOptions) error 
 
 // verifyWrite re-reads the card and reports whether its NDEF contents exactly
 // match the bytes that were written.
-func (r *NFCReader) verifyWrite(card *Card, expected []byte) (bool, error) {
+func verifyWrite(card *Card, expected []byte) (bool, error) {
 	card.Reset()
 	readBack, err := card.tag.ReadData()
 	if err != nil {
@@ -944,7 +955,7 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 		}()
 
 		log.Printf("Attempting to write NDEF message to card UID: %s, Type: %s", card.UID, card.Type)
-		res, err := r.writeMessageToCard(card, msg, opts)
+		res, err := writeMessageToCard(card, msg, opts, r.clock)
 		if err != nil {
 			return fmt.Errorf("failed to write to card UID %s (Type: %s): %w", card.UID, card.Type, err)
 		}

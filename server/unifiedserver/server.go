@@ -65,11 +65,18 @@ type Server struct {
 	// rather than accepting it.
 	mounts []mount
 
-	// mu guards the lifecycle fields below. Start runs on its own goroutine
-	// and blocks until Stop cancels it, so the two overlap by design: without
-	// this they raced on httpServer, and a Stop arriving before Start had
-	// finished binding could miss the listener entirely.
-	mu         sync.Mutex
+	// mu guards the lifecycle fields below. Serving continues on a goroutine
+	// after Start returns, so Stop overlaps it by design: without this they
+	// raced on httpServer.
+	mu sync.Mutex
+
+	// started closes Mount: a route registered after the mux was built would
+	// never be served. It stays set once stopped, since a stopped server is
+	// started again with the routes it already has.
+	started bool
+
+	// stopped reports that the server is not serving. Read by startMDNS, which
+	// registers after Start has released the lock.
 	stopped    bool
 	httpServer *http.Server
 	ctx        context.Context
@@ -111,7 +118,7 @@ func (s *Server) Mount(pattern string, handler http.Handler) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.httpServer != nil || s.stopped {
+	if s.started {
 		return fmt.Errorf("unifiedserver: cannot mount %q once started", pattern)
 	}
 	for _, m := range s.mounts {
@@ -129,23 +136,30 @@ func (s *Server) Mount(pattern string, handler http.Handler) error {
 // sees rather than a message in a log: the agent used to launch this on a
 // goroutine and drop the error, reporting itself running with nothing
 // listening. Serving continues on a goroutine until Stop.
+//
+// A stopped server starts again on the routes it already carries. The agent
+// stops and starts one whenever the reader changes or the certificate is
+// reissued, and rebuilding it there would lose whatever else was mounted on the
+// port, a control center included.
 func (s *Server) Start() error {
 	log.Printf("[unified] Starting NFC Agent server on port %d (device + client)...", s.config.Port)
 
 	s.mu.Lock()
-	if s.stopped {
-		// Stop landed first. Binding now would leave a listener nobody holds.
+	if s.httpServer != nil {
 		s.mu.Unlock()
-		log.Printf("[unified] Stopped before startup completed; not binding")
-		return nil
+		return fmt.Errorf("unifiedserver: already serving on port %d", s.config.Port)
 	}
-
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
+		// Nothing is closed off by a start that never bound: the caller can
+		// mount, fix the port and try again.
 		s.mu.Unlock()
 		return fmt.Errorf("unifiedserver: listen on %s: %w", addr, err)
 	}
+
+	s.started = true
+	s.stopped = false
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpServer = &http.Server{Addr: addr, Handler: s.handlerLocked()}
@@ -220,7 +234,9 @@ func (s *Server) Stop() {
 	mdns := s.mdnsServer
 	s.mdnsServer = nil
 	httpServer := s.httpServer
+	s.httpServer = nil
 	cancel := s.cancel
+	s.cancel = nil
 	s.mu.Unlock()
 
 	if mdns != nil {

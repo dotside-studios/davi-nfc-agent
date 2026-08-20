@@ -159,6 +159,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server/unifiedserver` | One listener fronting all of the above |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
+| `e2e` | Tests only: an agent wired as on this page, driven over its protocols |
 
 Dependencies run in one direction. `agent/console` and `agent/tray` import
 `agent`; neither is imported by it, and no package below `cmd` imports both.

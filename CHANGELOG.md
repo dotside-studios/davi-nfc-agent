@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   headless, no control center, no hardware backend, reacting to tags in Go.
   Every Go sample on the page compiles against this tree.
 
+- **An end-to-end test suite in `e2e/`.** The refactor is only worth what a
+  program built on it can do, and nothing exercised that: the packages were
+  tested one at a time, so the composition in `docs/custom-builds.md` was
+  covered by no test at all. The suite wires an agent exactly as that page
+  does, over a real TLS listener on a real port, and drives it from outside
+  over the published protocols: a card on the reader reaching a client and an
+  `OnTag` observer, a client write landing on the tag, a phone's scan reaching
+  a client, a client write and a raw exchange routed to the phone holding the
+  tag, read-only mode refusing a write aimed at a phone, pairing issuing the
+  credential that admits a device once only paired devices are allowed, a
+  revoked device refused, and the lifecycle: a restart still serving, a stop
+  releasing the port, a busy port failing the start. Every connection
+  authenticates the agent by its public key pin, the way a phone does, so a
+  certificate that does not carry the pinned key fails the suite. The only
+  stand-in is the reader hardware
+
 - **`(*Agent).OnTag` observes every scan.** Writing that page turned up a gap:
   a program embedding the agent had no supported way to see a card. The obvious
   move — reading `Agent.Bridge.TagData` — is wrong, because the client server is
@@ -99,6 +115,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   let an operation return its refusal rather than report it beside a value.
 
 ### Fixed
+
+- **A restarted agent serves again.** `Agent.Stop` dropped the server it was
+  given, and `unifiedserver.Server` refused to start once stopped, so every
+  stop-and-start left the agent running with a dead port: the tray's reader
+  switch, the console's stop button, and `RestartServers` on a certificate
+  reissue all took the WebSocket API and the control center down for the rest
+  of the run, silently. The agent now holds the listener for its whole life and
+  a stopped server starts again on the routes already mounted on it, which is
+  the only thing it can do: those routes are the caller's, so rebuilding the
+  server would lose them. Starting one that is already serving is now an error
+  rather than a second listener, and mounting stays closed once started
 
 - **A write to a phone reports what it did.** The device route returned a bare
   map, and the client server only reads a write outcome when it is an

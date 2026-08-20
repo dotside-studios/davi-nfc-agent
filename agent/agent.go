@@ -142,11 +142,14 @@ type Agent struct {
 	// Reader is the reader currently open, nil before Start and after Stop.
 	Reader *nfc.NFCReader
 
-	// The device and client endpoints are served from a single listener
-	// (UnifiedServer) on the configured port, which routes each /ws connection
-	// to the device driver or the client server. Router decides which tag
-	// source a client request applies to, and DeviceAuth gates the device
-	// endpoint. All are nil until Start.
+	// UnifiedServer is the listener the device and client endpoints are served
+	// from, routing each /ws connection to the device driver or the client
+	// server. It is the one the caller supplied, held for the agent's whole
+	// life: a stop leaves it stopped rather than dropping it, so a restart
+	// serves from the same listener with the same routes mounted on it.
+	//
+	// Router decides which tag source a client request applies to, and
+	// DeviceAuth gates the device endpoint. Both are nil until Start.
 	UnifiedServer *unifiedserver.Server
 	ClientServer  *clientserver.Server
 
@@ -369,7 +372,7 @@ func (a *Agent) startLocked(devicePath string) error {
 // lifecycle lock and owns the state transition; see Stop. It is safe to call on
 // a partly started agent, which is what makes an aborted Start recoverable.
 func (a *Agent) stopLocked() {
-	if a.Reader == nil && a.UnifiedServer == nil {
+	if a.Reader == nil && a.serving.Load() == nil {
 		return
 	}
 
@@ -377,7 +380,6 @@ func (a *Agent) stopLocked() {
 
 	if a.UnifiedServer != nil {
 		a.UnifiedServer.Stop()
-		a.UnifiedServer = nil
 	}
 
 	a.ClientServer = nil
@@ -462,14 +464,12 @@ func (a *Agent) stopServers() {
 
 	if a.UnifiedServer != nil {
 		a.UnifiedServer.Stop()
-		a.UnifiedServer = nil
 	}
 
 	a.ClientServer = nil
 	a.Router = nil
 
 	a.serving.Store(nil)
-
 }
 
 // startServers starts the HTTP/WebSocket servers.

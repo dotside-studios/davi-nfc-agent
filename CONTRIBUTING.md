@@ -35,6 +35,11 @@ go build ./cmd/davi-nfc-agent
 go test ./...
 ```
 
+`e2e/` builds an agent the way `docs/custom-builds.md` does, on a real TLS
+listener, and drives it over the published WebSocket protocols. Run it alone
+with `go test ./e2e/ -v` when changing anything a program embedding the agent
+depends on.
+
 ## Advanced Building
 
 ### Cross-Platform Builds

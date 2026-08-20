@@ -3,7 +3,7 @@ package agent
 import (
 	"net/http"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 )
@@ -70,16 +70,35 @@ type endpoints struct {
 	device http.Handler
 }
 
-// buildDeviceEndpoint makes the driver's handler, behind the agent's credential
-// check. Nil when no driver serves devices.
-func (a *Agent) buildDeviceEndpoint(remote *remotenfc.Manager) http.Handler {
-	if remote == nil {
-		return nil
+// DeviceEndpointOptions is what the agent decides about device connections,
+// handed to whatever builds the endpoint. It mirrors the driver's own options
+// without naming them.
+type DeviceEndpointOptions struct {
+	// Authenticate admits or rejects a device, writing its own rejection.
+	Authenticate func(w http.ResponseWriter, r *http.Request) bool
+
+	// CheckOrigin admits or rejects an upgrade by Origin.
+	CheckOrigin func(r *http.Request) bool
+
+	// AllowTagModification reports whether writes, locks and raw exchanges are
+	// currently permitted. Read-only mode gates every route to a tag, not just
+	// the hardware one.
+	AllowTagModification func() bool
+
+	// PublicKeyPin is reported at registration so a device can recognise this
+	// agent later without a certificate authority.
+	PublicKeyPin string
+}
+
+// TagModificationAllowed reports whether the agent's mode currently permits
+// writes, locks and raw exchanges.
+//
+// Read when the operation happens rather than when the endpoint was built: the
+// endpoint outlives any particular reader, and the mode changes while running.
+func (a *Agent) TagModificationAllowed() bool {
+	reader := a.reader.Load()
+	if reader == nil {
+		return true
 	}
-	return remote.Handler(remotenfc.ServerOptions{
-		Authenticate:         a.DeviceAuth.Check,
-		CheckOrigin:          a.checkOrigin(),
-		AllowTagModification: a.tagModificationPolicy(),
-		PublicKeyPin:         a.publicKeyPin,
-	})
+	return reader.GetMode() != nfc.ModeReadOnly
 }

@@ -92,7 +92,7 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		})
 	}
 
-	router := tagrouter.New(tagrouter.Config{Reader: cfg.Reader, Remote: remote})
+	router := tagrouter.New(tagrouter.Config{Reader: cfg.Reader, Devices: remote})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if remote != nil {

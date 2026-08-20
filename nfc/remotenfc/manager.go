@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -42,6 +43,9 @@ type Manager struct {
 	// that names none. The tags themselves live on the devices holding them.
 	activeLatest string
 	activeMu     sync.RWMutex
+
+	// reqSeq labels each request to a device.
+	reqSeq atomic.Uint64
 }
 
 // NewManager creates a new smartphone manager.

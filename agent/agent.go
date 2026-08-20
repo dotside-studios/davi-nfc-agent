@@ -11,7 +11,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
@@ -97,6 +96,24 @@ type Config struct {
 	// through SetRequirePairedDevice, which also tells the running server.
 	RequirePairedDevice bool
 
+	// Devices routes operations to paired devices, and DeviceScans carries what
+	// they scan. Both come from a driver the caller built, because the caller
+	// is what knows one is wanted: an agent with neither serves its own reader
+	// and nothing else.
+	//
+	// The agent takes them as an interface and a channel rather than a driver,
+	// so it names no device protocol and cannot reach past what it was given.
+	RemoteOps   server.DeviceOps
+	RemoteScans <-chan nfc.NFCData
+
+	// DeviceEndpoint builds the handler serving device connections on the
+	// shared /ws path.
+	//
+	// A function, because the policies are the agent's and the wire is the
+	// driver's: the agent hands over what it decides and the caller builds the
+	// handler, so neither names the other's types. Nil serves clients only.
+	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
+
 	// Server is the listener the agent serves from. The caller builds it and
 	// mounts whatever else it wants served from the same port, which is how a
 	// control center is attached: mount it, or do not and there is none.
@@ -135,7 +152,11 @@ type Agent struct {
 
 	// serving is what the mounted routes dispatch to, replaced on every start
 	// and cleared on stop.
-	serving    atomic.Pointer[endpoints]
+	serving atomic.Pointer[endpoints]
+
+	// reader mirrors Reader for the handlers, which read it from their own
+	// goroutines and must not take the lifecycle lock to do so.
+	reader     atomic.Pointer[nfc.NFCReader]
 	Router     *tagrouter.Router
 	DeviceAuth *server.DeviceAuth
 
@@ -143,6 +164,9 @@ type Agent struct {
 	info                buildinfo.Info
 	logger              *log.Logger
 	manager             nfc.Manager
+	deviceEndpoint      http.Handler
+	remoteOps           server.DeviceOps
+	remoteScans         <-chan nfc.NFCData
 	apiSecret           string
 	configDir           string
 	allowedOrigins      []string
@@ -194,6 +218,8 @@ func New(cfg Config) *Agent {
 		info:                cfg.Info.OrDefault(),
 		logger:              logger,
 		manager:             cfg.Manager,
+		remoteOps:           cfg.RemoteOps,
+		remoteScans:         cfg.RemoteScans,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
 		allowedOrigins:      cfg.AllowedOrigins,
@@ -209,6 +235,18 @@ func New(cfg Config) *Agent {
 		requirePairedLocked: cfg.RequirePairedDeviceLocked,
 		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
+	}
+
+	// Built here rather than at start, so a caller can put its device endpoint
+	// behind it before anything runs.
+	a.DeviceAuth = server.NewDeviceAuth(cfg.APISecret, a.tokenVerifier(), a.requirePairedDevice)
+	if cfg.DeviceEndpoint != nil {
+		a.deviceEndpoint = cfg.DeviceEndpoint(DeviceEndpointOptions{
+			Authenticate:         a.DeviceAuth.Check,
+			CheckOrigin:          a.checkOrigin(),
+			AllowTagModification: a.TagModificationAllowed,
+			PublicKeyPin:         a.publicKeyPin,
+		})
 	}
 
 	// Registered here rather than left to the caller: the pairing server's
@@ -316,6 +354,7 @@ func (a *Agent) startLocked(devicePath string) error {
 	}
 
 	a.Reader = nfcReader
+	a.reader.Store(nfcReader)
 
 	// Start network watcher if TLS manager is configured
 	if a.tlsManager != nil {
@@ -349,6 +388,7 @@ func (a *Agent) stopLocked() {
 	if a.Reader != nil {
 		a.Reader.Stop()
 		a.Reader = nil
+		a.reader.Store(nil)
 	}
 
 	a.logger.Println("Agent stopped successfully")
@@ -365,33 +405,6 @@ func (a *Agent) Shutdown() {
 	if closer, ok := a.manager.(interface{ Close() }); ok {
 		closer.Close()
 	}
-}
-
-// findDeviceDriver locates the driver serving remote devices, whether the agent
-// holds it directly or behind a manager that holds others.
-func findDeviceDriver(m nfc.Manager) *remotenfc.Manager {
-	if m == nil {
-		return nil
-	}
-
-	if driver, ok := m.(*remotenfc.Manager); ok {
-		return driver
-	}
-
-	holder, ok := m.(interface {
-		GetManager(string) (nfc.Manager, bool)
-	})
-	if !ok {
-		return nil
-	}
-
-	child, exists := holder.GetManager(nfc.ManagerTypeSmartphone)
-	if !exists {
-		return nil
-	}
-
-	driver, _ := child.(*remotenfc.Manager)
-	return driver
 }
 
 // watchNetworkChanges listens for network changes from TLS manager and restarts servers.
@@ -465,15 +478,8 @@ func (a *Agent) startServers() error {
 		return errors.New("reader not initialized")
 	}
 
-	// The device endpoint is the driver's own handler, checking the agent's
-	// credential. The driver requires an authenticator but knows nothing about
-	// API secrets or pairing; the agent knows nothing about the protocol.
-	remote := findDeviceDriver(a.manager)
-	a.DeviceAuth = server.NewDeviceAuth(a.apiSecret, a.tokenVerifier(), a.requirePairedDevice)
-	deviceEndpoint := a.buildDeviceEndpoint(remote)
-
 	// Routes each client request to whichever source holds the tag it names.
-	a.Router = tagrouter.New(tagrouter.Config{Reader: a.Reader, Remote: remote})
+	a.Router = tagrouter.New(tagrouter.Config{Reader: a.Reader, Devices: a.remoteOps})
 
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.apiSecret,
@@ -491,15 +497,15 @@ func (a *Agent) startServers() error {
 	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
 	a.Reader.Start()
 	go a.pumpReader(a.pumpCtx, a.Reader, a.ClientServer)
-	if remote != nil {
-		go pumpDevices(a.pumpCtx, remote.Data(), a.ClientServer)
+	if a.remoteScans != nil {
+		go pumpDevices(a.pumpCtx, a.remoteScans, a.ClientServer)
 	}
 
 	// Published as a pair, so a request never sees a client from one start
 	// beside a device from the next.
 	a.serving.Store(&endpoints{
 		client: http.HandlerFunc(a.ClientServer.ServeWS),
-		device: deviceEndpoint,
+		device: a.deviceEndpoint,
 	})
 
 	// The listener is the caller's, mounted before the agent starts. A nil one
@@ -590,17 +596,6 @@ func (a *Agent) checkOrigin() func(r *http.Request) bool {
 		return server.CheckOriginPolicy(policy)
 	}
 	return server.CheckOrigin(a.allowedOrigins)
-}
-
-// tagModificationPolicy captures the reader's mode as a predicate, so the
-// driver refuses a modifying operation the agent's mode forbids. Read-only
-// gates every route to a tag, not just the hardware one.
-func (a *Agent) tagModificationPolicy() func() bool {
-	reader := a.Reader
-	if reader == nil {
-		return nil
-	}
-	return func() bool { return reader.GetMode() != nfc.ModeReadOnly }
 }
 
 // originPolicy returns the live allowlist as an origin policy, or nil to fall

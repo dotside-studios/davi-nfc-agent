@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
@@ -17,7 +16,7 @@ type route struct {
 	reader bool
 
 	// device is the remote device holding the tag, when one does.
-	device remotenfc.ActiveTagInfo
+	device deviceTag
 }
 
 // refuse explains a refusal in the terms the client sees. The code travels on
@@ -65,17 +64,17 @@ func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route
 }
 
 // deviceHoldingUID finds the remote device holding a tag, by UID.
-func (s *Router) deviceHoldingUID(uid string) (remotenfc.ActiveTagInfo, bool) {
-	if s.remote == nil {
-		return remotenfc.ActiveTagInfo{}, false
+func (s *Router) deviceHoldingUID(uid string) (deviceTag, bool) {
+	if s.devices == nil {
+		return deviceTag{}, false
 	}
-	for _, deviceID := range s.remote.ActiveTagDevices() {
-		active, ok := s.remote.ActiveTag(deviceID)
+	for _, deviceID := range s.devices.DevicesHoldingTags() {
+		active, ok := s.targetDevice(deviceID)
 		if ok && strings.EqualFold(active.UID, uid) {
 			return active, true
 		}
 	}
-	return remotenfc.ActiveTagInfo{}, false
+	return deviceTag{}, false
 }
 
 // readerHoldsUID reports whether the reader's last scan carries uid. This is a

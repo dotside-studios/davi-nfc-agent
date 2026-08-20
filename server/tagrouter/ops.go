@@ -2,22 +2,14 @@ package tagrouter
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 var _ server.TagOps = (*Router)(nil)
-
-// requestID labels a request to the device, which correlates its reply by it.
-// A caller no longer supplies one, since nothing correlates on this side any
-// more: the call returns the answer.
-func (s *Router) requestID(op string) string {
-	return fmt.Sprintf("%s-%d", op, s.seq.Add(1))
-}
 
 // Write encodes a message onto the tag the request names.
 func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResult, error) {
@@ -60,26 +52,15 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 // map here, which the client server could not read as a result at all, so a
 // write to a phone reported success with none of the fields the protocol
 // documents.
-func (s *Router) writeViaDevice(req server.WriteOp, msg *nfc.NDEFMessage, active remotenfc.ActiveTagInfo) (*nfc.WriteResult, error) {
+func (s *Router) writeViaDevice(req server.WriteOp, msg *nfc.NDEFMessage, active deviceTag) (*nfc.WriteResult, error) {
 	ndefBytes, err := msg.Encode()
 	if err != nil {
 		return nil, protocol.WrapError(protocol.ErrCodeInvalidRequest, err, "could not encode the message")
 	}
 
-	resp, err := s.remote.WriteToDevice(active.DeviceID, remotenfc.DeviceWriteRequest{
-		RequestID:      s.requestID("write"),
-		TagUID:         active.UID,
-		NDEFMessage:    server.BuildNDEFInput(req.Request),
-		NDEFBytes:      ndefBytes,
-		Lock:           req.Request.Lock,
-		IdempotencyKey: req.IdempotencyKey,
-	})
+	err = s.devices.WriteTag(active.DeviceID, active.UID, ndefBytes, req.Request.Lock, req.IdempotencyKey)
 	if err != nil {
-		return nil, protocol.WrapError(operationErrorCode(err, protocol.ErrCodeDeviceGone), err,
-			"device %s did not complete the write", active.DeviceID)
-	}
-	if !resp.Success {
-		return nil, protocol.Errorf(orCode(resp.ErrorCode, protocol.ErrCodeWriteFailed), "%s", resp.Error)
+		return nil, deviceFailure(err, active.DeviceID, "write")
 	}
 
 	return &nfc.WriteResult{
@@ -112,19 +93,11 @@ func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, 
 	return s.config.Reader.LockCardExpecting(req.TagUID)
 }
 
-func (s *Router) lockViaDevice(req server.LockOp, active remotenfc.ActiveTagInfo) (*nfc.LockResult, error) {
-	resp, err := s.remote.WriteToDevice(active.DeviceID, remotenfc.DeviceWriteRequest{
-		RequestID:      s.requestID("lock"),
-		TagUID:         active.UID,
-		Lock:           true,
-		IdempotencyKey: req.IdempotencyKey,
-	})
-	if err != nil {
-		return nil, protocol.WrapError(operationErrorCode(err, protocol.ErrCodeDeviceGone), err,
-			"device %s did not complete the lock", active.DeviceID)
-	}
-	if !resp.Success {
-		return nil, protocol.Errorf(orCode(resp.ErrorCode, protocol.ErrCodeLockFailed), "%s", resp.Error)
+func (s *Router) lockViaDevice(req server.LockOp, active deviceTag) (*nfc.LockResult, error) {
+	// A lock travels as a write with no message: the device protocol has one
+	// tag-modifying frame, not two.
+	if err := s.devices.WriteTag(active.DeviceID, active.UID, nil, true, req.IdempotencyKey); err != nil {
+		return nil, deviceFailure(err, active.DeviceID, "lock")
 	}
 
 	// The device reports the outcome but not the tag type.
@@ -151,22 +124,27 @@ func (s *Router) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 	return s.config.Reader.TransceiveExpecting(req.Data, req.TagUID)
 }
 
-func (s *Router) transceiveViaDevice(req server.TransceiveOp, active remotenfc.ActiveTagInfo) ([]byte, error) {
-	resp, err := s.remote.TransceiveWithDevice(active.DeviceID, remotenfc.DeviceTransceiveRequest{
-		RequestID: s.requestID("transceive"),
-		DeviceID:  active.DeviceID,
-		TagUID:    active.UID,
-		Data:      req.Data,
-		Raw:       req.Raw,
-	})
+func (s *Router) transceiveViaDevice(req server.TransceiveOp, active deviceTag) ([]byte, error) {
+	data, err := s.devices.TransceiveTag(active.DeviceID, active.UID, req.Data, req.Raw)
 	if err != nil {
-		return nil, protocol.WrapError(protocol.ErrCodeTransceiveFailed, err,
-			"device %s did not complete the exchange", active.DeviceID)
+		return nil, deviceFailure(err, active.DeviceID, "exchange")
 	}
-	if !resp.Success {
-		return nil, protocol.Errorf(orCode(resp.ErrorCode, protocol.ErrCodeTransceiveFailed), "%s", resp.Error)
+	return data, nil
+}
+
+// deviceFailure reports a driver error.
+//
+// A failure the device itself reported already says what went wrong and carries
+// its own code, so it passes through: prefixing it buries the useful half. Only
+// a transport failure, which says nothing about the tag, is labelled with the
+// device and operation.
+func deviceFailure(err error, deviceID, op string) error {
+	var coded *protocol.CodedError
+	if errors.As(err, &coded) {
+		return err
 	}
-	return resp.Data, nil
+	return protocol.WrapError(operationErrorCode(err, protocol.ErrCodeDeviceGone), err,
+		"device %s did not complete the %s", deviceID, op)
 }
 
 // Capabilities reports what the named tag supports.
@@ -183,14 +161,6 @@ func (s *Router) Capabilities(ctx context.Context, req server.CapabilitiesOp) (*
 		return &caps, nil
 	}
 	return s.config.Reader.GetCapabilitiesExpecting(req.TagUID)
-}
-
-// orCode prefers a code the device supplied over the operation's own label.
-func orCode(code, fallback protocol.ErrorCode) protocol.ErrorCode {
-	if code == "" {
-		return fallback
-	}
-	return code
 }
 
 // tagType names the tag's type when one is known.

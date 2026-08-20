@@ -22,6 +22,7 @@ package main
 import (
 	"io"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
@@ -43,11 +44,26 @@ func main() {
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
-	// Hardware readers and smartphones behind one manager. Nothing downstream
-	// distinguishes them.
+	// The driver serving phones. Built here because this is what decides the
+	// agent should serve them: it is handed over as an interface, a channel of
+	// scans and a handler builder, so the agent names no device protocol.
+	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
+	opts.RemoteOps = devices
+	opts.RemoteScans = devices.Data()
+	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
+		return devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         o.Authenticate,
+			CheckOrigin:          o.CheckOrigin,
+			AllowTagModification: o.AllowTagModification,
+			PublicKeyPin:         o.PublicKeyPin,
+		})
+	}
+
+	// Hardware readers and phones behind one manager, which is what the agent
+	// opens its reader from.
 	manager := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
-		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: remotenfc.NewManager(remotenfc.DeviceTimeout)},
+		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
 	rt, err := agent.Setup(opts, manager)
@@ -80,6 +96,12 @@ alongside the stores a front end needs.
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
+
+Nor does it reach into that backend. Serving phones takes three values the
+caller supplies from a driver it built: `RemoteOps` to route operations,
+`RemoteScans` to receive what they scan, and `DeviceEndpoint` to build their
+handler. Supply none and the agent serves its own reader and nothing else. The
+agent names no device protocol, and cannot find one you did not give it.
 
 Nor does it define flags or redirect the standard logger. Both belong to the
 program: registering flags writes to `flag.CommandLine`, which would collide

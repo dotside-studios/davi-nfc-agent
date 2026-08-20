@@ -59,6 +59,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The agent no longer reaches into its manager for a device driver.**
+  `findDeviceDriver` searched the manager for a `*remotenfc.Manager`, pulling a
+  concrete driver back out of the abstraction the agent had just been handed,
+  and the tag router took that driver by its own type. So both packages named a
+  device protocol they had no business knowing.
+
+  A driver now reaches them as three values the caller supplies:
+  `server.DeviceOps` to route operations, a channel of scans, and a function
+  that builds the device handler. `agent` and `server/tagrouter` import
+  `nfc/remotenfc` nowhere. Supply none and the agent serves its own reader.
+
+  The interface is satisfied by shape rather than by import, so the driver does
+  not name its consumers either: a second kind of remote device implements the
+  same four methods and needs no change anywhere else.
+
+  What the agent decides about device connections travels with it, in
+  `agent.DeviceEndpointOptions`: the credential check, the origin check, the
+  read-only gate and the key pin. The gate is now read per operation rather than
+  captured when the endpoint is built, so a mode change while running takes
+  effect
+
 - **The bridge is gone; a client request is a call.** `ServerBridge` was six
   channels and a response channel per request, connecting exactly two objects:
   every channel had one receiver. It was a hand-rolled RPC between things that

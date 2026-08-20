@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // Config names the tag sources to route between.
@@ -22,15 +22,15 @@ type Config struct {
 	// Reader is the agent's own hardware reader. Nil when it has none.
 	Reader *nfc.NFCReader
 
-	// Remote is the driver serving paired devices. Nil when none are
+	// Devices is the driver serving paired devices. Nil when none are
 	// configured.
-	Remote *remotenfc.Manager
+	Devices server.DeviceOps
 }
 
 // Router routes client requests to a tag source.
 type Router struct {
-	config Config
-	remote *remotenfc.Manager
+	config  Config
+	devices server.DeviceOps
 
 	// seq labels each request to a device, which correlates its reply by it.
 	seq atomic.Uint64
@@ -39,17 +39,28 @@ type Router struct {
 // New builds the router. It has no lifetime of its own: every operation is a
 // call, so there is nothing to start or stop.
 func New(config Config) *Router {
-	return &Router{config: config, remote: config.Remote}
+	return &Router{config: config, devices: config.Devices}
 }
 
 // targetDevice resolves which remote device a request is for. A request naming
 // one is answered by that device or not at all; naming none falls back to the
 // most recent scan.
-func (s *Router) targetDevice(target string) (remotenfc.ActiveTagInfo, bool) {
-	if s.remote == nil {
-		return remotenfc.ActiveTagInfo{}, false
+func (s *Router) targetDevice(target string) (deviceTag, bool) {
+	if s.devices == nil {
+		return deviceTag{}, false
 	}
-	return s.remote.ActiveTag(target)
+	deviceID, tag, ok := s.devices.TagOn(target)
+	if !ok {
+		return deviceTag{}, false
+	}
+	return deviceTag{DeviceID: deviceID, UID: tag.UID(), Tag: tag}, true
+}
+
+// deviceTag is a tag a remote device is holding.
+type deviceTag struct {
+	DeviceID string
+	UID      string
+	Tag      nfc.Tag
 }
 
 // modeAllowsTagModification reports whether the agent's current mode permits a

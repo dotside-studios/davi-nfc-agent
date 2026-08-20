@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -45,10 +46,26 @@ func main() {
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
-	// Hardware readers and smartphones behind one manager.
+	// The driver serving phones. Built here, because this is what decides the
+	// agent should serve them at all: it is handed over as an interface, a
+	// channel of scans and a handler, so the agent names no device protocol.
+	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
+	opts.RemoteOps = devices
+	opts.RemoteScans = devices.Data()
+	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
+		return devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         o.Authenticate,
+			CheckOrigin:          o.CheckOrigin,
+			AllowTagModification: o.AllowTagModification,
+			PublicKeyPin:         o.PublicKeyPin,
+		})
+	}
+
+	// Hardware readers and phones behind one manager, which is what the agent
+	// opens its reader from.
 	manager := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
-		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: remotenfc.NewManager(remotenfc.DeviceTimeout)},
+		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
 	rt, err := agent.Setup(opts, manager)

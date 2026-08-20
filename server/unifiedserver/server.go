@@ -4,7 +4,7 @@
 // Historically the agent ran two servers on two ports: a device server (for NFC
 // readers/phones) and a client server (for web apps). They already share the
 // same WebSocket path (/ws), auth, origin, and CORS handling and communicate
-// in-process through a server.ServerBridge — the two ports were a conceptual
+// in-process by direct call -- the two ports were a conceptual
 // boundary, not a technical requirement. This package collapses them onto one
 // listener and routes each incoming /ws connection to the device or client
 // handler based on the same discriminator the device server already used

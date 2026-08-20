@@ -11,14 +11,14 @@ import (
 // tag. Asked for on the request rather than enabled by the operator, so one
 // such client does not lower the guarantee for every other client on the agent.
 func TestUntargetedWriteIsServedWhenAllowed(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWriteFor("legacy-1", "")
 	msg.AllowUntargeted = true
-	go func() { bridge.WriteRequest <- msg }()
+	_ = goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 	if got, _ := req.Payload["tagUID"].(string); got != scannedUID {
@@ -29,17 +29,17 @@ func TestUntargetedWriteIsServedWhenAllowed(t *testing.T) {
 // Even with allowUntargeted set, a request that does name a tag is still held
 // to it: the opt-in widens what an unnamed request may do, not a named one.
 func TestNamedWriteStillCheckedWhenUntargetedAllowed(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWriteFor("legacy-2", "04:DE:AD:00")
 	msg.AllowUntargeted = true
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Fatal("write succeeded against a tag nobody is holding")
 		}

@@ -2,6 +2,7 @@ package unifiedserver_test
 
 import (
 	"context"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/gorilla/websocket"
 )
@@ -22,15 +22,13 @@ import (
 func newTestServer(t *testing.T) string {
 	t.Helper()
 
-	bridge := server.NewServerBridge()
 	deviceMgr := remotenfc.NewManager(30 * time.Second)
 
 	// The device endpoint is the driver's handler behind the credential check,
 	// which is how the agent mounts it.
 	auth := server.NewDeviceAuth("", nil, false)
 	device := deviceMgr.Handler(remotenfc.ServerOptions{Authenticate: auth.Check})
-	client := clientserver.New(clientserver.Config{}, bridge)
-	router := tagrouter.New(tagrouter.Config{Remote: deviceMgr}, bridge)
+	client := clientserver.New(clientserver.Config{})
 
 	u := unifiedserver.New(unifiedserver.Config{})
 	if err := u.Mount("/ws", server.CORS(server.RouteByMode(
@@ -40,17 +38,16 @@ func newTestServer(t *testing.T) string {
 		t.Fatalf("mount /ws: %v", err)
 	}
 
+	// The driver feeds the client server directly, which is what the agent
+	// wires up.
 	ctx, cancel := context.WithCancel(context.Background())
-	router.Start(ctx)
-	client.StartBackground(ctx)
-	go server.PumpTagData(ctx, deviceMgr.Data(), bridge)
+	go pumpTo(ctx, deviceMgr.Data(), client)
 
 	ts := httptest.NewServer(u.Handler())
 
 	t.Cleanup(func() {
 		ts.Close()
 		cancel()
-		bridge.Close()
 		deviceMgr.Close()
 	})
 
@@ -107,5 +104,20 @@ func TestWSDispatch(t *testing.T) {
 	// yields the device handler's INVALID_MESSAGE_TYPE.
 	if code := dialAndProbe(t, base+"/ws?mode=device"); code != "INVALID_MESSAGE_TYPE" {
 		t.Errorf("device /ws?mode=device routed to wrong handler: got code %q, want INVALID_MESSAGE_TYPE", code)
+	}
+}
+
+// pumpTo forwards a driver's scans to the client server.
+func pumpTo(ctx context.Context, src <-chan nfc.NFCData, sink *clientserver.Server) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-src:
+			if !ok {
+				return
+			}
+			sink.Broadcast(data)
+		}
 	}
 }

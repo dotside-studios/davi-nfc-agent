@@ -13,16 +13,16 @@ import (
 
 // newWriteTestServer exposes the bridge alongside the device endpoint so a test
 // can submit a write the way the client server would.
-func newWriteTestServer(t *testing.T) (string, *server.ServerBridge) {
+func newWriteTestServer(t *testing.T) (string, *stack) {
 	t.Helper()
 	st := newStack(t, stackConfig{})
-	return st.URL, st.Bridge
+	return st.URL, st
 }
 
 // scanTag makes the device the holder of the active tag, which is what a write
 // request routes on. It waits for the tag to reach the bridge, so a write
 // submitted next cannot overtake the scan it depends on.
-func scanTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, deviceID, uid string) {
+func scanTag(t *testing.T, conn *websocket.Conn, st *stack, deviceID, uid string) {
 	t.Helper()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
@@ -37,30 +37,26 @@ func scanTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, de
 		t.Fatalf("write tagScanned: %v", err)
 	}
 
-	select {
-	case <-bridge.TagData:
-	case <-time.After(3 * time.Second):
-		t.Fatal("scanned tag never reached the bridge")
-	}
+	// Wait for the scan to land, so a request submitted next cannot overtake
+	// the scan it depends on.
+	st.Client.await(t)
 }
 
 // scannedUID is the tag every test in this package presents. Requests name it,
 // because the agent no longer guesses which tag a request means.
 const scannedUID = "04:A1:B2:C3"
 
-func sampleWrite(requestID string) server.WriteRequestMessage {
+func sampleWrite(requestID string) server.WriteOp {
 	return sampleWriteFor(requestID, scannedUID)
 }
 
-func sampleWriteFor(requestID, uid string) server.WriteRequestMessage {
-	return server.WriteRequestMessage{
-		RequestID: requestID,
-		TagUID:    uid,
+func sampleWriteFor(requestID, uid string) server.WriteOp {
+	return server.WriteOp{
+		Target: server.Target{TagUID: uid},
 		Request: server.WriteRequest{
 			Records: []server.WriteRecord{{Type: "text", Content: "Hello, NFC!"}},
 		},
 		IdempotencyKey: "key-" + requestID,
-		ResponseCh:     make(chan server.WriteResponseMessage, 1),
 	}
 }
 
@@ -81,13 +77,13 @@ func readDeviceWriteRequest(t *testing.T, conn *websocket.Conn) protocol.WebSock
 }
 
 func TestWriteRoutesToDeviceHoldingTag(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWrite("w1")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 
@@ -117,23 +113,23 @@ func TestWriteRoutesToDeviceHoldingTag(t *testing.T) {
 	}
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if !resp.Success {
 			t.Errorf("write failed: %s", resp.Error)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no write response reached the bridge")
+		t.Fatal("no write response reached the caller")
 	}
 }
 
 func TestWriteReportsDeviceFailure(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWrite("w2")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 	requestID, _ := req.Payload["requestID"].(string)
@@ -151,7 +147,7 @@ func TestWriteReportsDeviceFailure(t *testing.T) {
 	}
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected the write to be reported as failed")
 		}
@@ -159,26 +155,26 @@ func TestWriteReportsDeviceFailure(t *testing.T) {
 			t.Errorf("error = %q, want the device's message", resp.Error)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no write response reached the bridge")
+		t.Fatal("no write response reached the caller")
 	}
 }
 
 // A device that vanishes mid-write must release the waiter immediately rather
 // than making it sit out the full timeout.
 func TestWriteFailsFastWhenDeviceDisconnects(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWrite("w3")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	readDeviceWriteRequest(t, conn)
 	_ = conn.Close()
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected failure after the device disconnected")
 		}
@@ -193,16 +189,16 @@ func TestWriteFailsFastWhenDeviceDisconnects(t *testing.T) {
 // With no device holding a tag and no hardware reader, the write is refused
 // rather than being sent nowhere.
 func TestWriteWithoutActiveTagIsRefused(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	// Register a device but never scan, so nothing holds a tag.
 	registerV1(t, url)
 
 	msg := sampleWrite("w4")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected refusal when no tag is present")
 		}
@@ -213,10 +209,10 @@ func TestWriteWithoutActiveTagIsRefused(t *testing.T) {
 
 // A tag leaving the field clears the routing target.
 func TestTagRemovalClearsWriteTarget(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
 		Type: remotenfc.WSTypeTagRemoved,
@@ -233,10 +229,10 @@ func TestTagRemovalClearsWriteTarget(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	msg := sampleWrite("w5")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected refusal after the tag left the field")
 		}
@@ -247,24 +243,19 @@ func TestTagRemovalClearsWriteTarget(t *testing.T) {
 
 // awaitTag returns the tag the agent built from a device's scan, which is what
 // internal consumers operate on.
-func awaitTag(t *testing.T, bridge *server.ServerBridge) nfc.Tag {
+func awaitTag(t *testing.T, st *stack) nfc.Tag {
 	t.Helper()
 
-	select {
-	case data := <-bridge.TagData:
-		if data.Card == nil {
-			t.Fatal("bridge delivered no card")
-		}
-		return data.Card.GetUnderlyingTag()
-	case <-time.After(3 * time.Second):
-		t.Fatal("scanned tag never reached the bridge")
-		return nil
+	data := st.Client.await(t)
+	if data.Card == nil {
+		t.Fatal("the scan carried no card")
 	}
+	return data.Card.GetUnderlyingTag()
 }
 
 // scanCapableTag reports a tag whose device declared write and transceive, and
 // returns the resulting Tag.
-func scanCapableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, deviceID string) nfc.Tag {
+func scanCapableTag(t *testing.T, conn *websocket.Conn, st *stack, deviceID string) nfc.Tag {
 	t.Helper()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
@@ -283,14 +274,14 @@ func scanCapableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBri
 		t.Fatalf("write tagScanned: %v", err)
 	}
 
-	return awaitTag(t, bridge)
+	return awaitTag(t, st)
 }
 
 func TestTransceiveRoundTrip(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	tag := scanCapableTag(t, conn, bridge, deviceID)
+	tag := scanCapableTag(t, conn, st, deviceID)
 
 	if !nfc.GetTagCapabilities(tag).CanTransceive {
 		t.Fatal("tag does not report transceive despite device and tag declaring it")
@@ -353,10 +344,10 @@ func TestTransceiveRoundTrip(t *testing.T) {
 
 // A device reporting a failure yields a typed error carrying the code it sent.
 func TestTransceiveFailureKeepsCode(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	tag := scanCapableTag(t, conn, bridge, deviceID)
+	tag := scanCapableTag(t, conn, st, deviceID)
 
 	done := make(chan error, 1)
 	go func() {

@@ -11,40 +11,28 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// capabilities runs one capabilities query through the bridge.
-func capabilities(t *testing.T, bridge *server.ServerBridge, target string) server.CapabilitiesResponseMessage {
-	return capabilitiesFor(t, bridge, target, scannedUID)
+// capabilities runs one capabilities query against the router.
+func capabilities(t *testing.T, st *stack, target string) opResult {
+	return capabilitiesFor(t, st, target, scannedUID)
 }
 
-func capabilitiesFor(t *testing.T, bridge *server.ServerBridge, target, uid string) server.CapabilitiesResponseMessage {
+func capabilitiesFor(t *testing.T, st *stack, target, uid string) opResult {
 	t.Helper()
 
-	msg := server.CapabilitiesRequestMessage{
-		RequestID:    "cap-1",
-		TargetDevice: target,
-		TagUID:       uid,
-		ResponseCh:   make(chan server.CapabilitiesResponseMessage, 1),
-	}
-	go func() { bridge.CapabilitiesRequest <- msg }()
-
-	select {
-	case resp := <-msg.ResponseCh:
-		return resp
-	case <-time.After(3 * time.Second):
-		t.Fatal("no capabilities response reached the bridge")
-		return server.CapabilitiesResponseMessage{}
-	}
+	return runCapabilities(st.Router, server.CapabilitiesOp{
+		Target: server.Target{TagUID: uid, DeviceID: target},
+	})
 }
 
 // A capabilities query about a phone-held tag used to be answered by the
 // hardware reader, which is a different tag.
 func TestCapabilitiesAnswersFromTheDeviceHoldingTheTag(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanLockableTag(t, conn, bridge, deviceID)
+	scanLockableTag(t, conn, st, deviceID)
 
-	resp := capabilities(t, bridge, "")
+	resp := capabilities(t, st, "")
 	if !resp.Success {
 		t.Fatalf("capabilities failed: %s", resp.Error)
 	}
@@ -62,10 +50,10 @@ func TestCapabilitiesAnswersFromTheDeviceHoldingTheTag(t *testing.T) {
 }
 
 func TestCapabilitiesWithoutTagIsRefused(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 	registerCapableV1(t, url)
 
-	resp := capabilities(t, bridge, "")
+	resp := capabilities(t, st, "")
 	if resp.Success {
 		t.Error("expected refusal when no tag is present")
 	}
@@ -77,18 +65,18 @@ func TestCapabilitiesWithoutTagIsRefused(t *testing.T) {
 // Two phones can each hold a tag. A request naming one must reach that one,
 // not whichever scanned most recently.
 func TestWriteReachesTheNamedDevice(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	first, firstID := registerCapableV1(t, url)
 	second, secondID := registerCapableV1(t, url)
 
-	scanTag(t, first, bridge, firstID, "04:AA:AA:AA")
-	scanTag(t, second, bridge, secondID, "04:BB:BB:BB")
+	scanTag(t, first, st, firstID, "04:AA:AA:AA")
+	scanTag(t, second, st, secondID, "04:BB:BB:BB")
 
 	// The second device scanned last; naming the first must still reach it.
 	msg := sampleWriteFor("t1", "04:AA:AA:AA")
-	msg.TargetDevice = firstID
-	go func() { bridge.WriteRequest <- msg }()
+	msg.DeviceID = firstID
+	_ = goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, first)
 	if got, _ := req.Payload["tagUID"].(string); got != "04:AA:AA:AA" {
@@ -108,17 +96,17 @@ func TestWriteReachesTheNamedDevice(t *testing.T) {
 // client acting on the tag it could see depended on nothing else having been
 // scanned since.
 func TestWriteFollowsTheUIDNotTheLatestScan(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	first, firstID := registerCapableV1(t, url)
 	second, secondID := registerCapableV1(t, url)
 
-	scanTag(t, first, bridge, firstID, "04:AA:AA:AA")
-	scanTag(t, second, bridge, secondID, "04:BB:BB:BB")
+	scanTag(t, first, st, firstID, "04:AA:AA:AA")
+	scanTag(t, second, st, secondID, "04:BB:BB:BB")
 
 	// Name the older scan: the tie-break would have chosen the other one.
 	msg := sampleWriteFor("t2", "04:AA:AA:AA")
-	go func() { bridge.WriteRequest <- msg }()
+	_ = goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, first)
 	if got, _ := req.Payload["tagUID"].(string); got != "04:AA:AA:AA" {
@@ -132,16 +120,16 @@ func TestWriteFollowsTheUIDNotTheLatestScan(t *testing.T) {
 // never land on whichever tag happens to be available. This is the shape that
 // used to send a payload encoded for a lifted card onto a phone's tag.
 func TestWriteForAnAbsentTagIsRefusedNotRedirected(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:BB:BB:BB")
+	scanTag(t, conn, st, deviceID, "04:BB:BB:BB")
 
 	msg := sampleWriteFor("t2b", "04:AA:AA:AA") // no one is holding this
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Fatal("write succeeded for a tag no source is holding")
 		}
@@ -158,17 +146,17 @@ func TestWriteForAnAbsentTagIsRefusedNotRedirected(t *testing.T) {
 // Naming a device holds it to the UID too, so a stale deviceID cannot write to
 // whatever that device is holding now.
 func TestWriteRefusesWhenTheNamedDeviceHoldsAnotherTag(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:BB:BB:BB")
+	scanTag(t, conn, st, deviceID, "04:BB:BB:BB")
 
 	msg := sampleWriteFor("t2c", "04:AA:AA:AA")
-	msg.TargetDevice = deviceID
-	go func() { bridge.WriteRequest <- msg }()
+	msg.DeviceID = deviceID
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Fatal("write succeeded against a tag the device is not holding")
 		}
@@ -184,16 +172,16 @@ func TestWriteRefusesWhenTheNamedDeviceHoldsAnotherTag(t *testing.T) {
 
 // A request naming nothing is refused by default rather than guessed at.
 func TestUntargetedWriteIsRefusedByDefault(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWriteFor("t2d", "")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Fatal("an untargeted write succeeded")
 		}
@@ -209,13 +197,13 @@ func TestUntargetedWriteIsRefusedByDefault(t *testing.T) {
 
 // One device withdrawing its tag must not take the other's routing with it.
 func TestTagRemovalLeavesTheOtherDeviceRoutable(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	first, firstID := registerCapableV1(t, url)
 	second, secondID := registerCapableV1(t, url)
 
-	scanTag(t, first, bridge, firstID, "04:AA:AA:AA")
-	scanTag(t, second, bridge, secondID, "04:BB:BB:BB")
+	scanTag(t, first, st, firstID, "04:AA:AA:AA")
+	scanTag(t, second, st, secondID, "04:BB:BB:BB")
 
 	if err := second.WriteJSON(protocol.WebSocketRequest{
 		Type: remotenfc.WSTypeTagRemoved,
@@ -227,15 +215,11 @@ func TestTagRemovalLeavesTheOtherDeviceRoutable(t *testing.T) {
 		t.Fatalf("write tagRemoved: %v", err)
 	}
 
-	select {
-	case <-bridge.TagData:
-	case <-time.After(3 * time.Second):
-		t.Fatal("tag removal never reached the bridge")
-	}
+	st.Client.await(t) // the removal, reported as a scan with no UID
 
 	// The remaining device still holds its tag, and naming it finds it.
 	msg := sampleWriteFor("t3", "04:AA:AA:AA")
-	go func() { bridge.WriteRequest <- msg }()
+	_ = goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, first)
 	if got, _ := req.Payload["tagUID"].(string); got != "04:AA:AA:AA" {
@@ -245,14 +229,14 @@ func TestTagRemovalLeavesTheOtherDeviceRoutable(t *testing.T) {
 
 // The key identifies the logical write, so a client's retry can be recognised.
 func TestWriteCarriesTheClientsIdempotencyKey(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWrite("t4")
 	msg.IdempotencyKey = "client-key"
-	go func() { bridge.WriteRequest <- msg }()
+	_ = goWrite(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 	if got, _ := req.Payload["idempotencyKey"].(string); got != "client-key" {
@@ -261,14 +245,14 @@ func TestWriteCarriesTheClientsIdempotencyKey(t *testing.T) {
 }
 
 func TestLockCarriesAnIdempotencyKey(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleLock("t5")
 	msg.IdempotencyKey = "lock-key"
-	go func() { bridge.LockRequest <- msg }()
+	_ = goLock(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 	if got, _ := req.Payload["idempotencyKey"].(string); got != "lock-key" {

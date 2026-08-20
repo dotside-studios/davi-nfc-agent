@@ -26,6 +26,10 @@ type Config struct {
 	// secret.
 	TokenVerifier server.TokenVerifier
 
+	// Ops performs the tag operations a client asks for. Nil refuses them,
+	// which is what an agent that is not running does.
+	Ops server.TagOps
+
 	// OnChange, when set, is called whenever a client connects or disconnects
 	// so an observer can refresh without polling. Called off the hot path but
 	// on the connection's own goroutine, so it must not block.

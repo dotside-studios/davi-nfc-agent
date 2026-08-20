@@ -130,7 +130,6 @@ type Agent struct {
 	// to the device driver or the client server. Router decides which tag
 	// source a client request applies to, and DeviceAuth gates the device
 	// endpoint. All are nil until Start.
-	Bridge        *server.ServerBridge
 	UnifiedServer *unifiedserver.Server
 	ClientServer  *clientserver.Server
 
@@ -342,22 +341,10 @@ func (a *Agent) stopLocked() {
 		a.UnifiedServer = nil
 	}
 
-	if a.ClientServer != nil {
-		a.ClientServer.Stop()
-		a.ClientServer = nil
-	}
-
-	if a.Router != nil {
-		a.Router.Stop()
-		a.Router = nil
-	}
+	a.ClientServer = nil
+	a.Router = nil
 
 	a.serving.Store(nil)
-
-	if a.Bridge != nil {
-		a.Bridge.Close()
-		a.Bridge = nil
-	}
 
 	if a.Reader != nil {
 		a.Reader.Stop()
@@ -465,22 +452,11 @@ func (a *Agent) stopServers() {
 		a.UnifiedServer = nil
 	}
 
-	if a.ClientServer != nil {
-		a.ClientServer.Stop()
-		a.ClientServer = nil
-	}
-
-	if a.Router != nil {
-		a.Router.Stop()
-		a.Router = nil
-	}
+	a.ClientServer = nil
+	a.Router = nil
 
 	a.serving.Store(nil)
 
-	if a.Bridge != nil {
-		a.Bridge.Close()
-		a.Bridge = nil
-	}
 }
 
 // startServers starts the HTTP/WebSocket servers.
@@ -489,45 +465,35 @@ func (a *Agent) startServers() error {
 		return errors.New("reader not initialized")
 	}
 
-	// Create bridge for inter-server communication
-	a.Bridge = server.NewServerBridge()
-
-	// The reader and the paired devices are the agent's tag sources; it drains
-	// them onto the bridge itself rather than a server doing it, since neither
-	// has anything to do with serving.
-	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
-	a.Reader.Start()
-	go a.pumpReader(a.pumpCtx, a.Reader, a.Bridge)
-
 	// The device endpoint is the driver's own handler, checking the agent's
 	// credential. The driver requires an authenticator but knows nothing about
 	// API secrets or pairing; the agent knows nothing about the protocol.
 	remote := findDeviceDriver(a.manager)
 	a.DeviceAuth = server.NewDeviceAuth(a.apiSecret, a.tokenVerifier(), a.requirePairedDevice)
 	deviceEndpoint := a.buildDeviceEndpoint(remote)
-	if remote != nil {
-		go server.PumpTagData(a.pumpCtx, remote.Data(), a.Bridge)
-	}
 
 	// Routes each client request to whichever source holds the tag it names.
-	a.Router = tagrouter.New(tagrouter.Config{Reader: a.Reader, Remote: remote}, a.Bridge)
-	a.Router.Start(a.pumpCtx)
+	a.Router = tagrouter.New(tagrouter.Config{Reader: a.Reader, Remote: remote})
 
-	// Create client server (handles web client connections)
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.apiSecret,
 		AllowedOrigins: a.allowedOrigins,
 		OriginPolicy:   a.originPolicy(),
 		TokenVerifier:  a.tokenVerifier(),
+		Ops:            a.Router,
 		OnChange:       a.clientsChanged(),
 		OnTag:          a.tagObserver(),
-	}, a.Bridge)
+	})
 
-	// The client server's bridge listeners. Started here because nothing else
-	// does: the unified server used to start them as a side effect of binding,
-	// which is why taking it out dropped every scan on the floor while the
-	// clients still connected and the counts still looked right.
-	a.ClientServer.StartBackground(a.pumpCtx)
+	// The agent's tag sources feed the client server directly. There is no
+	// channel between them any more, so there is nothing to drain and nothing
+	// to remember to start.
+	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
+	a.Reader.Start()
+	go a.pumpReader(a.pumpCtx, a.Reader, a.ClientServer)
+	if remote != nil {
+		go pumpDevices(a.pumpCtx, remote.Data(), a.ClientServer)
+	}
 
 	// Published as a pair, so a request never sees a client from one start
 	// beside a device from the next.

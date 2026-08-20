@@ -1,6 +1,7 @@
 package clientserver
 
 import (
+	"context"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -43,25 +44,15 @@ func TestTransceiveRejectsMalformedData(t *testing.T) {
 	}
 }
 
-// The command must reach the bridge as the exact bytes the client encoded —
-// this is the whole point of a raw exchange.
-func TestTransceivePassesBytesThroughToTheBridge(t *testing.T) {
-	bridge := server.NewServerBridge()
-	s := New(Config{AllowedOrigins: []string{"*"}}, bridge)
-	conn := dial(t, s, "https://app.example.com")
-
+// The command must reach the tag as the exact bytes the client encoded: this is
+// the whole point of a raw exchange.
+func TestTransceivePassesBytesThroughToTheOperation(t *testing.T) {
 	command := []byte{0xFF, 0xCA, 0x00, 0x00, 0x00}
 	reply := []byte{0x04, 0xA2, 0xB3, 0x90, 0x00}
 
-	// Stand in for the device server.
-	go func() {
-		msg := <-bridge.Transceive
-		msg.ResponseCh <- server.TransceiveResponseMessage{
-			RequestID: msg.RequestID,
-			Success:   true,
-			Data:      reply,
-		}
-	}()
+	ops := &echoOps{reply: reply, seen: make(chan server.TransceiveOp, 4)}
+	s := New(Config{AllowedOrigins: []string{"*"}, Ops: ops})
+	conn := dial(t, s, "https://app.example.com")
 
 	if err := conn.WriteJSON(map[string]any{
 		"id":      "req-2",
@@ -90,16 +81,9 @@ func TestTransceivePassesBytesThroughToTheBridge(t *testing.T) {
 }
 
 func TestTransceiveCarriesTheRawFlag(t *testing.T) {
-	bridge := server.NewServerBridge()
-	s := New(Config{AllowedOrigins: []string{"*"}}, bridge)
+	ops := &echoOps{seen: make(chan server.TransceiveOp, 4)}
+	s := New(Config{AllowedOrigins: []string{"*"}, Ops: ops})
 	conn := dial(t, s, "https://app.example.com")
-
-	seen := make(chan bool, 1)
-	go func() {
-		msg := <-bridge.Transceive
-		seen <- msg.Raw
-		msg.ResponseCh <- server.TransceiveResponseMessage{RequestID: msg.RequestID, Success: true}
-	}()
 
 	_ = conn.WriteJSON(map[string]any{
 		"id":      "req-3",
@@ -108,26 +92,20 @@ func TestTransceiveCarriesTheRawFlag(t *testing.T) {
 	})
 
 	select {
-	case raw := <-seen:
-		if !raw {
-			t.Error("raw flag did not reach the bridge")
+	case op := <-ops.seen:
+		if !op.Raw {
+			t.Error("raw flag did not reach the operation")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("bridge never saw the request")
+		t.Fatal("the operation never saw the request")
 	}
 }
 
 // A raw exchange can write, so it is counted alongside writes — the count is
 // there to show which clients can change a tag.
 func TestTransceiveCountsAsAWrite(t *testing.T) {
-	bridge := server.NewServerBridge()
-	s := New(Config{AllowedOrigins: []string{"*"}}, bridge)
+	s := New(Config{AllowedOrigins: []string{"*"}, Ops: &echoOps{seen: make(chan server.TransceiveOp, 1)}})
 	conn := dial(t, s, "https://app.example.com")
-
-	go func() {
-		msg := <-bridge.Transceive
-		msg.ResponseCh <- server.TransceiveResponseMessage{RequestID: msg.RequestID, Success: true}
-	}()
 
 	_ = conn.WriteJSON(map[string]any{
 		"id":      "req-4",
@@ -139,4 +117,20 @@ func TestTransceiveCountsAsAWrite(t *testing.T) {
 		c := s.Clients()
 		return len(c) == 1 && c[0].Writes == 1
 	})
+}
+
+// echoOps answers a raw exchange with a fixed reply and records what it was
+// asked for.
+type echoOps struct {
+	stoppedOps
+	reply []byte
+	seen  chan server.TransceiveOp
+}
+
+func (o *echoOps) Transceive(_ context.Context, req server.TransceiveOp) ([]byte, error) {
+	select {
+	case o.seen <- req:
+	default:
+	}
+	return o.reply, nil
 }

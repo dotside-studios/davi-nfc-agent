@@ -14,7 +14,7 @@ import (
 // newModedTestServer is newWriteTestServer with a hardware reader attached in a
 // given mode, so a test can exercise the policy a bare device server has no
 // reader to read it from.
-func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *server.ServerBridge) {
+func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *stack) {
 	t.Helper()
 
 	reader, err := nfc.NewNFCReader("", nfc.NewMockManager(), time.Second)
@@ -24,18 +24,17 @@ func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *server.Serv
 	reader.SetMode(mode)
 
 	st := newStack(t, stackConfig{Reader: reader})
-	return st.URL, st.Bridge
+	return st.URL, st
 }
 
-func sampleLock(requestID string) server.LockRequestMessage {
+func sampleLock(requestID string) server.LockOp {
 	return sampleLockFor(requestID, scannedUID)
 }
 
-func sampleLockFor(requestID, uid string) server.LockRequestMessage {
-	return server.LockRequestMessage{
-		RequestID:  requestID,
-		TagUID:     uid,
-		ResponseCh: make(chan server.LockResponseMessage, 1),
+func sampleLockFor(requestID, uid string) server.LockOp {
+	return server.LockOp{
+		Target:         server.Target{TagUID: uid},
+		IdempotencyKey: requestID,
 	}
 }
 
@@ -43,13 +42,13 @@ func sampleLockFor(requestID, uid string) server.LockRequestMessage {
 // Before the device route existed this was applied to whatever card happened to
 // be on the hardware reader instead.
 func TestLockRoutesToDeviceHoldingTag(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleLock("l1")
-	go func() { bridge.LockRequest <- msg }()
+	done := goLock(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 
@@ -79,7 +78,7 @@ func TestLockRoutesToDeviceHoldingTag(t *testing.T) {
 	}
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if !resp.Success {
 			t.Fatalf("lock failed: %s", resp.Error)
 		}
@@ -91,18 +90,18 @@ func TestLockRoutesToDeviceHoldingTag(t *testing.T) {
 			t.Errorf("result = %+v, want the scanned UID reported as locked", lr)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no lock response reached the bridge")
+		t.Fatal("no lock response reached the caller")
 	}
 }
 
 func TestLockReportsDeviceFailure(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleLock("l2")
-	go func() { bridge.LockRequest <- msg }()
+	done := goLock(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 	requestID, _ := req.Payload["requestID"].(string)
@@ -120,7 +119,7 @@ func TestLockReportsDeviceFailure(t *testing.T) {
 	}
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected the lock to be reported as failed")
 		}
@@ -131,25 +130,25 @@ func TestLockReportsDeviceFailure(t *testing.T) {
 			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeNotSupported)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no lock response reached the bridge")
+		t.Fatal("no lock response reached the caller")
 	}
 }
 
 // A device that vanishes mid-lock must release the waiter immediately.
 func TestLockFailsFastWhenDeviceDisconnects(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleLock("l3")
-	go func() { bridge.LockRequest <- msg }()
+	done := goLock(st.Router, msg)
 
 	readDeviceWriteRequest(t, conn)
 	_ = conn.Close()
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected failure after the device disconnected")
 		}
@@ -161,15 +160,15 @@ func TestLockFailsFastWhenDeviceDisconnects(t *testing.T) {
 // With no device holding a tag and no hardware reader, the lock is refused
 // rather than being applied to something else.
 func TestLockWithoutActiveTagIsRefused(t *testing.T) {
-	url, bridge := newWriteTestServer(t)
+	url, st := newWriteTestServer(t)
 
 	registerCapableV1(t, url)
 
 	msg := sampleLock("l4")
-	go func() { bridge.LockRequest <- msg }()
+	done := goLock(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Error("expected refusal when no tag is present")
 		}
@@ -177,7 +176,7 @@ func TestLockWithoutActiveTagIsRefused(t *testing.T) {
 			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeNoCard)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no lock response reached the bridge")
+		t.Fatal("no lock response reached the caller")
 	}
 }
 
@@ -185,16 +184,16 @@ func TestLockWithoutActiveTagIsRefused(t *testing.T) {
 // enforces it inside its own write path, which a request routed to a phone
 // never reaches.
 func TestLockViaDeviceRefusedInReadOnlyMode(t *testing.T) {
-	url, bridge := newModedTestServer(t, nfc.ModeReadOnly)
+	url, st := newModedTestServer(t, nfc.ModeReadOnly)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleLock("l5")
-	go func() { bridge.LockRequest <- msg }()
+	done := goLock(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Fatal("read-only mode allowed a lock")
 		}
@@ -202,23 +201,23 @@ func TestLockViaDeviceRefusedInReadOnlyMode(t *testing.T) {
 			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeReadOnly)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no lock response reached the bridge")
+		t.Fatal("no lock response reached the caller")
 	}
 
 	assertDeviceGotNothing(t, conn)
 }
 
 func TestWriteViaDeviceRefusedInReadOnlyMode(t *testing.T) {
-	url, bridge := newModedTestServer(t, nfc.ModeReadOnly)
+	url, st := newModedTestServer(t, nfc.ModeReadOnly)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleWrite("w5")
-	go func() { bridge.WriteRequest <- msg }()
+	done := goWrite(st.Router, msg)
 
 	select {
-	case resp := <-msg.ResponseCh:
+	case resp := <-done:
 		if resp.Success {
 			t.Fatal("read-only mode allowed a write")
 		}
@@ -226,7 +225,7 @@ func TestWriteViaDeviceRefusedInReadOnlyMode(t *testing.T) {
 			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeReadOnly)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("no write response reached the bridge")
+		t.Fatal("no write response reached the caller")
 	}
 
 	assertDeviceGotNothing(t, conn)
@@ -235,13 +234,13 @@ func TestWriteViaDeviceRefusedInReadOnlyMode(t *testing.T) {
 // Read/write mode must not refuse on mode grounds; the request should reach the
 // device instead.
 func TestLockViaDeviceAllowedInReadWriteMode(t *testing.T) {
-	url, bridge := newModedTestServer(t, nfc.ModeReadWrite)
+	url, st := newModedTestServer(t, nfc.ModeReadWrite)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, scannedUID)
+	scanTag(t, conn, st, deviceID, scannedUID)
 
 	msg := sampleLock("l6")
-	go func() { bridge.LockRequest <- msg }()
+	_ = goLock(st.Router, msg)
 
 	req := readDeviceWriteRequest(t, conn)
 	if lock, _ := req.Payload["lock"].(bool); !lock {
@@ -273,7 +272,7 @@ func isTimeout(err error) bool {
 
 // scanLockableTag reports a tag declaring every modifying capability, so a test
 // can see which of them survive the agent's mode.
-func scanLockableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBridge, deviceID string) nfc.Tag {
+func scanLockableTag(t *testing.T, conn *websocket.Conn, st *stack, deviceID string) nfc.Tag {
 	t.Helper()
 
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
@@ -295,17 +294,17 @@ func scanLockableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBr
 		t.Fatalf("write tagScanned: %v", err)
 	}
 
-	return awaitTag(t, bridge)
+	return awaitTag(t, st)
 }
 
 // A tag must not advertise an operation the agent would then refuse, so
 // read-only mode withdraws the modifying capabilities rather than leaving a
 // client to discover the refusal by attempting one.
 func TestRemoteTagCapabilitiesWithdrawnInReadOnlyMode(t *testing.T) {
-	url, bridge := newModedTestServer(t, nfc.ModeReadOnly)
+	url, st := newModedTestServer(t, nfc.ModeReadOnly)
 
 	conn, deviceID := registerCapableV1(t, url)
-	caps := nfc.GetTagCapabilities(scanLockableTag(t, conn, bridge, deviceID))
+	caps := nfc.GetTagCapabilities(scanLockableTag(t, conn, st, deviceID))
 
 	if caps.CanWrite {
 		t.Error("tag advertised canWrite in read-only mode")
@@ -322,10 +321,10 @@ func TestRemoteTagCapabilitiesWithdrawnInReadOnlyMode(t *testing.T) {
 }
 
 func TestRemoteTagCapabilitiesKeptInReadWriteMode(t *testing.T) {
-	url, bridge := newModedTestServer(t, nfc.ModeReadWrite)
+	url, st := newModedTestServer(t, nfc.ModeReadWrite)
 
 	conn, deviceID := registerCapableV1(t, url)
-	caps := nfc.GetTagCapabilities(scanLockableTag(t, conn, bridge, deviceID))
+	caps := nfc.GetTagCapabilities(scanLockableTag(t, conn, st, deviceID))
 
 	if !caps.CanWrite {
 		t.Error("tag did not advertise canWrite in read/write mode")

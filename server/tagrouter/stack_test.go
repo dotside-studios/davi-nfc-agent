@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,9 +20,46 @@ import (
 // build it the same way so they exercise the composition, not a stand-in.
 type stack struct {
 	URL    string
-	Bridge *server.ServerBridge
+	Router *tagrouter.Router
+	Client *fakeClient
 	Auth   *server.DeviceAuth
 	Remote *remotenfc.Manager
+}
+
+// fakeClient stands in for the client server: it receives the scans the driver
+// produces, which is what the agent wires up in the shipped binary.
+type fakeClient struct {
+	mu   sync.Mutex
+	tags []nfc.NFCData
+	ch   chan nfc.NFCData
+}
+
+func newFakeClient() *fakeClient {
+	return &fakeClient{ch: make(chan nfc.NFCData, 16)}
+}
+
+func (c *fakeClient) Broadcast(data nfc.NFCData) {
+	c.mu.Lock()
+	c.tags = append(c.tags, data)
+	c.mu.Unlock()
+	select {
+	case c.ch <- data:
+	default:
+	}
+}
+
+func (c *fakeClient) BroadcastDeviceStatus(nfc.DeviceStatus) {}
+
+// await waits for the next scan to arrive.
+func (c *fakeClient) await(t *testing.T) nfc.NFCData {
+	t.Helper()
+	select {
+	case data := <-c.ch:
+		return data
+	case <-time.After(3 * time.Second):
+		t.Fatal("no scan reached the client")
+		return nfc.NFCData{}
+	}
 }
 
 type stackConfig struct {
@@ -38,8 +76,8 @@ type stackConfig struct {
 func newStack(t *testing.T, cfg stackConfig) *stack {
 	t.Helper()
 
-	bridge := server.NewServerBridge()
 	auth := server.NewDeviceAuth(cfg.APISecret, cfg.TokenVerifier, cfg.RequirePaired)
+	client := newFakeClient()
 
 	var remote *remotenfc.Manager
 	endpoint := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,12 +92,11 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		})
 	}
 
-	router := tagrouter.New(tagrouter.Config{Reader: cfg.Reader, Remote: remote}, bridge)
+	router := tagrouter.New(tagrouter.Config{Reader: cfg.Reader, Remote: remote})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	router.Start(ctx)
 	if remote != nil {
-		go server.PumpTagData(ctx, remote.Data(), bridge)
+		go pumpTo(ctx, remote.Data(), client)
 	}
 
 	ts := httptest.NewServer(endpoint)
@@ -67,8 +104,6 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	t.Cleanup(func() {
 		ts.Close()
 		cancel()
-		router.Stop()
-		bridge.Close()
 		if remote != nil {
 			remote.Close()
 		}
@@ -79,9 +114,25 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 
 	return &stack{
 		URL:    "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device",
-		Bridge: bridge,
+		Router: router,
+		Client: client,
 		Auth:   auth,
 		Remote: remote,
+	}
+}
+
+// pumpTo forwards a driver's scans to the sink, which is what the agent does.
+func pumpTo(ctx context.Context, src <-chan nfc.NFCData, sink *fakeClient) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-src:
+			if !ok {
+				return
+			}
+			sink.Broadcast(data)
+		}
 	}
 }
 

@@ -59,6 +59,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The bridge is gone; a client request is a call.** `ServerBridge` was six
+  channels and a response channel per request, connecting exactly two objects:
+  every channel had one receiver. It was a hand-rolled RPC between things that
+  could call each other, and its real cost was not the 430 lines. Because the
+  two ends talked over channels, each needed goroutines to drain them, so each
+  had a lifetime, so something had to remember to start it. Forgetting was
+  silent: clients connected, counts read correctly, and every scan was
+  discarded.
+
+  `server.TagOps` replaces the request half. `clientserver` calls it and
+  `tagrouter` implements it, so a write is `Write(ctx, op)` returning a result
+  and an error. Scans travel the other way by `clientserver.Broadcast`, called
+  by whatever produced them. Neither package has a goroutine left, neither has
+  a `Start` or a `Stop`, and there is nothing left to forget.
+
+  `protocol.CodedError` carries a wire code on an ordinary error, which is what
+  let an operation return its refusal rather than report it beside a value.
+
+### Fixed
+
+- **A write to a phone reports what it did.** The device route returned a bare
+  map, and the client server only reads a write outcome when it is an
+  `*nfc.WriteResult`, so the assertion failed and the response carried nothing
+  but "Write operation completed successfully" -- no `uid`, no `locked`, none of
+  the fields [api.md](docs/api.md) documents. Both routes now return a result:
+  the device route fills in what the agent knows and leaves `verified` false,
+  since the device confirms the write but does not read it back
+
 - **Routes are mounted on the server rather than configured into it.**
   `unifiedserver` took the control API and the console as `Config` fields, read
   once when the mux was built, so a console attached afterwards was never

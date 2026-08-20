@@ -6,31 +6,52 @@ import (
 	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
-// pumpReader forwards what the hardware reader scans onto the bridge, where the
-// client server picks it up. It returns once ctx is done.
-func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, bridge *server.ServerBridge) {
+// tagSink receives scans. The client server is the one the agent has; the
+// interface is here so the pumps can be tested without one.
+type tagSink interface {
+	Broadcast(nfc.NFCData)
+	BroadcastDeviceStatus(nfc.DeviceStatus)
+}
+
+// pumpReader forwards what the hardware reader scans to the sink. It returns
+// once ctx is done.
+func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagSink) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case data := <-reader.Data():
-			a.forwardScan(data, bridge)
+			a.forwardScan(data, sink)
 		case status := <-reader.StatusUpdates():
-			if !bridge.SendDeviceStatus(status) {
-				a.logger.Println("Warning: failed to send device status to bridge")
-			}
+			sink.BroadcastDeviceStatus(status)
 		}
 	}
 }
 
-// forwardScan applies the card-type filter and puts the scan on the bridge.
-func (a *Agent) forwardScan(data nfc.NFCData, bridge *server.ServerBridge) {
+// pumpDevices forwards what paired devices scan. Their scans carry no reader
+// status and are not filtered by card type: the filter is the agent's policy
+// for its own reader, and a device reports what its user tapped.
+func pumpDevices(ctx context.Context, src <-chan nfc.NFCData, sink tagSink) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-src:
+			if !ok {
+				return
+			}
+			sink.Broadcast(data)
+		}
+	}
+}
+
+// forwardScan applies the card-type filter and hands the scan on.
+func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
 	if data.Err != nil {
 		log.Printf("Error: %v", data.Err)
-		a.sendScan(data, bridge)
+		sink.Broadcast(data)
 		return
 	}
 
@@ -40,9 +61,9 @@ func (a *Agent) forwardScan(data nfc.NFCData, bridge *server.ServerBridge) {
 
 	if !a.cardTypes.isAllowed(data.Card.Type) {
 		log.Printf("Card type '%s' not in allowed list, ignoring", data.Card.Type)
-		a.sendScan(nfc.NFCData{
+		sink.Broadcast(nfc.NFCData{
 			Err: fmt.Errorf("card type '%s' not allowed by filter", data.Card.Type),
-		}, bridge)
+		})
 		return
 	}
 
@@ -59,11 +80,5 @@ func (a *Agent) forwardScan(data nfc.NFCData, bridge *server.ServerBridge) {
 	}
 	fmt.Printf("UID: %s\nDecoded text: %s\n", data.Card.UID, text)
 
-	a.sendScan(data, bridge)
-}
-
-func (a *Agent) sendScan(data nfc.NFCData, bridge *server.ServerBridge) {
-	if !bridge.SendTagData(data) {
-		a.logger.Println("Warning: failed to send tag data to bridge")
-	}
+	sink.Broadcast(data)
 }

@@ -1,8 +1,6 @@
 package tagrouter
 
 import (
-	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -22,16 +20,11 @@ type route struct {
 	device remotenfc.ActiveTagInfo
 }
 
-// routeError explains a refusal in the terms the client sees.
-type routeError struct {
-	code protocol.ErrorCode
-	msg  string
-}
-
-func (e *routeError) Error() string { return e.msg }
-
-func refuse(code protocol.ErrorCode, format string, args ...any) *routeError {
-	return &routeError{code: code, msg: fmt.Sprintf(format, args...)}
+// refuse explains a refusal in the terms the client sees. The code travels on
+// the error itself, so an operation can return one rather than reporting it
+// beside a value.
+func refuse(code protocol.ErrorCode, format string, args ...any) error {
+	return protocol.Errorf(code, format, args...)
 }
 
 // resolveRoute decides which tag source an operation applies to, by looking up
@@ -108,13 +101,4 @@ func (s *Router) guessRoute(reader *nfc.NFCReader) (route, error) {
 		return route{reader: true}, nil
 	}
 	return route{}, refuse(protocol.ErrCodeNoCard, "no reader or device is holding a tag")
-}
-
-// routeFailure unwraps a refusal into the code and message a client receives.
-func routeFailure(err error) (protocol.ErrorCode, string) {
-	var re *routeError
-	if errors.As(err, &re) {
-		return re.code, re.msg
-	}
-	return protocol.ErrCodeNoCard, err.Error()
 }

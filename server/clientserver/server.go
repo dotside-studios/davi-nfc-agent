@@ -22,10 +22,6 @@ import (
 // Server handles client connections for consuming NFC data.
 type Server struct {
 	config Config
-	bridge *server.ServerBridge
-
-	ctx    context.Context
-	cancel context.CancelFunc
 
 	// WebSocket upgrader
 	upgrader websocket.Upgrader
@@ -39,33 +35,16 @@ type Server struct {
 	cardMu   sync.RWMutex
 }
 
-// New creates a new client server instance.
-func New(config Config, bridge *server.ServerBridge) *Server {
+// New creates a client server. It has no lifetime of its own: connections are
+// served as they arrive and scans are handed to it by whatever produced them.
+func New(config Config) *Server {
 	return &Server{
 		config:  config,
-		bridge:  bridge,
 		clients: make(map[*server.SafeConn]*clientSession),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: originChecker(config),
 		},
 	}
-}
-
-// StartBackground starts the client-side background work — the bridge listeners
-// that fan tag data and device status out to connected clients — under the given
-// parent context, without binding an HTTP listener. It returns immediately once
-// the goroutines are running.
-//
-// The unified server owns the HTTP listener and routes client WebSocket
-// connections here via ServeWS.
-func (s *Server) StartBackground(ctx context.Context) {
-	// Derive a cancelable context so Stop can tear the goroutines down even
-	// when the parent context outlives this server.
-	s.ctx, s.cancel = context.WithCancel(ctx)
-
-	// Start bridge listeners
-	go s.listenBridgeTagData()
-	go s.listenBridgeDeviceStatus()
 }
 
 // ServeWS handles a WebSocket connection request for a client. It performs its
@@ -178,15 +157,6 @@ func (s *Server) countOperation(conn *server.SafeConn, kind string) {
 	}
 }
 
-// Stop stops the client server's background work. The unified server owns the
-// HTTP listener; this only cancels the context the background goroutines run
-// under.
-func (s *Server) Stop() {
-	if s.cancel != nil {
-		s.cancel()
-	}
-}
-
 // clientCount returns the number of connected clients.
 func (s *Server) clientCount() int {
 	s.clientsMux.RLock()
@@ -277,143 +247,59 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleWriteRequest handles write requests from clients.
+// handleWriteRequest encodes a message onto the tag the client names.
 func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
-	// Parse write request from payload
-	payloadBytes, err := json.Marshal(req.Payload)
-	if err != nil {
-		log.Printf("[client] Failed to marshal write request payload: %v", err)
-		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid write request payload")
-		return
-	}
-
 	var writeReq server.WriteRequest
-	if err := json.Unmarshal(payloadBytes, &writeReq); err != nil {
-		log.Printf("[client] Failed to parse write request: %v", err)
+	if !decodePayload(req.Payload, &writeReq) {
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Failed to parse write request")
 		return
 	}
 
-	// Create request message
-	requestID := req.ID
-	if requestID == "" {
-		requestID = uuid.New().String()
-	}
-
-	msg := server.WriteRequestMessage{
-		RequestID:       requestID,
-		ClientID:        clientID,
-		Request:         writeReq,
-		TargetDevice:    writeReq.DeviceID,
-		TagUID:          writeReq.UID,
-		AllowUntargeted: writeReq.AllowUntargeted,
+	result, err := s.ops().Write(context.Background(), server.WriteOp{
+		Target:  targetOf(writeReq.UID, writeReq.DeviceID, writeReq.AllowUntargeted),
+		Request: writeReq,
 		// A client that wants a retry deduplicated supplies a stable key. The
 		// request ID stands in, which dedupes when the client reuses that too.
-		IdempotencyKey: firstNonEmpty(writeReq.IdempotencyKey, requestID),
-		ResponseCh:     make(chan server.WriteResponseMessage, 1),
-	}
-
-	// Send through bridge and wait for response
-	response, err := s.bridge.SendWriteRequest(msg)
+		IdempotencyKey: firstNonEmpty(writeReq.IdempotencyKey, req.ID),
+	})
 	if err != nil {
-		log.Printf("[client] Write request failed: %v", err)
 		s.sendOperationError(conn, req.ID, protocol.ErrCodeWriteFailed, err)
 		return
 	}
 
-	// Send response to client
-	wsResponse := protocol.WebSocketResponse{
-		ID:      req.ID,
-		Type:    server.WSMessageTypeWriteResponse,
-		Success: response.Success,
-	}
-	if response.Success {
-		payload := map[string]interface{}{
-			"message": "Write operation completed successfully",
-		}
-		// Surface the verified write outcome so clients can confirm the data
-		// actually landed (verified), how many attempts it took, and the size.
-		if wr, ok := response.Payload.(*nfc.WriteResult); ok && wr != nil {
-			payload["uid"] = wr.UID
-			payload["tagType"] = wr.TagType
-			payload["bytesWritten"] = wr.BytesWritten
-			payload["verified"] = wr.Verified
-			payload["attempts"] = wr.Attempts
-			payload["locked"] = wr.Locked
-		}
-		wsResponse.Payload = payload
-	} else {
-		wsResponse.Error = response.Error
-		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeWriteFailed)
+	// Surface the verified write outcome so clients can confirm the data
+	// actually landed, how many attempts it took, and the size.
+	payload := map[string]any{"message": "Write operation completed successfully"}
+	if result != nil {
+		payload["uid"] = result.UID
+		payload["tagType"] = result.TagType
+		payload["bytesWritten"] = result.BytesWritten
+		payload["verified"] = result.Verified
+		payload["attempts"] = result.Attempts
+		payload["locked"] = result.Locked
 	}
 
-	if err := conn.WriteJSON(wsResponse); err != nil {
-		log.Printf("[client] Failed to send write response: %v", err)
-	}
+	s.reply(conn, req.ID, server.WSMessageTypeWriteResponse, payload)
 }
 
-// handleLockRequest handles make-read-only (lock) requests from clients.
+// handleLockRequest makes the named tag permanently read-only.
 func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
-	requestID := req.ID
-	if requestID == "" {
-		requestID = uuid.New().String()
-	}
-
 	target := tagTarget(req.Payload)
 
-	msg := server.LockRequestMessage{
-		RequestID:       requestID,
-		ClientID:        clientID,
-		TargetDevice:    target.DeviceID,
-		TagUID:          target.UID,
-		AllowUntargeted: target.AllowUntargeted,
-		IdempotencyKey:  firstNonEmpty(target.IdempotencyKey, requestID),
-		ResponseCh:      make(chan server.LockResponseMessage, 1),
-	}
-
-	// Send through bridge and wait for response
-	response, err := s.bridge.SendLockRequest(msg)
+	result, err := s.ops().Lock(context.Background(), server.LockOp{
+		Target:         targetOf(target.UID, target.DeviceID, target.AllowUntargeted),
+		IdempotencyKey: firstNonEmpty(target.IdempotencyKey, req.ID),
+	})
 	if err != nil {
-		log.Printf("[client] Lock request failed: %v", err)
 		s.sendOperationError(conn, req.ID, protocol.ErrCodeLockFailed, err)
 		return
 	}
 
-	wsResponse := protocol.WebSocketResponse{
-		ID:      req.ID,
-		Type:    server.WSMessageTypeLockResponse,
-		Success: response.Success,
-	}
-	if response.Success {
-		payload := map[string]interface{}{
-			"message": "Lock operation completed successfully",
-		}
-		if lr, ok := response.Payload.(*nfc.LockResult); ok && lr != nil {
-			payload["uid"] = lr.UID
-			payload["tagType"] = lr.TagType
-			payload["locked"] = lr.Locked
-		}
-		wsResponse.Payload = payload
-	} else {
-		wsResponse.Error = response.Error
-		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeLockFailed)
-	}
-
-	if err := conn.WriteJSON(wsResponse); err != nil {
-		log.Printf("[client] Failed to send lock response: %v", err)
-	}
+	s.reply(conn, req.ID, server.WSMessageTypeLockResponse, result)
 }
 
-// handleTransceiveRequest exchanges raw bytes with the present tag.
-//
-// The command arrives base64-encoded, matching how the device protocol carries
-// byte slices, so a client builds it the same way at both ends.
+// handleTransceiveRequest exchanges raw bytes with the named tag.
 func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
-	requestID := req.ID
-	if requestID == "" {
-		requestID = uuid.New().String()
-	}
-
 	var payload struct {
 		Data            string `json:"data"`
 		Raw             bool   `json:"raw"`
@@ -421,11 +307,7 @@ func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string,
 		UID             string `json:"uid"`
 		AllowUntargeted bool   `json:"allowUntargeted"`
 	}
-	payloadBytes, err := json.Marshal(req.Payload)
-	if err == nil {
-		err = json.Unmarshal(payloadBytes, &payload)
-	}
-	if err != nil {
+	if !decodePayload(req.Payload, &payload) {
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid transceive request")
 		return
 	}
@@ -440,82 +322,34 @@ func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string,
 		return
 	}
 
-	response, err := s.bridge.SendTransceiveRequest(server.TransceiveRequestMessage{
-		RequestID:       requestID,
-		ClientID:        clientID,
-		Data:            data,
-		Raw:             payload.Raw,
-		TargetDevice:    payload.DeviceID,
-		TagUID:          payload.UID,
-		AllowUntargeted: payload.AllowUntargeted,
-		ResponseCh:      make(chan server.TransceiveResponseMessage, 1),
+	resp, err := s.ops().Transceive(context.Background(), server.TransceiveOp{
+		Target: targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
+		Data:   data,
+		Raw:    payload.Raw,
 	})
 	if err != nil {
-		log.Printf("[client] Transceive request failed: %v", err)
 		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
 		return
 	}
 
-	wsResponse := protocol.WebSocketResponse{
-		ID:      req.ID,
-		Type:    server.WSMessageTypeTransceiveResponse,
-		Success: response.Success,
-	}
-	if response.Success {
-		wsResponse.Payload = map[string]interface{}{
-			"data": base64.StdEncoding.EncodeToString(response.Data),
-		}
-	} else {
-		wsResponse.Error = response.Error
-		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeTransceiveFailed)
-	}
-
-	if err := conn.WriteJSON(wsResponse); err != nil {
-		log.Printf("[client] Failed to send transceive response: %v", err)
-	}
+	s.reply(conn, req.ID, server.WSMessageTypeTransceiveResponse, map[string]any{
+		"data": base64.StdEncoding.EncodeToString(resp),
+	})
 }
 
-// handleCapabilitiesRequest handles capabilities queries for the present tag.
+// handleCapabilitiesRequest reports what the named tag supports.
 func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
-	requestID := req.ID
-	if requestID == "" {
-		requestID = uuid.New().String()
-	}
+	target := tagTarget(req.Payload)
 
-	msg := server.CapabilitiesRequestMessage{
-		RequestID:       requestID,
-		ClientID:        clientID,
-		TargetDevice:    tagTarget(req.Payload).DeviceID,
-		TagUID:          tagTarget(req.Payload).UID,
-		AllowUntargeted: tagTarget(req.Payload).AllowUntargeted,
-		ResponseCh:      make(chan server.CapabilitiesResponseMessage, 1),
-	}
-
-	// Send through bridge and wait for response
-	response, err := s.bridge.SendCapabilitiesRequest(msg)
+	caps, err := s.ops().Capabilities(context.Background(), server.CapabilitiesOp{
+		Target: targetOf(target.UID, target.DeviceID, target.AllowUntargeted),
+	})
 	if err != nil {
-		log.Printf("[client] Capabilities request failed: %v", err)
 		s.sendOperationError(conn, req.ID, protocol.ErrCodeCapabilitiesFailed, err)
 		return
 	}
 
-	wsResponse := protocol.WebSocketResponse{
-		ID:      req.ID,
-		Type:    server.WSMessageTypeCapabilitiesResponse,
-		Success: response.Success,
-	}
-	if response.Success {
-		wsResponse.Payload = map[string]interface{}{
-			"capabilities": response.Payload,
-		}
-	} else {
-		wsResponse.Error = response.Error
-		wsResponse.Payload = errorPayloadOrDefault(response.ErrorCode, protocol.ErrCodeCapabilitiesFailed)
-	}
-
-	if err := conn.WriteJSON(wsResponse); err != nil {
-		log.Printf("[client] Failed to send capabilities response: %v", err)
-	}
+	s.reply(conn, req.ID, server.WSMessageTypeCapabilitiesResponse, caps)
 }
 
 // requestTarget is what a request that acts on a tag may carry alongside its
@@ -550,49 +384,34 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// listenBridgeTagData listens for tag data from the bridge and broadcasts to clients.
-func (s *Server) listenBridgeTagData() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case data, ok := <-s.bridge.TagData:
-			if !ok {
-				return
-			}
-			// Store last card
-			if data.Card != nil {
-				s.cardMu.Lock()
-				s.lastCard = data.Card
-				s.cardMu.Unlock()
-			}
-			// Hand the scan to an in-process observer before the clients see
-			// it. This is the supported way to read tags from Go: the bridge
-			// channel has exactly one consumer -- this loop -- so a second
-			// reader would take scans away from the browsers rather than
-			// copying them.
-			if s.config.OnTag != nil {
-				s.config.OnTag(data)
-			}
-			// Broadcast to all clients
-			s.broadcastTagData(data)
-		}
+// Broadcast hands a scan to the in-process observer and then to every
+// connected client.
+//
+// Called by whatever produced the scan. It used to arrive on a channel this
+// server drained in a goroutine of its own, which meant the server had a
+// lifetime whose only purpose was to receive, and something had to remember to
+// start it.
+func (s *Server) Broadcast(data nfc.NFCData) {
+	if data.Card != nil {
+		s.cardMu.Lock()
+		s.lastCard = data.Card
+		s.cardMu.Unlock()
 	}
+
+	// The observer sees it before the clients do. This is the supported way to
+	// read tags from Go.
+	if s.config.OnTag != nil {
+		s.config.OnTag(data)
+	}
+
+	s.broadcastTagData(data)
 }
 
-// listenBridgeDeviceStatus listens for device status from the bridge and broadcasts to clients.
-func (s *Server) listenBridgeDeviceStatus() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case status, ok := <-s.bridge.DeviceStatus:
-			if !ok {
-				return
-			}
-			s.broadcastDeviceStatus(status)
-		}
-	}
+// BroadcastDeviceStatus tells every client what the agent's own reader is
+// doing. It describes that reader and nothing else: a tag a phone is holding is
+// unaffected by it.
+func (s *Server) BroadcastDeviceStatus(status nfc.DeviceStatus) {
+	s.broadcastDeviceStatus(status)
 }
 
 // broadcastTagData sends tag data to all connected clients.

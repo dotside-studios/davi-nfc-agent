@@ -30,36 +30,32 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 		return nil, protocol.WrapError(protocol.ErrCodeInvalidRequest, err, "invalid write request")
 	}
 
-	if !rt.reader {
-		return s.writeViaDevice(req, ndefMsg, rt.device)
-	}
-
-	// WriteMessageWithResult performs a capacity check, retries on transient
-	// failures, and verifies the write by reading it back.
-	return s.config.Reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
+	opts := nfc.WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 		Lock:      req.Request.Lock,
 		ExpectUID: req.TagUID,
-	})
+	}
+
+	if !rt.reader {
+		return s.writeViaDevice(req, ndefMsg, rt.device)
+	}
+	return s.config.Reader.WriteMessageWithResult(ndefMsg, opts)
 }
 
 // writeViaDevice asks the device holding the tag to perform the write.
 //
-// It reports what the agent knows rather than what it checked: the device
-// answers success or failure and nothing else, so the UID and the lock are
-// filled in from the request and Verified stays false. It used to return a bare
-// map here, which the client server could not read as a result at all, so a
-// write to a phone reported success with none of the fields the protocol
-// documents.
+// It reports what the agent knows rather than what it checked. Whether the
+// write could be confirmed is the tag's answer, not this route's: a tag whose
+// reads are a snapshot cannot confirm one, which is the same fact the shared
+// pipeline consults for a tag on the reader.
 func (s *Router) writeViaDevice(req server.WriteOp, msg *nfc.NDEFMessage, active deviceTag) (*nfc.WriteResult, error) {
 	ndefBytes, err := msg.Encode()
 	if err != nil {
 		return nil, protocol.WrapError(protocol.ErrCodeInvalidRequest, err, "could not encode the message")
 	}
 
-	err = s.devices.WriteTag(active.DeviceID, active.UID, ndefBytes, req.Request.Lock, req.IdempotencyKey)
-	if err != nil {
+	if err := s.devices.WriteTag(active.DeviceID, active.UID, ndefBytes, req.Request.Lock, req.IdempotencyKey); err != nil {
 		return nil, deviceFailure(err, active.DeviceID, "write")
 	}
 
@@ -67,10 +63,20 @@ func (s *Router) writeViaDevice(req server.WriteOp, msg *nfc.NDEFMessage, active
 		UID:          active.UID,
 		TagType:      tagType(active.Tag),
 		BytesWritten: len(ndefBytes),
-		Verified:     false,
+		Verified:     verifiable(active.Tag),
 		Attempts:     1,
 		Locked:       req.Request.Lock,
 	}, nil
+}
+
+// verifiable reports whether a write to this tag could have been confirmed by
+// reading it back. Asked of the tag rather than assumed from the route, so the
+// answer comes from the same capability the reader's pipeline consults.
+func verifiable(tag nfc.Tag) bool {
+	if tag == nil {
+		return false
+	}
+	return !tag.Capabilities().ReadsAreSnapshot
 }
 
 // Lock makes the named tag permanently read-only.

@@ -16,6 +16,15 @@ type TagCapabilities struct {
 	CanWrite      bool `json:"canWrite"`
 	CanTransceive bool `json:"canTransceive"`
 
+	// ReadsAreSnapshot reports that reading this tag returns what was captured
+	// when it was scanned, not what is on it now.
+	//
+	// A write to such a tag cannot be confirmed by reading it back: the read
+	// answers with data that a write cannot have changed, so the comparison
+	// says nothing. The zero value is the common case, a tag read live over its
+	// own connection; a tag whose contents arrive from elsewhere declares this.
+	ReadsAreSnapshot bool `json:"readsAreSnapshot,omitempty"`
+
 	// Locking capabilities
 	CanLock    bool `json:"canLock"`
 	IsReadOnly bool `json:"isReadOnly,omitempty"`

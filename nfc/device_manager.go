@@ -74,10 +74,10 @@ type DeviceManager struct {
 	hasDevice  bool
 
 	// Reconnection state
-	retryCount    int           // Tracks retry attempts for timeout/closed errors
+	retryCount    int // Tracks retry attempts for timeout/closed errors
 	inCooldown    bool
-	cooldownTimer Timer         // Timer interface for testability
-	clock         Clock         // Clock abstraction for time operations
+	cooldownTimer Timer // Timer interface for testability
+	clock         Clock // Clock abstraction for time operations
 
 	// Event broadcasting
 	events   chan DeviceEvent // Buffered channel for device events

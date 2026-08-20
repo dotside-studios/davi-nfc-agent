@@ -208,9 +208,9 @@ func TestURIRecordPayload(t *testing.T) {
 // Test URI record with abbreviations
 func TestURIRecordAbbreviations(t *testing.T) {
 	tests := []struct {
-		fullURI      string
+		fullURI        string
 		identifierCode byte
-		suffix       string
+		suffix         string
 	}{
 		{"http://www.example.com", 0x01, "example.com"},
 		{"https://www.example.com", 0x02, "example.com"},
@@ -253,7 +253,7 @@ func TestParseMalformedNDEF(t *testing.T) {
 		{"truncated header", []byte{}},
 		{"truncated type length", []byte{0xD1}},
 		{"truncated payload length", []byte{0xD1, 0x01}},
-		{"truncated type", []byte{0xD1, 0x05, 0x10, 0x54}}, // Type length=5 but only 1 byte
+		{"truncated type", []byte{0xD1, 0x05, 0x10, 0x54}},    // Type length=5 but only 1 byte
 		{"truncated payload", []byte{0xD1, 0x01, 0xFF, 0x54}}, // Payload length=255 but no payload
 	}
 
@@ -301,7 +301,7 @@ func TestRoundTrip(t *testing.T) {
 		"Text with emoji 😀🎉",
 		"Multiple\nLines\nOf\nText",
 		string(make([]byte, 500)), // Long text
-		"",                         // Empty
+		"",                        // Empty
 	}
 
 	for _, text := range texts {
@@ -325,8 +325,8 @@ func TestRoundTrip(t *testing.T) {
 func TestParseTextRecordPayloadUTF16(t *testing.T) {
 	// UTF-16 LE encoded "Hi" (0x0048 0x0069)
 	payload := []byte{
-		0x82,       // Status: UTF-16 (bit 7 set), lang length = 2
-		'e', 'n',   // Language code
+		0x82,     // Status: UTF-16 (bit 7 set), lang length = 2
+		'e', 'n', // Language code
 		0x48, 0x00, // 'H' in UTF-16 LE
 		0x69, 0x00, // 'i' in UTF-16 LE
 	}

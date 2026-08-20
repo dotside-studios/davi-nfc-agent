@@ -75,6 +75,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **What a tag cannot support is declared, not branched around.** A write to a
+  tag on the reader was confirmed by reading it back; a write to a tag a phone
+  is holding was not, and the difference lived as two implementations of the
+  same operation. It is not a difference between kinds of tag: `remotenfc.Tag`
+  satisfies `nfc.Tag` in full and routes writes back to the device holding it.
+  It is one fact about one method. `ReadData` on such a tag answers with what
+  the device reported when it scanned, so reading back after a write compares
+  against data the write could not have changed.
+
+  `TagCapabilities.ReadsAreSnapshot` says so, and the write pipeline skips the
+  confirmation it cannot trust rather than testing what kind of tag it holds.
+  The zero value is the common case, a tag read live over its own connection;
+  a tag whose contents arrive from elsewhere declares itself.
+
+- **`nfc.WriteMessage` is the write pipeline, for any tag.** Encoding, the
+  capacity check, retries and confirmation were methods on `*NFCReader` that
+  never touched one. They are free functions now, and
+  `WriteMessageWithResult` is the reader's path into them.
+
+  `nfc.AtomicLockWriter` is the optional interface for a tag that can be written
+  and locked in one operation. Writing then locking is two steps, and a failure
+  between them leaves a tag carrying data meant to be permanent that is not; a
+  tag reached over a connection carrying both implements this so the pair cannot
+  come apart. `remotenfc.Tag` does
+
 - **The agent no longer reaches into its manager for a device driver.**
   `findDeviceDriver` searched the manager for a `*remotenfc.Manager`, pulling a
   concrete driver back out of the abstraction the agent had just been handed,

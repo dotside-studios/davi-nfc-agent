@@ -24,13 +24,13 @@ const (
 
 // PC/SC pseudo-APDU instructions
 const (
-	INSGetUID      = 0xCA // Get UID
-	INSLoadKey     = 0x82 // Load authentication key
-	INSAuth        = 0x86 // General authenticate
-	INSReadBinary  = 0xB0 // Read binary
-	INSUpdateBin   = 0xD6 // Update binary
-	INSDirectCmd   = 0x00 // Direct transmit (for wrapped commands)
-	INSSelectFile  = 0xA4 // Select file
+	INSGetUID     = 0xCA // Get UID
+	INSLoadKey    = 0x82 // Load authentication key
+	INSAuth       = 0x86 // General authenticate
+	INSReadBinary = 0xB0 // Read binary
+	INSUpdateBin  = 0xD6 // Update binary
+	INSDirectCmd  = 0x00 // Direct transmit (for wrapped commands)
+	INSSelectFile = 0xA4 // Select file
 )
 
 // MIFARE key types

@@ -719,7 +719,7 @@ false only when the exchange itself could not be performed.
 > with `READ_ONLY`. A raw command can also burn OTP bits or lock a tag
 > permanently, and the agent can neither recognise nor undo that.
 
-Accepts an optional `deviceID`. See [Targeting a device](#targeting-a-device).
+Accepts an optional `deviceID`. See [Naming the tag](#naming-the-tag).
 
 ### Tag Capabilities
 
@@ -788,7 +788,7 @@ The query is routed like a write: to the device holding a tag when no hardware
 reader has a card, otherwise to the reader. For a device-held tag it is answered
 from what the device declared at the scan, with no round trip, so it costs
 nothing to ask. Accepts an optional `deviceID`; see
-[Targeting a device](#targeting-a-device).
+[Naming the tag](#naming-the-tag).
 
 If nothing is holding a tag, `success` is `false` with `NO_CARD`.
 
@@ -840,43 +840,80 @@ Response (`type: "lockResponse"`):
 
 If the present tag does not support locking, `success` is `false` with an error.
 
-The request is routed like a write: to the remote device holding a tag when no
-hardware reader has a card present, otherwise to the reader. A device receives
-it as a `deviceWriteRequest` with `lock: true` and no message.
+The request is routed like a write: to whichever source is holding the tag it
+names. A device receives it as a `deviceWriteRequest` with `lock: true` and no
+message.
 
-Both accept an optional `deviceID` to name the device holding the tag, and an
-optional `idempotencyKey`. See [Targeting a device](#targeting-a-device).
+Both take the `uid` of the tag they apply to, optionally a `deviceID`, and
+optionally an `idempotencyKey`. See [Naming the tag](#naming-the-tag). A lock
+cannot be undone, so it is refused rather than redirected when the tag named is
+not the tag present.
 
 > **Refused in read-only mode.** Locking is irreversible, so the agent's
 > read-only mode refuses it with `READ_ONLY` on every route — a tag held by a
 > phone included. Writes are refused the same way.
 
-### Targeting a Device
+### Naming the Tag
 
 `writeRequest`, `lockRequest`, `transceiveRequest` and `capabilitiesRequest` all
-accept an optional `deviceID`:
+name the tag they apply to, with the `uid` from the `tagData` they are
+responding to:
 
 ```json
 {
   "id": "req_10",
   "type": "writeRequest",
   "payload": {
-    "deviceID": "dev_abc123",
+    "uid": "04A1B2C3D4E5F6",
     "records": [{ "type": "text", "content": "Hello" }]
   }
 }
 ```
 
-Every `tagData` broadcast carries the `deviceID` of the device that scanned it,
-so a client watching two phones can name the one it means.
+The agent finds whichever source is holding that tag, its own reader or a
+paired device, and refuses the request if none is. It does not matter which
+scanned most recently, or whether anything has been scanned since.
 
-Without `deviceID` the agent routes for you: its own reader while it holds a
-card, otherwise whichever device scanned most recently. That is fine for one
-device and ambiguous for several, which is what naming one resolves.
+That refusal is the point. The agent used to route by preference rather than by
+name: its own reader while it reported a card, otherwise the most recent remote
+scan. Preference is re-evaluated when the request arrives, not when the tag was
+scanned, so lifting a card in between moved the request to a phone's tag. A
+payload encoded for one tag was written to another, irreversibly so when the
+request also locked, and there was no field with which to say otherwise.
 
-Naming a device is decisive. The request goes to that device or fails with
-`NO_CARD`; it never falls back to the reader, since a tag on the reader is a
-different tag.
+A request whose tag is not present fails with `NO_CARD` and is never applied
+somewhere else. It is retryable: present the tag again and the same request
+works. If a tag is present but is not the one named, the failure is
+`TAG_MISMATCH`, which is not retryable. Re-read the tag instead, because the
+one now on the reader is a different tag with a different UID.
+
+**Naming a device instead.** Every `tagData` carries the `deviceID` of the
+device that scanned it, and a request may name that instead of, or alongside,
+the `uid`:
+
+```json
+{ "deviceID": "dev_abc123", "uid": "04A1B2C3D4E5F6" }
+```
+
+Naming a device is decisive: the request goes to that device or fails, never
+falling back to the reader, since a tag on the reader is a different tag. Giving
+both holds the device to the UID too, so a `deviceID` remembered from an earlier
+scan cannot act on whatever that device is holding now.
+
+**Naming neither.** A request with no `uid` and no `deviceID` is refused with
+`TAG_NOT_NAMED`. A client that genuinely cannot name its tag may opt back into
+the old guess, per request:
+
+```json
+{ "allowUntargeted": true, "records": [{ "type": "text", "content": "Hello" }] }
+```
+
+It is a request field rather than an agent setting so that one such client
+carries the risk itself, instead of the operator lowering the guarantee for
+every client on the agent. A request that does name a tag is still checked.
+
+> The bundled JavaScript client fills in `uid` from the last tag it saw, so
+> `client.write({ records })` is already targeted and needs no change.
 
 **Idempotency.** `writeRequest` and `lockRequest` also accept an
 `idempotencyKey`, passed through to the device. Reuse it when retrying after a
@@ -1055,6 +1092,8 @@ Raised by the bridge itself, before reaching a tag.
 | `INVALID_MESSAGE_TYPE` | no | Message type not valid at this point in the exchange |
 | `UNKNOWN_TYPE` | no | Unrecognized message type |
 | `INVALID_DEVICE` | no | Device ID did not match the connection |
+| `TAG_MISMATCH` | no | The tag present is not the one the request named |
+| `TAG_NOT_NAMED` | no | Request named no tag and did not ask for one to be guessed |
 | `REGISTRATION_FAILED` | no | Device could not be registered |
 | `SESSION_LOCKED` | no | Another client holds the session |
 | `TAG_SEND_FAILED` | yes | Tag data could not be delivered internally |
@@ -1080,4 +1119,4 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
-| `NO_CARD` | yes | No card present on reader |
+| `NO_CARD` | yes | Nothing is holding the tag the request named |

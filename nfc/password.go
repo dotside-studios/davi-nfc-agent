@@ -65,7 +65,7 @@ func (r *NFCReader) RemoveCardPassword(password []byte) (*PasswordResult, error)
 func (r *NFCReader) passwordOperation(op string, fn func(*Card) error) (*PasswordResult, error) {
 	var result *PasswordResult
 	err := r.withTagOperation(func() error {
-		card, err := r.prepareCardForWrite()
+		card, err := r.prepareCardForWrite("")
 		if err != nil {
 			return err
 		}

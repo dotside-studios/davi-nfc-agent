@@ -92,3 +92,18 @@ func TestErrorPayloadCarriesContext(t *testing.T) {
 		t.Error("a tag too small for the data will not get bigger on retry")
 	}
 }
+
+// A blind retry of TAG_MISMATCH is what would reach the wrong tag, so it must
+// never be advertised as retryable. TAG_NOT_NAMED will not change its own mind
+// either. NO_CARD is retryable: the tag can come back.
+func TestTagTargetingRetryability(t *testing.T) {
+	for code, want := range map[ErrorCode]bool{
+		ErrCodeTagMismatch: false,
+		ErrCodeTagNotNamed: false,
+		ErrCodeNoCard:      true,
+	} {
+		if got := code.Retryable(); got != want {
+			t.Errorf("%s.Retryable() = %v, want %v", code, got, want)
+		}
+	}
+}

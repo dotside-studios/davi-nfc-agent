@@ -48,6 +48,12 @@ class NFCClient {
     this._pendingRequests = {};
     this._requestIdCounter = 0;
 
+    /**
+     * The most recent tag seen, or null after it is removed. A write names it.
+     * @type {Object|null}
+     */
+    this.lastTag = null;
+
     // Event handlers
     this.eventHandlers = {
       tagData: [],
@@ -224,9 +230,13 @@ class NFCClient {
 
     // Handle broadcast messages (without ID)
     switch (type) {
-      case 'tagData':
-        this._emit('tagData', this._parseTagData(payload));
+      case 'tagData': {
+        const tag = this._parseTagData(payload);
+        // A removal arrives as a tagData with no uid, and clears the memory.
+        this.lastTag = tag.uid ? tag : null;
+        this._emit('tagData', tag);
         break;
+      }
       case 'deviceStatus':
         this._emit('deviceStatus', payload);
         break;
@@ -245,6 +255,7 @@ class NFCClient {
   _parseTagData(payload) {
     const tagData = {
       uid: payload.uid || '',
+      deviceID: payload.deviceID || '',
       type: payload.type || '',
       technology: payload.technology || '',
       scannedAt: payload.scannedAt ? new Date(payload.scannedAt) : null,
@@ -343,11 +354,20 @@ class NFCClient {
       // Update stored handlers
       this._pendingRequests[requestId] = { resolve, reject };
 
+      // Name the tag this write is for; the agent refuses it otherwise.
+      const payload = { ...writeRequest };
+      if (!payload.uid && !payload.deviceID && this.lastTag) {
+        payload.uid = this.lastTag.uid;
+        if (this.lastTag.deviceID) {
+          payload.deviceID = this.lastTag.deviceID;
+        }
+      }
+
       // Send write request with ID
       const message = {
         id: requestId,
         type: 'writeRequest',
-        payload: writeRequest
+        payload
       };
 
       this.ws.send(JSON.stringify(message));

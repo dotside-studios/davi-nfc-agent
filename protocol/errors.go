@@ -29,6 +29,14 @@ const (
 
 // Protocol errors added with the taxonomy.
 const (
+	// ErrCodeTagMismatch reports that the tag resolved is not the one named.
+	// Re-read the tag rather than retrying.
+	ErrCodeTagMismatch ErrorCode = "TAG_MISMATCH"
+
+	// ErrCodeTagNotNamed reports that a request named no tag and did not ask
+	// for one to be guessed.
+	ErrCodeTagNotNamed ErrorCode = "TAG_NOT_NAMED"
+
 	ErrCodeTimeout      ErrorCode = "TIMEOUT"
 	ErrCodeDeviceGone   ErrorCode = "DEVICE_GONE"
 	ErrCodeInternal     ErrorCode = "INTERNAL_ERROR"

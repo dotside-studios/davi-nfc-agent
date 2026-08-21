@@ -83,6 +83,13 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	}
 
 	caps.CanRead = true
+
+	// ReadData answers with what the device reported when it scanned, so a
+	// write cannot be confirmed by reading it back. Declared rather than
+	// special-cased, so the write pipeline skips a step it cannot trust
+	// instead of branching on what kind of tag this is.
+	caps.ReadsAreSnapshot = true
+
 	caps.CanWrite = t.canWrite()
 	caps.CanLock = t.canLock()
 	caps.CanTransceive = t.canTransceive()
@@ -90,23 +97,49 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	return caps
 }
 
+// declared reports what the tag said about one of its capabilities, and whether
+// it said anything at all.
+//
+// A tag that declared nothing is unknown, not incapable. Only a v1 device can
+// describe a tag it scanned; a v0 device sends what it can do and no more, and
+// the wire protocol keeps accepting that. Reading absence as a refusal would
+// leave every v0 device holding tags that can do nothing, which is the
+// hard-coded false this capability work exists to remove.
+func (t *Tag) declared(of func(protocol.TagCapabilities) bool) (value, ok bool) {
+	if t.declaredCaps == nil {
+		return false, false
+	}
+	return of(*t.declaredCaps), true
+}
+
+// readOnly reports whether the tag declared itself already locked. Absence of a
+// declaration is not a claim that it is.
+func (t *Tag) readOnly() bool {
+	ro, _ := t.declared(func(c protocol.TagCapabilities) bool { return c.IsReadOnly })
+	return ro
+}
+
 // canWrite reports whether a write would actually reach the tag. Callers must
 // hold at least a read lock.
+//
+// Three states, not two: a tag that declared it cannot be written is refused, a
+// tag that declared nothing defers to the device holding it, and a tag declared
+// read-only is refused however capable that device is.
 func (t *Tag) canWrite() bool {
-	if t.route == nil || t.declaredCaps == nil || !t.declaredCaps.CanWrite {
+	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if t.declaredCaps.IsReadOnly {
+	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanWrite }); declared && !can {
 		return false
 	}
 	return t.route.deviceCanWrite(t.sourceDevice)
 }
 
 func (t *Tag) canLock() bool {
-	if t.route == nil || t.declaredCaps == nil || !t.declaredCaps.CanLock {
+	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if t.declaredCaps.IsReadOnly {
+	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanLock }); declared && !can {
 		return false
 	}
 	return t.route.deviceCanLock(t.sourceDevice)
@@ -115,7 +148,10 @@ func (t *Tag) canLock() bool {
 // canTransceive reports whether a raw exchange would reach the tag. Callers
 // must hold at least a read lock.
 func (t *Tag) canTransceive() bool {
-	if t.route == nil || t.declaredCaps == nil || !t.declaredCaps.CanTransceive {
+	if t.route == nil {
+		return false
+	}
+	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanTransceive }); declared && !can {
 		return false
 	}
 	return t.route.deviceCanTransceive(t.sourceDevice)
@@ -148,6 +184,26 @@ func (t *Tag) WriteData(data []byte) error {
 		return nfc.NewNotSupportedError("WriteData")
 	}
 	return route.writeTag(deviceID, uid, data, nfc.WriteOptions{Overwrite: true, Index: -1})
+}
+
+// WriteDataAndLock writes and locks in the one exchange the device protocol
+// offers, so a failure cannot leave the data written and the lock not applied.
+//
+// This is what nfc.AtomicLockWriter exists for: a local tag has to write and
+// then lock as two operations, and a tag reached over a connection that carries
+// both should not be made to imitate that.
+func (t *Tag) WriteDataAndLock(data []byte) error {
+	t.mu.RLock()
+	route, deviceID, uid, canWrite, canLock := t.route, t.sourceDevice, t.uid, t.canWrite(), t.canLock()
+	t.mu.RUnlock()
+
+	if !canWrite {
+		return nfc.NewNotSupportedError("WriteData")
+	}
+	if !canLock {
+		return nfc.NewNotSupportedError("MakeReadOnly")
+	}
+	return route.writeTag(deviceID, uid, data, nfc.WriteOptions{Overwrite: true, Index: -1, Lock: true})
 }
 
 // IsWritable reports whether the tag can currently be written.
@@ -209,3 +265,7 @@ func (t *Tag) ScannedAt() time.Time {
 func (t *Tag) SourceDevice() string {
 	return t.sourceDevice
 }
+
+// The tag satisfies the optional write-and-lock interface, so the shared write
+// pipeline folds a lock into the one exchange rather than sending two.
+var _ nfc.AtomicLockWriter = (*Tag)(nil)

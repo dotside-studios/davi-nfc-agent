@@ -99,6 +99,12 @@ export interface TagData {
   uid: string;
 
   /**
+   * The paired device that scanned this tag, or '' when the agent's own
+   * reader did. Pass it back on a write to act on that device's tag.
+   */
+  deviceID: string;
+
+  /**
    * Card type (e.g., 'MIFARE Classic 1K')
    */
   type: string;
@@ -204,6 +210,36 @@ export interface WriteRequest {
    * Array of NDEF records to write
    */
   records: NDEFRecordWrite[];
+
+  /**
+   * UID of the tag to write, from the tagData this write responds to. The write
+   * is refused unless the tag about to be encoded carries it. Left unset, the
+   * client fills it in from the last tag it saw.
+   */
+  uid?: string;
+
+  /**
+   * The paired device holding the tag, from the same tagData. Optional: the
+   * UID alone identifies the tag.
+   */
+  deviceID?: string;
+
+  /**
+   * Guess which tag this write means when neither `uid` nor `deviceID` is
+   * given, instead of refusing it.
+   */
+  allowUntargeted?: boolean;
+
+  /**
+   * Make the tag permanently read-only after a successful write. Irreversible.
+   */
+  lock?: boolean;
+
+  /**
+   * Identifies the logical write, so a retry after a lost response is not
+   * applied twice.
+   */
+  idempotencyKey?: string;
 }
 
 /**

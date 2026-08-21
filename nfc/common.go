@@ -48,6 +48,10 @@ var (
 	// ErrDeviceClosed indicates the device connection was closed
 	ErrDeviceClosed = errors.New("device closed")
 
+	// ErrTagUIDMismatch indicates the tag presented is not the one the request
+	// named. Not retryable: a blind retry would reach whichever card is next.
+	ErrTagUIDMismatch = errors.New("tag UID mismatch")
+
 	// ErrIO indicates an input/output error with the device
 	ErrIO = errors.New("device I/O error")
 

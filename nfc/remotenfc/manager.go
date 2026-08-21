@@ -38,8 +38,9 @@ type Manager struct {
 	pending   map[string]pendingRequest // requestID -> waiter
 	pendingMu sync.Mutex
 
-	active       map[string]activeTag // deviceID -> the tag it is holding
-	activeLatest string               // Most recent scan, for a request naming no device
+	// activeLatest names the device that scanned most recently, for a request
+	// that names none. The tags themselves live on the devices holding them.
+	activeLatest string
 	activeMu     sync.RWMutex
 }
 
@@ -58,7 +59,6 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 		sessions:          make(map[string]*wsconn.SafeConn),
 		sessionConn:       make(map[*wsconn.SafeConn]string),
 		pending:           make(map[string]pendingRequest),
-		active:            make(map[string]activeTag),
 	}
 
 	// Start cleanup routine

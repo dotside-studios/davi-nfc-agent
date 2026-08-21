@@ -188,14 +188,6 @@ func main() {
 	agent.Devices = devices
 	agent.Bootstrap = bootstrapServer
 	agent.BootstrapPort = bootstrapPortFlag
-	agent.RequirePairedDevice = requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
-
-	if agent.RequirePairedDevice {
-		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
-		if devices.Count() == 0 {
-			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
-		}
-	}
 	agent.CertFile = certFileFlag
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration
@@ -227,8 +219,17 @@ func main() {
 	if !isFlagSet("device-port") && stored.Port > 0 {
 		agent.DevicePort = stored.Port
 	}
-	if !requirePairedFlag && os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") != "1" && stored.RequirePairedDevice {
-		agent.RequirePairedDevice = true
+	// Asked for on the command line or in the environment, as opposed to
+	// remembered from a previous run: a stored preference may raise the
+	// requirement but not withdraw one asked for there. The notice waits until
+	// both sources are in, so it reports what is actually in force.
+	askedForPairing := requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
+	agent.RequirePairedDevice, agent.RequirePairedDeviceLocked = resolveRequirePaired(askedForPairing, stored.RequirePairedDevice)
+	if agent.RequirePairedDevice {
+		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		if devices.Count() == 0 {
+			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
+		}
 	}
 	applySettings(agent, stored)
 
@@ -244,6 +245,15 @@ func main() {
 	app.AttachConsole(console)
 	app.AttachSettings(settingsStore)
 	app.Run()
+}
+
+// resolveRequirePaired settles the paired-device requirement from its two
+// sources. Either can turn it on. Only the command line locks it on: a stored
+// preference that says false must not withdraw a requirement an operator asked
+// for on the command line, which is the one direction that costs security
+// rather than convenience.
+func resolveRequirePaired(askedForPairing, stored bool) (require, locked bool) {
+	return askedForPairing || stored, askedForPairing
 }
 
 // isFlagSet reports whether a flag was given on the command line, as opposed to

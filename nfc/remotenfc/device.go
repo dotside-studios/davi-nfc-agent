@@ -21,6 +21,7 @@ type Device struct {
 	mu           sync.RWMutex       // Protects device state
 	lastSeen     time.Time          // Last activity timestamp (for health monitoring)
 	capabilities DeviceCapabilities // Read/write capabilities
+	tag          nfc.Tag            // The tag it is holding, nil when its field is empty
 	metadata     map[string]string  // Additional device info
 }
 
@@ -132,26 +133,44 @@ func (d *Device) Transceive(txData []byte) ([]byte, error) {
 // GetTags satisfies nfc.Device and never returns a tag.
 //
 // A phone is not polled the way a reader is: it pushes its scans, which reach
-// the agent through Manager.Data, and nfc.IsRemoteDevice keeps a remote device
-// from ever being opened as the agent's reader. So there is nothing here to
-// return. The wait is what a poller would expect of a reader with no card in
-// the field, and keeps a caller that polls anyway from spinning; a close is
-// still reported as one.
+// the agent through Manager.Data, which is the scan notification. This is the
+// other question: what is it holding right now. It used to answer nothing,
+// which is why a registry of held tags grew on the manager beside it.
 func (d *Device) GetTags() ([]nfc.Tag, error) {
 	d.mu.RLock()
-	active := d.isActive
+	active, tag := d.isActive, d.tag
 	d.mu.RUnlock()
 
 	if !active {
 		return nil, nfc.ErrDeviceClosed
 	}
+	if tag != nil {
+		return []nfc.Tag{tag}, nil
+	}
 
+	// Nothing in its field. The wait is what a poller expects of a reader with
+	// no card, and keeps one that polls anyway from spinning; a close is still
+	// reported as one.
 	select {
 	case <-time.After(GetTagsTimeout):
 		return []nfc.Tag{}, nil
 	case <-d.closeChannel:
 		return nil, nfc.ErrDeviceClosed
 	}
+}
+
+// setTag records the tag the device is holding, or clears it with nil.
+func (d *Device) setTag(tag nfc.Tag) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.tag = tag
+}
+
+// heldTag reports the tag it is holding, without waiting.
+func (d *Device) heldTag() nfc.Tag {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.tag
 }
 
 // UpdateLastSeen updates the device's last activity timestamp.

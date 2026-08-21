@@ -38,11 +38,6 @@ type pendingResult struct {
 // activeTag is a tag a device is holding in its field. The tag itself is kept,
 // not just its UID, so its capabilities can be answered without waiting for the
 // next scan.
-type activeTag struct {
-	deviceID string
-	uid      string
-	tag      nfc.Tag
-}
 
 // ActiveTag returns the tag on the named device. An empty deviceID asks for the
 // most recent scan across all devices.
@@ -51,21 +46,24 @@ type activeTag struct {
 // be holding one, and a request that names its target must reach that target
 // rather than whichever scanned last.
 func (m *Manager) ActiveTag(deviceID string) (ActiveTagInfo, bool) {
-	m.activeMu.RLock()
-	defer m.activeMu.RUnlock()
-
 	if deviceID == "" {
+		m.activeMu.RLock()
 		deviceID = m.activeLatest
+		m.activeMu.RUnlock()
 	}
 	if deviceID == "" {
 		return ActiveTagInfo{}, false
 	}
 
-	active, ok := m.active[deviceID]
+	device, ok := m.GetDevice(deviceID)
 	if !ok {
 		return ActiveTagInfo{}, false
 	}
-	return ActiveTagInfo{DeviceID: active.deviceID, UID: active.uid, Tag: active.tag}, true
+	tag := device.heldTag()
+	if tag == nil {
+		return ActiveTagInfo{}, false
+	}
+	return ActiveTagInfo{DeviceID: deviceID, UID: tag.UID(), Tag: tag}, true
 }
 
 // ActiveTagInfo describes a tag a device is holding.
@@ -80,53 +78,82 @@ type ActiveTagInfo struct {
 // ActiveTagDevices lists the devices currently holding a tag, most recent first.
 func (m *Manager) ActiveTagDevices() []string {
 	m.activeMu.RLock()
-	defer m.activeMu.RUnlock()
+	latest := m.activeLatest
+	m.activeMu.RUnlock()
 
-	ids := make([]string, 0, len(m.active))
-	if m.activeLatest != "" {
-		ids = append(ids, m.activeLatest)
-	}
-	for deviceID := range m.active {
-		if deviceID != m.activeLatest {
-			ids = append(ids, deviceID)
+	m.mu.RLock()
+	holders := make([]string, 0, len(m.devices))
+	for id, device := range m.devices {
+		if id != latest && device.heldTag() != nil {
+			holders = append(holders, id)
 		}
 	}
-	return ids
+	m.mu.RUnlock()
+
+	ids := make([]string, 0, len(holders)+1)
+	if latest != "" {
+		ids = append(ids, latest)
+	}
+	return append(ids, holders...)
 }
 
+// setActiveTag records the tag on the device holding it, and remembers which
+// device scanned last for a request that names none.
 func (m *Manager) setActiveTag(deviceID, uid string, tag nfc.Tag) {
+	device, ok := m.GetDevice(deviceID)
+	if !ok {
+		return
+	}
+	device.setTag(tag)
+
 	m.activeMu.Lock()
 	defer m.activeMu.Unlock()
-
-	m.active[deviceID] = activeTag{deviceID: deviceID, uid: uid, tag: tag}
 	m.activeLatest = deviceID
 }
 
 // clearActiveTag forgets a device's tag, but only if it is still the one being
 // cleared: the device may have presented another in the meantime.
 func (m *Manager) clearActiveTag(deviceID, uid string) {
-	m.activeMu.Lock()
-	defer m.activeMu.Unlock()
-
-	active, ok := m.active[deviceID]
+	device, ok := m.GetDevice(deviceID)
 	if !ok {
 		return
 	}
-	if uid != "" && active.uid != "" && active.uid != uid {
+
+	held := device.heldTag()
+	if held == nil {
+		return
+	}
+	if uid != "" && held.UID() != "" && held.UID() != uid {
+		return
+	}
+	device.setTag(nil)
+
+	// Chosen before taking activeMu: every other path releases m.mu before
+	// touching activeMu, and holding them the other way round here would be the
+	// one inversion in the package.
+	fallback := m.anyDeviceHoldingTag(deviceID)
+
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+	if m.activeLatest != deviceID {
 		return
 	}
 
-	delete(m.active, deviceID)
+	// A second phone keeps working when the first withdraws its tag.
+	m.activeLatest = fallback
+}
 
-	if m.activeLatest == deviceID {
-		m.activeLatest = ""
-		// Fall back to any other device still holding one, so a second phone
-		// keeps working when the first withdraws its tag.
-		for id := range m.active {
-			m.activeLatest = id
-			break
+// anyDeviceHoldingTag names a device still holding a tag, other than except.
+func (m *Manager) anyDeviceHoldingTag(except string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for id, d := range m.devices {
+		if id != except && d.heldTag() != nil {
+			return id
 		}
 	}
+	return ""
 }
 
 func (m *Manager) addSession(deviceID string, conn *wsconn.SafeConn) {

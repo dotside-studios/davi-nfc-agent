@@ -2,12 +2,12 @@ package nfc
 
 // TLV types for NDEF
 const (
-	TLVNull       = 0x00 // Null TLV
-	TLVLockCtrl   = 0x01 // Lock Control TLV
-	TLVMemCtrl    = 0x02 // Memory Control TLV
-	TLVNDEF       = 0x03 // NDEF Message TLV
-	TLVProprietary= 0xFD // Proprietary TLV
-	TLVTerminator = 0xFE // Terminator TLV
+	TLVNull        = 0x00 // Null TLV
+	TLVLockCtrl    = 0x01 // Lock Control TLV
+	TLVMemCtrl     = 0x02 // Memory Control TLV
+	TLVNDEF        = 0x03 // NDEF Message TLV
+	TLVProprietary = 0xFD // Proprietary TLV
+	TLVTerminator  = 0xFE // Terminator TLV
 )
 
 // TLVEncode encodes data into TLV format

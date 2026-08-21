@@ -173,7 +173,7 @@ func containsISO14443_4Indicator(atr []byte) bool {
 	}
 
 	// Check TD1
-	if (t0 & 0x80) != 0 && pos < len(atr) {
+	if (t0&0x80) != 0 && pos < len(atr) {
 		td1 := atr[pos]
 		// Lower nibble is protocol type (T value)
 		// T=1 indicates potential ISO14443-4 support
@@ -239,4 +239,3 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 		return DetectedUnknown
 	}
 }
-

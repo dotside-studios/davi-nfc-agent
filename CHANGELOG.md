@@ -28,6 +28,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A write to a phone reports its outcome.** The device route answered with a
+  bare `{uid, deviceID}` map while the client server reads a write outcome by
+  asserting `*nfc.WriteResult`. The assertion failed, the whole block was
+  skipped, and a client got `success: true` carrying none of the documented
+  fields -- no `uid`, `tagType`, `bytesWritten`, `verified`, `attempts` or
+  `locked` -- where the same write through the agent's own reader returned all
+  six. Both routes now answer in the one shape, with `verified` asked of the tag
+  rather than assumed from the route: a tag whose reads are a snapshot cannot
+  confirm a write, which is the same fact the reader's pipeline consults.
+
+- **A tag that declared nothing is unknown, not incapable.** `remotenfc.Tag`
+  refused writes, locks and exchanges whenever the scan carried no per-tag
+  capabilities, collapsing "the device said this tag cannot" together with "the
+  device said nothing about this tag". Only a v1 device can describe a tag it
+  scanned; a v0 device sends what it can do and no more, and the wire protocol
+  keeps accepting that forever. So every v0 device held tags that could do
+  nothing -- the hard-coded `false` the capability work exists to remove,
+  surviving in a narrower form.
+
+  The three states are now distinct. A tag that declared it cannot is refused, a
+  tag declared read-only is refused however capable its device, and a tag that
+  declared nothing defers to the device holding it, which is the inference the
+  protocol documents. The device-level check is unchanged, so a capability that
+  outlives its session still buys nothing.
+
+- **A write can no longer land on a tag the client did not mean.** Requests were
+  routed by preference rather than by name: the agent's own reader while it
+  reported a card, otherwise whichever device had scanned most recently. That
+  preference was evaluated when the request arrived, not when the tag was
+  scanned, so lifting a card in between moved the request to a phone's tag. A
+  payload encoded for one tag was written to another, irreversibly when the
+  request also locked. Nothing caught it, because the request had no field
+  naming the tag it meant: `uid` was reported in the *response*, so a client
+  learned which tag it had hit only afterwards.
+
+  `writeRequest`, `lockRequest`, `transceiveRequest` and `capabilitiesRequest`
+  now carry the `uid` of the tag they apply to, and the agent finds whichever
+  source is holding it instead of choosing one. A tag that is not present fails
+  with `NO_CARD`; a tag present but not the one named fails with the new
+  `TAG_MISMATCH`, which is not retryable. Naming a `deviceID` as well holds that
+  device to the UID too, so an id remembered from an earlier scan cannot act on
+  whatever that device is holding now.
+
+  A request that names no tag is refused with `TAG_NOT_NAMED` unless it sets
+  `allowUntargeted`, which is per-request rather than an agent-wide flag so one
+  legacy client cannot weaken the guarantee for the others.
+
+- **A tag declares what it cannot confirm, instead of the pipeline branching on
+  its kind.** A tag whose contents arrive from elsewhere answers a read with the
+  snapshot taken when it was scanned, so reading back after a write compares
+  against data the write could not have changed: confirmation with nothing
+  behind it. `TagCapabilities.ReadsAreSnapshot` says so, and the write skips the
+  step rather than asking what kind of tag it holds. `nfc.AtomicLockWriter` does
+  the same for locking, folding it into the write where a tag offers both in one
+  exchange, so a failure between the two cannot leave data written and the lock
+  not applied.
+
+- **A phone's device reports the tag it is holding.** `nfc.Device.GetTags` is
+  the question "what tag do you have", and `remotenfc.Device` satisfied the
+  interface without answering it: the method waited and returned nothing, on
+  the grounds that scans arrive by push and a phone is never opened as the
+  agent's reader. So the driver grew a second place to keep held tags, a map on
+  the manager keyed by device ID, and every path that needed one had to know to
+  look there instead. That is the origin of the reader-and-device split in the
+  request routing.
+
+  The tag now lives on the device holding it, which is what `GetTags` returns.
+  The manager keeps only which device scanned most recently, for a request that
+  names no device. The wait stays for the empty case, since that is what paces a
+  caller polling a device with nothing in its field.
+
 - **The agent starts without auto-TLS again.** `-auto-tls=false` and an
   externally provisioned `-cert`/`-key` both panicked at startup, before the
   systray appeared. Neither configuration has a certificate authority, and the

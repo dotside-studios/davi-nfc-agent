@@ -404,13 +404,50 @@ func (s *Server) writeViaDevice(msg server.WriteRequestMessage, active remotenfc
 		return
 	}
 
+	if !resp.Success {
+		msg.ResponseCh <- server.WriteResponseMessage{
+			RequestID: msg.RequestID,
+			Success:   false,
+			Error:     resp.Error,
+			ErrorCode: resp.ErrorCode,
+		}
+		return
+	}
+
 	msg.ResponseCh <- server.WriteResponseMessage{
 		RequestID: msg.RequestID,
-		Success:   resp.Success,
-		Error:     resp.Error,
-		ErrorCode: resp.ErrorCode,
-		Payload:   map[string]any{"uid": uid, "deviceID": deviceID},
+		Success:   true,
+		Payload:   deviceWriteResult(active, len(ndefBytes), msg.Request.Lock),
 	}
+}
+
+// deviceWriteResult describes a write the device performed, in the shape the
+// reader's route returns.
+//
+// The client server reads a write outcome by asserting *nfc.WriteResult, so a
+// bare map reaches the client as a success carrying none of the fields the
+// protocol documents. It reports what the agent knows rather than what it
+// checked: the device answers success or failure for the whole operation and
+// nothing else, so the size and the attempt count come from what was sent. The
+// lock comes from the request because the device applies it as part of that one
+// operation -- a success covers both, which is the same reason the reader's
+// writeOnce reports a folded lock as applied.
+//
+// Whether the write could be confirmed is the tag's answer, not this route's. A
+// tag whose reads are a snapshot cannot confirm one, which is the same fact the
+// reader's pipeline consults, asked here in the same way.
+func deviceWriteResult(active remotenfc.ActiveTagInfo, bytesWritten int, locked bool) *nfc.WriteResult {
+	result := &nfc.WriteResult{
+		UID:          active.UID,
+		BytesWritten: bytesWritten,
+		Attempts:     1,
+		Locked:       locked,
+	}
+	if active.Tag != nil {
+		result.TagType = active.Tag.Type()
+		result.Verified = !active.Tag.Capabilities().ReadsAreSnapshot
+	}
+	return result
 }
 
 // handleLockRequests listens for make-read-only requests from the client server.

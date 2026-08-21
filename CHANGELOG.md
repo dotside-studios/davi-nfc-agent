@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A write to a phone reports its outcome.** The device route answered with a
+  bare `{uid, deviceID}` map while the client server reads a write outcome by
+  asserting `*nfc.WriteResult`. The assertion failed, the whole block was
+  skipped, and a client got `success: true` carrying none of the documented
+  fields -- no `uid`, `tagType`, `bytesWritten`, `verified`, `attempts` or
+  `locked` -- where the same write through the agent's own reader returned all
+  six. Both routes now answer in the one shape, with `verified` asked of the tag
+  rather than assumed from the route: a tag whose reads are a snapshot cannot
+  confirm a write, which is the same fact the reader's pipeline consults.
+
 - **A tag that declared nothing is unknown, not incapable.** `remotenfc.Tag`
   refused writes, locks and exchanges whenever the scan carried no per-tag
   capabilities, collapsing "the device said this tag cannot" together with "the

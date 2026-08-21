@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A tag declares what it cannot confirm, instead of the pipeline branching on
+  its kind.** A tag whose contents arrive from elsewhere answers a read with the
+  snapshot taken when it was scanned, so reading back after a write compares
+  against data the write could not have changed: confirmation with nothing
+  behind it. `TagCapabilities.ReadsAreSnapshot` says so, and the write skips the
+  step rather than asking what kind of tag it holds. `nfc.AtomicLockWriter` does
+  the same for locking, folding it into the write where a tag offers both in one
+  exchange, so a failure between the two cannot leave data written and the lock
+  not applied.
+
 - **A phone's device reports the tag it is holding.** `nfc.Device.GetTags` is
   the question "what tag do you have", and `remotenfc.Device` satisfied the
   interface without answering it: the method waited and returned nothing, on

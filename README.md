@@ -15,6 +15,7 @@ A lightweight NFC card reader agent with WebSocket broadcasting capabilities. Re
 - **Per-device Pairing**: each device gets its own revocable credential, issued against a PIN
 - **Auto-discovery**: mDNS/Bonjour advertising for zero-config device setup
 - **Cross-platform**: Linux, macOS, Windows
+- **Reader Feedback**: ACR122 readers flash their LED and beep at what they read and write, when the operator turns it on
 - **System Tray UI**: Device management and status
 - **Control Center**: A built-in web console for logs, tag inspection, NDEF
   writing, per-device revocation and persistent settings
@@ -58,6 +59,20 @@ it. See [Control Center](docs/control-center.md).
 It is a self-contained package (`webui/`, frontend included) that reaches the
 agent through one interface, so `go build -tags nowebui .` omits the routes, the
 privileged API and the embedded console without touching anything else.
+
+### Reader Feedback
+
+**Flash and Beep on Scan** in the tray menu has the reader announce its own
+work: one green flash with a short beep when a tag is read or written, two red
+flashes when a write or a lock fails. It is off by default, and the choice is
+saved to `settings.json`.
+
+The commands come from the ACS ACR122U instruction set, so ACR122 readers
+answer them and other readers report the feature as unsupported and are left
+alone. They are sent with `SCardControl`, falling back to a pseudo-APDU over
+the card connection where the PC/SC stack will not carry escape commands. See
+[Installation](docs/installation.md#reader-led-and-buzzer) for the two stacks
+that need configuring.
 
 ### Command-line Options
 

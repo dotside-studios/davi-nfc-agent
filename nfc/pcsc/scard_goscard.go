@@ -173,6 +173,14 @@ func (c *goscardCard) Transmit(cmd []byte) ([]byte, error) {
 	return resp, nil
 }
 
+func (c *goscardCard) Control(code uint32, in []byte) ([]byte, error) {
+	resp, ret, err := c.card.Control(goscard.SCardCtlCode(code), in)
+	if err != nil {
+		return nil, statusError(uint32(ret), err)
+	}
+	return resp, nil
+}
+
 func (c *goscardCard) Disconnect(d disposition) error {
 	ret, err := c.card.Disconnect(goscard.SCardDisposition(d))
 	return statusError(uint32(ret), err)

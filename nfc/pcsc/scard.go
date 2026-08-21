@@ -116,6 +116,13 @@ type scardCard interface {
 	// Transmit sends an APDU and returns the card's response.
 	Transmit(cmd []byte) ([]byte, error)
 
+	// Control sends a command to the reader's driver rather than to the card
+	// (SCardControl), and returns the driver's answer. code is a control code
+	// as the platform builds them; this package uses escapeControlCode, for
+	// the vendor commands that drive a reader's LED and buzzer. A stack that
+	// will not carry those reports errNotTransacted or errNotSupported.
+	Control(code uint32, in []byte) ([]byte, error)
+
 	// Disconnect closes the connection, leaving the card as d says.
 	Disconnect(d disposition) error
 }
@@ -145,8 +152,10 @@ var statusNames = map[uint32]string{
 	0x80100002: "SCARD_E_CANCELLED",
 	0x8010000A: "SCARD_E_TIMEOUT",
 	0x8010000C: "SCARD_E_NO_SMARTCARD",
+	0x80100016: "SCARD_E_NOT_TRANSACTED",
 	0x8010001E: "SCARD_E_SERVICE_STOPPED",
 	0x8010002E: "SCARD_E_NO_READERS_AVAILABLE",
+	0x80100065: "SCARD_E_NOT_SUPPORTED",
 	0x80100067: "SCARD_W_UNPOWERED_CARD",
 	0x80100068: "SCARD_W_RESET_CARD",
 	0x80100069: "SCARD_W_REMOVED_CARD",
@@ -164,6 +173,8 @@ var (
 	errCancelled     = &scardError{Code: 0x80100002} // SCARD_E_CANCELLED
 	errTimeout       = &scardError{Code: 0x8010000A} // SCARD_E_TIMEOUT
 	errNoSmartcard   = &scardError{Code: 0x8010000C} // SCARD_E_NO_SMARTCARD
+	errNotTransacted = &scardError{Code: 0x80100016} // SCARD_E_NOT_TRANSACTED
+	errNotSupported  = &scardError{Code: 0x80100065} // SCARD_E_NOT_SUPPORTED
 	errUnpoweredCard = &scardError{Code: 0x80100067} // SCARD_W_UNPOWERED_CARD
 	errResetCard     = &scardError{Code: 0x80100068} // SCARD_W_RESET_CARD
 	errRemovedCard   = &scardError{Code: 0x80100069} // SCARD_W_REMOVED_CARD

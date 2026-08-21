@@ -43,6 +43,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		DevicePath:          "ACS ACR122U",
 		Port:                9480,
 		RequirePairedDevice: true,
+		ReaderFeedback:      true,
 	}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -68,6 +69,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if !got.RequirePairedDevice {
 		t.Error("requirePairedDevice = false, want true")
 	}
+	if !got.ReaderFeedback {
+		t.Error("readerFeedback = false, want true")
+	}
 }
 
 // A file written by an older build lacks the newer keys. They must land on
@@ -90,6 +94,9 @@ func TestPartialFileKeepsDefaults(t *testing.T) {
 	}
 	if got.Mode != ModeReadWrite {
 		t.Errorf("mode = %q, want the default %q", got.Mode, ModeReadWrite)
+	}
+	if got.ReaderFeedback {
+		t.Error("readerFeedback = true, want the default false")
 	}
 }
 

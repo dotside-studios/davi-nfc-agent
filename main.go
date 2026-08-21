@@ -242,6 +242,7 @@ func main() {
 	// Create and run systray app
 	app := NewSystrayApp(agent, devicePathFlag, bootstrapPortFlag, bootstrapServer)
 	app.AttachConsole(console)
+	app.AttachSettings(settingsStore)
 	app.Run()
 }
 

@@ -36,6 +36,11 @@ type Settings struct {
 
 	// RequirePairedDevice admits only devices holding a paired credential.
 	RequirePairedDevice bool `json:"requirePairedDevice"`
+
+	// ReaderFeedback has the reader flash its LED and sound its buzzer when a
+	// tag is read or written. Off by default, since a reader sitting beside
+	// someone all day stays quiet unless its operator asks otherwise.
+	ReaderFeedback bool `json:"readerFeedback"`
 }
 
 // Defaults are what the agent does when no file has ever been saved.

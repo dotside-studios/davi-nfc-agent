@@ -122,6 +122,27 @@ type Tag interface {
 - `tag_ultralight.go` - MIFARE Ultralight implementation
 - `tag_iso14443.go` - ISO14443-4 Type 4 implementation
 
+### Reader feedback
+
+Devices whose reader has an indicator LED or a buzzer implement
+`FeedbackDevice`, an optional interface alongside `Device`:
+
+```go
+if fb, ok := device.(nfc.FeedbackDevice); ok {
+    _ = fb.Signal(nfc.SignalSuccess)
+}
+```
+
+`NFCReader.SetFeedback(true)` has the reader signal its own reads, writes and
+locks. The signal plays in the background and a reader that cannot show it
+reports a not-supported error, so nothing about the operation changes.
+
+`nfc/pcsc` implements this for ACR122 readers with the ACS LED and buzzer
+command, sent over `SCardControl` or, where the PC/SC stack will not carry
+escape commands, as a pseudo-APDU over the card connection.
+
+**Files**: `feedback.go`, `pcsc/feedback.go`, `pcsc/acr122.go`
+
 ### Card
 
 High-level abstraction implementing `io.Reader`, `io.Writer`, and `io.Closer`.
@@ -462,6 +483,9 @@ The package is **not thread-safe**. If you need concurrent access:
 | `keys.go` | Key management utilities |
 | `cache.go` | Tag caching for debouncing |
 | `capabilities.go` | Tag capability detection |
+| `feedback.go` | Reader LED and buzzer signals |
+| `pcsc/feedback.go` | LED and buzzer over SCardControl |
+| `pcsc/acr122.go` | ACR122 LED and buzzer commands |
 | `errors.go` | Error types and handling |
 | `*_test.go` | Unit tests |
 | `*_mock.go` | Test mocks |

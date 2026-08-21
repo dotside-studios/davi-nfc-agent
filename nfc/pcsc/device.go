@@ -30,6 +30,10 @@ type device struct {
 
 	// Tracks if unsupported tag error was already reported for current card
 	unsupportedReported bool
+
+	// feedback is the channel this reader's LED and buzzer commands travel
+	// on, settled on the first signal. See feedback.go.
+	feedback feedbackTransport
 }
 
 // newDevice creates a device for a card already connected on a reader.

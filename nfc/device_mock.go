@@ -66,6 +66,12 @@ type MockDevice struct {
 	// MockSupportsEvents makes the device report as event-based (like smartphone)
 	MockSupportsEvents bool
 
+	// SignalError, if set, will be returned by Signal()
+	SignalError error
+
+	// Signals records the signals passed to Signal(), in order
+	Signals []Signal
+
 	mu sync.Mutex
 }
 
@@ -157,6 +163,31 @@ func (m *MockDevice) SupportsEvents() bool {
 
 	m.CallLog = append(m.CallLog, "SupportsEvents")
 	return m.MockSupportsEvents
+}
+
+// Signal records a reader feedback signal (implements FeedbackDevice).
+func (m *MockDevice) Signal(s Signal) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.CallLog = append(m.CallLog, fmt.Sprintf("Signal(%s)", s))
+
+	if m.SignalError != nil {
+		return m.SignalError
+	}
+
+	m.Signals = append(m.Signals, s)
+	return nil
+}
+
+// GetSignals returns a copy of the recorded signals.
+func (m *MockDevice) GetSignals() []Signal {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]Signal, len(m.Signals))
+	copy(out, m.Signals)
+	return out
 }
 
 // Transceive simulates data transmission with the device.

@@ -53,8 +53,13 @@ func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *server.Serv
 }
 
 func sampleLock(requestID string) server.LockRequestMessage {
+	return sampleLockFor(requestID, scannedUID)
+}
+
+func sampleLockFor(requestID, uid string) server.LockRequestMessage {
 	return server.LockRequestMessage{
 		RequestID:  requestID,
+		TagUID:     uid,
 		ResponseCh: make(chan server.LockResponseMessage, 1),
 	}
 }
@@ -66,14 +71,14 @@ func TestLockRoutesToDeviceHoldingTag(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleLock("l1")
 	go func() { bridge.LockRequest <- msg }()
 
 	req := readDeviceWriteRequest(t, conn)
 
-	if got, _ := req.Payload["tagUID"].(string); got != "04:A1:B2:C3" {
+	if got, _ := req.Payload["tagUID"].(string); got != scannedUID {
 		t.Errorf("tagUID = %q, want the scanned UID", got)
 	}
 	if got, _ := req.Payload["deviceID"].(string); got != deviceID {
@@ -107,7 +112,7 @@ func TestLockRoutesToDeviceHoldingTag(t *testing.T) {
 		if !ok {
 			t.Fatalf("payload = %#v, want *nfc.LockResult", resp.Payload)
 		}
-		if lr.UID != "04:A1:B2:C3" || !lr.Locked {
+		if lr.UID != scannedUID || !lr.Locked {
 			t.Errorf("result = %+v, want the scanned UID reported as locked", lr)
 		}
 	case <-time.After(3 * time.Second):
@@ -119,7 +124,7 @@ func TestLockReportsDeviceFailure(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleLock("l2")
 	go func() { bridge.LockRequest <- msg }()
@@ -160,7 +165,7 @@ func TestLockFailsFastWhenDeviceDisconnects(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleLock("l3")
 	go func() { bridge.LockRequest <- msg }()
@@ -208,7 +213,7 @@ func TestLockViaDeviceRefusedInReadOnlyMode(t *testing.T) {
 	url, bridge := newModedTestServer(t, nfc.ModeReadOnly)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleLock("l5")
 	go func() { bridge.LockRequest <- msg }()
@@ -232,7 +237,7 @@ func TestWriteViaDeviceRefusedInReadOnlyMode(t *testing.T) {
 	url, bridge := newModedTestServer(t, nfc.ModeReadOnly)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleWrite("w5")
 	go func() { bridge.WriteRequest <- msg }()
@@ -258,7 +263,7 @@ func TestLockViaDeviceAllowedInReadWriteMode(t *testing.T) {
 	url, bridge := newModedTestServer(t, nfc.ModeReadWrite)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleLock("l6")
 	go func() { bridge.LockRequest <- msg }()
@@ -300,7 +305,7 @@ func scanLockableTag(t *testing.T, conn *websocket.Conn, bridge *server.ServerBr
 		Type: protocol.WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
-			"uid":        "04:A1:B2:C3",
+			"uid":        scannedUID,
 			"technology": "ISO14443A",
 			"type":       "NTAG215",
 			"capabilities": map[string]any{

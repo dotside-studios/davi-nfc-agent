@@ -55,6 +55,7 @@ func TestTransceiveWithoutReaderOrDevice(t *testing.T) {
 
 	resp := respond(t, s, server.TransceiveRequestMessage{
 		RequestID: "req-2",
+		TagUID:    "04:A1:B2:C3",
 		Data:      []byte{0x30, 0x00},
 	})
 

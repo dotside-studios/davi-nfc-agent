@@ -40,9 +40,19 @@ type WriteRequestMessage struct {
 	ClientID string
 
 	// TargetDevice names the remote device holding the tag to act on. Empty
-	// leaves the routing to the agent, which prefers its own reader and then
-	// the most recent scan.
+	// means the client did not name one, and the tag is found by TagUID.
 	TargetDevice string
+
+	// TagUID names the tag the request applies to. The operation is refused
+	// unless the tag it resolves to carries this UID. Empty is refused unless
+	// AllowUntargeted is set.
+	TagUID string
+
+	// AllowUntargeted serves a request with neither TagUID nor TargetDevice by
+	// guessing: the agent's own reader while it reports a card, otherwise the
+	// most recent remote scan. Asked for per request so one client that cannot
+	// name its tag does not weaken the others.
+	AllowUntargeted bool
 
 	// Request contains the actual write data
 	Request WriteRequest
@@ -83,9 +93,25 @@ type LockRequestMessage struct {
 	ClientID string
 
 	// TargetDevice names the remote device holding the tag to act on. Empty
-	// leaves the routing to the agent, which prefers its own reader and then
-	// the most recent scan.
+	// means the client did not name one, and the tag is found by TagUID.
 	TargetDevice string
+
+	// TagUID names the tag the client means, as reported by the tagData
+	// broadcast it is acting on. The agent refuses the operation unless the
+	// tag it resolves to carries this UID, so a card lifted between the scan
+	// and the request cannot silently redirect the operation to another tag.
+	// Empty is refused unless AllowUntargeted is set.
+	TagUID string
+
+	// AllowUntargeted lets a request with no TagUID and no TargetDevice be
+	// served by guessing which tag it meant -- the agent's own reader while it
+	// reports a card, otherwise the most recent remote scan.
+	//
+	// The client asks for this per request rather than the operator enabling it
+	// for everyone, so a caller that cannot name its tag carries the risk
+	// itself instead of lowering the guarantee for every other client on the
+	// same agent.
+	AllowUntargeted bool
 
 	// IdempotencyKey identifies the logical lock, so a device that already
 	// applied it reports the previous outcome instead of locking twice.
@@ -123,9 +149,25 @@ type TransceiveRequestMessage struct {
 	ClientID string
 
 	// TargetDevice names the remote device holding the tag to act on. Empty
-	// leaves the routing to the agent, which prefers its own reader and then
-	// the most recent scan.
+	// means the client did not name one, and the tag is found by TagUID.
 	TargetDevice string
+
+	// TagUID names the tag the client means, as reported by the tagData
+	// broadcast it is acting on. The agent refuses the operation unless the
+	// tag it resolves to carries this UID, so a card lifted between the scan
+	// and the request cannot silently redirect the operation to another tag.
+	// Empty is refused unless AllowUntargeted is set.
+	TagUID string
+
+	// AllowUntargeted lets a request with no TagUID and no TargetDevice be
+	// served by guessing which tag it meant -- the agent's own reader while it
+	// reports a card, otherwise the most recent remote scan.
+	//
+	// The client asks for this per request rather than the operator enabling it
+	// for everyone, so a caller that cannot name its tag carries the risk
+	// itself instead of lowering the guarantee for every other client on the
+	// same agent.
+	AllowUntargeted bool
 
 	// Data is the command to send to the tag.
 	Data []byte
@@ -168,9 +210,25 @@ type CapabilitiesRequestMessage struct {
 	ClientID string
 
 	// TargetDevice names the remote device holding the tag to act on. Empty
-	// leaves the routing to the agent, which prefers its own reader and then
-	// the most recent scan.
+	// means the client did not name one, and the tag is found by TagUID.
 	TargetDevice string
+
+	// TagUID names the tag the client means, as reported by the tagData
+	// broadcast it is acting on. The agent refuses the operation unless the
+	// tag it resolves to carries this UID, so a card lifted between the scan
+	// and the request cannot silently redirect the operation to another tag.
+	// Empty is refused unless AllowUntargeted is set.
+	TagUID string
+
+	// AllowUntargeted lets a request with no TagUID and no TargetDevice be
+	// served by guessing which tag it meant -- the agent's own reader while it
+	// reports a card, otherwise the most recent remote scan.
+	//
+	// The client asks for this per request rather than the operator enabling it
+	// for everyone, so a caller that cannot name its tag carries the risk
+	// itself instead of lowering the guarantee for every other client on the
+	// same agent.
+	AllowUntargeted bool
 
 	// ResponseCh receives the capabilities result (buffered, size 1)
 	ResponseCh chan CapabilitiesResponseMessage

@@ -59,11 +59,18 @@ type WriteRequest struct {
 	// write. Only tags that support locking honor this. WARNING: irreversible.
 	Lock bool `json:"lock,omitempty"`
 
-	// DeviceID names the remote device holding the tag to write. Empty leaves
-	// the routing to the agent, which prefers its own reader and then the most
-	// recent scan. Clients learn the value from the deviceID on a tagData
-	// broadcast.
+	// DeviceID names the remote device holding the tag to write. Empty means
+	// the tag is found by UID instead. Clients learn the value from the
+	// deviceID on a tagData broadcast.
 	DeviceID string `json:"deviceID,omitempty"`
+
+	// UID names the tag to write, from the tagData this write responds to. The
+	// write is refused unless the tag about to be encoded carries it.
+	UID string `json:"uid,omitempty"`
+
+	// AllowUntargeted guesses which tag the write means when neither UID nor
+	// DeviceID is given, instead of refusing it.
+	AllowUntargeted bool `json:"allowUntargeted,omitempty"`
 
 	// IdempotencyKey identifies the logical write. A client that retries after
 	// a lost response should reuse it, so the write is not applied twice.

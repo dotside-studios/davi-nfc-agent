@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A write can no longer land on a tag the client did not mean.** Requests were
+  routed by preference rather than by name: the agent's own reader while it
+  reported a card, otherwise whichever device had scanned most recently. That
+  preference was evaluated when the request arrived, not when the tag was
+  scanned, so lifting a card in between moved the request to a phone's tag. A
+  payload encoded for one tag was written to another, irreversibly when the
+  request also locked. Nothing caught it, because the request had no field
+  naming the tag it meant: `uid` was reported in the *response*, so a client
+  learned which tag it had hit only afterwards.
+
+  `writeRequest`, `lockRequest`, `transceiveRequest` and `capabilitiesRequest`
+  now carry the `uid` of the tag they apply to, and the agent finds whichever
+  source is holding it instead of choosing one. A tag that is not present fails
+  with `NO_CARD`; a tag present but not the one named fails with the new
+  `TAG_MISMATCH`, which is not retryable. Naming a `deviceID` as well holds that
+  device to the UID too, so an id remembered from an earlier scan cannot act on
+  whatever that device is holding now.
+
+  A request that names no tag is refused with `TAG_NOT_NAMED` unless it sets
+  `allowUntargeted`, which is per-request rather than an agent-wide flag so one
+  legacy client cannot weaken the guarantee for the others.
+
 - **A tag declares what it cannot confirm, instead of the pipeline branching on
   its kind.** A tag whose contents arrive from elsewhere answers a read with the
   snapshot taken when it was scanned, so reading back after a write compares

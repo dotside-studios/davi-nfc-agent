@@ -12,11 +12,16 @@ import (
 
 // capabilities runs one capabilities query through the bridge.
 func capabilities(t *testing.T, bridge *server.ServerBridge, target string) server.CapabilitiesResponseMessage {
+	return capabilitiesFor(t, bridge, target, scannedUID)
+}
+
+func capabilitiesFor(t *testing.T, bridge *server.ServerBridge, target, uid string) server.CapabilitiesResponseMessage {
 	t.Helper()
 
 	msg := server.CapabilitiesRequestMessage{
 		RequestID:    "cap-1",
 		TargetDevice: target,
+		TagUID:       uid,
 		ResponseCh:   make(chan server.CapabilitiesResponseMessage, 1),
 	}
 	go func() { bridge.CapabilitiesRequest <- msg }()
@@ -79,8 +84,8 @@ func TestWriteReachesTheNamedDevice(t *testing.T) {
 	scanTag(t, first, bridge, firstID, "04:AA:AA:AA")
 	scanTag(t, second, bridge, secondID, "04:BB:BB:BB")
 
-	// The second device scanned last, so an untargeted write would go there.
-	msg := sampleWrite("t1")
+	// The second device scanned last; naming the first must still reach it.
+	msg := sampleWriteFor("t1", "04:AA:AA:AA")
 	msg.TargetDevice = firstID
 	go func() { bridge.WriteRequest <- msg }()
 
@@ -97,7 +102,11 @@ func TestWriteReachesTheNamedDevice(t *testing.T) {
 
 // Without a target the most recent scan still wins, which is what a client
 // watching a single phone expects.
-func TestUntargetedWriteGoesToTheLatestScan(t *testing.T) {
+// Two devices hold tags at once. The UID picks between them, so which scan was
+// most recent does not matter -- that used to be the tie-break, and it meant a
+// client acting on the tag it could see depended on nothing else having been
+// scanned since.
+func TestWriteFollowsTheUIDNotTheLatestScan(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	first, firstID := registerCapableV1(t, url)
@@ -106,15 +115,95 @@ func TestUntargetedWriteGoesToTheLatestScan(t *testing.T) {
 	scanTag(t, first, bridge, firstID, "04:AA:AA:AA")
 	scanTag(t, second, bridge, secondID, "04:BB:BB:BB")
 
-	msg := sampleWrite("t2")
+	// Name the older scan: the tie-break would have chosen the other one.
+	msg := sampleWriteFor("t2", "04:AA:AA:AA")
 	go func() { bridge.WriteRequest <- msg }()
 
-	req := readDeviceWriteRequest(t, second)
-	if got, _ := req.Payload["tagUID"].(string); got != "04:BB:BB:BB" {
-		t.Errorf("tagUID = %q, want the most recent scan", got)
+	req := readDeviceWriteRequest(t, first)
+	if got, _ := req.Payload["tagUID"].(string); got != "04:AA:AA:AA" {
+		t.Errorf("tagUID = %q, want the tag the request named", got)
 	}
 
-	assertNoWriteRequest(t, first)
+	assertNoWriteRequest(t, second)
+}
+
+// The refusal that matters: a request naming a tag nobody holds must fail,
+// never land on whichever tag happens to be available. This is the shape that
+// used to send a payload encoded for a lifted card onto a phone's tag.
+func TestWriteForAnAbsentTagIsRefusedNotRedirected(t *testing.T) {
+	url, bridge := newWriteTestServer(t)
+
+	conn, deviceID := registerCapableV1(t, url)
+	scanTag(t, conn, bridge, deviceID, "04:BB:BB:BB")
+
+	msg := sampleWriteFor("t2b", "04:AA:AA:AA") // no one is holding this
+	go func() { bridge.WriteRequest <- msg }()
+
+	select {
+	case resp := <-msg.ResponseCh:
+		if resp.Success {
+			t.Fatal("write succeeded for a tag no source is holding")
+		}
+		if resp.ErrorCode != protocol.ErrCodeNoCard {
+			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeNoCard)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no response to a write for an absent tag")
+	}
+
+	assertNoWriteRequest(t, conn)
+}
+
+// Naming a device holds it to the UID too, so a stale deviceID cannot write to
+// whatever that device is holding now.
+func TestWriteRefusesWhenTheNamedDeviceHoldsAnotherTag(t *testing.T) {
+	url, bridge := newWriteTestServer(t)
+
+	conn, deviceID := registerCapableV1(t, url)
+	scanTag(t, conn, bridge, deviceID, "04:BB:BB:BB")
+
+	msg := sampleWriteFor("t2c", "04:AA:AA:AA")
+	msg.TargetDevice = deviceID
+	go func() { bridge.WriteRequest <- msg }()
+
+	select {
+	case resp := <-msg.ResponseCh:
+		if resp.Success {
+			t.Fatal("write succeeded against a tag the device is not holding")
+		}
+		if resp.ErrorCode != protocol.ErrCodeTagMismatch {
+			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeTagMismatch)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no response to a mismatched write")
+	}
+
+	assertNoWriteRequest(t, conn)
+}
+
+// A request naming nothing is refused by default rather than guessed at.
+func TestUntargetedWriteIsRefusedByDefault(t *testing.T) {
+	url, bridge := newWriteTestServer(t)
+
+	conn, deviceID := registerCapableV1(t, url)
+	scanTag(t, conn, bridge, deviceID, scannedUID)
+
+	msg := sampleWriteFor("t2d", "")
+	go func() { bridge.WriteRequest <- msg }()
+
+	select {
+	case resp := <-msg.ResponseCh:
+		if resp.Success {
+			t.Fatal("an untargeted write succeeded")
+		}
+		if resp.ErrorCode != protocol.ErrCodeTagNotNamed {
+			t.Errorf("errorCode = %q, want %q", resp.ErrorCode, protocol.ErrCodeTagNotNamed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no response to an untargeted write")
+	}
+
+	assertNoWriteRequest(t, conn)
 }
 
 // One device withdrawing its tag must not take the other's routing with it.
@@ -143,9 +232,8 @@ func TestTagRemovalLeavesTheOtherDeviceRoutable(t *testing.T) {
 		t.Fatal("tag removal never reached the bridge")
 	}
 
-	// The remaining device is now the only one holding a tag, so an untargeted
-	// write must find it.
-	msg := sampleWrite("t3")
+	// The remaining device still holds its tag, and naming it finds it.
+	msg := sampleWriteFor("t3", "04:AA:AA:AA")
 	go func() { bridge.WriteRequest <- msg }()
 
 	req := readDeviceWriteRequest(t, first)
@@ -159,7 +247,7 @@ func TestWriteCarriesTheClientsIdempotencyKey(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleWrite("t4")
 	msg.IdempotencyKey = "client-key"
@@ -175,7 +263,7 @@ func TestLockCarriesAnIdempotencyKey(t *testing.T) {
 	url, bridge := newWriteTestServer(t)
 
 	conn, deviceID := registerCapableV1(t, url)
-	scanTag(t, conn, bridge, deviceID, "04:A1:B2:C3")
+	scanTag(t, conn, bridge, deviceID, scannedUID)
 
 	msg := sampleLock("t5")
 	msg.IdempotencyKey = "lock-key"

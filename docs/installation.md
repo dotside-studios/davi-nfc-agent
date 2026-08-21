@@ -58,6 +58,24 @@ Any PC/SC-compatible NFC reader works, including:
   pcsc_scan
   ```
 
+### Reader LED and Buzzer
+
+Reader feedback (**Flash and Beep on Scan**) drives the reader over
+`SCardControl`. Two stacks refuse to carry those commands until told to:
+
+- **Linux (pcsc-lite):** set bit 0 of `ifdDriverOptions` in the CCID driver's
+  `libccid_Info.plist` (usually `/etc/libccid_Info.plist` or under
+  `/usr/lib/pcsc/drivers/ifd-ccid.bundle/Contents/Info.plist`) and restart
+  `pcscd`. Without it pcsc-lite reports `SCARD_E_NOT_TRANSACTED`.
+- **Windows:** the ACS driver answers out of the box. The generic CCID class
+  driver needs `EscapeCommandEnable` set for the reader under
+  `HKLM\SYSTEM\CurrentControlSet\Enum\...\Device Parameters\WUDFUsbccidDriver`.
+
+Neither is required while a tag is on the reader: the agent falls back to
+sending the same command over the card connection, and logs once when it does.
+A reader that answers on neither channel is left alone for the rest of the
+session.
+
 ### Permission Denied (Linux)
 
 Add your user to the `pcscd` group or add udev rules:

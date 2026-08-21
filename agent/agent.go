@@ -96,6 +96,11 @@ type Config struct {
 	// through SetRequirePairedDevice, which also tells the running server.
 	RequirePairedDevice bool
 
+	// ReaderFeedback has the reader flash its LED and sound its buzzer at what
+	// it reads and writes. Changeable at runtime through SetReaderFeedback,
+	// which also reaches the reader already running.
+	ReaderFeedback bool
+
 	// Devices routes operations to paired devices, and DeviceScans carries what
 	// they scan. Both come from a driver the caller built, because the caller
 	// is what knows one is wanted: an agent with neither serves its own reader
@@ -183,6 +188,7 @@ type Agent struct {
 	tlsManager          *tls.Manager
 	requirePairedDevice bool
 	requirePairedLocked bool
+	readerFeedback      bool
 
 	// Mutable state. lifecycle carries the state machine, the hooks and the
 	// registered components; every transition below runs under its lock.
@@ -236,6 +242,7 @@ func New(cfg Config) *Agent {
 		tlsManager:          cfg.TLSManager,
 		requirePairedDevice: cfg.RequirePairedDevice || cfg.RequirePairedDeviceLocked,
 		requirePairedLocked: cfg.RequirePairedDeviceLocked,
+		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
 	}
@@ -314,6 +321,10 @@ func (a *Agent) RequirePairedDevice() bool { return a.requirePairedDevice }
 // line and cannot be lowered while this agent runs.
 func (a *Agent) RequirePairedDeviceLocked() bool { return a.requirePairedLocked }
 
+// ReaderFeedback reports whether the reader answers for its own work with its
+// LED and buzzer.
+func (a *Agent) ReaderFeedback() bool { return a.readerFeedback }
+
 // ServerRestarts returns a channel that signals when servers are restarted
 // due to network changes or certificate regeneration.
 func (a *Agent) ServerRestarts() <-chan struct{} {
@@ -358,6 +369,7 @@ func (a *Agent) startLocked(devicePath string) error {
 
 	a.Reader = nfcReader
 	a.reader.Store(nfcReader)
+	nfcReader.SetFeedback(a.readerFeedback)
 
 	// Start network watcher if TLS manager is configured
 	if a.tlsManager != nil {
@@ -614,6 +626,15 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	a.requirePairedDevice = on
 	if a.DeviceAuth != nil {
 		a.DeviceAuth.SetRequirePaired(on)
+	}
+}
+
+// SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
+// running reader as well as on the next one the agent starts.
+func (a *Agent) SetReaderFeedback(on bool) {
+	a.readerFeedback = on
+	if reader := a.reader.Load(); reader != nil {
+		reader.SetFeedback(on)
 	}
 }
 

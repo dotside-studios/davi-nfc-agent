@@ -73,6 +73,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into today: attach a console after `Start` and the agent reports having one
   while the listener has never heard of it
 
+- **The reader can say what it just did.** Someone holding a card at the reader
+  had no way to tell a completed scan from one that never happened: the agent
+  said so on a screen they were not looking at. **Flash and Beep on Scan** in
+  the tray menu now has the reader answer for its own work, with one green
+  flash and a short beep on a tag read, written or locked, and two red flashes
+  when a write or a lock fails. It is off by default and the choice is saved to
+  `settings.json`
+
+- **`SCardControl`, and LED and buzzer commands for ACR122 readers.** The
+  adapter over the platform's PC/SC library only carried commands to the card,
+  so a reader's own peripherals were unreachable. `scardCard` gained `Control`
+  in both backends, with the escape control code built per platform, and
+  `nfc/pcsc` implements the ACS bi-color LED and buzzer command on top of it.
+  Where a stack will not carry escape commands, which is the default on
+  pcsc-lite and on the Windows CCID class driver, the same command travels as a
+  pseudo-APDU over the card connection instead. The channel that answers is
+  remembered per connection, and a reader that answers on neither is left alone
+
 ### Changed
 
 - **What a tag cannot support is declared, not branched around.** A write to a
@@ -140,6 +158,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   let an operation return its refusal rather than report it beside a value.
 
 ### Fixed
+
+- **A tag that declared nothing is unknown, not incapable.** `remotenfc.Tag`
+  refused writes, locks and exchanges whenever the scan carried no per-tag
+  capabilities, collapsing "the device said this tag cannot" together with "the
+  device said nothing about this tag". Only a v1 device can describe a tag it
+  scanned; a v0 device sends what it can do and no more, and the wire protocol
+  keeps accepting that forever. So every v0 device held tags that could do
+  nothing -- the hard-coded `false` the capability work exists to remove,
+  surviving in a narrower form.
+
+  The three states are now distinct. A tag that declared it cannot is refused, a
+  tag declared read-only is refused however capable its device, and a tag that
+  declared nothing defers to the device holding it, which is the inference the
+  protocol documents. The device-level check is unchanged, so a capability that
+  outlives its session still buys nothing.
 
 - **A restarted agent serves again.** `Agent.Stop` dropped the server it was
   given, and `unifiedserver.Server` refused to start once stopped, so every

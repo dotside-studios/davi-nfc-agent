@@ -23,6 +23,8 @@ in real time, and provides the NFC functionality used by the
   against a PIN
 - **Zero-config discovery**: Advertised over mDNS/Bonjour, so a device finds
   the agent without being told where it is
+- **Reader feedback**: ACR122 readers flash their LED and beep at what they
+  read and write, once the operator turns it on
 - **System tray**: Reader selection, status, and device management
 - **Control Center**: A built-in web console for the log, tag inspection, NDEF
   writing, device revocation and settings that survive a restart
@@ -75,6 +77,20 @@ the same plain-text banner as `/`:
 ```bash
 go build -tags nowebui ./cmd/davi-nfc-agent
 ```
+
+### Reader Feedback
+
+**Flash and Beep on Scan** in the tray menu has the reader announce its own
+work: one green flash with a short beep when a tag is read or written, two red
+flashes when a write or a lock fails. It is off by default, and the choice is
+saved to `settings.json`.
+
+The commands come from the ACS ACR122U instruction set, so ACR122 readers
+answer them and other readers report the feature as unsupported and are left
+alone. They are sent with `SCardControl`, falling back to a pseudo-APDU over
+the card connection where the PC/SC stack will not carry escape commands. See
+[Installation](docs/installation.md#reader-led-and-buzzer) for the two stacks
+that need configuring.
 
 ### Command-line Options
 

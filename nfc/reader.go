@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -62,6 +63,9 @@ type NFCReader struct {
 	cardCheckTicker  Ticker         // Ticker for periodic card presence checks (based on cache)
 	workerWg         sync.WaitGroup // Tracks worker goroutine completion
 	classicKeys      [][]byte       // Extra MIFARE Classic auth keys (guarded by statusMux)
+	feedbackOn       atomic.Bool    // Whether the reader flashes and beeps at what it does
+	signalling       atomic.Bool    // Held while a signal plays, so only one does
+	lastSignalErr    string         // Last signal failure logged (guarded by statusMux)
 }
 
 // classicKeyConfigurable is implemented by tags that accept additional
@@ -150,6 +154,69 @@ func (r *NFCReader) GetMode() ReaderMode {
 	r.statusMux.RLock()
 	defer r.statusMux.RUnlock()
 	return r.mode
+}
+
+// SetFeedback turns reader feedback on or off. With it on, a reader that has
+// an indicator LED or a buzzer flashes and beeps when a tag is read or
+// written. Readers with neither are unaffected.
+func (r *NFCReader) SetFeedback(on bool) {
+	if r.feedbackOn.Swap(on) == on {
+		return
+	}
+	if on {
+		log.Println("Reader feedback enabled: the reader will flash and beep at what it reads and writes")
+	} else {
+		log.Println("Reader feedback disabled")
+	}
+}
+
+// FeedbackEnabled reports whether the reader signals what it does.
+func (r *NFCReader) FeedbackEnabled() bool {
+	return r.feedbackOn.Load()
+}
+
+// signal asks the reader to show what just happened, if it can.
+//
+// It returns immediately, because the reader answers only once it has finished
+// flashing and the operation being signalled is already done. One signal plays
+// at a time; a card presented during one is read as usual, just not announced.
+func (r *NFCReader) signal(s Signal) {
+	if !r.feedbackOn.Load() {
+		return
+	}
+
+	feedback, ok := r.deviceManager.Device().(FeedbackDevice)
+	if !ok {
+		return
+	}
+
+	if !r.signalling.CompareAndSwap(false, true) {
+		return
+	}
+
+	go func() {
+		defer r.signalling.Store(false)
+		r.reportSignalError(feedback.Signal(s))
+	}()
+}
+
+// reportSignalError logs a failed signal once for as long as the reason holds.
+// The reasons a signal fails, such as a stack that will not carry reader
+// commands, persist across every scan that follows.
+func (r *NFCReader) reportSignalError(err error) {
+	var message string
+	if err != nil && !IsNotSupportedError(err) {
+		message = err.Error()
+	}
+
+	r.statusMux.Lock()
+	repeat := r.lastSignalErr == message
+	r.lastSignalErr = message
+	r.statusMux.Unlock()
+
+	if message != "" && !repeat {
+		log.Printf("Reader feedback failed: %v", err)
+	}
 }
 
 // Close releases resources. Does not stop the worker, use Stop() for that.
@@ -389,6 +456,7 @@ func (r *NFCReader) handleTagPolling(tags []Tag) {
 		if r.cache.HasChanged(uid) {
 			log.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
 			r.dataChan <- NFCData{Card: card, Err: nil}
+			r.signal(SignalSuccess)
 		}
 
 		r.clock.Sleep(DefaultPollingInterval)
@@ -740,7 +808,6 @@ func (r *NFCReader) prepareCardForWrite(expectUID string) (*Card, error) {
 // handling, a pre-flight capacity check, bounded retries, and read-after-write
 // verification. Supports overwrite mode and partial update (append/replace at
 // index). It returns a WriteResult describing the outcome on success.
-// writeMessageToCard encodes msg onto the card and confirms it landed.
 //
 // A free function over the card rather than a method on the reader: every step
 // works through nfc.Tag, and the clock is the only thing it needed a reader
@@ -748,9 +815,9 @@ func (r *NFCReader) prepareCardForWrite(expectUID string) (*Card, error) {
 // the reader, instead of a second implementation beside this one.
 //
 // The steps a tag cannot support are skipped rather than branched around. A tag
-// reporting no capacity is not capacity-checked; a tag whose contents cannot be
-// re-read is written once and reported unverified, because reading it back
-// would compare against data that never changes.
+// reporting no capacity is not capacity-checked; a tag whose reads are a
+// snapshot is written once and reported unverified, because reading it back
+// would compare against data the write could not have changed.
 func writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions, clock Clock) (*WriteResult, error) {
 	log.Printf("writeMessageToCard (UID: %s, Type: %s): overwrite=%v, index=%d",
 		card.UID, card.Type, opts.Overwrite, opts.Index)
@@ -871,11 +938,10 @@ func resolveWriteMessage(card *Card, msg *NDEFMessage, opts WriteOptions) (*NDEF
 	return updated, nil
 }
 
-// writeOnce performs a single write of the encoded NDEF data to the tag. It
-// writes the bytes directly (rather than through the Card's buffer) so that a
-// failed attempt leaves no partial buffer behind for the next retry.
 // writeOnce puts the bytes on the tag, reporting whether the lock the caller
-// asked for was applied as part of the same operation.
+// asked for was applied as part of the same operation. It writes the bytes
+// directly (rather than through the Card's buffer) so that a failed attempt
+// leaves no partial buffer behind for the next retry.
 func writeOnce(card *Card, data []byte, opts WriteOptions) (locked bool, err error) {
 	// Clear any cached read state so the verification read hits the tag.
 	card.Reset()
@@ -972,6 +1038,7 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 		log.Printf("Attempting to write NDEF message to card UID: %s, Type: %s", card.UID, card.Type)
 		res, err := WriteMessage(card, msg, opts, r.clock)
 		if err != nil {
+			r.signal(SignalFailure)
 			return fmt.Errorf("failed to write to card UID %s (Type: %s): %w", card.UID, card.Type, err)
 		}
 
@@ -979,6 +1046,7 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 
 		log.Printf("Successfully wrote NDEF message to card UID: %s (verified=%v, attempts=%d, locked=%v)",
 			card.UID, res.Verified, res.Attempts, res.Locked)
+		r.signal(SignalSuccess)
 		return nil
 	})
 	if err != nil {
@@ -1017,9 +1085,11 @@ func (r *NFCReader) LockCardExpecting(expectUID string) (*LockResult, error) {
 
 		res, err := lockCard(card)
 		if err != nil {
+			r.signal(SignalFailure)
 			return fmt.Errorf("failed to lock card UID %s (Type: %s): %w", card.UID, card.Type, err)
 		}
 		result = res
+		r.signal(SignalSuccess)
 		return nil
 	})
 	if err != nil {

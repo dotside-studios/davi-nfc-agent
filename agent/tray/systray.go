@@ -84,6 +84,9 @@ type App struct {
 	mOriginAllowAny *systray.MenuItem
 	originSlots     []*originSlot
 
+	// Reader feedback toggle
+	mReaderFeedback *systray.MenuItem
+
 	// Card filter menu items
 	mCardFilterMenu *systray.MenuItem
 	mFilterAll      *systray.MenuItem
@@ -91,6 +94,10 @@ type App struct {
 
 	// Control center
 	mConsole *systray.MenuItem
+
+	// settings is the store the tray writes its toggles back to. Nil when the
+	// agent has no config directory to persist to.
+	settings *settings.Store
 }
 
 // New creates a new systray application. bootstrap may be nil
@@ -102,6 +109,7 @@ type App struct {
 func New(rt *agent.Runtime) *App {
 	return &App{
 		agent:           rt.Agent,
+		settings:        rt.Settings,
 		initialDevice:   rt.DevicePath,
 		bootstrapPort:   rt.Agent.BootstrapPort(),
 		bootstrap:       rt.Agent.Bootstrap(),
@@ -159,6 +167,14 @@ func (s *App) SyncSettingsToMenu(next settings.Settings) {
 			s.mRequirePaired.Check()
 		} else {
 			s.mRequirePaired.Uncheck()
+		}
+	}
+
+	if s.mReaderFeedback != nil {
+		if next.ReaderFeedback {
+			s.mReaderFeedback.Check()
+		} else {
+			s.mReaderFeedback.Uncheck()
 		}
 	}
 }
@@ -251,6 +267,9 @@ func (s *App) setupUI() {
 	s.mReadWriteMode = s.mModeMenu.AddSubMenuItemCheckbox("Read/Write Mode", "Allow both read and write", true)
 	s.mReadMode = s.mModeMenu.AddSubMenuItemCheckbox("Read Only Mode", "Only allow reading", false)
 	s.mWriteMode = s.mModeMenu.AddSubMenuItemCheckbox("Write Only Mode", "Only allow writing", false)
+
+	// Reader feedback toggle
+	s.setupFeedbackMenu()
 
 	systray.AddSeparator()
 
@@ -467,6 +486,8 @@ func (s *App) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
 			s.handleRevokeAllDevices()
 		case <-s.mRequirePaired.ClickedCh:
 			s.handleRequirePaired()
+		case <-s.mReaderFeedback.ClickedCh:
+			s.handleReaderFeedback()
 		case <-mQuit.ClickedCh:
 			systray.Quit()
 			return

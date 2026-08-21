@@ -23,4 +23,5 @@ func (agent *Agent) ApplySettings(s settings.Settings) {
 	}
 
 	agent.SetRequirePairedDevice(s.RequirePairedDevice)
+	agent.SetReaderFeedback(s.ReaderFeedback)
 }

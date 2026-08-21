@@ -109,6 +109,14 @@ func (c *ebfeCard) Transmit(cmd []byte) ([]byte, error) {
 	return resp, nil
 }
 
+func (c *ebfeCard) Control(code uint32, in []byte) ([]byte, error) {
+	resp, err := c.card.Control(code, in)
+	if err != nil {
+		return nil, convertError(err)
+	}
+	return resp, nil
+}
+
 func (c *ebfeCard) Disconnect(d disposition) error {
 	return convertError(c.card.Disconnect(scard.Disposition(d)))
 }

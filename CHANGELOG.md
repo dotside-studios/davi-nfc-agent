@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A phone's device reports the tag it is holding.** `nfc.Device.GetTags` is
+  the question "what tag do you have", and `remotenfc.Device` satisfied the
+  interface without answering it: the method waited and returned nothing, on
+  the grounds that scans arrive by push and a phone is never opened as the
+  agent's reader. So the driver grew a second place to keep held tags, a map on
+  the manager keyed by device ID, and every path that needed one had to know to
+  look there instead. That is the origin of the reader-and-device split in the
+  request routing.
+
+  The tag now lives on the device holding it, which is what `GetTags` returns.
+  The manager keeps only which device scanned most recently, for a request that
+  names no device. The wait stays for the empty case, since that is what paces a
+  caller polling a device with nothing in its field.
+
 - **The agent starts without auto-TLS again.** `-auto-tls=false` and an
   externally provisioned `-cert`/`-key` both panicked at startup, before the
   systray appeared. Neither configuration has a certificate authority, and the

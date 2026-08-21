@@ -85,6 +85,12 @@ type Agent struct {
 	// connections. Browser clients are unaffected.
 	RequirePairedDevice bool
 
+	// RequirePairedDeviceLocked stops anything lowering that requirement for
+	// the rest of the run. Set it when the requirement came from the command
+	// line or the environment: an operator who asked for it there should not
+	// have it withdrawn by a preference file or a toggle in the console.
+	RequirePairedDeviceLocked bool
+
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
 	KeyFile    string       // Path to TLS private key file
@@ -431,6 +437,13 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
+	if a.RequirePairedDeviceLocked && !on {
+		// Asked for on the command line. A stored preference or a console
+		// toggle may not withdraw it, which is the direction that matters:
+		// the operator who set the flag is the one who would be surprised.
+		a.Logger.Printf("Ignoring request to stop requiring paired devices: it was set on the command line")
+		return
+	}
 	a.RequirePairedDevice = on
 	if a.DeviceServer != nil {
 		a.DeviceServer.SetRequirePairedDevice(on)

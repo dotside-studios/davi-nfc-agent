@@ -3,12 +3,12 @@ package nfc
 // NDEFRecordPayload represents an NDEF record in JSON-friendly format.
 // This structure is used for serialization to WebSocket clients and API responses.
 type NDEFRecordPayload struct {
-	Type     string `json:"type"`              // Record type: "text", "uri", etc. (human-readable)
-	Content  string `json:"content,omitempty"` // Decoded content (text or URI)
-	Language string `json:"language,omitempty"`// Language code for text records
-	TNF      uint8  `json:"tnf"`               // Type Name Format (technical detail)
-	ID       string `json:"id,omitempty"`      // Record ID (optional)
-	Payload  []byte `json:"payload"`           // Raw payload data
+	Type     string `json:"type"`               // Record type: "text", "uri", etc. (human-readable)
+	Content  string `json:"content,omitempty"`  // Decoded content (text or URI)
+	Language string `json:"language,omitempty"` // Language code for text records
+	TNF      uint8  `json:"tnf"`                // Type Name Format (technical detail)
+	ID       string `json:"id,omitempty"`       // Record ID (optional)
+	Payload  []byte `json:"payload"`            // Raw payload data
 }
 
 // NDEFMessagePayload represents an NDEF message in JSON-friendly format.

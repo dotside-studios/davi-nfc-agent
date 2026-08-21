@@ -21,7 +21,7 @@ func TestClassicTag_IsSectorTrailer(t *testing.T) {
 		{4, false},
 		{5, false},
 		{6, false},
-		{7, true},  // Sector 1 trailer
+		{7, true}, // Sector 1 trailer
 		{8, false},
 		{11, true}, // Sector 2 trailer
 		{63, true}, // Last sector trailer in 1K
@@ -51,10 +51,10 @@ func TestClassicTag_IsSectorTrailer4K(t *testing.T) {
 		{127, true},
 		// Large sectors (32-39) - 16 blocks each
 		{128, false},
-		{143, true},  // First large sector trailer
+		{143, true}, // First large sector trailer
 		{144, false},
-		{159, true},  // Second large sector trailer
-		{255, true},  // Last sector trailer
+		{159, true}, // Second large sector trailer
+		{255, true}, // Last sector trailer
 	}
 
 	for _, tt := range tests {

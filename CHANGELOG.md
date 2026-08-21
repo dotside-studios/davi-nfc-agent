@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A tag that declared nothing is unknown, not incapable.** `remotenfc.Tag`
+  refused writes, locks and exchanges whenever the scan carried no per-tag
+  capabilities, collapsing "the device said this tag cannot" together with "the
+  device said nothing about this tag". Only a v1 device can describe a tag it
+  scanned; a v0 device sends what it can do and no more, and the wire protocol
+  keeps accepting that forever. So every v0 device held tags that could do
+  nothing -- the hard-coded `false` the capability work exists to remove,
+  surviving in a narrower form.
+
+  The three states are now distinct. A tag that declared it cannot is refused, a
+  tag declared read-only is refused however capable its device, and a tag that
+  declared nothing defers to the device holding it, which is the inference the
+  protocol documents. The device-level check is unchanged, so a capability that
+  outlives its session still buys nothing.
+
 - **A write can no longer land on a tag the client did not mean.** Requests were
   routed by preference rather than by name: the agent's own reader while it
   reported a card, otherwise whichever device had scanned most recently. That

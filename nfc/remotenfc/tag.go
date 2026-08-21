@@ -97,23 +97,49 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	return caps
 }
 
+// declared reports what the tag said about one of its capabilities, and whether
+// it said anything at all.
+//
+// A tag that declared nothing is unknown, not incapable. Only a v1 device can
+// describe a tag it scanned; a v0 device sends what it can do and no more, and
+// the wire protocol keeps accepting that. Reading absence as a refusal would
+// leave every v0 device holding tags that can do nothing, which is the
+// hard-coded false this capability work exists to remove.
+func (t *Tag) declared(of func(protocol.TagCapabilities) bool) (value, ok bool) {
+	if t.declaredCaps == nil {
+		return false, false
+	}
+	return of(*t.declaredCaps), true
+}
+
+// readOnly reports whether the tag declared itself already locked. Absence of a
+// declaration is not a claim that it is.
+func (t *Tag) readOnly() bool {
+	ro, _ := t.declared(func(c protocol.TagCapabilities) bool { return c.IsReadOnly })
+	return ro
+}
+
 // canWrite reports whether a write would actually reach the tag. Callers must
 // hold at least a read lock.
+//
+// Three states, not two: a tag that declared it cannot be written is refused, a
+// tag that declared nothing defers to the device holding it, and a tag declared
+// read-only is refused however capable that device is.
 func (t *Tag) canWrite() bool {
-	if t.route == nil || t.declaredCaps == nil || !t.declaredCaps.CanWrite {
+	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if t.declaredCaps.IsReadOnly {
+	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanWrite }); declared && !can {
 		return false
 	}
 	return t.route.deviceCanWrite(t.sourceDevice)
 }
 
 func (t *Tag) canLock() bool {
-	if t.route == nil || t.declaredCaps == nil || !t.declaredCaps.CanLock {
+	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if t.declaredCaps.IsReadOnly {
+	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanLock }); declared && !can {
 		return false
 	}
 	return t.route.deviceCanLock(t.sourceDevice)
@@ -122,7 +148,10 @@ func (t *Tag) canLock() bool {
 // canTransceive reports whether a raw exchange would reach the tag. Callers
 // must hold at least a read lock.
 func (t *Tag) canTransceive() bool {
-	if t.route == nil || t.declaredCaps == nil || !t.declaredCaps.CanTransceive {
+	if t.route == nil {
+		return false
+	}
+	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanTransceive }); declared && !can {
 		return false
 	}
 	return t.route.deviceCanTransceive(t.sourceDevice)

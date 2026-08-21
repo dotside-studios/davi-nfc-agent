@@ -9,30 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The reader can say what it just did.** A person holding a card at a reader
-  had no way of telling a completed scan from a card that was never read: the
-  agent said so on a screen they were not looking at, and the reader itself
-  stayed as it was. **Flash and Beep on Scan** in the tray menu now has it
-  answer for its own work, with one green flash and a short beep on a tag read,
-  written or locked, and two red flashes when a write or a lock fails. It is
-  off by default and the choice is written to `settings.json`, so a reader
-  stays silent unless its operator asks otherwise
-- **`SCardControl` in both PC/SC backends.** The adapter over the platform's
-  PC/SC library only carried commands to the card, so a reader's own
-  peripherals, its LED and buzzer among them, were unreachable. `scardCard`
-  gained `Control`, with the goscard and `-tags cgopcsc` backends behind it and
-  the escape control code built per platform: `SCARD_CTL_CODE(1)` on pcsc-lite
-  and the PCSC framework, `IOCTL_CCID_ESCAPE` on Windows
-- **LED and buzzer commands for ACR122 readers.** `nfc/pcsc` implements
-  `nfc.FeedbackDevice` with the ACS bi-color LED and buzzer command. It goes
-  over `SCardControl` where the PC/SC stack will carry escape commands, and
-  falls back to the same command as a pseudo-APDU over the card connection
-  where it will not, which is the default on pcsc-lite and on the Windows CCID
-  class driver. Whichever channel answers is remembered for the connection, so
-  a reader is asked once per signal; a reader that answers on neither is left
-  alone with a not-supported error, and other readers are never sent the
-  command at all. Signals play in the background, since the reader replies only
-  once it has finished flashing
+- **The reader can say what it just did.** Someone holding a card at the reader
+  had no way to tell a completed scan from one that never happened: the agent
+  said so on a screen they were not looking at. **Flash and Beep on Scan** in
+  the tray menu now has the reader answer for its own work, with one green
+  flash and a short beep on a tag read, written or locked, and two red flashes
+  when a write or a lock fails. It is off by default and the choice is saved to
+  `settings.json`
+- **`SCardControl`, and LED and buzzer commands for ACR122 readers.** The
+  adapter over the platform's PC/SC library only carried commands to the card,
+  so a reader's own peripherals were unreachable. `scardCard` gained `Control`
+  in both backends, with the escape control code built per platform, and
+  `nfc/pcsc` implements the ACS bi-color LED and buzzer command on top of it.
+  Where a stack will not carry escape commands, which is the default on
+  pcsc-lite and on the Windows CCID class driver, the same command travels as a
+  pseudo-APDU over the card connection instead. The channel that answers is
+  remembered per connection, and a reader that answers on neither is left alone
 
 ### Fixed
 

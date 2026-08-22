@@ -1,10 +1,6 @@
 package traymenu
 
-import (
-	"sync"
-
-	"github.com/dotside-studios/davi-nfc-agent/signals"
-)
+import "sync"
 
 // Item is one entry in a menu. It owns its state rather than reading it back
 // from the platform, so Checked and friends mean the same thing on every
@@ -12,7 +8,7 @@ import (
 type Item struct {
 	owner    *Menu
 	platform Native
-	clicked  signals.Signal[*Item]
+	clicked  Signal[*Item]
 
 	mu       sync.RWMutex
 	title    string
@@ -25,11 +21,11 @@ type Item struct {
 
 // Clicked is the signal raised when the item is activated. OnClick is the
 // shorthand for the common case.
-func (i *Item) Clicked() *signals.Signal[*Item] { return &i.clicked }
+func (i *Item) Clicked() *Signal[*Item] { return &i.clicked }
 
 // OnClick runs fn whenever the item is activated. Handlers run in the order
 // they were connected.
-func (i *Item) OnClick(fn func()) *signals.Connection {
+func (i *Item) OnClick(fn func()) *Connection {
 	if fn == nil {
 		return i.clicked.Connect(nil)
 	}

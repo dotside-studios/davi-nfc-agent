@@ -42,8 +42,7 @@ stops working as soon as the set of items changes at runtime: nothing is
 receiving on a device or origin row unless some other item was clicked first.
 
 `traymenu` keeps a receiver on every item for its whole life and fans each click
-out through a [`signals.Signal`](../signals). Handlers are declared with the item
-they belong to:
+out through a `Signal`. Handlers are declared with the item they belong to:
 
 ```go
 item.OnClick(func() { ... })                    // the common case

@@ -1,26 +1,16 @@
-// Package signals is a type-safe signal/slot primitive.
-//
-// A Signal is a fan-out point: any number of handlers connect to it, and every
-// Emit calls them all.
-//
-//	var changed signals.Signal[string]
-//
-//	conn := changed.Connect(func(name string) { log.Println("now:", name) })
-//	defer conn.Disconnect()
-//
-//	changed.Emit("device-2")
-//
-// The zero value is ready to use, and every method is safe to call from any
-// goroutine, including from inside a handler. Handlers run synchronously on the
-// goroutine that calls Emit, in the order they connected, so anything slow
-// belongs in a goroutine of the handler's own.
-package signals
+package traymenu
 
 import "sync"
 
-// Signal delivers a value of type T to every connected handler. Use a struct
-// when an event carries several fields, and struct{} when the fact that it
-// happened is the message.
+// Signal is a fan-out point: any number of handlers connect to it, and every
+// Emit calls them all. It is what a menu delivers its clicks on.
+//
+//	conn := item.Clicked().Connect(func(i *traymenu.Item) { log.Println(i.Title()) })
+//	defer conn.Disconnect()
+//
+// The zero value is ready to use, and every method is safe to call from any
+// goroutine, including from inside a handler. Handlers run synchronously on the
+// goroutine that calls Emit, in the order they connected.
 type Signal[T any] struct {
 	mu     sync.Mutex
 	nextID uint64

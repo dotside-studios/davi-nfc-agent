@@ -1,10 +1,6 @@
 package traymenu
 
-import (
-	"sync"
-
-	"github.com/dotside-studios/davi-nfc-agent/signals"
-)
+import "sync"
 
 // Row is one entry in a List. Value carries whatever the caller needs back when
 // the row is clicked, so the handler does not have to look the row up again by
@@ -29,7 +25,7 @@ type List[T any] struct {
 	rows  []Row[T]
 	shown int
 
-	activated signals.Signal[Row[T]]
+	activated Signal[Row[T]]
 }
 
 // NewList adds size hidden items to parent and returns the list that drives
@@ -116,10 +112,10 @@ func (l *List[T]) Items() []*Item {
 }
 
 // Activated is raised when a row is clicked, carrying the row as it was set.
-func (l *List[T]) Activated() *signals.Signal[Row[T]] { return &l.activated }
+func (l *List[T]) Activated() *Signal[Row[T]] { return &l.activated }
 
 // OnActivate runs fn whenever a row is clicked.
-func (l *List[T]) OnActivate(fn func(Row[T])) *signals.Connection { return l.activated.Connect(fn) }
+func (l *List[T]) OnActivate(fn func(Row[T])) *Connection { return l.activated.Connect(fn) }
 
 func (l *List[T]) activate(slot int) {
 	l.mu.Lock()

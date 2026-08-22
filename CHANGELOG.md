@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A device is no longer refused for what it calls itself.** Registration
+  required `platform` to be `ios`, `android` or `web`, but nothing branches on
+  the value: it reaches a column in the console and stops. The allowlist turned
+  a description into an admission test on a bridge that carries whatever speaks
+  the protocol, which is why `DeviceCapabilities` documents `deviceType` values
+  like `pn532-serial` that could never register.
+
+  The bundled client failed it too. `nfc-device-client.js` defaults `platform`
+  to `unknown` and its Node example sends `node`, so following the shipped
+  documentation was refused at the door. Any identifier is accepted now, and a
+  device that sends none is recorded as `unknown`.
+
 - **A write to a phone reports its outcome.** The device route answered with a
   bare `{uid, deviceID}` map while the client server reads a write outcome by
   asserting `*nfc.WriteResult`. The assertion failed, the whole block was

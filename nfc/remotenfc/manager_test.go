@@ -94,13 +94,31 @@ func TestManagerRegisterDeviceValidation(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid platform",
+			name: "a platform outside the three the agent knows",
 			req: DeviceRegistrationRequest{
-				DeviceName: "Device",
-				Platform:   "windows",
+				DeviceName: "PN532 bridge",
+				Platform:   "pn532-serial",
 				AppVersion: "1.0.0",
 			},
-			wantErr: true,
+			wantErr: false,
+		},
+		{
+			name: "the platform the bundled client defaults to",
+			req: DeviceRegistrationRequest{
+				DeviceName: "Device",
+				Platform:   "unknown",
+				AppVersion: "1.0.0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "the platform the bundled client's Node example sends",
+			req: DeviceRegistrationRequest{
+				DeviceName: "My NFC Device",
+				Platform:   "node",
+				AppVersion: "1.0.0",
+			},
+			wantErr: false,
 		},
 	}
 
@@ -406,5 +424,41 @@ func TestManagerClose(t *testing.T) {
 	// All devices should be removed
 	if m.GetDeviceCount() != 0 {
 		t.Errorf("Should have 0 devices after close, got %d", m.GetDeviceCount())
+	}
+}
+
+// TestPlatformDescribesTheDeviceRatherThanAdmittingIt covers what the
+// ios/android/web allowlist refused, including the bundled client's own default
+// of "unknown" and the "node" its Node example sends.
+func TestPlatformDescribesTheDeviceRatherThanAdmittingIt(t *testing.T) {
+	m := NewManager(30 * time.Second)
+	defer m.Close()
+
+	for _, platform := range []string{"ios", "android", "web", "node", "unknown", "pn532-serial"} {
+		device, err := m.RegisterDevice(DeviceRegistrationRequest{
+			DeviceName: "Device",
+			Platform:   platform,
+		})
+		if err != nil {
+			t.Errorf("RegisterDevice(platform=%q) = %v, want it admitted", platform, err)
+			continue
+		}
+		if device.Platform() != platform {
+			t.Errorf("Platform() = %q, want %q reported back as sent", device.Platform(), platform)
+		}
+	}
+
+	// Saying nothing is not a reason to refuse either.
+	device, err := m.RegisterDevice(DeviceRegistrationRequest{DeviceName: "Quiet device"})
+	if err != nil {
+		t.Fatalf("RegisterDevice with no platform = %v, want it admitted", err)
+	}
+	if device.Platform() != "unknown" {
+		t.Errorf("Platform() = %q for a device that sent none, want %q", device.Platform(), "unknown")
+	}
+
+	// A device name is still required: it names the row an operator sees.
+	if _, err := m.RegisterDevice(DeviceRegistrationRequest{Platform: "ios"}); err == nil {
+		t.Error("RegisterDevice with no device name was admitted, want an error")
 	}
 }

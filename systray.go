@@ -412,12 +412,17 @@ func (s *SystrayApp) startCardInfoUpdater() {
 }
 
 // startServerRestartListener listens for server restart events from the Agent
-// and updates the displayed URLs accordingly.
+// and brings the menu back in step with what the listeners are now serving.
 func (s *SystrayApp) startServerRestartListener() {
 	go func() {
 		for range s.agent.ServerRestarts() {
-			log.Printf("[systray] Server restart detected, updating URLs")
+			log.Printf("[systray] Server restart detected, updating the menu")
 			s.updateURLs()
+
+			// CAInstalled is a look at the filesystem, not a decision taken
+			// once: a config directory that loses its CA needs the offer to
+			// install one back, without an agent restart to notice.
+			s.refreshTrustMenu()
 		}
 	}()
 }

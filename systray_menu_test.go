@@ -3,11 +3,15 @@ package main
 import (
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
+	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -457,4 +461,58 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 			t.Errorf("a stopped agent still shows %q", item.Title())
 		}
 	}
+}
+
+// waitFor polls until cond holds, which is how a test waits on the tray's own
+// goroutines without a fixed sleep.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
+	dir := t.TempDir()
+
+	agent := newTestAgent()
+	agent.TLSManager = tls.NewManager(dir)
+	agent.serverRestartChan = make(chan struct{}, 1)
+
+	app, _ := newTestTray(t, agent)
+
+	if !app.mTrustBrowsers.Visible() {
+		t.Fatal("the trust entry is hidden with no certificate authority installed")
+	}
+
+	// Installing one is the whole job of the entry, so it has nothing left to
+	// offer once there is one.
+	caFile := filepath.Join(dir, "ca", "rootCA.pem")
+	if err := os.MkdirAll(filepath.Dir(caFile), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(caFile, []byte("ca"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app.refreshTrustMenu()
+	if app.mTrustBrowsers.Visible() {
+		t.Fatal("the trust entry is still offered with a certificate authority installed")
+	}
+
+	// CAInstalled reads the filesystem every time, so a config directory that
+	// loses its CA needs the offer back. A restart of the listeners is when the
+	// tray looks again.
+	if err := os.Remove(caFile); err != nil {
+		t.Fatal(err)
+	}
+	app.startServerRestartListener()
+	agent.serverRestartChan <- struct{}{}
+
+	waitFor(t, "the trust entry to come back", app.mTrustBrowsers.Visible)
 }

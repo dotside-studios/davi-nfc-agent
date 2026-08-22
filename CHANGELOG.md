@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one builder, so an entry copies what it reads. The pairing entry also stopped
   labelling itself `CA Cert` once the agent stopped
 
+- **The offer to trust this agent in browsers comes back if the certificate
+  authority goes away.** `CAInstalled` is a look at the filesystem taken on
+  every call, not a decision taken once, but the tray only looked at it at
+  startup and after an install of its own. A config directory that lost its CA
+  therefore left the menu entry hidden until the agent was restarted, which is
+  the one entry that would put the CA back. The tray now looks again whenever
+  the listeners restart
+
 - **All Types accepts a card type the agent has never heard of.** The filter
   admitted everything when it was empty, but **All Types** filled it with the
   eight types this agent enumerates instead of emptying it. A phone reports the

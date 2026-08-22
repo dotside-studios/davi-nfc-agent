@@ -28,6 +28,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The agent holds the settings, and the console reads them back from it.**
+  Preferences lived in two places at once. `settings.json` had what was last
+  saved, the agent had what it was actually doing, and the console rendered a
+  mixture: mode and card filter from the file, the reader's live mode and the
+  pairing requirement from the agent, in fields beside each other in the same
+  snapshot. A mode switched from the tray never reached the file, so the console
+  went on showing the old one, and a pairing requirement the command line would
+  not let a preference withdraw was reported as withdrawn.
+
+  `Agent.ApplySettings` puts a stored file in force and `Agent.Settings` reports
+  what is in force in the same shape, so the agent parses and holds the whole
+  preference set rather than having its parts pushed at it. The console's
+  `settings` block is that answer, and the duplicates beside it (`reader.mode`,
+  `reader.devicePath`, `security.requirePairedDevice`) are gone from the
+  snapshot and from `webui.Host` with them. A pairing requirement that came from
+  the command line is now shown as locked instead of springing back when
+  switched off.
+
+  There is also one path from a saved preference to the running agent: the
+  store's change hook. The console and the tray write to the store and neither
+  applies anything itself, so the two cannot put the agent in different states.
+  The agent's port is the port it is set to and the listener reports the one it
+  is bound on, which is what makes a port saved in the console take effect on
+  **Restart servers** rather than only at the next startup
+
 - **The tray menu is a package now, and its clicks are signals.** A menu item
   from the tray library *drops* a click when nobody is receiving on its channel,
   and a `select` cannot name a changing set of items, so the card filters, the
@@ -47,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it under test with no desktop involved
 
 ### Fixed
+
+- **A stored reader mode survives a restart.** The mode was applied to the
+  reader and nowhere else, and settings are applied before `Start` builds one,
+  so an agent saved as read-only came back from every restart able to write
+  while the console reported the read-only it had read from the file. The agent
+  holds the mode and hands it to each reader it starts, next to the feedback
+  preference that already worked this way. Picking a mode from the tray with the
+  agent stopped now sticks too, instead of the tick springing back
 
 - **Copying a device URL from the tray hands out a device URL.** The Server URLs
   submenu showed `ws://host:9470/ws?mode=device` and copied

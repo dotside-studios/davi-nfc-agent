@@ -489,16 +489,14 @@ func (s *SystrayApp) handleRotateAPISecret() {
 	s.updateAPISecretLabel(fresh)
 }
 
-// handleModeSwitch applies a mode picked from the menu.
+// handleModeSwitch applies a mode picked from the menu. The mode belongs to the
+// agent rather than to the running reader, so it can be picked with the agent
+// stopped, and the console sees it because the console reads the agent.
+//
+// Session-only, like the card-type filter beside it: the tray changes what the
+// agent is doing now, the console changes what it does from now on.
 func (s *SystrayApp) handleModeSwitch(mode nfc.ReaderMode) {
-	if s.agent.Reader == nil {
-		// Nothing to apply it to. Put the tick back rather than showing a mode
-		// the reader is not in.
-		s.modes.Set(s.currentMode())
-		return
-	}
-
-	s.agent.Reader.SetMode(mode)
+	s.agent.SetReaderMode(mode)
 	s.setMode(mode)
 	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
 
@@ -667,7 +665,9 @@ func (s *SystrayApp) urls() agentURLs {
 	if s.agent.CertFile != "" && s.agent.KeyFile != "" {
 		scheme = "wss"
 	}
-	port := s.agent.DevicePort
+	// The port being served, not the one configured. These URLs are copied and
+	// pasted into a device, so one naming an unbound port is worse than none.
+	port := s.agent.ServingPort()
 	if port == 0 {
 		port = DEFAULT_DEVICE_PORT
 	}

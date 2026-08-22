@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // The console reads the snapshot by JSON key. A wire type that loses its tags
@@ -49,6 +51,49 @@ func TestSnapshotKeysAreLowerCamel(t *testing.T) {
 	for _, key := range []string{`"ID"`, `"Origin"`, `"RemoteAddr"`, `"ConnectedAt"`, `"Writes"`} {
 		if strings.Contains(got, key) {
 			t.Errorf("%s marshalled under its Go name; the wire type is missing a json tag", key)
+		}
+	}
+}
+
+// The snapshot carries a preference once, in Settings, taken from the agent. A
+// second copy beside it, such as the reader's own mode, can disagree with it,
+// and a console showing read-only while the reader writes costs a card.
+func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
+	host := newFakeHost()
+	host.settings = settings.Settings{
+		Mode:                settings.ModeReadOnly,
+		DevicePath:          "ACS ACR1252U 01 00",
+		RequirePairedDevice: true,
+	}
+	host.pairingLock = true
+
+	console := New(Config{Host: host, Name: "davi-nfc-agent", Version: "test"})
+	state := console.buildState()
+
+	if state.Settings.Mode != settings.ModeReadOnly {
+		t.Errorf("snapshot mode = %q, want %q", state.Settings.Mode, settings.ModeReadOnly)
+	}
+	if !state.Settings.RequirePairedDevice {
+		t.Error("the snapshot does not report the requirement the agent is enforcing")
+	}
+	if !state.Security.RequirePairedDeviceLocked {
+		t.Error("the console is not told the requirement cannot be withdrawn from there")
+	}
+
+	body, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// Once each, under settings. A reader that reported its own mode, or a
+	// security block that repeated the requirement, would show up here.
+	for key, want := range map[string]int{
+		`"mode":`:                1,
+		`"devicePath":`:          1,
+		`"requirePairedDevice":`: 1,
+	} {
+		if got := strings.Count(string(body), key); got != want {
+			t.Errorf("%s appears %d times in the snapshot, want %d", key, got, want)
 		}
 	}
 }

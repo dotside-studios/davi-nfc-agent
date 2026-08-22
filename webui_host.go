@@ -49,15 +49,6 @@ func (h *webuiHost) RestartServers() error { return h.agent.RestartServers() }
 
 // ---- reader ----
 
-func (h *webuiHost) ReaderMode() string {
-	if h.agent.Reader == nil {
-		return settings.ModeReadWrite
-	}
-	return settings.FormatMode(h.agent.Reader.GetMode())
-}
-
-func (h *webuiHost) DevicePath() string { return h.agent.CurrentDevicePath() }
-
 func (h *webuiHost) AvailableDevices() []string {
 	if h.agent.Manager == nil {
 		return nil
@@ -109,7 +100,10 @@ func (h *webuiHost) SelectDevice(devicePath string) error {
 
 // ---- server ----
 
-func (h *webuiHost) Port() int          { return h.agent.DevicePort }
+// Port is the port being served, not the one configured. A port saved in the
+// console is bound only once the listener has been restarted, and until then
+// the console must not hand out a URL nothing is listening on.
+func (h *webuiHost) Port() int          { return h.agent.ServingPort() }
 func (h *webuiHost) BootstrapPort() int { return h.agent.BootstrapPort }
 func (h *webuiHost) CertFile() string   { return h.agent.CertFile }
 func (h *webuiHost) TLSEnabled() bool   { return h.agent.CertFile != "" && h.agent.KeyFile != "" }
@@ -252,8 +246,6 @@ func (h *webuiHost) RevokeAllDevices() error {
 	return h.agent.Devices.RevokeAll()
 }
 
-func (h *webuiHost) RequirePairedDevice() bool { return h.agent.RequirePairedDevice }
-
 // ---- browser origins ----
 
 func (h *webuiHost) AllowedOrigins() []string {
@@ -296,19 +288,23 @@ func (h *webuiHost) SetOriginCheckDisabled(on bool) {
 
 // ---- settings ----
 
-func (h *webuiHost) Settings() settings.Settings { return h.settings.Get() }
+// Settings comes from the agent rather than from the file, so the console shows
+// what is in force, such as a mode switched from the tray or a pairing
+// requirement the command line will not let a preference withdraw.
+func (h *webuiHost) Settings() settings.Settings { return h.agent.Settings() }
 
+// RequirePairedDeviceLocked reports a requirement the console may not withdraw.
+func (h *webuiHost) RequirePairedDeviceLocked() bool { return h.agent.PairingRequirementLocked() }
+
+// SaveSettings persists the change and answers with what the agent then holds.
+// It applies nothing itself. The store's change hook is the one path from a
+// saved preference to the running agent, so a save made here and one made from
+// the tray land the same way.
 func (h *webuiHost) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
-	saved, err := h.settings.Update(mutate)
-	if err != nil {
-		return saved, err
+	if _, err := h.settings.Update(mutate); err != nil {
+		return h.agent.Settings(), err
 	}
-
-	applySettings(h.agent, saved)
-	if h.app != nil {
-		h.app.syncSettingsToMenu(saved)
-	}
-	return saved, nil
+	return h.agent.Settings(), nil
 }
 
 // remoteManager returns the remote device manager, held either directly or

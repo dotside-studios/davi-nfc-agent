@@ -196,17 +196,28 @@ func TestAllTypesClearsIndividualFilters(t *testing.T) {
 	}
 }
 
-func TestModeMenuRevertsWithoutAReader(t *testing.T) {
-	app, _ := newTestTray(t, newTestAgent())
+// The mode is the agent's, not the running reader's, so it can be picked with
+// the agent stopped and the reader Start builds is started in it. The tick used
+// to spring back here, leaving the operator with no way to tell which mode the
+// next reader would use.
+func TestModeMenuHoldsWithoutAReader(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
 
-	// No reader to apply it to, so the tick goes back where it was.
 	app.modes.Item(nfc.ModeWriteOnly).Click()
 
-	if got, _ := app.modes.Value(); got != nfc.ModeReadWrite {
-		t.Errorf("mode = %v, want ModeReadWrite", got)
+	if got, _ := app.modes.Value(); got != nfc.ModeWriteOnly {
+		t.Errorf("mode = %v, want ModeWriteOnly", got)
 	}
-	if app.mModeMenu.Title() != "Mode: Read/Write" {
-		t.Errorf("mode menu title = %q, want %q", app.mModeMenu.Title(), "Mode: Read/Write")
+	if app.mModeMenu.Title() != "Mode: Write Only" {
+		t.Errorf("mode menu title = %q, want %q", app.mModeMenu.Title(), "Mode: Write Only")
+	}
+	// And the agent is what holds it, so the console shows the same thing.
+	if got := agent.CurrentReaderMode(); got != nfc.ModeWriteOnly {
+		t.Errorf("agent mode = %v, want ModeWriteOnly", got)
+	}
+	if got := agent.Settings().Mode; got != settings.ModeWriteOnly {
+		t.Errorf("agent settings mode = %q, want %q", got, settings.ModeWriteOnly)
 	}
 }
 
@@ -259,7 +270,7 @@ func TestReaderFeedbackTogglePersists(t *testing.T) {
 	if !app.mReaderFeedback.Checked() {
 		t.Error("the toggle is not ticked after clicking it")
 	}
-	if !agent.ReaderFeedback {
+	if !agent.ReaderFeedbackEnabled() {
 		t.Error("the agent was not told about the change")
 	}
 	if !store.Get().ReaderFeedback {
@@ -267,7 +278,7 @@ func TestReaderFeedbackTogglePersists(t *testing.T) {
 	}
 
 	app.mReaderFeedback.Click()
-	if app.mReaderFeedback.Checked() || agent.ReaderFeedback || store.Get().ReaderFeedback {
+	if app.mReaderFeedback.Checked() || agent.ReaderFeedbackEnabled() || store.Get().ReaderFeedback {
 		t.Error("clicking again did not turn the feedback back off")
 	}
 }
@@ -403,7 +414,7 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 
 	// Nothing is paired, so requiring pairing would refuse every device.
 	app.mRequirePaired.Click()
-	if app.mRequirePaired.Checked() || agent.RequirePairedDevice {
+	if app.mRequirePaired.Checked() || agent.RequiresPairedDevice() {
 		t.Fatal("pairing was required with no paired device to admit")
 	}
 
@@ -412,7 +423,7 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 	}
 	app.mRequirePaired.Click()
 
-	if !app.mRequirePaired.Checked() || !agent.RequirePairedDevice {
+	if !app.mRequirePaired.Checked() || !agent.RequiresPairedDevice() {
 		t.Fatal("pairing was not required once a device had paired")
 	}
 }

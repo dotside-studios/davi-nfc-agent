@@ -138,11 +138,13 @@ func main() {
 	// certificate has no CA to hand out but still has devices to pair, and
 	// coupling the two left that deployment with no way to authenticate one.
 	var bootstrapServer *tls.BootstrapServer
+	var pairingIssuer tls.PairingIssuer
 	if bootstrapPortFlag > 0 {
 		// tlsMgr may be nil here; the CA endpoints report that there is nothing
 		// to install and the pairing endpoint works regardless.
 		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
-		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), devicePortFlag)
+		pairingIssuer = NewPairingIssuer(devices, agentPublicKeyPin)
+		bootstrapServer.SetPairingIssuer(pairingIssuer, devicePortFlag)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)
 		}
@@ -207,9 +209,9 @@ func main() {
 	if devicePathFlag == "" {
 		devicePathFlag = stored.DevicePath
 	}
-	if !isFlagSet("device-port") && stored.Port > 0 {
-		agent.DevicePort = stored.Port
-	}
+	// A port asked for on the command line is not the preference file's to move,
+	// as the pairing requirement below is not its to withdraw.
+	agent.DevicePortLocked = isFlagSet("device-port")
 	// Asked for on the command line or in the environment, as opposed to
 	// remembered from a previous run: a stored preference may raise the
 	// requirement but not withdraw one asked for there. The notice waits until
@@ -222,7 +224,18 @@ func main() {
 			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
 		}
 	}
-	applySettings(agent, stored)
+	// The agent holds the settings from here on, and the console and the tray
+	// read them back from it, so a mode switched in one shows in the other.
+	agent.ApplySettings(stored)
+
+	// The flag beats the file and has already fallen back to it when unset.
+	agent.SetPinnedDevice(devicePathFlag)
+
+	// A device that pairs is told where to reconnect, and the stored settings
+	// may just have moved the agent to a different port.
+	if bootstrapServer != nil && agent.ConfiguredPort() != devicePortFlag {
+		bootstrapServer.SetPairingIssuer(pairingIssuer, agent.ConfiguredPort())
+	}
 
 	// Nil in a -tags nowebui build, which is why everything below tolerates it.
 	console := setupConsole(agent, settingsStore, logRing)
@@ -235,6 +248,16 @@ func main() {
 	app := NewSystrayApp(agent, devicePathFlag, bootstrapPortFlag, bootstrapServer)
 	app.AttachConsole(console)
 	app.AttachSettings(settingsStore)
+
+	// One path from a saved preference to the running agent, whoever saved it.
+	// The tray and the console both write to the store and neither applies
+	// anything itself, so the two cannot put the agent in different states. The
+	// menu is then refreshed from the agent rather than from the file just
+	// written, for the same reason the console reads the agent.
+	settingsStore.OnChange(func(next settings.Settings) {
+		agent.ApplySettings(next)
+		app.syncSettingsToMenu(agent.Settings())
+	})
 
 	go func() {
 		<-sigChan

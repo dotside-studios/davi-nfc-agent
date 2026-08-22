@@ -28,8 +28,6 @@ type Host interface {
 
 	// ---- reader ----
 
-	ReaderMode() string
-	DevicePath() string
 	AvailableDevices() []string
 	AllCardTypes() []string
 	// CurrentCard reports the tag on the reader, if any.
@@ -67,7 +65,11 @@ type Host interface {
 	PairedDevices() []PairedDevice
 	RevokeDevice(id string) error
 	RevokeAllDevices() error
-	RequirePairedDevice() bool
+	// RequirePairedDeviceLocked reports that the requirement came from the
+	// command line, which the console may raise but not withdraw. It is shown
+	// rather than discovered, because a switch that springs back explains
+	// nothing.
+	RequirePairedDeviceLocked() bool
 
 	// ---- browser origins ----
 
@@ -80,8 +82,13 @@ type Host interface {
 
 	// ---- settings ----
 
+	// Settings is what the agent is set to, and the console's only source for a
+	// preference. Reader mode, the card-type filter, the pinned reader and the
+	// pairing requirement all come from here, so the console cannot show one
+	// thing while the agent does another.
 	Settings() settings.Settings
-	// SaveSettings persists a mutation and applies it to the running agent.
+	// SaveSettings persists a mutation and returns what the agent holds once it
+	// has been applied, which is not necessarily what was asked for.
 	SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error)
 }
 

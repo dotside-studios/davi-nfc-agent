@@ -18,6 +18,11 @@ import (
 // State is the whole picture the console renders from. Sent as a
 // snapshot rather than deltas, so the console can never show a half-applied
 // combination of settings.
+//
+// Every preference lives in Settings and nowhere else, passed through from the
+// agent. A preference repeated in a second field can disagree with itself, and
+// a console showing read-only while the reader writes misleads the operator
+// about what the reader will do to a card.
 type State struct {
 	Agent    AgentInfo         `json:"agent"`
 	Reader   ReaderInfo        `json:"reader"`
@@ -42,10 +47,9 @@ type AgentInfo struct {
 	Platform  string    `json:"platform"`
 }
 
-// ReaderInfo covers the NFC reader and the card currently on it.
+// ReaderInfo covers the NFC reader and the card currently on it. What the
+// reader is set to is in Settings; this is what it is doing.
 type ReaderInfo struct {
-	Mode          string   `json:"mode"`
-	DevicePath    string   `json:"devicePath"`
 	Available     []string `json:"available"`
 	CardPresent   bool     `json:"cardPresent"`
 	CardUID       string   `json:"cardUID,omitempty"`
@@ -71,14 +75,18 @@ type ServerInfo struct {
 // included in full: the console's gate is a higher bar than reading the file it
 // comes from.
 type SecurityInfo struct {
-	APISecret           string    `json:"apiSecret"`
-	PairingPIN          string    `json:"pairingPIN,omitempty"`
-	PublicKeyPin        string    `json:"publicKeyPin,omitempty"`
-	RequirePairedDevice bool      `json:"requirePairedDevice"`
-	CAInstalled         bool      `json:"caInstalled"`
-	CAFingerprint       string    `json:"caFingerprint,omitempty"`
-	Cert                *CertInfo `json:"cert,omitempty"`
-	ControlSessions     int       `json:"controlSessions"`
+	APISecret    string `json:"apiSecret"`
+	PairingPIN   string `json:"pairingPIN,omitempty"`
+	PublicKeyPin string `json:"publicKeyPin,omitempty"`
+
+	// RequirePairedDeviceLocked says the requirement in Settings came from the
+	// command line and cannot be withdrawn from here.
+	RequirePairedDeviceLocked bool `json:"requirePairedDeviceLocked"`
+
+	CAInstalled     bool      `json:"caInstalled"`
+	CAFingerprint   string    `json:"caFingerprint,omitempty"`
+	Cert            *CertInfo `json:"cert,omitempty"`
+	ControlSessions int       `json:"controlSessions"`
 }
 
 // CertInfo describes the certificate being served.
@@ -164,8 +172,6 @@ func (c *Server) buildState() State {
 
 func (c *Server) buildReaderInfo() ReaderInfo {
 	info := ReaderInfo{
-		Mode:         c.host.ReaderMode(),
-		DevicePath:   c.host.DevicePath(),
 		Available:    orEmpty(c.host.AvailableDevices()),
 		AllCardTypes: orEmpty(c.host.AllCardTypes()),
 	}
@@ -211,12 +217,12 @@ func (c *Server) buildServerInfo() ServerInfo {
 
 func (c *Server) buildSecurityInfo() SecurityInfo {
 	info := SecurityInfo{
-		APISecret:           c.host.APISecret(),
-		PairingPIN:          c.host.PairingPIN(),
-		PublicKeyPin:        c.host.PublicKeyPin(),
-		RequirePairedDevice: c.host.RequirePairedDevice(),
-		CAInstalled:         c.host.CAInstalled(),
-		ControlSessions:     c.auth.SessionCount(),
+		APISecret:                 c.host.APISecret(),
+		PairingPIN:                c.host.PairingPIN(),
+		PublicKeyPin:              c.host.PublicKeyPin(),
+		RequirePairedDeviceLocked: c.host.RequirePairedDeviceLocked(),
+		CAInstalled:               c.host.CAInstalled(),
+		ControlSessions:           c.auth.SessionCount(),
 	}
 
 	if info.CAInstalled {

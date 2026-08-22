@@ -122,7 +122,11 @@ export function PortEditor({ state }: { state: ControlState }) {
   const [port, setPort] = useState(String(settings.port || server.port))
 
   const parsed = Number(port)
-  const changed = Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 && parsed !== server.port
+  const valid = Number.isInteger(parsed) && parsed > 0 && parsed <= 65535
+  // settings.port is what the agent is set to, server.port what its listener is
+  // on. They differ only between saving a port and rebinding on it.
+  const edited = valid && parsed !== settings.port
+  const pending = settings.port !== server.port
 
   return (
     <>
@@ -130,7 +134,7 @@ export function PortEditor({ state }: { state: ControlState }) {
         <span className="dim">Agent port</span>
         <input type="number" value={port} min={1} max={65535} style={{ width: 80 }} onChange={(e) => setPort(e.target.value)} />
         <ActionLink
-          disabled={!changed}
+          disabled={!edited}
           run={() => act.mutateAsync({ name: 'settings.save', params: { ...settings, port: parsed } })}
         >
           save
@@ -141,10 +145,10 @@ export function PortEditor({ state }: { state: ControlState }) {
         </span>
       </div>
 
-      {changed ? (
+      {pending ? (
         <Notice kind="warn">
-          Stored, but applied at startup. Restart the agent for it to take effect — the console is served
-          on this port, so it moves with it.
+          Saved as {settings.port}, but the listener is still on {server.port}. Restart the servers for it
+          to take effect. The console is served on this port, so it moves with it.
         </Notice>
       ) : null}
     </>

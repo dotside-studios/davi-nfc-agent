@@ -18,7 +18,7 @@ func (s *SystrayApp) AttachSettings(store *settings.Store) {
 func (s *SystrayApp) setupFeedbackMenu() {
 	s.mReaderFeedback = s.menu.AddCheckbox(
 		"Flash and Beep on Scan",
-		s.agent.ReaderFeedback,
+		s.agent.ReaderFeedbackEnabled(),
 		traymenu.Tooltip("Flash the reader's LED and sound its buzzer when a tag is read or written"),
 		traymenu.OnClick(s.handleReaderFeedback),
 	)

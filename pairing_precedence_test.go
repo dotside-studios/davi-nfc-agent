@@ -10,21 +10,26 @@ import (
 // TestStoredSettingCannotWithdrawCommandLineRequirement is the console's path:
 // saving any preference re-applies the stored settings, which must not lower a
 // requirement the command line set. Startup has the same shape, because
-// applySettings is the last thing it does.
+// ApplySettings is the last thing it does.
 func TestStoredSettingCannotWithdrawCommandLineRequirement(t *testing.T) {
 	agent := NewAgent(nfc.NewMockManager())
 	agent.RequirePairedDevice = true
 	agent.RequirePairedDeviceLocked = true
 
-	applySettings(agent, settings.Settings{RequirePairedDevice: false})
+	agent.ApplySettings(settings.Settings{RequirePairedDevice: false})
 
-	if !agent.RequirePairedDevice {
+	if !agent.RequiresPairedDevice() {
 		t.Error("applying a stored setting withdrew a command-line requirement")
+	}
+
+	// And the console is told the truth about it, rather than the file's version.
+	if !agent.Settings().RequirePairedDevice {
+		t.Error("the agent reports a requirement it is enforcing as withdrawn")
 	}
 }
 
 // TestCommandLineRequirementSurvivesDirectToggle covers the systray switch,
-// which reaches SetRequirePairedDevice without going through applySettings.
+// which reaches SetRequirePairedDevice without going through ApplySettings.
 func TestCommandLineRequirementSurvivesDirectToggle(t *testing.T) {
 	agent := NewAgent(nfc.NewMockManager())
 	agent.RequirePairedDevice = true
@@ -32,7 +37,7 @@ func TestCommandLineRequirementSurvivesDirectToggle(t *testing.T) {
 
 	agent.SetRequirePairedDevice(false)
 
-	if !agent.RequirePairedDevice {
+	if !agent.RequiresPairedDevice() {
 		t.Error("SetRequirePairedDevice(false) withdrew a command-line requirement")
 	}
 }
@@ -47,7 +52,7 @@ func TestStoredRequirementStaysToggleable(t *testing.T) {
 
 	agent.SetRequirePairedDevice(false)
 
-	if agent.RequirePairedDevice {
+	if agent.RequiresPairedDevice() {
 		t.Error("a requirement that came only from settings should still be toggleable")
 	}
 }

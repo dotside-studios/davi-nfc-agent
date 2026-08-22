@@ -6,7 +6,7 @@ import { ActionLink, Dot, Empty, Notice, Panel } from '../ui'
 /** Paired devices, one row each, revocable individually or all at once. */
 export function Devices({ state }: { state: ControlState }) {
   const act = useAction()
-  const { devices, security } = state
+  const { devices, security, settings } = state
 
   return (
     <>
@@ -79,7 +79,8 @@ export function Devices({ state }: { state: ControlState }) {
           <label className="row">
             <input
               type="checkbox"
-              checked={security.requirePairedDevice}
+              checked={settings.requirePairedDevice}
+              disabled={security.requirePairedDeviceLocked}
               onChange={(e) =>
                 act.mutate({
                   name: 'devices.setRequirePaired',
@@ -99,7 +100,14 @@ export function Devices({ state }: { state: ControlState }) {
             allowlist instead, and are unaffected either way.
           </div>
 
-          {security.requirePairedDevice && devices.length === 0 ? (
+          {security.requirePairedDeviceLocked ? (
+            <Notice kind="warn">
+              This agent was started with <span className="mono">-require-paired-devices</span>, so
+              the requirement stays on for this run and cannot be turned off from here.
+            </Notice>
+          ) : null}
+
+          {settings.requirePairedDevice && devices.length === 0 ? (
             <Notice kind="err">
               No devices are paired, so every device connection will be refused until one pairs.
               Pair a device first, or turn this off.

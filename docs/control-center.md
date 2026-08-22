@@ -122,7 +122,8 @@ Lives beside the other config files:
   "cardTypes": [],
   "devicePath": "",
   "port": 0,
-  "requirePairedDevice": false
+  "requirePairedDevice": false,
+  "readerFeedback": false
 }
 ```
 
@@ -131,15 +132,46 @@ Lives beside the other config files:
 | `mode` | `readwrite`, `read` or `write` |
 | `cardTypes` | Card-type allowlist. Empty means all types |
 | `devicePath` | Pinned reader. Empty means auto-detect |
-| `port` | Agent port. `0` means the built-in default. Applied at startup only |
+| `port` | Agent port. `0` means the built-in default. Takes effect when the listener is next bound, at startup or on **Restart servers** |
 | `requirePairedDevice` | Admit only devices holding a paired credential |
+| `readerFeedback` | Flash the reader's LED and sound its buzzer at what it reads and writes |
 
 An explicit flag still wins: passing `-device` or `-device-port` means it for
-that run. No file is written until something is deliberately saved, so its
-absence keeps meaning "never configured".
+that run, and `-require-paired-devices` cannot be withdrawn by the file or by
+the console, where the switch is shown disabled rather than springing back. No
+file is written until something is deliberately saved, so its absence keeps
+meaning "never configured".
 
 Credentials are deliberately not in this file — the API secret, paired devices
 and origin allowlist keep their own.
+
+## Where a setting lives
+
+The file persists a preference; the **agent holds it**. Saving anywhere, from
+the console or the tray's feedback toggle, writes to `settings.json`, and the
+store's change hook is the single path from there to the running agent:
+
+```
+console ─┐                        ┌─ agent.ApplySettings   (what is in force)
+         ├─ settings.Store.Update ┤
+tray  ───┘                        └─ tray menu             (redrawn from the agent)
+```
+
+Nothing displays a preference from the file. The console's `settings` block in
+the state snapshot is `Agent.Settings()`, what the agent is set to right now, so
+a mode switched from the tray shows in the console, a pairing requirement the
+command line locked on shows as on, and a reader mode restored from disk is on
+the reader rather than only in the file.
+
+The tray and the console still differ in reach, and deliberately: the tray's
+mode and card-type menus change what the agent is doing for this session, the
+console's change what it does from now on. Both are visible in both places,
+because both read the agent.
+
+A saved preference means "make the agent match the file", so the next save from
+either place ends a session-only change made from the tray. The tray menu is
+redrawn from the agent when that happens, so it shows the mode now in force
+rather than the one that was picked.
 
 ## Building
 

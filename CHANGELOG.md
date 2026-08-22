@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The runtime knows nothing about what a plugin does. It has no notion of an
   address or an HTTP route: a plugin that serves something draws its own menu
   for it, and one that needs something of a peer asks for it by capability with
-  `Find` and `FindAll`. Anything else would be the agent's own features keeping
+  `Find`, or by walking the registered plugins. Anything else would be the
+  agent's own features keeping
   a privileged seam a consumer's cannot reach.
 
   Nothing in it reaches `fyne.io/systray`, and a build with no tray discards the

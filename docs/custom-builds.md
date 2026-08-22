@@ -128,8 +128,8 @@ func (p *Plugin) Routes() []wsserver.Route {
 ```
 
 `Route` belongs to the server that mounts it, not to the runtime — the runtime
-has no notion of HTTP. A different server would collect the same declarations
-with `plugin.FindAll[RouteProvider]`, which is how `wsserver` does it.
+has no notion of HTTP. `wsserver` collects the declarations by walking its
+peers, so a different server would gather the same ones the same way.
 
 Whatever is serving the agent's port mounts it, so the page is reachable wherever
 the agent already is, under the certificate a device already trusts. The control
@@ -203,12 +203,12 @@ it; show your entry disabled instead.
 
 ## Reaching other plugins
 
-By capability, with `plugin.Find` and `plugin.FindAll`, or by ID with
-`ctx.Peer("pairing")`. Everything cross-plugin works this way, including the
-agent's own lookups: `ServingPort` asks whatever is serving where it is, the
-console asks whatever serves clients for its client list, and the paired-device
-requirement reaches whatever admits devices. The server collects its mounts the
-same way.
+By capability with `plugin.Find`, by ID with `ctx.Peer("pairing")`, or by
+walking `ctx.Host().Plugins()` and asserting the interface you want — which is
+what the server does to collect its mounts. The agent's own lookups are the same
+three: `ServingPort` asks whatever is serving where it is, the console asks
+whatever serves clients for its client list, and the paired-device requirement
+reaches whatever admits devices.
 
 That is the whole extension mechanism. The runtime carries no registry of
 addresses, routes or anything else domain-specific, so the agent's own plugins

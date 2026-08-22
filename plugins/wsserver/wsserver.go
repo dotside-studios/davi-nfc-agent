@@ -275,15 +275,18 @@ func (p *Plugin) Stop(ctx *plugin.Context) error {
 	return nil
 }
 
-// collectRoutes asks every plugin with a page what to mount. The runtime is not
-// asked: it knows nothing about HTTP, and this is the only thing here that
-// does.
+// collectRoutes asks every plugin with a page what to mount, in the order they
+// were registered. The runtime is not asked: it knows nothing about HTTP, and
+// this is the only thing here that does.
 func (p *Plugin) collectRoutes(ctx *plugin.Context) []Route {
-	host := ctx.Host()
-
 	var routes []Route
-	for _, provider := range plugin.FindAll[RouteProvider](host) {
-		owner := plugin.IDOf(host, provider)
+	for _, peer := range ctx.Host().Plugins() {
+		provider, ok := peer.(RouteProvider)
+		if !ok {
+			continue
+		}
+
+		owner := peer.Describe().ID
 		for _, route := range provider.Routes() {
 			if route.Pattern == "" || route.Handler == nil {
 				ctx.Logf("%s asked for a route with no %s", owner, missingPart(route))

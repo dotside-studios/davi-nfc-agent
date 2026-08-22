@@ -71,15 +71,15 @@ By capability rather than by name:
 
 ```go
 if serving, ok := plugin.Find[interface{ Port() int }](host); ok { ... }
-
-for _, provider := range plugin.FindAll[wsserver.RouteProvider](host) { ... }
 ```
 
-`Find` takes the first, `FindAll` takes them in registration order, and
-`IDOf(host, p)` puts a name back on one for a log line. This is how
-`Agent.ServingPort` asks what is serving it, how the console finds the client
-list, and how `wsserver` gathers the pages its peers want mounted. Nothing in
-`agent.go` names a server package.
+`Find` returns the first registered plugin implementing the interface. It is how
+`Agent.ServingPort` asks what is serving it and how the console finds the client
+list; nothing in `agent.go` names a server package.
+
+For more than one — `wsserver` gathering the pages its peers want mounted — walk
+`host.Plugins()`, which is in registration order, and assert the capability you
+want. `peer.Describe().ID` names the one you found.
 
 `Context.Peer(id)` reaches one by ID, for a plugin that extends another it knows.
 

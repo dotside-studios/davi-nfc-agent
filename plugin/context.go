@@ -61,7 +61,8 @@ func (c *Context) Watch(fn func(State)) *traymenu.Connection { return c.host.Wat
 func (c *Context) Peer(id string) (Plugin, bool) { return c.host.Lookup(id) }
 
 // Host is the runtime this plugin is registered in: where a plugin reaches its
-// peers, with [Find] and [FindAll], and where one that registers another or
+// peers, with [Find] or by walking [Host.Plugins], and where one that registers
+// another or
 // drives a peer's lifecycle does it. A plugin must not call a lifecycle phase
 // from inside one of its own.
 func (c *Context) Host() *Host { return c.host }

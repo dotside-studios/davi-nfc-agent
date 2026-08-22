@@ -241,10 +241,10 @@ func TestReplacingAPluginRetiresTheOneItReplaces(t *testing.T) {
 	}
 }
 
-func TestFindAllGathersACapabilityInRegistrationOrder(t *testing.T) {
-	// What one plugin does to find what its peers have declared to it: the
-	// server asking who has a page for it to mount. The runtime is not asked
-	// what a page is.
+func TestPluginsAreListedInRegistrationOrder(t *testing.T) {
+	// What a plugin does to find what its peers have declared to it: the server
+	// asking who has a page for it to mount. It walks the list and asserts the
+	// capability it wants; the runtime is not asked what a page is.
 	var log []string
 	console, turnstile := newRecorder("console", &log), newRecorder("turnstile", &log)
 	console.serves, turnstile.serves = "/control/", "/turnstile/"
@@ -253,8 +253,12 @@ func TestFindAllGathersACapabilityInRegistrationOrder(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 
 	var served []string
-	for _, provider := range plugin.FindAll[server](host.Host) {
-		served = append(served, plugin.IDOf(host.Host, provider)+":"+provider.Serves())
+	for _, peer := range host.Plugins() {
+		provider, ok := peer.(server)
+		if !ok {
+			continue
+		}
+		served = append(served, peer.Describe().ID+":"+provider.Serves())
 	}
 
 	if strings.Join(served, " ") != "console:/control/ turnstile:/turnstile/" {

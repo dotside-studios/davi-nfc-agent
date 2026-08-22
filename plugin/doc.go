@@ -50,11 +50,12 @@
 //
 // # Reaching other plugins
 //
-// By capability rather than by name, with [Find] and [FindAll]. It is how the
-// agent asks what is serving it, and how a server gathers the pages its peers
-// want it to mount:
+// By capability rather than by name. [Find] returns the first plugin
+// implementing an interface, which is how the agent asks what is serving it;
+// walk [Host.Plugins] and assert for more than one, which is how a server
+// gathers the pages its peers want it to mount:
 //
-//	for _, provider := range plugin.FindAll[wsserver.RouteProvider](host) { ... }
+//	if serving, ok := plugin.Find[interface{ Port() int }](host); ok { ... }
 //
 // # Registration
 //

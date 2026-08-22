@@ -25,6 +25,10 @@ func (s *servingAgent) RemoteDevices() *remotenfc.Manager { return findDeviceDri
 
 func (s *servingAgent) APISecret() string { return s.agent.APISecret }
 
+// RotateAPISecret issues a fresh one and restarts the listeners on to it, which
+// takes this plugin down and back up with the new secret in hand.
+func (s *servingAgent) RotateAPISecret() (string, error) { return s.agent.RotateAPISecret() }
+
 func (s *servingAgent) PublicKeyPin() string { return s.agent.PublicKeyPin }
 
 func (s *servingAgent) TokenVerifier() server.TokenVerifier { return s.agent.tokenVerifier() }

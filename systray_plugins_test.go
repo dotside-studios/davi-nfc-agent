@@ -7,6 +7,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/plugin"
+	"github.com/dotside-studios/davi-nfc-agent/plugins/wsserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -180,7 +181,7 @@ func TestTheConsoleIsServedThroughTheSameSeamAsAnyPlugin(t *testing.T) {
 		t.Skip("this build has no control center to serve")
 	}
 
-	routes, ok := served.(plugin.RouteProvider)
+	routes, ok := served.(wsserver.RouteProvider)
 	if !ok {
 		t.Fatal("the console does not ask for its routes like every other plugin")
 	}

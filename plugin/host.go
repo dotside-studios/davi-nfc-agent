@@ -55,8 +55,6 @@ type Host struct {
 	inited  bool
 	started bool
 
-	endpoints Endpoints
-
 	// publishMu keeps snapshots in the order they were taken; stateMu guards
 	// the last one, so a plugin can read it from inside a handler.
 	publishMu sync.Mutex
@@ -301,8 +299,8 @@ func (h *Host) Lookup(id string) (Plugin, bool) {
 }
 
 // Find returns the first registered plugin that implements T. It is how a
-// plugin reaches a capability rather than a name: whatever is serving HTTP,
-// whatever knows about pairing.
+// plugin, or the agent, reaches a capability rather than a name: whatever is
+// serving HTTP, whatever knows about pairing.
 //
 //	if servers, ok := plugin.Find[interface{ Port() int }](host); ok { ... }
 func Find[T any](h *Host) (T, bool) {
@@ -316,38 +314,32 @@ func Find[T any](h *Host) (T, bool) {
 	return zero, false
 }
 
-// Endpoints is the register of addresses the agent hands out. Plugins publish
-// theirs here and whatever draws the agent's menus reads it back, so an address
-// appears without anything being told what it is.
-func (h *Host) Endpoints() *Endpoints { return &h.endpoints }
-
-// Routes returns every route the registered plugins want served, in
-// registration order. Whatever is serving the agent's port asks for these as it
-// comes up.
-func (h *Host) Routes() []Route {
-	var routes []Route
-	for _, e := range h.snapshot() {
-		provider, ok := e.plugin.(RouteProvider)
-		if !ok {
-			continue
-		}
-		for _, route := range provider.Routes() {
-			if route.Pattern == "" || route.Handler == nil {
-				h.config.Logf("[plugin] %s asked for a route with no %s", e.info.Name(), missingPart(route))
-				continue
-			}
-			route.Owner = e.info.ID
-			routes = append(routes, route)
+// FindAll returns every registered plugin that implements T, in registration
+// order. It is how a plugin gathers what its peers have declared to it — the
+// server asking who has a page for it to mount — without the runtime having to
+// know what any of it is.
+//
+//	for _, provider := range plugin.FindAll[RouteProvider](host) { ... }
+func FindAll[T any](h *Host) []T {
+	var found []T
+	for _, p := range h.Plugins() {
+		if match, ok := p.(T); ok {
+			found = append(found, match)
 		}
 	}
-	return routes
+	return found
 }
 
-func missingPart(route Route) string {
-	if route.Pattern == "" {
-		return "pattern"
+// IDOf returns the ID a plugin is registered under, empty when it is not
+// registered here. A capability found through FindAll is an interface with no
+// name on it; this puts one back for a log line.
+func IDOf(h *Host, plugin any) string {
+	for _, e := range h.snapshot() {
+		if e.plugin == plugin {
+			return e.info.ID
+		}
 	}
-	return "handler"
+	return ""
 }
 
 // State is the snapshot as of the last change reported.

@@ -19,11 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `plugin` is the runtime everything that serves now goes through. A plugin
   declares only the phases it has work in — `Init` to wire up, `Start` and
   `Stop` to serve, `Close` on the way out — and is handed a context of its own:
-  a menu, the register of addresses the agent hands out, routes mounted on the
-  agent's listener, a snapshot of what the agent is doing and a signal raised
-  whenever that changes, the clipboard, a browser and the log. Init and Start
-  run in registration order and Stop and Close in the reverse of it, so what
-  everything else is mounted on comes up first and goes down last.
+  a menu of its own, a snapshot of what the agent is doing and a signal raised
+  whenever that changes, its peers by name or by capability, the clipboard, a
+  browser and the log. Init and Start run in registration order and Stop and
+  Close in the reverse of it, so what everything else is mounted on comes up
+  first and goes down last.
+
+  The runtime knows nothing about what a plugin does. It has no notion of an
+  address or an HTTP route: a plugin that serves something draws its own menu
+  for it, and one that needs something of a peer asks for it by capability with
+  `Find` and `FindAll`. Anything else would be the agent's own features keeping
+  a privileged seam a consumer's cannot reach.
 
   Nothing in it reaches `fyne.io/systray`, and a build with no tray discards the
   menus rather than making a plugin ask whether anything draws one. A plugin
@@ -47,11 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The control center is served this way now and has no other mechanism: it is a
   plugin asking for `/control/` and `/`, like any other.
 
-  A route may carry a `Label`, which puts its address on the agent's menus
-  beside the agent's own. The URL is built by whatever bound the port — it knows
-  the scheme, the host and the port actually taken, none of which the plugin can
-  be sure of — and withdrawn again when that listener stops, so a mounted page
-  publishes an address without building one
+  A route may carry a `Label`, which lists its address on the serving plugin's
+  own menu beside the endpoints that plugin answers itself. The URL is built by
+  whatever bound the port — it knows the scheme, the host and the port actually
+  taken, none of which the plugin can be sure of — and goes to `Not running`
+  when that listener stops, so a mounted page gets an address without building
+  one. `Route` lives with the server that mounts it rather than in the runtime
 
 - **The reader can say what it just did.** Someone holding a card at the reader
   had no way to tell a completed scan from one that never happened: the agent
@@ -91,28 +98,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serves clients for its client list, and the paired-device requirement reaches
   whatever admits devices. Nothing in `agent.go` names the server package
 
-- **The servers publish their addresses, and the tray draws what is published.**
-  The tray built the device, client and pairing URLs itself and drew a fixed
-  entry and a matching copy entry for each. Nothing else could appear there: a
-  feature serving something of its own had no way onto a menu whose contents
-  were a hardcoded list of the three the agent shipped with.
+- **Whoever serves an address is the one who shows it.** The tray built the
+  device, client and pairing URLs itself and drew a fixed entry and a matching
+  copy entry for each, so the only addresses that could appear were the three
+  the agent shipped with.
 
-  A plugin registers a `plugin.Endpoint` instead. The addresses are declared
-  before anything is listening, so they hold their place on a menu drawn first,
-  and filled in from the port actually bound — these are pasted into a device,
-  and an address naming an unbound port is worse than none. A stopped server
-  empties its own, which is what makes it read as `Not running` rather than
-  disappear. The tray renders whatever is in the register and knows what none of
-  it is. A row is now the address and its copy entry in one — clicking it copies
-  — so what is copied cannot drift from what is read
+  **Server URLs** is the server plugin's own menu now, the way **Pair a Phone**
+  is the pairing plugin's. It lists what that listener answers on — the device
+  and client endpoints, and a row for every page a plugin asked it to mount —
+  along with the API secret those endpoints ask for, which is useless away from
+  them. The addresses name the port actually bound, since they get pasted into a
+  device and one naming an unbound port is worse than none, and a stopped server
+  keeps its rows and reads `Not running` rather than leaving an empty menu. A
+  row is the address and its copy entry in one, so what is copied cannot drift
+  from what is read.
+
+  Nothing else on the tray knows what a server address is, and nothing in the
+  runtime does either: the plugin menus sit where **Server URLs** used to, and
+  the tray reserves the places without drawing any of them
 
 - **Pairing is a plugin, and the tray no longer knows what pairing is.** The
   pairing PIN, its copy and its regenerate entry lived in the tray's URLs
   submenu, the tray held the bootstrap server to work them, and `main` started
   it. It is now a plugin with a **Pair a Phone** menu of its own carrying the
-  PIN, the page, both copy entries and the rotation — and, new, an entry that
-  opens the pairing page here, for pairing a phone from the code on the
-  operator's own screen. It owns its listener's lifecycle, so pairing now comes
+  PIN, the page it is served on, the copy entries and the rotation — and, new,
+  an entry that opens the pairing page here, for pairing a phone from the code
+  on the operator's own screen. It owns its listener's lifecycle, so pairing now comes
   up and goes down with the agent rather than running whether or not the agent
   was started, and a build with no pairing server registers nothing rather than
   hiding entries. `NewSystrayApp` no longer takes a pairing server or its port

@@ -52,65 +52,49 @@ to another plugin's menu, or to the agent's settings.
 | | |
 |---|---|
 | `Menu()` | a menu of its own — a [`traymenu.Container`](../traymenu), taken on first use |
-| `Endpoints()` | the register of addresses the agent hands out, for one with no route behind it |
 | `State()` / `Watch(fn)` | what the agent is doing, and a signal raised whenever that changes |
-| `Routes()` | what the plugins want served, for whatever is serving the port |
-| `Peer(id)` / `Host()` | the plugins around it |
+| `Peer(id)` / `Host()` | the plugins around it, by name or by capability |
 | `Copy`, `Open`, `Logf` | the clipboard, a browser, and the agent's log |
+
+That is the whole of it. The runtime has no notion of an address, an HTTP route
+or anything else a particular plugin does: a plugin that serves something draws
+its own menu for it, and one that needs something of a peer asks for it by
+capability. The agent's own features have no seam a consumer's cannot use.
 
 Nothing here names `fyne.io/systray`. A build with no tray leaves `Config.Menus`
 nil and a plugin that fills a menu still runs — its items go to
 `traymenu.Discard()` and behave, they are just not on any tray.
 
-## Serving HTTP
+## Reaching other plugins
 
-A plugin with a page or an API of its own does not open a listener for it. It
-implements `RouteProvider`, and whatever is serving the agent's port mounts what
-it returns:
-
-```go
-func (t *turnstile) Routes() []plugin.Route {
-    return []plugin.Route{{Pattern: "/turnstile/", Handler: t.mux, Label: "Gate"}}
-}
-```
-
-So the gate is reachable at the address a device already trusts, under the
-certificate it already has, with no port of its own. The control center is served
-exactly this way. A route asking for a path the agent serves itself (`/ws`,
-`/health`) is refused and logged; the root is claimable, since the agent's banner
-is only there while nothing else wants it.
-
-## Addresses
-
-`Endpoints` is the register of addresses the agent hands out — what the tray
-shows under **Server URLs** and copies. Routes and endpoints are not the same
-thing: a route is a handler to mount, an endpoint is an address to give someone.
-Most mounted pages are both, so a `Label` on a route publishes one, with the URL
-built by whatever bound the port rather than by the plugin guessing at the
-scheme, the host and the port.
-
-Register one directly when there is no route behind it — a listener of your own,
-or an address that is not a plain path:
-
-```go
-ctx.Endpoints().Set(plugin.Endpoint{ID: "turnstile", Label: "Gate", URL: gateURL})
-```
-
-An empty `URL` means *not running*, which is what a stopped server publishes: the
-entry keeps its place and says so, rather than handing out an address that
-refuses the connection. Publishing the same ID again — a pairing PIN rotating
-into the URL that carries it — keeps that place too.
-
-## Capabilities, not names
-
-The agent asks its plugins what they can do rather than which one they are:
+By capability rather than by name:
 
 ```go
 if serving, ok := plugin.Find[interface{ Port() int }](host); ok { ... }
+
+for _, provider := range plugin.FindAll[wsserver.RouteProvider](host) { ... }
 ```
 
-That is how `Agent.ServingPort` and the console's client list work, and why the
-server can be replaced or left out without the agent knowing.
+`Find` takes the first, `FindAll` takes them in registration order, and
+`IDOf(host, p)` puts a name back on one for a log line. This is how
+`Agent.ServingPort` asks what is serving it, how the console finds the client
+list, and how `wsserver` gathers the pages its peers want mounted. Nothing in
+`agent.go` names a server package.
+
+`Context.Peer(id)` reaches one by ID, for a plugin that extends another it knows.
+
+## Menus and addresses
+
+A plugin draws its own. `wsserver` owns **Server URLs** — the endpoints it
+answers on, the pages mounted on it, the secret they ask for — and `pairing`
+owns **Pair a Phone**. There is no shared register and nothing else on the tray
+knows what a server address is.
+
+The tray holds a few top-level menus open where a feature's menu belongs and
+hands them out through `Config.Menus`. A menu is taken on first use, so a plugin
+that only serves something never asks for one and leaves nothing empty behind.
+In a build with no tray the menu is `traymenu.Discard()`: the items behave, they
+are just not on any tray.
 
 ## Registration from outside
 
@@ -137,7 +121,7 @@ h.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04A
 h.Tray.Find("Turnstile", "Hold Gate Open").Deliver()
 h.Render()   // the menu as text
 h.Copied()   // what the plugin put on the clipboard
-h.Endpoints().List()
+h.Opened()   // what it asked a browser to show
 ```
 
 No desktop, no tray, no display server. See `example_test.go` for a whole

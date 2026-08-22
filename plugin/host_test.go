@@ -2,7 +2,6 @@ package plugin_test
 
 import (
 	"errors"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -19,8 +18,9 @@ type recorder struct {
 	initErr  error
 	startErr error
 
-	// routes are what it asks to have served.
-	routes []plugin.Route
+	// serves is a path this plugin would have someone else mount, which stands
+	// in for any capability a peer declares.
+	serves string
 
 	// wantsMenu has it take a menu of its own.
 	wantsMenu bool
@@ -57,7 +57,7 @@ func (r *recorder) Close(*plugin.Context) error {
 	return nil
 }
 
-func (r *recorder) Routes() []plugin.Route { return r.routes }
+func (r *recorder) Serves() string { return r.serves }
 
 func (r *recorder) note(phase string) { *r.log = append(*r.log, r.info.ID+":"+phase) }
 
@@ -241,32 +241,30 @@ func TestReplacingAPluginRetiresTheOneItReplaces(t *testing.T) {
 	}
 }
 
-func TestRoutesAreCollectedInRegistrationOrderAndOwned(t *testing.T) {
+func TestFindAllGathersACapabilityInRegistrationOrder(t *testing.T) {
+	// What one plugin does to find what its peers have declared to it: the
+	// server asking who has a page for it to mount. The runtime is not asked
+	// what a page is.
 	var log []string
-	console := newRecorder("console", &log)
-	console.routes = []plugin.Route{{Pattern: "/control/", Handler: http.NotFoundHandler()}}
+	console, turnstile := newRecorder("console", &log), newRecorder("turnstile", &log)
+	console.serves, turnstile.serves = "/control/", "/turnstile/"
 
-	turnstile := newRecorder("turnstile", &log)
-	turnstile.routes = []plugin.Route{
-		{Pattern: "/turnstile/", Handler: http.NotFoundHandler()},
-		{Pattern: "", Handler: http.NotFoundHandler()}, // no pattern
-		{Pattern: "/nothing/", Handler: nil},           // no handler
-	}
-
-	host := plugin.NewHarness(console, turnstile)
+	host := plugin.NewHarness(&stub{info: plugin.Info{ID: "quiet"}}, console, turnstile)
 	t.Cleanup(func() { _ = host.Close() })
 
-	routes := host.Routes()
-	if len(routes) != 2 {
-		t.Fatalf("collected %d routes, want the two that were complete", len(routes))
+	var served []string
+	for _, provider := range plugin.FindAll[server](host.Host) {
+		served = append(served, plugin.IDOf(host.Host, provider)+":"+provider.Serves())
 	}
-	if routes[0].Pattern != "/control/" || routes[0].Owner != "console" {
-		t.Errorf("first route = %+v", routes[0])
-	}
-	if routes[1].Pattern != "/turnstile/" || routes[1].Owner != "turnstile" {
-		t.Errorf("second route = %+v", routes[1])
+
+	if strings.Join(served, " ") != "console:/control/ turnstile:/turnstile/" {
+		t.Fatalf("gathered %v, want both providers in registration order and named", served)
 	}
 }
+
+// server is a capability, as the agent's own lookups are: an interface with no
+// plugin named in it.
+type server interface{ Serves() string }
 
 func TestFindReachesAPluginByWhatItCanDo(t *testing.T) {
 	var log []string
@@ -275,8 +273,8 @@ func TestFindReachesAPluginByWhatItCanDo(t *testing.T) {
 
 	// What the agent does to ask "is anything serving, and where": it names the
 	// capability, never the plugin.
-	if _, ok := plugin.Find[plugin.RouteProvider](host.Host); !ok {
-		t.Fatal("Find did not reach the plugin that can serve routes")
+	if _, ok := plugin.Find[server](host.Host); !ok {
+		t.Fatal("Find did not reach the plugin that has the capability")
 	}
 	if _, ok := plugin.Find[interface{ Port() int }](host.Host); ok {
 		t.Fatal("Find claimed a capability nothing registered has")

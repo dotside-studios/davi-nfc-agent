@@ -25,9 +25,15 @@ type fakeAgent struct {
 	changed int
 }
 
-func (f *fakeAgent) Reader() *nfc.NFCReader              { return f.reader }
-func (f *fakeAgent) RemoteDevices() *remotenfc.Manager   { return f.remote }
-func (f *fakeAgent) APISecret() string                   { return f.secret }
+func (f *fakeAgent) Reader() *nfc.NFCReader            { return f.reader }
+func (f *fakeAgent) RemoteDevices() *remotenfc.Manager { return f.remote }
+func (f *fakeAgent) APISecret() string                 { return f.secret }
+
+func (f *fakeAgent) RotateAPISecret() (string, error) {
+	f.secret = "fresh12345678secret"
+	return f.secret, nil
+}
+
 func (f *fakeAgent) PublicKeyPin() string                { return "" }
 func (f *fakeAgent) TokenVerifier() server.TokenVerifier { return nil }
 func (f *fakeAgent) OriginPolicy() server.OriginPolicy   { return nil }
@@ -69,7 +75,7 @@ func freePort(t *testing.T) int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
-func TestAddressesAreDeclaredBeforeAnythingIsServing(t *testing.T) {
+func TestTheMenuIsDrawnBeforeAnythingIsServing(t *testing.T) {
 	host := plugin.NewHarness(wsserver.New(wsserver.Config{Agent: &fakeAgent{}}))
 	t.Cleanup(func() { _ = host.Close() })
 
@@ -77,20 +83,63 @@ func TestAddressesAreDeclaredBeforeAnythingIsServing(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// They hold their place on a menu drawn before the listener is up, and read
-	// as not running until it is.
-	for _, id := range []string{wsserver.EndpointDevice, wsserver.EndpointClient} {
-		endpoint, ok := host.Endpoints().Get(id)
-		if !ok {
-			t.Fatalf("%s was never declared", id)
-		}
-		if endpoint.Running() {
-			t.Errorf("%s reads as running with nothing serving: %q", id, endpoint.URL)
+	// The addresses are this plugin's own menu, drawn before the listener is
+	// up and reading as not running until it is.
+	for _, title := range []string{"Device: Not running", "Client: Not running"} {
+		if host.Tray.Find("Server URLs", title) == nil {
+			t.Fatalf("%q is not on the menu:\n%s", title, host.Render())
 		}
 	}
 }
 
-func TestServingPublishesThePortItBound(t *testing.T) {
+func TestTheSecretIsHandedOutWithTheAddressesThatAskForIt(t *testing.T) {
+	agent := newAgent(t)
+	agent.secret = "abcd12345678wxyz"
+
+	host := plugin.NewHarness(wsserver.New(wsserver.Config{Agent: agent, Logf: func(string, ...any) {}}))
+	t.Cleanup(func() { _ = host.Close() })
+
+	if err := host.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Redacted on the menu, whole on the clipboard: a tray is read over
+	// someone's shoulder.
+	label := host.Tray.Find("Server URLs", "API Secret: abcd…wxyz")
+	if label == nil {
+		t.Fatalf("the secret is not on the menu:\n%s", host.Render())
+	}
+
+	host.Tray.Find("Server URLs", "Copy API Secret").Deliver()
+	waitFor(t, "the copy", func() bool { return len(host.Copied()) == 1 })
+	if got := host.Copied()[0].Value; got != agent.secret {
+		t.Errorf("copied %q, want the whole secret", got)
+	}
+
+	host.Tray.Find("Server URLs", "Regenerate API Secret").Deliver()
+	waitFor(t, "the rotation", func() bool { return label.Title() != "API Secret: abcd…wxyz" })
+}
+
+func TestWithNoSecretConfiguredNothingOffersOne(t *testing.T) {
+	host := plugin.NewHarness(wsserver.New(wsserver.Config{Agent: &fakeAgent{}}))
+	t.Cleanup(func() { _ = host.Close() })
+
+	if err := host.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	for _, title := range []string{"API Secret: not set", "Copy API Secret", "Regenerate API Secret"} {
+		item := host.Tray.Find("Server URLs", title)
+		if item == nil {
+			t.Fatalf("%q is missing from the menu:\n%s", title, host.Render())
+		}
+		if item.Visible() {
+			t.Errorf("%q is offered with no secret behind it", title)
+		}
+	}
+}
+
+func TestServingShowsThePortItBound(t *testing.T) {
 	agent := newAgent(t)
 	servers := wsserver.New(wsserver.Config{Agent: agent, Logf: func(string, ...any) {}})
 
@@ -108,31 +157,53 @@ func TestServingPublishesThePortItBound(t *testing.T) {
 	}
 
 	port := strconv.Itoa(agent.port)
-	device, _ := host.Endpoints().Get(wsserver.EndpointDevice)
-	client, _ := host.Endpoints().Get(wsserver.EndpointClient)
+	client, device := addressRows(t, host)
 
 	// A device connects with the device mode on it, a client to plain /ws, and
 	// both name the port that is actually bound.
-	if !strings.HasSuffix(device.URL, "/ws?mode=device") || !strings.Contains(device.URL, port) {
-		t.Errorf("device URL = %q", device.URL)
+	if !strings.HasSuffix(device, "/ws?mode=device") || !strings.Contains(device, port) {
+		t.Errorf("device row = %q", device)
 	}
-	if !strings.HasSuffix(client.URL, "/ws") || !strings.Contains(client.URL, port) {
-		t.Errorf("client URL = %q", client.URL)
+	if !strings.HasSuffix(client, "/ws") || !strings.Contains(client, port) {
+		t.Errorf("client row = %q", client)
 	}
 
-	// And a stop withdraws them without losing their place.
+	// A row is its own copy entry, so what is copied cannot drift from what is
+	// read.
+	host.Tray.Find("Server URLs", "Device: "+device).Deliver()
+	waitFor(t, "the copy", func() bool { return len(host.Copied()) == 1 })
+	if got := host.Copied()[0].Value; got != device {
+		t.Errorf("copied %q, want the address the row is showing", got)
+	}
+
+	// And a stop leaves the rows where they were, saying so.
 	if err := host.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 	if servers.Serving() {
 		t.Error("still serving after a stop")
 	}
-	if endpoint, _ := host.Endpoints().Get(wsserver.EndpointDevice); endpoint.Running() {
-		t.Errorf("a stopped listener still hands out %q", endpoint.URL)
+	if host.Tray.Find("Server URLs", "Device: Not running") == nil {
+		t.Errorf("a stopped listener still hands out an address:\n%s", host.Render())
 	}
-	if endpoint, _ := host.Endpoints().Get(wsserver.EndpointDevice); endpoint.Label != "Device" {
-		t.Error("the entry lost its label on the way down")
+}
+
+// addressRows reads the device and client addresses off the menu.
+func addressRows(t *testing.T, host *plugin.Harness) (client, device string) {
+	t.Helper()
+
+	for _, item := range host.Tray.Find("Server URLs").Children() {
+		switch {
+		case strings.HasPrefix(item.Title(), "Device: "):
+			device = strings.TrimPrefix(item.Title(), "Device: ")
+		case strings.HasPrefix(item.Title(), "Client: "):
+			client = strings.TrimPrefix(item.Title(), "Client: ")
+		}
 	}
+	if client == "" || device == "" {
+		t.Fatalf("the menu is missing an address:\n%s", host.Render())
+	}
+	return client, device
 }
 
 func TestWithoutAReaderNothingServes(t *testing.T) {
@@ -150,8 +221,8 @@ type gate struct{}
 
 func (gate) Describe() plugin.Info { return plugin.Info{ID: "turnstile", Title: "Turnstile"} }
 
-func (gate) Routes() []plugin.Route {
-	return []plugin.Route{{
+func (gate) Routes() []wsserver.Route {
+	return []wsserver.Route{{
 		Pattern: "/turnstile/",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("gate"))
@@ -178,30 +249,45 @@ func TestAPluginsPageIsServedOnTheAgentsPort(t *testing.T) {
 		t.Fatalf("the agent's port answered %q at the plugin's path", body)
 	}
 
-	// And its address is handed out beside the agent's own, built by whatever
-	// bound the port rather than by the plugin guessing at it.
-	route := plugin.Route{Pattern: "/turnstile/", Owner: "turnstile"}
-	endpoint, ok := host.Endpoints().Get(route.EndpointID())
-	if !ok {
-		t.Fatal("the labelled route was not published")
+	// And its address is listed on this server's menu, beside the endpoints the
+	// server answers itself — built by whatever bound the port rather than by
+	// the plugin guessing at the scheme, the host and the port.
+	var listed string
+	for _, item := range host.Tray.Find("Server URLs").Children() {
+		if strings.HasPrefix(item.Title(), "Gate: ") {
+			listed = strings.TrimPrefix(item.Title(), "Gate: ")
+		}
 	}
-	if endpoint.Label != "Gate" {
-		t.Errorf("published as %q, want the name the plugin gave it", endpoint.Label)
+	if listed == "" {
+		t.Fatalf("the labelled route is not on the menu:\n%s", host.Render())
 	}
-	if !strings.HasSuffix(endpoint.URL, "/turnstile/") || !strings.Contains(endpoint.URL, strconv.Itoa(agent.port)) {
-		t.Errorf("published URL = %q, want the agent's own port and the route's path", endpoint.URL)
-	}
-	if !strings.HasPrefix(endpoint.URL, "http://") {
-		t.Errorf("published URL = %q, want the scheme the listener is serving", endpoint.URL)
+	if !strings.HasPrefix(listed, "http://") || !strings.HasSuffix(listed, "/turnstile/") ||
+		!strings.Contains(listed, strconv.Itoa(agent.port)) {
+		t.Errorf("listed as %q, want the agent's own scheme, port and the route's path", listed)
 	}
 
-	// It goes down with the listener, like the agent's own addresses.
+	// It goes down with the listener, like the server's own addresses.
 	if err := host.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if endpoint, _ := host.Endpoints().Get(route.EndpointID()); endpoint.Running() {
-		t.Errorf("a stopped listener still hands out %q", endpoint.URL)
+	if host.Tray.Find("Server URLs", "Gate: Not running") == nil {
+		t.Errorf("a stopped listener still hands out a mounted page's address:\n%s", host.Render())
 	}
+}
+
+// waitFor polls until cond holds, for a click delivered the way the platform
+// delivers one: down the item's channel, on the menu's own goroutine.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }
 
 func get(t *testing.T, url string) string {

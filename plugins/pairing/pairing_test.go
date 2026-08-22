@@ -8,6 +8,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/plugin"
 	"github.com/dotside-studios/davi-nfc-agent/plugins/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // fakeServer is a pairing server with no listener behind it.
@@ -51,18 +52,30 @@ func TestPairingPublishesItsPageAndPIN(t *testing.T) {
 		t.Fatalf("the pairing server was started %d times", server.started)
 	}
 
-	// The address goes where the agent's menus read addresses from, PIN and
-	// all, so the URL that is copied is the one that works.
-	endpoint, ok := host.Endpoints().Get(pairing.ID)
-	if !ok || !endpoint.Running() {
-		t.Fatal("the pairing page was not published")
-	}
-	if !strings.Contains(endpoint.URL, "pin=111111") {
-		t.Fatalf("pairing URL %q does not carry the PIN a phone is asked for", endpoint.URL)
-	}
+	// Both are on this plugin's own menu. Nothing else on the tray knows what a
+	// pairing page is, or has to be changed for one to appear.
 	if host.Tray.Find("Pair a Phone", "Pairing PIN: 111111") == nil {
 		t.Fatalf("the menu does not show the PIN:\n%s", host.Render())
 	}
+
+	page := pageRow(t, host)
+	if !strings.Contains(page.Title(), "pin=111111") {
+		t.Fatalf("the page entry reads %q, without the PIN a phone is asked for", page.Title())
+	}
+}
+
+// pageRow is the entry showing where the pairing page is.
+func pageRow(t *testing.T, host *plugin.Harness) *traymenu.FakeItem {
+	t.Helper()
+
+	for _, item := range host.Tray.Find("Pair a Phone").Children() {
+		if strings.HasPrefix(item.Title(), "Page: ") {
+			return item
+		}
+	}
+
+	t.Fatalf("no page entry on the menu:\n%s", host.Render())
+	return nil
 }
 
 func TestRotatingThePINMovesEverythingShowingIt(t *testing.T) {
@@ -74,16 +87,16 @@ func TestRotatingThePINMovesEverythingShowingIt(t *testing.T) {
 	}
 
 	label := host.Tray.Find("Pair a Phone", "Pairing PIN: 111111")
-	host.Tray.Find("Pair a Phone", "Regenerate Pairing PIN").Deliver()
+	page := pageRow(t, host)
 
+	host.Tray.Find("Pair a Phone", "Regenerate Pairing PIN").Deliver()
 	waitFor(t, "the PIN to rotate", func() bool { return !strings.Contains(label.Title(), "111111") })
 
 	if got := label.Title(); got != "Pairing PIN: 222222" {
 		t.Errorf("the menu shows %q after a rotation", got)
 	}
-	endpoint, _ := host.Endpoints().Get(pairing.ID)
-	if !strings.Contains(endpoint.URL, "pin=222222") {
-		t.Errorf("the published URL %q still carries the old PIN", endpoint.URL)
+	if !strings.Contains(page.Title(), "pin=222222") {
+		t.Errorf("the page entry %q still carries the old PIN", page.Title())
 	}
 }
 
@@ -96,7 +109,7 @@ func TestCopyEntriesHandOutWhatTheMenuShows(t *testing.T) {
 	}
 
 	host.Tray.Find("Pair a Phone", "Copy Pairing PIN").Deliver()
-	host.Tray.Find("Pair a Phone", "Copy Pairing URL").Deliver()
+	pageRow(t, host).Deliver()
 	waitFor(t, "both copies", func() bool { return len(host.Copied()) == 2 })
 
 	// Both entries hand out the same PIN the label is showing, whichever click
@@ -131,9 +144,9 @@ func TestStoppingWithdrawsThePage(t *testing.T) {
 	if server.stopped != 1 {
 		t.Fatalf("the pairing server was stopped %d times", server.stopped)
 	}
-	// The entry keeps its place and says so, rather than disappearing.
-	if endpoint, _ := host.Endpoints().Get(pairing.ID); endpoint.Running() {
-		t.Errorf("the pairing page still reads as running: %q", endpoint.URL)
+	// The menu keeps its place and says so, rather than disappearing.
+	if got := pageRow(t, host).Title(); got != "Page: Not running" {
+		t.Errorf("a stopped pairing server still offers %q", got)
 	}
 	if host.Tray.Find("Pair a Phone", "Pairing PIN: 111111") == nil {
 		t.Error("the menu went away with the listener")
@@ -159,9 +172,9 @@ func TestAPairingServerThatWillNotStart(t *testing.T) {
 	if err := host.Start(); err == nil {
 		t.Fatal("Start reported no error though the listener never came up")
 	}
-	// Nothing is answering, so nothing is handed out.
-	if endpoint, _ := host.Endpoints().Get(pairing.ID); endpoint.Running() {
-		t.Errorf("an address was published for a listener that never started: %q", endpoint.URL)
+	// Nothing is answering, so nothing is offered.
+	if got := pageRow(t, host).Title(); got != "Page: Not running" {
+		t.Errorf("an address was offered for a listener that never started: %q", got)
 	}
 }
 

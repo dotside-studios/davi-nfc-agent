@@ -118,14 +118,18 @@ control where yours sits in the start order instead, call `host.Use` directly.
 A plugin with a page or an API of its own does not open a listener for it:
 
 ```go
-func (p *Plugin) Routes() []plugin.Route {
-    return []plugin.Route{{
+func (p *Plugin) Routes() []wsserver.Route {
+    return []wsserver.Route{{
         Pattern: "/turnstile/",
         Handler: p.mux,
-        Label:   "Gate",   // and put its address on the menus
+        Label:   "Gate",   // and list its address on the server's menu
     }}
 }
 ```
+
+`Route` belongs to the server that mounts it, not to the runtime — the runtime
+has no notion of HTTP. A different server would collect the same declarations
+with `plugin.FindAll[RouteProvider]`, which is how `wsserver` does it.
 
 Whatever is serving the agent's port mounts it, so the page is reachable wherever
 the agent already is, under the certificate a device already trusts. The control
@@ -145,38 +149,32 @@ authority yet is exactly who its page is for.
 
 ## Addresses
 
-A `Label` on a route is all a mounted page needs. The address is built by
-whatever bound the port — it knows the scheme, the host and the port that was
-actually taken, none of which the plugin can be sure of — and withdrawn again
-when that listener stops. Leave the label off a route nobody is meant to be
-handed: the control center is opened with a token, not a URL, so it has none.
-
-Register an address directly only when there is no route to hang it on — a
-listener of your own, or an address that is not a plain path:
+There is no shared address register. A plugin that serves something draws its
+own menu for it, the way `wsserver` draws **Server URLs** and `pairing` draws
+**Pair a Phone**:
 
 ```go
-ctx.Endpoints().Set(plugin.Endpoint{
-    ID:      "turnstile",
-    Label:   "Gate",
-    URL:     "http://" + hostPort + "/",
-    Tooltip: "The gate's own console. Click to copy",
-})
+func (p *Plugin) Init(ctx *plugin.Context) error {
+    p.page = ctx.Menu().Add("Page: Not running",
+        traymenu.Tooltip("Where the gate is. Click to copy"),
+        traymenu.OnClick(func() { ctx.Copy("gate URL", p.url) }),
+    )
+    return nil
+}
 ```
 
-Either way it appears under **Server URLs** beside the agent's own and is copied
-by the same entry. The tray draws whatever is in the register; it is not told
-what any of it is.
+Keep the row and relabel it as the thing behind it comes and goes — `Not
+running` while it is down, rather than an entry that vanishes. A row that copies
+what it is showing cannot drift from it.
 
-An empty `URL` means the server behind it is not running: the entry keeps its
-place and reads as `Not running` rather than disappearing. Setting the same ID
-again replaces it in place, which is how the pairing page survives a PIN rotation
-without moving on the menu.
+If your page is mounted on the agent's listener, a `Label` on the route is
+enough: the server lists it on its own menu, with the address built from the
+port it actually bound.
 
-`wsserver` is the one that has to do this by hand, since its addresses are
-`ws://` and carry the device mode. It declares both entries in `Init`, before
-anything is listening, and fills in the URLs in `Start` from the port it actually
-bound. These get pasted into a device, and an address naming an unbound port is
-worse than none.
+`wsserver`'s menu therefore carries the device and client endpoints, a row for
+every mounted page that asked to be listed, and the API secret those endpoints
+ask for — which is meaningless away from them, so it is handed out with them
+rather than by the tray.
 
 ## Following the agent
 
@@ -205,10 +203,16 @@ it; show your entry disabled instead.
 
 ## Reaching other plugins
 
-By capability, with `plugin.Find`, or by ID with `ctx.Peer("pairing")`. The agent
-itself only ever asks by capability: `ServingPort` asks whatever is serving where
-it is, the console asks whatever serves clients for its client list, and the
-paired-device requirement reaches whatever admits devices.
+By capability, with `plugin.Find` and `plugin.FindAll`, or by ID with
+`ctx.Peer("pairing")`. Everything cross-plugin works this way, including the
+agent's own lookups: `ServingPort` asks whatever is serving where it is, the
+console asks whatever serves clients for its client list, and the paired-device
+requirement reaches whatever admits devices. The server collects its mounts the
+same way.
+
+That is the whole extension mechanism. The runtime carries no registry of
+addresses, routes or anything else domain-specific, so the agent's own plugins
+have no seam a consumer's cannot use.
 
 ## Where a menu goes
 
@@ -234,10 +238,9 @@ h.Start()
 h.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04A2"}})
 
 h.Tray.Find("Turnstile", "Hold Gate Open").Deliver()
-h.Render()             // the menu as text
-h.Copied()             // what it put on the clipboard
-h.Endpoints().List()   // what it published
-h.Routes()             // what it asked to serve
+h.Render()   // the menu as text
+h.Copied()   // what it put on the clipboard
+h.Opened()   // what it asked a browser to show
 ```
 
 No desktop and no display server.

@@ -2,7 +2,6 @@ package plugin_test
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/plugin"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -23,6 +22,7 @@ type gate struct{}
 
 func (gate) Open() error  { return nil }
 func (gate) Close() error { return nil }
+func (gate) URL() string  { return "http://localhost:8080/" }
 
 func (t *turnstile) Describe() plugin.Info {
 	return plugin.Info{ID: "turnstile", Title: "Turnstile", Tooltip: "The gate this agent drives"}
@@ -39,7 +39,7 @@ func (t *turnstile) Init(ctx *plugin.Context) error {
 
 	menu.AddSeparator()
 	menu.Add("Copy Gate URL", traymenu.OnClick(func() {
-		ctx.Copy("gate URL", "http://localhost:9470/turnstile/")
+		ctx.Copy("gate URL", t.gate.URL())
 	}))
 
 	// A badge on the reader is a pass through the gate.
@@ -51,17 +51,6 @@ func (t *turnstile) Init(ctx *plugin.Context) error {
 		t.passes.SetTitle(fmt.Sprintf("Passes today: %d", t.count))
 	})
 	return nil
-}
-
-// Routes are served on the agent's own listener, so the gate needs no port, no
-// certificate and no trust of its own. Labelling one puts its address on the
-// agent's menus, built by whatever bound the port.
-func (t *turnstile) Routes() []plugin.Route {
-	return []plugin.Route{{
-		Pattern: "/turnstile/",
-		Handler: http.NotFoundHandler(),
-		Label:   "Gate",
-	}}
 }
 
 // Start is where a plugin with something of its own to run would run it.
@@ -84,13 +73,9 @@ func Example() {
 	host.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04A2"}})
 	host.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04B7"}})
 
-	for _, route := range host.Routes() {
-		fmt.Printf("%s serves %s as %q\n", route.Owner, route.Pattern, route.Label)
-	}
 	fmt.Print(host.Render())
 
 	// Output:
-	// turnstile serves /turnstile/ as "Gate"
 	// Turnstile
 	//   Passes today: 2 (disabled)
 	//   [ ] Hold Gate Open

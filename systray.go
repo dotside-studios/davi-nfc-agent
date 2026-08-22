@@ -16,11 +16,6 @@ import (
 // [traymenu.NewList].
 const readerSlotCount = 12
 
-// endpointSlotCount bounds the addresses shown under Server URLs. The pool is
-// fixed and reused, as everywhere else the contents change at runtime: a row
-// added on a refresh would land under the API secret entries below it.
-const endpointSlotCount = 8
-
 // SystrayApp manages the system tray interface for the NFC agent
 type SystrayApp struct {
 	agent         *Agent
@@ -37,12 +32,6 @@ type SystrayApp struct {
 	mCardType *traymenu.Item
 	mStart    *traymenu.Item
 	mStop     *traymenu.Item
-
-	// Addresses. The rows come from the plugins' endpoint register rather than
-	// from the tray, so a feature that serves something appears here without
-	// the tray knowing what it is.
-	endpoints  *traymenu.List[plugin.Endpoint]
-	mAPISecret *traymenu.Item
 
 	// Reader selection
 	readers *traymenu.List[string]
@@ -214,7 +203,11 @@ func (s *SystrayApp) setupUI() {
 
 	s.mStatus = s.menu.Add("Starting...", traymenu.Tooltip("Agent Status"), traymenu.Disabled())
 
-	s.setupURLsMenu()
+	// Then the menus of whatever serves this agent: the addresses a device
+	// connects to, the pairing page, a consumer's own feature. The tray holds
+	// the places open and draws none of them.
+	s.reservePluginSlots()
+	s.agent.Plugins().SetMenus(s)
 
 	s.menu.AddSeparator()
 
@@ -242,11 +235,6 @@ func (s *SystrayApp) setupUI() {
 
 	// Certificate trust, the other half of what a browser needs.
 	s.setupTrustMenu()
-
-	// Where a plugin's own menu goes: beside the agent's features rather than
-	// under Quit, which is where anything added later would land.
-	s.reservePluginSlots()
-	s.agent.Plugins().SetMenus(s)
 
 	s.menu.AddSeparator()
 
@@ -286,80 +274,6 @@ func (s *SystrayApp) setupUI() {
 	s.agent.PublishState()
 	if err := s.agent.Plugins().Init(); err != nil {
 		log.Printf("[systray] Not everything registered could be set up: %v", err)
-	}
-}
-
-// setupURLsMenu builds the submenu of addresses.
-//
-// What is in it comes from the agent's endpoint register, not from here. The
-// servers publish theirs as they start, the pairing plugin publishes its page,
-// and a consumer's plugin serving something of its own is listed beside them
-// without this function being told about it. Clicking a row copies it, which is
-// what the separate copy entries here used to be for.
-func (s *SystrayApp) setupURLsMenu() {
-	urls := s.menu.AddSubmenu("Server URLs", traymenu.Tooltip("Server addresses"))
-
-	s.endpoints = traymenu.NewList[plugin.Endpoint](urls, endpointSlotCount)
-	s.endpoints.OnActivate(func(row traymenu.Row[plugin.Endpoint]) {
-		copyValue(row.Value.Label+" URL", row.Value.URL)
-	})
-
-	// API secret entries, only shown if a secret is configured. The secret is
-	// not an address, but it is the other half of what a device needs to be let
-	// in, and this is where an operator goes to hand a device its details.
-	noSecret := s.agent.APISecret == ""
-	s.mAPISecret = urls.Add("API Secret: hidden",
-		traymenu.Tooltip("Required from non-loopback phones/clients"),
-		traymenu.Disabled(),
-		traymenu.HiddenIf(noSecret),
-	)
-	urls.Add("  Copy API Secret",
-		traymenu.Tooltip("Copy the agent's API secret to clipboard"),
-		traymenu.HiddenIf(noSecret),
-		traymenu.OnClick(func() { copyValue("API secret", s.agent.APISecret) }),
-	)
-	urls.Add("  Regenerate API Secret",
-		traymenu.Tooltip("Generate a fresh secret; all phones must re-handshake"),
-		traymenu.HiddenIf(noSecret),
-		traymenu.OnClick(s.handleRotateAPISecret),
-	)
-
-	// Redrawn whenever something is published or withdrawn, so an address that
-	// changes with a restart, or a PIN rotation, does not wait for a click.
-	s.agent.Plugins().Endpoints().OnChange(func([]plugin.Endpoint) { s.refreshURLsMenu() })
-	s.refreshURLsMenu()
-}
-
-// refreshURLsMenu redraws the addresses from the register.
-func (s *SystrayApp) refreshURLsMenu() {
-	if s.endpoints == nil {
-		return
-	}
-
-	list := s.agent.Plugins().Endpoints().List()
-	rows := make([]traymenu.Row[plugin.Endpoint], 0, len(list))
-	for _, endpoint := range list {
-		row := traymenu.Row[plugin.Endpoint]{
-			Value:   endpoint,
-			Title:   endpoint.Label + ": " + endpoint.URL,
-			Tooltip: endpoint.Tooltip,
-		}
-		if row.Tooltip == "" {
-			// A row is its own copy entry, so an address that said nothing
-			// about itself still says what clicking it does.
-			row.Tooltip = "Click to copy"
-		}
-		if !endpoint.Running() {
-			// The label stays: a server that is down is worth reading as down,
-			// and it keeps its place for when it comes back.
-			row.Title = endpoint.Label + ": Not running"
-			row.Tooltip = "Nothing is serving this address"
-		}
-		rows = append(rows, row)
-	}
-
-	if dropped := s.endpoints.Set(rows); dropped > 0 {
-		log.Printf("[systray] %d more addresses are published than the menu can show", dropped)
 	}
 }
 
@@ -449,17 +363,15 @@ func (s *SystrayApp) watchCard() {
 	})
 }
 
-// startServerRestartListener listens for server restart events from the Agent
-// and brings the menu back in step with what the listeners are now serving.
+// startServerRestartListener watches for a restart of what serves the agent.
+//
+// The addresses redraw themselves — they belong to the plugin that serves them
+// — so what is left here is the certificate. CAInstalled is a look at the
+// filesystem, not a decision taken once: a config directory that loses its CA
+// needs the offer to install one back, without an agent restart to notice.
 func (s *SystrayApp) startServerRestartListener() {
 	go func() {
 		for range s.agent.ServerRestarts() {
-			log.Printf("[systray] Server restart detected, updating the menu")
-			s.updateURLs()
-
-			// CAInstalled is a look at the filesystem, not a decision taken
-			// once: a config directory that loses its CA needs the offer to
-			// install one back, without an agent restart to notice.
 			s.refreshTrustMenu()
 		}
 	}()
@@ -488,7 +400,6 @@ func (s *SystrayApp) handleStopAgent() {
 // mean something, and Stop as the control that can be clicked.
 func (s *SystrayApp) showRunning() {
 	s.updateStatus("Running")
-	s.updateURLs()
 	s.mStart.Disable()
 	s.mStop.Enable()
 }
@@ -497,22 +408,8 @@ func (s *SystrayApp) showRunning() {
 // with the status line saying why.
 func (s *SystrayApp) showStopped(status string) {
 	s.updateStatus(status)
-	s.clearURLs()
 	s.mStart.Enable()
 	s.mStop.Disable()
-}
-
-// handleRotateAPISecret issues a fresh API secret; every phone must handshake
-// again with it.
-func (s *SystrayApp) handleRotateAPISecret() {
-	fresh, err := s.agent.RotateAPISecret()
-	if err != nil {
-		log.Printf("[systray] Failed to rotate API secret: %v", err)
-		return
-	}
-
-	log.Printf("[systray] API secret rotated; servers restarted")
-	s.updateAPISecretLabel(fresh)
 }
 
 // handleModeSwitch applies a mode picked from the menu. The mode belongs to the
@@ -642,34 +539,4 @@ func (s *SystrayApp) updateCardType(cardType string) {
 	} else {
 		s.mCardType.SetTitle("Card Type: " + cardType)
 	}
-}
-
-// updateURLs brings the addresses and the API secret label back in step with
-// what the agent is serving.
-func (s *SystrayApp) updateURLs() {
-	s.refreshURLsMenu()
-	s.updateAPISecretLabel(s.agent.APISecret)
-}
-
-// updateAPISecretLabel updates the systray label with a redacted view
-// of the API secret. The full secret is available via Copy.
-func (s *SystrayApp) updateAPISecretLabel(secret string) {
-	if secret == "" {
-		s.mAPISecret.SetTitle("API Secret: not set")
-		return
-	}
-	// Show first/last 4 chars only — operators can confirm the secret
-	// changed after rotation without leaking it on the screen.
-	preview := secret
-	if len(secret) > 12 {
-		preview = secret[:4] + "…" + secret[len(secret)-4:]
-	}
-	s.mAPISecret.SetTitle("API Secret: " + preview)
-}
-
-// clearURLs redraws the addresses of an agent that has stopped. The servers
-// withdrew theirs on the way down, so this is the redraw rather than the
-// change: what is published is the servers' business, not the tray's.
-func (s *SystrayApp) clearURLs() {
-	s.refreshURLsMenu()
 }

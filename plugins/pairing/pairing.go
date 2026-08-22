@@ -17,7 +17,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// ID is what this plugin is registered under, and the address it publishes.
+// ID is what this plugin is registered under.
 const ID = "pairing"
 
 // Server is what this plugin needs from the pairing server it runs: the PIN it
@@ -47,8 +47,10 @@ type Config struct {
 type Plugin struct {
 	config Config
 
-	ctx *plugin.Context
-	pin *traymenu.Item
+	ctx     *plugin.Context
+	page    *traymenu.Item
+	pin     *traymenu.Item
+	serving bool
 }
 
 // New returns the plugin, with nothing listening yet.
@@ -75,6 +77,10 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 
 	menu := ctx.Menu()
 
+	p.page = menu.Add("Page: Not running",
+		traymenu.Tooltip("Where a phone goes to pair. Click to copy"),
+		traymenu.OnClick(func() { ctx.Copy("phone-pairing URL", p.URL()) }),
+	)
 	p.pin = menu.Add("Pairing PIN: --",
 		traymenu.Tooltip("The PIN a phone is asked for"),
 		traymenu.Disabled(),
@@ -82,10 +88,6 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 	menu.Add("Open Pairing Page",
 		traymenu.Tooltip("Open the pairing page here, to pair a phone from the code on this screen"),
 		traymenu.OnClick(p.open),
-	)
-	menu.Add("Copy Pairing URL",
-		traymenu.Tooltip("Copy the pairing page's address, PIN and all"),
-		traymenu.OnClick(func() { ctx.Copy("phone-pairing URL", p.URL()) }),
 	)
 	menu.Add("Copy Pairing PIN",
 		traymenu.Tooltip("Copy the 6-digit pairing PIN"),
@@ -97,14 +99,7 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 		traymenu.OnClick(p.Rotate),
 	)
 
-	// Declared before anything is listening, so the entry holds its place and
-	// reads as not running until it is.
-	ctx.Endpoints().Set(plugin.Endpoint{
-		ID:      ID,
-		Label:   "Pair Phone",
-		Tooltip: "The page a phone opens to pair with this agent. Click to copy",
-	})
-	p.showPIN()
+	p.show()
 	return nil
 }
 
@@ -113,16 +108,20 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 	if err := p.config.Server.Start(); err != nil {
 		return err
 	}
+	p.serving = true
 
-	p.publish()
+	p.show()
 	ctx.Logf("pairing on port %d, PIN %s", p.config.Port, p.config.Server.PIN())
 	return nil
 }
 
-// Stop takes it down and marks the page as no longer answering.
-func (p *Plugin) Stop(ctx *plugin.Context) error {
+// Stop takes it down. The menu stays, saying so: a phone cannot pair against a
+// listener that is not there, and an entry that vanishes reads as a feature the
+// build does not have.
+func (p *Plugin) Stop(*plugin.Context) error {
 	p.config.Server.Stop()
-	ctx.Endpoints().SetURL(ID, "")
+	p.serving = false
+	p.show()
 	return nil
 }
 
@@ -137,7 +136,7 @@ func (p *Plugin) URL() string {
 // and puts the new one everywhere the old one was showing.
 func (p *Plugin) Rotate() {
 	fresh := p.config.Server.RotatePIN()
-	p.publish()
+	p.show()
 	p.ctx.Logf("PIN rotated to %s; the URLs carrying the old one no longer work", fresh)
 }
 
@@ -151,16 +150,21 @@ func (p *Plugin) open() {
 	}
 }
 
-// publish puts the current address and PIN where they are read from.
-func (p *Plugin) publish() {
-	p.ctx.Endpoints().SetURL(ID, p.URL())
-	p.showPIN()
-}
-
-func (p *Plugin) showPIN() {
-	if p.pin != nil {
-		p.pin.SetTitle("Pairing PIN: " + p.config.Server.PIN())
+// show redraws the menu from the pairing server as it stands: the page it is
+// answering on, and the PIN it is asking for.
+func (p *Plugin) show() {
+	if p.pin == nil {
+		return
 	}
+
+	p.pin.SetTitle("Pairing PIN: " + p.config.Server.PIN())
+	if p.serving {
+		p.page.SetTitle("Page: " + p.URL())
+		p.page.Enable()
+		return
+	}
+	p.page.SetTitle("Page: Not running")
+	p.page.Disable()
 }
 
 // The phases this plugin takes part in.

@@ -14,7 +14,7 @@
 //	    &turnstile{gate: gate},
 //	)
 //
-//	host.Init()   // wire up: menus, addresses, routes, peers
+//	host.Init()   // wire up: menus, peers
 //	host.Start()  // begin serving
 //	defer host.Close()
 //
@@ -24,8 +24,7 @@
 // required, so a plugin that just adds a menu implements one method and one
 // phase:
 //
-//	Init    once, before anything serves: fill a menu, declare an address,
-//	        publish routes, find a peer
+//	Init    once, before anything serves: fill a menu, find a peer
 //	Start   begin serving; called again after a Restart
 //	Stop    stop serving, the inverse of Start
 //	Close   release what outlives serving, on the way out
@@ -36,23 +35,26 @@
 //
 // # What a plugin gets
 //
-// A [Context] of its own: a menu it fills, the register of addresses the agent
-// hands out, a snapshot of what the agent is doing and a signal raised whenever
-// that changes, its peers, the clipboard, a browser, and the log.
+// A [Context] of its own: a menu it fills, a snapshot of what the agent is
+// doing and a signal raised whenever that changes, its peers, the clipboard, a
+// browser, and the log.
+//
+// That is all of it. This package has no notion of an address, an HTTP route or
+// anything else a particular plugin does — a plugin that serves something draws
+// its own menu for it, and the agent's own features get no seam a consumer's
+// cannot reach.
 //
 // Nothing in it names the tray library beyond the container a menu is filled
 // through, and nothing names fyne.io/systray. A build with no tray leaves
 // [Config.Menus] nil and a plugin that fills a menu still runs.
 //
-// # Serving HTTP
+// # Reaching other plugins
 //
-// A plugin with a page or an API of its own does not open a listener for it. It
-// implements [RouteProvider], and whatever is serving the agent's port mounts
-// what it returns:
+// By capability rather than by name, with [Find] and [FindAll]. It is how the
+// agent asks what is serving it, and how a server gathers the pages its peers
+// want it to mount:
 //
-//	func (t *turnstile) Routes() []plugin.Route {
-//	    return []plugin.Route{{Pattern: "/turnstile/", Handler: t.mux}}
-//	}
+//	for _, provider := range plugin.FindAll[wsserver.RouteProvider](host) { ... }
 //
 // # Registration
 //

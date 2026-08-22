@@ -45,14 +45,6 @@ func (c *Context) Menu() traymenu.Container {
 	return c.menu
 }
 
-// Endpoints is the register of addresses the agent hands out. A plugin serving
-// something puts its address here rather than drawing it.
-func (c *Context) Endpoints() *Endpoints { return c.host.Endpoints() }
-
-// Routes is every route the plugins want served, for whatever is serving the
-// agent's port. A plugin that is not itself a server has no use for it.
-func (c *Context) Routes() []Route { return c.host.Routes() }
-
 // State is what the agent is doing now.
 func (c *Context) State() State { return c.host.State() }
 
@@ -68,9 +60,10 @@ func (c *Context) Watch(fn func(State)) *traymenu.Connection { return c.host.Wat
 // knows by name. Prefer [Find] for a capability rather than a name.
 func (c *Context) Peer(id string) (Plugin, bool) { return c.host.Lookup(id) }
 
-// Host is the runtime this plugin is registered in, for the rare plugin that
-// registers another or drives a peer's lifecycle. A plugin must not call a
-// lifecycle phase from inside one of its own.
+// Host is the runtime this plugin is registered in: where a plugin reaches its
+// peers, with [Find] and [FindAll], and where one that registers another or
+// drives a peer's lifecycle does it. A plugin must not call a lifecycle phase
+// from inside one of its own.
 func (c *Context) Host() *Host { return c.host }
 
 // Copy puts a value on the clipboard. what names it for the log, which is the

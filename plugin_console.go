@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/plugin"
+	"github.com/dotside-studios/davi-nfc-agent/plugins/wsserver"
 )
 
 // consoleRoutePlugin puts the control center on whatever is serving the agent.
@@ -37,20 +38,21 @@ func (c *consoleRoutePlugin) Describe() plugin.Info {
 // Neither is wrapped in CORS by whatever mounts them, which is the point: the
 // API administers the agent rather than serving applications, and the console
 // is a page. Nothing else should be fetching either and reading the reply.
-func (c *consoleRoutePlugin) Routes() []plugin.Route {
-	var routes []plugin.Route
+func (c *consoleRoutePlugin) Routes() []wsserver.Route {
+	var routes []wsserver.Route
 
 	if api := consoleRoutes(c.console); api != nil {
-		routes = append(routes, plugin.Route{Pattern: "/control/", Handler: api})
+		routes = append(routes, wsserver.Route{Pattern: "/control/", Handler: api})
 	}
 	if assets := consoleAssets(); assets != nil {
 		// The root, which the agent's banner stands down for.
-		routes = append(routes, plugin.Route{Pattern: "/", Handler: assets})
+		routes = append(routes, wsserver.Route{Pattern: "/", Handler: assets})
 	}
 	return routes
 }
 
 var (
-	_ plugin.RouteProvider = (*consoleRoutePlugin)(nil)
-	_ http.Handler         = http.HandlerFunc(nil)
+	_ plugin.Plugin          = (*consoleRoutePlugin)(nil)
+	_ wsserver.RouteProvider = (*consoleRoutePlugin)(nil)
+	_ http.Handler           = http.HandlerFunc(nil)
 )

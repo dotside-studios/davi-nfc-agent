@@ -281,8 +281,8 @@ The agent's modular NFC layer supports adding custom readers and tag types beyon
 The agent is a reader, its settings and the stores behind them. Everything that
 *serves* something is a plugin — the WebSocket endpoints, the pairing server, the
 control center — and an application built on this agent plugs in the same way: a
-menu of its own on the tray, a page served on the agent's own port, an address
-listed beside the agent's, and the agent's state to follow.
+menu of its own on the tray, a page served on the agent's own port, and the
+agent's state to follow.
 
 ```go
 func (p *Plugin) Describe() plugin.Info {
@@ -298,8 +298,8 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 }
 
 // Served on the agent's port, so the gate needs no port or certificate of its own.
-func (p *Plugin) Routes() []plugin.Route {
-    return []plugin.Route{{Pattern: "/turnstile/", Handler: p.mux}}
+func (p *Plugin) Routes() []wsserver.Route {
+    return []wsserver.Route{{Pattern: "/turnstile/", Handler: p.mux, Label: "Gate"}}
 }
 
 func init() { plugin.Register(&Plugin{gate: OpenGate()}) }

@@ -25,17 +25,16 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// ID is what this plugin is registered under, and Endpoint... the addresses it
-// publishes: a device connects to one, a web page to the other, and they are
-// the same listener.
-const (
-	ID = "wsserver"
+// ID is what this plugin is registered under.
+const ID = "wsserver"
 
-	EndpointDevice = "device"
-	EndpointClient = "client"
-)
+// addressSlots bounds the addresses the menu shows: the two endpoints this
+// server answers on, and a row for every page mounted on it. The pool is fixed
+// and reused, since no platform can insert a menu item in the middle.
+const addressSlots = 8
 
 // Agent is what the servers need from the agent they serve.
 //
@@ -52,8 +51,11 @@ type Agent interface {
 	RemoteDevices() *remotenfc.Manager
 
 	// APISecret is the shared secret a connection handshakes with, empty when
-	// there is none.
+	// there is none, and RotateAPISecret issues a fresh one. The secret is
+	// asked for by these endpoints and nothing else, so the menu that hands out
+	// the addresses hands out the secret with them.
 	APISecret() string
+	RotateAPISecret() (string, error)
 
 	// PublicKeyPin identifies this agent to a device across certificate
 	// reissues.
@@ -95,38 +97,89 @@ type Config struct {
 type Plugin struct {
 	config Config
 
+	// The menu this plugin draws: a row per address, and the secret they ask
+	// for. Nothing else on the tray knows what a server address is.
+	addresses *traymenu.List[address]
+	secret    *traymenu.Item
+
 	mu      sync.Mutex
+	mounted []Route
 	bridge  *server.ServerBridge
 	device  *deviceserver.Server
 	client  *clientserver.Server
 	unified *unifiedserver.Server
 }
 
+// address is one row of that menu: what it is called, and where it is.
+type address struct {
+	label string
+	url   string
+}
+
 // New returns the plugin, with nothing serving yet.
 func New(config Config) *Plugin { return &Plugin{config: config} }
 
 func (p *Plugin) Describe() plugin.Info {
-	return plugin.Info{ID: ID, Title: "Agent Server"}
+	return plugin.Info{ID: ID, Title: "Server URLs", Tooltip: "Where devices and web pages connect"}
 }
 
-// Init declares the addresses before anything is serving, so they hold their
-// place on a menu that is drawn before the listener is up.
+// Init draws the menu, before anything is serving.
+//
+// The addresses are this plugin's to show. Nothing else on the tray knows what
+// this server serves, or has to be changed for it to serve something else.
 func (p *Plugin) Init(ctx *plugin.Context) error {
 	if p.config.Agent == nil {
 		return errors.New("there is no agent to serve")
 	}
 
-	ctx.Endpoints().Set(plugin.Endpoint{
-		ID:      EndpointDevice,
-		Label:   "Device",
-		Tooltip: "Where a phone or a networked reader connects. Click to copy",
+	menu := ctx.Menu()
+
+	p.addresses = traymenu.NewList[address](menu, addressSlots)
+	p.addresses.OnActivate(func(row traymenu.Row[address]) {
+		ctx.Copy(row.Value.label+" URL", row.Value.url)
 	})
-	ctx.Endpoints().Set(plugin.Endpoint{
-		ID:      EndpointClient,
-		Label:   "Client",
-		Tooltip: "Where a web page connects. Click to copy",
-	})
+
+	// The secret those addresses ask for. It is the agent's, but it is useless
+	// away from the endpoints that want it, so it is handed out with them.
+	noSecret := p.config.Agent.APISecret() == ""
+	p.secret = menu.Add("API Secret: hidden",
+		traymenu.Tooltip("Required from non-loopback phones and clients"),
+		traymenu.Disabled(),
+		traymenu.HiddenIf(noSecret),
+	)
+	menu.Add("Copy API Secret",
+		traymenu.Tooltip("Copy the agent's API secret to clipboard"),
+		traymenu.HiddenIf(noSecret),
+		traymenu.OnClick(func() { ctx.Copy("API secret", p.config.Agent.APISecret()) }),
+	)
+	menu.Add("Regenerate API Secret",
+		traymenu.Tooltip("Generate a fresh secret; all phones must handshake again"),
+		traymenu.HiddenIf(noSecret),
+		traymenu.OnClick(func() { p.rotateSecret(ctx) }),
+	)
+
+	p.showSecret()
+	p.showAddresses(nil)
 	return nil
+}
+
+// rotateSecret issues a fresh secret. The agent restarts its listeners for it,
+// which brings this plugin back through Stop and Start, so the address rows are
+// redrawn by that rather than here.
+//
+// It runs off the menu goroutine: the restart waits on listeners, and a handler
+// that blocks holds up every other menu item.
+func (p *Plugin) rotateSecret(ctx *plugin.Context) {
+	go func() {
+		fresh, err := p.config.Agent.RotateAPISecret()
+		if err != nil {
+			ctx.Logf("could not rotate the API secret: %v", err)
+			return
+		}
+
+		p.showSecret()
+		ctx.Logf("API secret rotated to %s…; every phone must handshake again", preview(fresh))
+	}()
 }
 
 // Start binds the listener and publishes what it is answering on.
@@ -168,7 +221,7 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 	certFile, keyFile := agent.Certificates()
 	port := agent.Port()
 
-	routes := ctx.Routes()
+	routes := p.collectRoutes(ctx)
 	unified := unifiedserver.New(unifiedserver.Config{
 		Port:     port,
 		CertFile: certFile,
@@ -179,6 +232,7 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 
 	p.mu.Lock()
 	p.bridge, p.device, p.client, p.unified = bridge, device, client, unified
+	p.mounted = routes
 	p.mu.Unlock()
 
 	go func() {
@@ -187,18 +241,20 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 		}
 	}()
 
-	p.publish(ctx)
-	p.publishRoutes(ctx, routes)
+	p.showAddresses(routes)
+	p.showSecret()
 	ctx.Logf("serving devices and clients on port %d", port)
 	return nil
 }
 
-// Stop takes the listener down and marks the addresses as no longer answering.
-// They keep their place on the menu: a server that is down is worth reading as
-// down, and it comes back to where it was.
+// Stop takes the listener down and marks every address on the menu as no longer
+// answering — the two endpoints and the pages mounted on it alike. They keep
+// their place: a server that is down is worth reading as down, and it comes
+// back to where it was.
 func (p *Plugin) Stop(ctx *plugin.Context) error {
 	p.mu.Lock()
 	bridge, device, client, unified := p.bridge, p.device, p.client, p.unified
+	mounted := p.mounted
 	p.bridge, p.device, p.client, p.unified = nil, nil, nil, nil
 	p.mu.Unlock()
 
@@ -215,14 +271,36 @@ func (p *Plugin) Stop(ctx *plugin.Context) error {
 		bridge.Close()
 	}
 
-	ctx.Endpoints().SetURL(EndpointDevice, "")
-	ctx.Endpoints().SetURL(EndpointClient, "")
-	for _, route := range ctx.Routes() {
-		if route.Label != "" {
-			ctx.Endpoints().SetURL(route.EndpointID(), "")
+	p.showAddresses(mounted)
+	return nil
+}
+
+// collectRoutes asks every plugin with a page what to mount. The runtime is not
+// asked: it knows nothing about HTTP, and this is the only thing here that
+// does.
+func (p *Plugin) collectRoutes(ctx *plugin.Context) []Route {
+	host := ctx.Host()
+
+	var routes []Route
+	for _, provider := range plugin.FindAll[RouteProvider](host) {
+		owner := plugin.IDOf(host, provider)
+		for _, route := range provider.Routes() {
+			if route.Pattern == "" || route.Handler == nil {
+				ctx.Logf("%s asked for a route with no %s", owner, missingPart(route))
+				continue
+			}
+			route.Owner = owner
+			routes = append(routes, route)
 		}
 	}
-	return nil
+	return routes
+}
+
+func missingPart(route Route) string {
+	if route.Pattern == "" {
+		return "pattern"
+	}
+	return "handler"
 }
 
 // ---- what the agent's surfaces ask of whatever is serving ----
@@ -324,33 +402,75 @@ func (p *Plugin) URLs() (client, device string) {
 	return client, client + "?mode=device"
 }
 
-// publish puts the addresses where the agent's menus read them from. They name
-// the port being served rather than the one configured: these are pasted into a
-// device, and an address naming an unbound port is worse than none.
-func (p *Plugin) publish(ctx *plugin.Context) {
+// showAddresses redraws the menu: the two endpoints this server answers on,
+// then a row for every mounted page that asked to be listed.
+//
+// The addresses name the port being served rather than the one configured —
+// they are pasted into a device, and one naming an unbound port is worse than
+// none — and a stopped server keeps its rows and says so, rather than leaving
+// an empty menu behind.
+func (p *Plugin) showAddresses(routes []Route) {
 	client, device := p.URLs()
 
-	ctx.Endpoints().SetURL(EndpointDevice, device)
-	ctx.Endpoints().SetURL(EndpointClient, client)
-}
-
-// publishRoutes hands out an address for every route that asked to be shown.
-//
-// The plugin that asked names it and this builds it, because this is what knows
-// the scheme, the host and the port that was actually bound. A plugin building
-// its own would be guessing at all three.
-func (p *Plugin) publishRoutes(ctx *plugin.Context, routes []plugin.Route) {
+	rows := []traymenu.Row[address]{
+		p.row(address{label: "Device", url: device}, "Where a phone or a networked reader connects"),
+		p.row(address{label: "Client", url: client}, "Where a web page connects"),
+	}
 	for _, route := range routes {
 		if route.Label == "" {
 			continue
 		}
-		ctx.Endpoints().Set(plugin.Endpoint{
-			ID:      route.EndpointID(),
-			Label:   route.Label,
-			URL:     p.PageURL(route.Pattern),
-			Tooltip: route.Tooltip,
-		})
+		tooltip := route.Tooltip
+		if tooltip == "" {
+			tooltip = "Served by " + route.Owner
+		}
+		rows = append(rows, p.row(address{label: route.Label, url: p.PageURL(route.Pattern)}, tooltip))
 	}
+
+	if dropped := p.addresses.Set(rows); dropped > 0 {
+		p.logf("wsserver: %d more addresses are served than the menu can show", dropped)
+	}
+}
+
+// row is one address as the menu reads it. A row is its own copy entry, so what
+// is copied cannot drift from what is read.
+func (p *Plugin) row(addr address, tooltip string) traymenu.Row[address] {
+	if addr.url == "" {
+		return traymenu.Row[address]{
+			Value:   addr,
+			Title:   addr.label + ": Not running",
+			Tooltip: "Nothing is serving this address",
+		}
+	}
+	return traymenu.Row[address]{
+		Value:   addr,
+		Title:   addr.label + ": " + addr.url,
+		Tooltip: tooltip + ". Click to copy",
+	}
+}
+
+// showSecret puts a redacted view of the secret on the menu. The whole of it is
+// a click away; a tray is read over someone's shoulder.
+func (p *Plugin) showSecret() {
+	if p.secret == nil {
+		return
+	}
+
+	secret := p.config.Agent.APISecret()
+	if secret == "" {
+		p.secret.SetTitle("API Secret: not set")
+		return
+	}
+	p.secret.SetTitle("API Secret: " + preview(secret))
+}
+
+// preview is the first and last few characters, enough to tell one secret from
+// the one that replaced it.
+func preview(secret string) string {
+	if len(secret) <= 12 {
+		return secret
+	}
+	return secret[:4] + "…" + secret[len(secret)-4:]
 }
 
 // PageURL is where a path mounted on this listener can be reached.
@@ -376,7 +496,7 @@ func (p *Plugin) logf(format string, args ...any) {
 }
 
 // mounts turns the plugins' routes into the listener's.
-func mounts(routes []plugin.Route) []unifiedserver.Mount {
+func mounts(routes []Route) []unifiedserver.Mount {
 	if len(routes) == 0 {
 		return nil
 	}

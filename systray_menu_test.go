@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/plugin"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -66,7 +65,6 @@ func TestMenuLayout(t *testing.T) {
 
 	want := []string{
 		"Starting...",
-		"Server URLs",
 		"----",
 		"Card UID: None",
 		"Card Type: None",
@@ -114,23 +112,16 @@ func TestStatusAndCardLabelsAreNotClickable(t *testing.T) {
 	}
 }
 
-func TestSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
+func TestTheTrayDrawsNoPluginMenusOfItsOwn(t *testing.T) {
 	_, fake := newTestTray(t, newTestAgent())
 
-	for _, title := range []string{"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
-		item := fake.Find("Server URLs", title)
-		if item == nil {
-			t.Fatalf("%q is missing from the URLs submenu", title)
+	// Addresses, the API secret and pairing all belong to the plugins that
+	// serve them. With none registered there is nothing of theirs on the tray,
+	// rather than empty menus the agent cannot fill.
+	for _, title := range []string{"Server URLs", "Pair a Phone"} {
+		if item := fake.Find(title); item != nil && item.Visible() {
+			t.Errorf("%q is on the tray with no plugin behind it", title)
 		}
-		if item.Visible() {
-			t.Errorf("%q is shown even though it has nothing behind it", title)
-		}
-	}
-
-	// Pairing is a plugin, and none is attached here, so the menu should not be
-	// offering something with nothing behind it.
-	if item := fake.Find("Pair a Phone"); item != nil && item.Visible() {
-		t.Error("the pairing menu is on the tray with no pairing server behind it")
 	}
 }
 
@@ -439,59 +430,6 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 
 	if !app.mRequirePaired.Checked() || !agent.RequiresPairedDevice() {
 		t.Fatal("pairing was not required once a device had paired")
-	}
-}
-
-func TestPublishedAddressesAreWhatTheMenuCopies(t *testing.T) {
-	agent := newTestAgent()
-	app, fake := newTestTray(t, agent)
-
-	// What a server publishes as it comes up. The tray is not told what it is.
-	agent.Plugins().Endpoints().Set(plugin.Endpoint{
-		ID:    "device",
-		Label: "Device",
-		URL:   "wss://192.168.1.5:9470/ws?mode=device",
-	})
-
-	rows := app.endpoints.Rows()
-	if len(rows) != 1 {
-		t.Fatalf("the menu shows %d addresses, want the one that was published", len(rows))
-	}
-	if got, want := rows[0].Title, "Device: wss://192.168.1.5:9470/ws?mode=device"; got != want {
-		t.Errorf("device row = %q, want %q", got, want)
-	}
-
-	// A row is the address and its copy entry in one, so what is copied cannot
-	// drift from what is read.
-	if got := rows[0].Value.URL; got != "wss://192.168.1.5:9470/ws?mode=device" {
-		t.Errorf("the device row copies %q", got)
-	}
-	if item := fake.Find("Server URLs", rows[0].Title); item == nil {
-		t.Error("the device address is not on the menu")
-	}
-}
-
-func TestAnAddressPublishedLaterAppears(t *testing.T) {
-	agent := newTestAgent()
-	app, _ := newTestTray(t, agent)
-
-	// What a plugin serving something of its own does. The tray is not told
-	// about it and needs no change to show it.
-	agent.Plugins().Endpoints().Set(plugin.Endpoint{
-		ID:    "turnstile",
-		Label: "Turnstile",
-		URL:   "http://localhost:8080/",
-	})
-
-	rows := app.endpoints.Rows()
-	if len(rows) != 1 || rows[0].Title != "Turnstile: http://localhost:8080/" {
-		t.Fatalf("the menu shows %v, want the address the plugin published", rows)
-	}
-
-	// And an address that stops being served says so rather than disappearing.
-	agent.Plugins().Endpoints().SetURL("turnstile", "")
-	if rows := app.endpoints.Rows(); len(rows) != 1 || rows[0].Title != "Turnstile: Not running" {
-		t.Fatalf("a withdrawn address reads as %v", rows)
 	}
 }
 

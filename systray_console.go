@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"fyne.io/systray"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // AttachConsole gives the tray the console it opens, and gives the console's
@@ -21,10 +21,11 @@ func (s *SystrayApp) AttachConsole(console *Console) {
 }
 
 func (s *SystrayApp) setupConsoleMenu() {
-	s.mConsole = systray.AddMenuItem("Open Control Center", "Manage this agent in a browser")
-	if s.console == nil {
-		s.mConsole.Hide()
-	}
+	s.menu.Add("Open Control Center",
+		traymenu.Tooltip("Manage this agent in a browser"),
+		traymenu.HiddenIf(s.console == nil),
+		traymenu.OnClick(s.handleOpenConsole),
+	)
 }
 
 // handleOpenConsole mints a single-use token and opens the console.

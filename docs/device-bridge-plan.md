@@ -8,6 +8,11 @@ with it is under-specification. This is the sequenced work.
 
 Phases 1–4 are implemented. Phase 5 (reach) is not started.
 
+Work toward a successor protocol has moved to
+[device-api-v2-research.md](device-api-v2-research.md), which surveys the tag,
+platform and hardware semantics this bridge projects, and records the design
+rules that came out of that. Nothing there is decided.
+
 Phase 4 landed agent-side only: the agent issues per-device credentials and
 publishes its key pin, but no client verifies the pin or calls `/pair` yet, and
 neither the shared secret nor the loopback bypass has been withdrawn. It is

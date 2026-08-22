@@ -1,0 +1,445 @@
+# Device API v2 — Research Notes
+
+Research toward freezing the current device protocol (v1) and designing its
+successor. Nothing here is decided: this is the evidence and the model that
+came out of it, written down so the design conversation starts from a fixed
+text rather than from memory.
+
+It follows [device-bridge-protocols.md](device-bridge-protocols.md) (the survey
+of prior art) and [device-bridge-plan.md](device-bridge-plan.md) (the phased
+work that produced v1). Where those two are about *our* protocol, this one is
+about the semantics underneath it — what the tags, the platforms and the
+hardware actually offer, and therefore what a wire protocol can honestly carry.
+
+## 0. Scope, and the test a design has to pass
+
+Every protocol surveyed assumes a **homogeneous** population of holders. PC/SC
+assumes readers attached to this machine. Web NFC assumes one browser. OSDP
+assumes badge readers on an RS-485 bus. VPCD assumes one emulator per port.
+ESPHome assumes it owns the device. None of them lets a phone, a USB reader, a
+DIY ESP32 board and a badge reader be present at the same time, speaking one
+vocabulary, addressed by a client that does not care which of them is holding
+the tag.
+
+That heterogeneity is the thing this agent is for, and it is the constraint the
+design should be judged against:
+
+> The same vocabulary must work unchanged for a badge reader, a phone and a
+> PC/SC reader — and a client must not be able to tell which one is holding the
+> tag.
+
+## 1. What v1 did to v0
+
+v1 is additive almost everywhere: the first frame's type selects the dialect
+(`nfc/remotenfc/server.go`), `registerDevice` is still served, and every
+capability field is `omitempty`. Three things were genuinely narrowed.
+
+**The write options struct.** v0's wire `DeviceWriteRequest` carried
+`Options nfc.WriteOptions` — the whole struct: `Overwrite`, `Index`,
+`ForceInitialize`, `ExpectUID`, `SkipVerify`, `MaxWriteAttempts`,
+`SkipCapacityCheck`, `Lock`. v1 replaced it with `Lock bool` plus
+`NDEFBytes` / `IdempotencyKey` / `TagUID` (`protocol/device.go:109`), and the
+call sites hard-code the rest: `nfc/remotenfc/tag.go:207` and `:227` pass
+`{Overwrite: true, Index: -1}`, and `writeTag` forwards only `opts.Lock`
+(`nfc/remotenfc/requests.go:341`). Append-at-index, force-initialising a
+Classic card, and retry/verify policy are now unreachable over the bridge.
+
+The honest qualifier: v0 never implemented the write path at all, and the
+client API does not expose those options on the reader route either
+(`server/handlers.go` also hard-codes `{Overwrite: true, Index: -1}`). This was
+headroom, not a working feature — but the shape was right, and the wire is now
+narrower than the internal model it projects.
+
+**The write outcome.** Neither version's `deviceWriteResponse` carries a
+result, so `deviceWriteResult` (`server/deviceserver/server.go:439`)
+manufactures one: `BytesWritten` = what we sent, `Attempts: 1`, and
+`Verified = !ReadsAreSnapshot`. On the reader route `Verified` means "read back
+and compared". On the device route it means "could in principle have been". One
+field, two meanings, and the device route reports a verification nobody
+performed.
+
+**The `platform` allowlist** (v0 required `ios`/`android`/`web`) was removed in
+`#28`, correctly — it was the smartphone assumption encoded as an admission
+test, and it refused the bundled client's own `"node"` example.
+
+The CA install path is a different story than the docs suggest: Phase 4.0
+landed (self-signed by default, CA opt-in behind `-install-ca`,
+`tls/manager.go`), and `docs/api.md` dropped the install instructions. What has
+no replacement is the browser case — a browser cannot pair and cannot pin, so
+it is still CA-or-hosted-cert, gated only by the origin allowlist.
+
+### 1.1 Pairing, as it actually shipped
+
+Per-device revocation is the right requirement and a shared secret cannot serve
+it. The mechanism has five gaps worth recording before v2 touches any of it:
+
+1. **`/pair` is plain HTTP.** `tls/bootstrap.go` starts the bootstrap server
+   with `ListenAndServe` on 9472. The PIN travels in the query string, and the
+   response carries both the device token and the `publicKeyPin`. The pin is
+   the anti-MITM measure and it is delivered over the channel it exists to
+   protect. The QR — a genuine out-of-band channel, since it is shown on the
+   kiosk — currently encodes `http://host/install?pin=…` and no key hash.
+2. **The credential is a bearer token, not a key.** Nothing binds it to a
+   device. The survey recommended TR-03112-6's OOB-code → PAKE → per-device
+   credential; what shipped went straight to a shared-secret-per-device.
+3. **Paired identity is discarded at the door.** `CheckAuth` and
+   `CheckPairedDevice` throw away the returned device ID (`server/auth.go:61`,
+   `:95`) and `RegisterDevice` mints a fresh UUID per connection, so the tray's
+   paired list and the connected-device list are separate identity spaces.
+4. **Revocation is not immediate.** Auth is checked once at upgrade; `Revoke`
+   does not close live sessions.
+5. **Headless devices cannot pair** without an operator relaying a PIN. See
+   §7.4 — OSDP's install mode is the standard's answer to this.
+
+## 2. The agent runs three tag models
+
+| | Local reader | Device bridge | Client API |
+|---|---|---|---|
+| Arrival | poll ~100 ms, `HasChanged(uid)` — "UID differs from last" | explicit `tagScanned` | `tagData` broadcast |
+| Removal | **inferred**: last seen >1 s ago (`nfc/cache.go:57`) | explicit `tagRemoved`, **with UID** | `NFCData{Card: nil}` — **unnamed** |
+| Concurrency | `soleTag` refuses >1 tag (`nfc/reader.go:1144`) | one tag per device; `setActiveTag` replaces | n/a |
+| Presence | `deviceStatus.cardPresent` | none — device-level only | the reader's only |
+
+The bridge has the better lifecycle — it is the only source that knows a tag
+left, and which one — and the agent narrows it on the way out:
+`SendTagRemoved` receives `data.UID` and broadcasts `Card: nil`
+(`nfc/remotenfc/manager.go:214`). A client watching a phone cannot tell which
+tag departed, or whether it was its own.
+
+## 3. The device protocol is announce-only; every native API is query-based
+
+This is the structural finding. Our wire has three commands (`write`, `lock`,
+`transceive`) and no questions. A device volunteers capabilities once at
+`hello` and once per `tagScanned`, and is never asked anything again.
+
+- **CoreNFC**: `queryNDEFStatus()` → `(notSupported | readWrite | readOnly,
+  capacity: UInt32)`, then `readNDEF` / `writeNDEF` / `writeLock`.
+- **Android**: `getType()` (`org.nfcforum.ndef.type1..4`, or
+  `com.nxp.ndef.mifareclassic`), `getMaxSize()`, `isWritable()`,
+  `canMakeReadOnly()`, `getNdefMessage()` vs `getCachedNdefMessage()`,
+  `writeNdefMessage()`, `makeReadOnly()`.
+- **Web NFC** — the floor: `scan` / `write(overwrite)` / `makeReadOnly`, and
+  nothing else. Explicitly out of scope: low-level ISO-DEP and NFC-A/B/F I/O,
+  HCE, **tag removal events**, tag type and capacity queries.
+- **OSDP**: `CMD_ID` → `REPLY_PDID`, `CMD_CAP` → `REPLY_PDCAP`.
+
+So the client-facing `capabilitiesRequest` has no device-side counterpart: for
+a phone-held tag it is answered from what the device volunteered at scan time,
+not by asking the tag. No serious reader protocol is announce-only.
+
+## 4. Capability is three questions flattened into one struct
+
+`tagProfile` (`nfc/tag_profile.go`) is the best idea in the codebase —
+capabilities declared *next to the driver that must honour them*, with
+`AssertCapabilitiesConsistent` to stop drift. But three distinct questions get
+flattened:
+
+1. **What the bridge can carry** — `canWrite` / `canTransceive` / `canLock` /
+   `maxHoldMs`. A property of the device.
+2. **What this kind of tag supports** — memory, max NDEF, family, technology,
+   crypto, password. A property of the *type*, and agent-side it is still
+   recovered by substring-matching a display name in `InferTagCapabilities`
+   (`"mifare classic"`, `"ntag2"`, …).
+3. **What this tag is right now** — `isReadOnly`, real free capacity,
+   formatted-or-not. A property of the *instance*; only the holder can answer.
+
+The three-valued logic `#28` had to retrofit (`Device.DeclaredCapabilities`
+returning `(caps, declared)`) exists because the wire had no way to say "I do
+not know". That correction should become general: **every capability answer is
+yes / no / unknown, and is attributed to a level.**
+
+`ReadsAreSnapshot` is well chosen and validated by Android — `getCachedNdefMessage()`
+returns what was captured at discovery, `getNdefMessage()` "always reads the
+current NDEF Message… may cause RF activity". But Android offers *both*, so
+snapshot-ness is a property of **a read**, not of a tag. Modelling it as a
+static per-tag boolean is why the write path cannot confirm anything.
+
+## 5. Sessions and holds are real, and unmodelled
+
+Verified: an iOS session is capped at **60 s** from `begin`, and a connected tag
+drops at roughly **20 s** — a hard limit that cannot be extended. iOS reports
+these as two different errors: `Code=100 "Tag connection lost"` and
+`Code=201 "Session timeout"`.
+
+Three nested lifetimes exist — device connection, scan session, tag hold — and
+the wire models the first (heartbeat 30 s / timeout 90 s) and part of the third
+(`maxHoldMs`, advisory). There is no error code for "my session ended", which
+is neither `TAG_REMOVED` nor `DEVICE_GONE`. And `retryableCodes` marks
+`TAG_REMOVED` retryable when it is only retryable *after the user taps again* —
+a different class from "retry now".
+
+## 6. Identity: UID is load-bearing and unsound
+
+`resolveRoute` (`server/deviceserver/resolve.go`) is good design — it resolves
+*which holder has this tag* at request time rather than preferring a source.
+But it addresses by UID, and UID is not an identity: MIFARE Classic and DESFire
+ship random IDs, Web NFC's `serialNumber` may be the empty string, and a
+Wiegand reader has no UID at all. Meanwhile every platform hands out a handle —
+Android's `Tag`, CoreNFC's tag-in-session, PC/SC's card handle — valid exactly
+while the tag is in the field. Our wire discards it and re-derives from a hex
+string.
+
+## 7. The IoT tier
+
+### 7.1 It is not a smaller phone
+
+| | Phone | PC/SC reader | ESP32 + PN532 | Badge reader (Wiegand/OSDP) |
+|---|---|---|---|---|
+| Tag hold | bounded (~20 s) | until removed | until removed, while it polls | **none** — a tap is ~200 ms |
+| Identifier | UID | UID + ATR | UID + ATQA/SAK | facility code + card number, **no UID** |
+| NDEF | OS-provided | agent-side drivers | **firmware-dependent** | absent |
+| Who initiates | device pushes | agent polls | either | panel polls |
+| Outputs | alert text, vibrate | LED/buzzer (ACR122) | LED/buzzer/relay | LED/buzzer/text/relay, standardised |
+
+### 7.2 The tag is not held, and writes are a latched mode
+
+ESPHome's PN532 component is the reference implementation of this tier.
+`on_tag` fires only when the tag "is changed or goes away for one cycle of
+`update_interval`" (default 1 s), with `on_tag_removed` on departure — that is
+presence-by-timeout and dedup-by-change, **the same model as our own
+`TagCache`**, arrived at independently.
+
+But writing is not a request against a held tag. It is `write_mode(message)`:
+the board is *armed*, and writes the next tag it sees. There is no addressable
+tag to target, because by the time a request crosses the network the badge is
+gone.
+
+This is the largest finding. v1's command model — `{requestID, tagUID}` →
+response, correlated against a tag the device is currently holding — is
+structurally unusable on this tier. The primitive that works is a **standing
+intent**: "the next credential you see within N seconds, do this", answered
+later by an event. Phones and readers can express holds; badge readers can only
+express intents.
+
+### 7.3 What OSDP models that we do not
+
+- **The panel polls; the reader replies.** Card reads arrive as `REPLY_RAW` in
+  answer to `CMD_POLL`. Events are pull-delivered, which is what a constrained
+  or half-duplex link can support.
+- **Identity and capability are query verbs** (`CMD_ID`/`CMD_CAP`).
+- **Outputs are first-class**: `CMD_LED`, `CMD_BUZ`, `CMD_TEXT`, `CMD_OUT`
+  (relay/strike). The reader is an actuator, not only a sensor.
+- **`REPLY_BUSY` and `REPLY_NAK`** — explicit backpressure and negative ack.
+  We have a 10-deep channel (`nfc/remotenfc/manager.go:57`) and then
+  unspecified behaviour.
+- **`CMD_MFG` / `REPLY_MFGREP`** — a sanctioned vendor-extension channel, so
+  proprietary features do not fork the protocol.
+- Card data is a **raw bit array of declared length** — not a UID, not NDEF.
+
+### 7.4 Screenless pairing has a standard answer
+
+OSDP's **install mode**: a PD with no key set accepts a secure channel using
+**SCBK-D**, a publicly known default key, purely so the panel can `CMD_KEYSET`
+a unique per-device key — after which the device auto-disables install mode and
+accepts only the real key. The documented caveats are exactly the ones we would
+inherit: communications are *not* secure during install, it must happen in a
+controlled environment, and the key must be unique per device.
+
+That is the agent-side "accept new device for 60 s" window from Phase 4.1,
+validated by a standard, including the honest security statement. Alongside it,
+**Improv Wi-Fi** (BLE + serial) is the de-facto way an ESP joins a network at
+all, and **ATECC608 / ESP32-WROOM-32SE** is how a device holds a key it cannot
+leak. Identity gets provisioned over the wire the device was flashed on — never
+typed into a screen.
+
+### 7.5 Resource numbers that constrain the wire
+
+- A TLS handshake needs **40–50 KB of free heap**; `mbedtls_ssl_setup`
+  allocates **~23 KB per connection**; mbedTLS defaults to 16 KB record
+  buffers, **32 KB in RAM** for RX+TX. Optimised builds land ~40 KB steady with
+  ~64 KB peaks.
+- ESP32 (~320 KB usable) copes. ESP8266 is marginal — TLS is *the* pinch point,
+  and max-fragment-length negotiation is the lever. AVR is out entirely.
+
+Consequences: frames must fit a 2–4 KB max fragment (base64 raw-data dumps are
+hostile), and the device endpoint currently sets **no read limit at all** —
+only the web UI does (`webui/server.go:257`, 4 KB). `-auto-tls=false` already
+gives a plain-`ws://` path, which is the honest escape hatch for the
+constrained tier and for USB-attached boards where physical attachment is the
+authentication.
+
+### 7.6 Capability is a firmware property here
+
+The PN532 lists at most **two targets** at once (`MaxTarget` = One | Two), does
+APDU exchange via `InDataExchange` and framing-level exchange via
+`InCommunicateThru`. Note that `InListPassiveTarget` does not report what kind
+of tag it found — the .NET binding's own guidance is "you can't determine which
+target you've read… prefer the AutoPoll function, as the type identified is
+returned".
+
+More important: **NDEF lives in the Arduino/ESPHome library, not the chip.**
+Whether a PN532 board can read NDEF, write NDEF or lock a tag is a property of
+the firmware build, and it changes with an OTA update. Capability on this tier
+is not a static hardware fact declared once at `hello`.
+
+## 8. OSDP: take the answers, not the wire
+
+Every structural feature of OSDP exists because it runs on RS-485 multidrop:
+half-duplex, shared bus, no collision detection, so a peripheral may not speak
+unless spoken to. That is where the polling, the 7-bit bus address and the
+SOM/LEN/CTRL/CRC framing come from. Over TCP none of it buys anything, and the
+polling actively hurts — a CP polls every 50–200 ms, which over Wi-Fi is a
+constant packet stream at a device that could have stayed asleep.
+
+The data model does not fit either: `REPLY_RAW` is a bit array plus a format
+code; there is no NDEF, no tag capability, no write, no lock. Writing an NDEF
+message to an NTAG has no OSDP command, so every davi operation would travel
+through `CMD_MFG` — inheriting the framing and none of the semantics. Three
+smaller reasons: the secure channel is a symmetric per-device key the agent
+must *store* (backwards from Phase 4, which keeps only hashes); "OSDP" without
+SIA conformance is a claim to defend; and nothing in the device population
+speaks it — not phones, not browsers, not ESPHome, not any Arduino NFC library.
+
+This is the same conclusion the survey reached about VPCD and CCID, and it
+generalises: **foreign protocols belong at the edge, as adapters.** If OSDP
+matters later it belongs in that slot — an adapter, or davi presenting itself
+as a PD — not as a migration.
+
+What to take: capability-as-a-query, output verbs, BUSY, install-mode pairing.
+
+## 9. The model
+
+Four levels, each with its own identity, lifetime, capability set and error
+class:
+
+1. **Bridge** — the connection. Identity: the *paired* device, not a
+   per-connection UUID. Carries what this device can do at all, the protocol
+   version, and the output channel. Capability must be re-announceable
+   mid-session (§7.6) and survive a gateway speaking for several readers.
+2. **Hold mode** — declared by the device, replacing the advisory `maxHoldMs`:
+   `until-removed` (reader, polling board) | `bounded` (iOS, ~20 s) | `brief`
+   (Web NFC) | `none` (badge reader). **This is the axis everything else hangs
+   off**, because it decides whether operations are commands or intents.
+3. **Hold** — one tag in the field, where the device has holds at all.
+   Identity: an opaque holder-issued `tagRef`; the credential is an attribute,
+   not the address. Ends with a *named* departure.
+   Where hold mode is `none`, this level is replaced by **armed intents** with
+   a scope and an expiry, answered by an event.
+4. **Operation** — read / status / write / lock / exchange / signal, against a
+   `tagRef` or an intent. Correlated, idempotent, bounded, and answered with a
+   real result — including an explicit BUSY.
+
+Cutting across all four: **the credential is not necessarily a UID.** It has a
+declared kind — `uid` | `wiegand(bits)` | `opaque` — where UID is one case
+rather than the assumed one. Today the wire rejects a device that cannot supply
+both `uid` and `technology` (`nfc/remotenfc/protocol.go:58`), which a Wiegand
+bridge or a Home Assistant tag source (an opaque `tag_id` and nothing else)
+can never do honestly.
+
+## 10. Design rules
+
+Checkable rules, each traceable to something above.
+
+**Capability and negotiation**
+
+1. Every capability answer is three-valued: yes / no / **unknown**. A missing
+   boolean must never read as a refusal (§4).
+2. Attribute each capability to a level — bridge / kind / instance (§4).
+3. Capability is mutable: re-announceable and re-queryable mid-session (§7.6).
+4. Declaring is opting in — **the agent never sends a device a message type it
+   did not declare**. This is what makes a small floor real: a badge reader
+   implements two outbound messages and zero inbound ones.
+5. Version negotiation and capability negotiation are different mechanisms.
+   v1 built the first and still lacks the second (§3).
+
+**Identity and addressing**
+
+6. Address tags by a holder-issued handle, not by an identifier we do not
+   control (§6).
+7. The identifier is a typed credential, not a UID (§9).
+8. Device identity is not connection identity — required for revocation that
+   bites mid-session, and for gateways (§1.1, §9).
+
+**Lifecycle and time**
+
+9. Model the holder's time budget explicitly, as a mode rather than a number
+   (§5, §9).
+10. Where hold mode is `none`, operations are armed intents, not commands
+    (§7.2).
+11. Events name their subject: a departure says which tag left (§2).
+
+**Operations and failure**
+
+12. Report outcomes; never synthesise them (§1).
+13. Freshness is a property of the read, not of the tag (§4).
+14. Errors carry a class, not just a code: permanent / retry-now /
+    retry-after-re-present / session-ended (§5).
+15. Backpressure is a protocol element (§7.3).
+16. Outputs are peers of inputs — LED, buzzer, text/alert, vibrate. This is
+    what makes a phone a *good* device rather than a degraded reader, and it is
+    available on every tier.
+17. Bind the envelope to more than one transport, and bound it in both
+    directions. An HTTP POST of the same `tagScanned` JSON is ~15 lines on any
+    board and survives deep sleep (§7.5).
+18. Give extensions a sanctioned channel; ignore unknown fields; answer unknown
+    message types with a typed error (§7.3).
+
+## 11. What to resist
+
+- **A second, "simple" protocol.** Two implementations, two test matrices, and
+  a cliff the device falls off the moment it needs one more feature. Profiles
+  by declaration, one protocol.
+- **Friendliness through looseness.** v1's problems came from
+  under-specification, not from being custom. A small mandatory core with
+  *strict* optional extensions is friendly; tolerating anything is not.
+- **A wire richer than any device can honestly answer.** Every field needs a
+  holder that can fill it truthfully, or it becomes another synthesised
+  `Verified`.
+- **Policy in the protocol.** Pairing, read-only mode and origin rules are
+  agent-edge concerns; keeping them there is why pairing-as-an-HTTP-endpoint
+  was the right call even though its mechanism needs work (§1.1).
+- **Designing for the phone and treating everything else as degraded.** That
+  assumption produced `smartphone:{id}`, the platform allowlist, and a
+  manager-wide `RemoteDevices() → true` (`nfc/remotenfc/manager.go:377`) that
+  locks a real PN532 reader out of ever being a reader.
+
+The last one is the summary: v1 is a phone protocol that other devices are
+allowed to use. v2 should be a holder-agnostic protocol that phones happen to
+be one instance of.
+
+## 12. Open questions
+
+1. **Handles or UIDs?** Handles change every client-facing request shape too.
+2. **Which query verbs earn their round trip?** A *status* query looks worth
+   it; a *read* query should stay optional — the survey's round-trip argument
+   (§5.1 there) applies to us the moment we use it.
+3. **One tag per holder, or a declared `maxSimultaneousTags`?** A PN532 holds
+   two; `soleTag` refuses two.
+4. **Does the device report write results**, and does `Verified` then split
+   into "confirmed" and "unconfirmable"?
+5. **Gateways.** One connection speaking for N readers breaks "one device = one
+   connection = one identity".
+6. **Poll-delivered events** for links that cannot hold a socket open, or
+   push-only with an adapter for the constrained tier?
+7. **What exactly gets frozen** — is v1 served indefinitely (first-frame type
+   selects the dialect, so it can be), or deprecated with a date?
+8. **Deferred:** whether physical access control is a product direction. If it
+   ever is, OSDP compatibility becomes a market requirement rather than a
+   technical choice, and §8 is re-opened. Explicitly not being decided now —
+   the agent should serve the use cases others do not, so the rules above are
+   written to be vertical-neutral.
+
+## References
+
+Primary sources checked for this document, beyond those in
+[device-bridge-protocols.md](device-bridge-protocols.md):
+
+- [Android `android.nfc.tech.Ndef`](https://www.iut-fbleau.fr/docs/android/reference/android/nfc/tech/Ndef.html)
+  — constants, methods, exceptions
+- [Apple CoreNFC `NFCNDEFTag`](https://developer.apple.com/documentation/corenfc/nfcndeftag)
+  — `queryNDEFStatus`, `NFCNDEFStatus`, `writeLock`
+- [CoreNFC session limits](https://developer.apple.com/forums/thread/802895)
+  — 60 s session, ~20 s tag connection, error codes 100 and 201
+- [W3C Web NFC](https://w3c-cg.github.io/web-nfc/) — surface and exclusions
+- [LibOSDP command and reply codes](https://doc.osdp.dev/protocol/commands-and-replies)
+- [LibOSDP secure channel](https://libosdp.sidcha.dev/libosdp/secure-channel.html)
+  — SCBK-D and install mode
+- [ESPHome PN532 component](https://esphome.io/components/binary_sensor/pn532/)
+  — `on_tag` / `on_tag_removed`, `write_mode`
+- [Home Assistant Tags](https://www.home-assistant.io/integrations/tag/)
+  — opaque `tag_id`
+- [Improv Wi-Fi](https://www.improv-wifi.com/) — BLE and serial provisioning
+- [ESP32 secure element (ATECC608)](https://docs.espressif.com/projects/esp-idf/en/v5.2/esp32/api-reference/peripherals/secure_element.html)
+- [ESP-IDF mbedTLS memory guidance](https://docs.espressif.com/projects/esp-faq/en/latest/software-framework/protocols/mbedtls.html)
+- [PN532 `MaxTarget`](https://learn.microsoft.com/en-us/dotnet/api/iot.device.pn532.listpassive.maxtarget?view=iot-dotnet-latest)
+  — one or two targets

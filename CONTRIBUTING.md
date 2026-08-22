@@ -155,7 +155,7 @@ davi-nfc-agent/
   the agent's listener, and the agent's state to follow
 - The WebSocket servers, the pairing server and the control center are all
   plugins, registered by `main.go` and by nothing else
-- See [docs/plugins.md](docs/plugins.md) and [plugin/README.md](plugin/README.md)
+- See [docs/custom-builds.md](docs/custom-builds.md) and [plugin/README.md](plugin/README.md)
 
 **Tray Menu** (`traymenu/`)
 - Declarative menu building on top of `fyne.io/systray`, with clicks delivered
@@ -214,7 +214,7 @@ To add support for new NFC readers or tag types, see [docs/extending-nfc-support
 
 A feature that serves something, or has a menu of its own — pairing, the control
 center, or an application built on this agent — is a plugin rather than a part of
-the agent. See [docs/plugins.md](docs/plugins.md).
+the agent. See [docs/custom-builds.md](docs/custom-builds.md).
 
 ## Reporting Issues
 

@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `plugin.Harness` runs a plugin through the real lifecycle against a tray that
   records instead of drawing, so a plugin is testable with no desktop involved.
-  See [docs/plugins.md](docs/plugins.md)
+  See [docs/custom-builds.md](docs/custom-builds.md)
 
 - **A plugin can serve HTTP without a listener of its own.** The single listener
   took two handlers it knew by name, both the control center's. It now takes

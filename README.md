@@ -305,7 +305,7 @@ func (p *Plugin) Routes() []plugin.Route {
 func init() { plugin.Register(&Plugin{gate: OpenGate()}) }
 ```
 
-See [Plugins](docs/plugins.md).
+See [Custom Builds](docs/custom-builds.md) for the lifecycle, and for what a build can leave out.
 
 ## Contributing
 

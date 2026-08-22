@@ -3,8 +3,6 @@ package agent
 import (
 	"sync"
 	"testing"
-
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
 // The console and the tray change the filter while the goroutine draining the
@@ -64,10 +62,14 @@ func TestCardTypeFilterSemantics(t *testing.T) {
 		t.Error("emptying the filter must admit every type again")
 	}
 
-	// allowAll names every type rather than emptying, which is what the tray
-	// reads back to tick its menu.
-	f.allowAll(nfc.GetAllCardTypes())
-	if f.len() != len(nfc.GetAllCardTypes()) {
-		t.Errorf("len = %d, want every known type named", f.len())
+	// Clearing is how every type is admitted, including one this agent does not
+	// enumerate. Naming the known types would have refused the rest.
+	f.allow("NTAG215")
+	f.clear()
+	if f.len() != 0 {
+		t.Errorf("len = %d after clear, want 0", f.len())
+	}
+	if !f.isAllowed("MIFARE Plus") {
+		t.Error("a cleared filter must admit a type the agent does not know")
 	}
 }

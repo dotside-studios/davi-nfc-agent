@@ -30,17 +30,6 @@ func (f *cardTypeFilter) disallow(cardType string) {
 	delete(f.allowed, cardType)
 }
 
-// allowAll names every known type, which is what the tray's "allow all" does.
-// It is not the same as an empty filter, though both admit every scan: the
-// tray reads the names back to tick its menu.
-func (f *cardTypeFilter) allowAll(types []string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, cardType := range types {
-		f.allowed[cardType] = true
-	}
-}
-
 // clear empties the filter. An empty filter admits every type.
 func (f *cardTypeFilter) clear() {
 	f.mu.Lock()

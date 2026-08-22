@@ -578,8 +578,12 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 	}
 }
 
-func (a *Agent) AllowAllCardTypes() {
-	a.cardTypes.allowAll(nfc.GetAllCardTypes())
+// ClearCardTypeFilter drops the filter, so every card is accepted. That is not
+// the same as naming each known type: a phone reports the tag types it
+// recognizes, which need not be ones this agent enumerates, and listing the
+// known types would refuse the rest.
+func (a *Agent) ClearCardTypeFilter() {
+	a.cardTypes.clear()
 }
 
 func (a *Agent) AllowedCardTypesLength() int {
@@ -594,8 +598,10 @@ func (a *Agent) DisallowCardType(cardType string) {
 	a.cardTypes.disallow(cardType)
 }
 
+// IsCardTypeAllowed answers the question the scan path asks of the filter: an
+// empty filter admits everything, including a type this agent does not know.
 func (a *Agent) IsCardTypeAllowed(cardType string) bool {
-	return a.cardTypes.explicitlyAllowed(cardType)
+	return a.cardTypes.isAllowed(cardType)
 }
 
 // CurrentDevicePath returns the current device path from the reader.

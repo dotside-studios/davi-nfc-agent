@@ -13,13 +13,9 @@ func (agent *Agent) ApplySettings(s settings.Settings) {
 		reader.SetMode(settings.ParseMode(s.Mode))
 	}
 
-	agent.cardTypes.clear()
-	if len(s.CardTypes) == 0 {
-		agent.AllowAllCardTypes()
-	} else {
-		for _, t := range s.CardTypes {
-			agent.AllowCardType(t)
-		}
+	agent.ClearCardTypeFilter()
+	for _, t := range s.CardTypes {
+		agent.AllowCardType(t)
 	}
 
 	agent.SetRequirePairedDevice(s.RequirePairedDevice)

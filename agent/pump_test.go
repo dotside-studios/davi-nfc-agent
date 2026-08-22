@@ -50,10 +50,13 @@ func TestForwardScanAppliesTheCardTypeFilter(t *testing.T) {
 	a := newPumpAgent(t)
 	sink := newSink()
 
-	// Setup names every known type, which is the shipped default, so the card
-	// has to be one of them to be admitted.
+	// The shipped default is an empty filter, which admits everything, so a
+	// type has to be named for there to be a filter at all.
+	named := nfc.GetAllCardTypes()[0]
+	a.AllowCardType(named)
+
 	tag := nfc.NewMockTag("04A1B2C3")
-	tag.TagType = nfc.GetAllCardTypes()[0]
+	tag.TagType = named
 	card := nfc.NewCard(tag)
 
 	t.Run("a type the filter names is admitted", func(t *testing.T) {
@@ -64,10 +67,10 @@ func TestForwardScanAppliesTheCardTypeFilter(t *testing.T) {
 	})
 
 	t.Run("a type it does not name is refused", func(t *testing.T) {
-		a.DisallowCardType(tag.TagType)
-		t.Cleanup(func() { a.AllowCardType(tag.TagType) })
+		other := nfc.NewMockTag("04A1B2C3")
+		other.TagType = "MIFARE Plus"
 
-		a.forwardScan(nfc.NFCData{Card: card}, sink)
+		a.forwardScan(nfc.NFCData{Card: nfc.NewCard(other)}, sink)
 
 		// Refused scans still reach the bridge, as an error: a client that
 		// asked for a write needs to hear why nothing happened.
@@ -77,6 +80,18 @@ func TestForwardScanAppliesTheCardTypeFilter(t *testing.T) {
 		}
 		if got.Err == nil {
 			t.Error("a filtered-out scan must say why it was dropped")
+		}
+	})
+
+	t.Run("an empty filter admits a type the agent does not know", func(t *testing.T) {
+		a.ClearCardTypeFilter()
+
+		other := nfc.NewMockTag("04A1B2C3")
+		other.TagType = "MIFARE Plus"
+
+		a.forwardScan(nfc.NFCData{Card: nfc.NewCard(other)}, sink)
+		if got := awaitScan(t, sink); got.Card == nil {
+			t.Errorf("got %+v, want the scan admitted by an empty filter", got)
 		}
 	})
 }

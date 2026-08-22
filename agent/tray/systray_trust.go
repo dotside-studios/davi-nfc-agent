@@ -3,7 +3,7 @@ package tray
 import (
 	"log"
 
-	"fyne.io/systray"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // setupTrustMenu adds the entry that makes browsers accept this agent.
@@ -12,9 +12,10 @@ import (
 // browser needs: the allowlist decides who may connect, this decides whether the
 // connection can be opened at all.
 func (s *App) setupTrustMenu() {
-	s.mTrustBrowsers = systray.AddMenuItem(
+	s.mTrustBrowsers = s.menu.Add(
 		"Trust This Agent in Browsers",
-		"Install a local certificate authority so web pages on this machine can reach the reader",
+		traymenu.Tooltip("Install a local certificate authority so web pages on this machine can reach the reader"),
+		traymenu.OnClick(s.handleTrustBrowsers),
 	)
 	s.RefreshTrustMenu()
 }
@@ -24,11 +25,7 @@ func (s *App) RefreshTrustMenu() {
 	if s.mTrustBrowsers == nil {
 		return
 	}
-	if s.agent.TLSManager() == nil || s.agent.TLSManager().CAInstalled() {
-		s.mTrustBrowsers.Hide()
-		return
-	}
-	s.mTrustBrowsers.Show()
+	s.mTrustBrowsers.SetVisible(s.agent.TLSManager() != nil && !s.agent.TLSManager().CAInstalled())
 }
 
 // handleTrustBrowsers installs the local CA and restarts the listeners so the

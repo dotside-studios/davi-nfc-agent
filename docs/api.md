@@ -192,7 +192,10 @@ than the agent implements is answered at the agent's maximum rather than
 refused. Devices should read this field rather than assume their request was
 honoured.
 
-`platform` must be `ios`, `android`, or `web`.
+`platform` is a free-form identifier describing the device, such as `ios`,
+`android`, `web`, `node`, or `pn532-serial`. Nothing in the agent branches on
+it; it is reported back in the console and the device list. Omit it and the
+agent records `unknown`.
 
 ### Legacy Registration (v0)
 

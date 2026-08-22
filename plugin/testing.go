@@ -54,15 +54,13 @@ func NewHarness(plugins ...Plugin) *Harness {
 	fake := traymenu.NewFake()
 	h := &Harness{Tray: fake, Menu: traymenu.New(fake)}
 
-	h.Host = New(Config{
-		Logf:      h.logf,
-		Menus:     h,
-		Clipboard: h.copy,
-		Browser:   h.open,
-	})
+	h.Host = New(Config{Logf: h.logf, UI: h})
 	_ = h.Use(plugins...)
 	return h
 }
+
+// The harness is the [UI] the plugins draw through: a submenu each, as the tray
+// gives them, and a record of every copy and every page they open.
 
 // MenuFor gives each plugin a submenu named after it, as the tray does.
 func (h *Harness) MenuFor(info Info) traymenu.Container {
@@ -100,13 +98,15 @@ func (h *Harness) Logs() []string {
 	return append([]string(nil), h.logs...)
 }
 
-func (h *Harness) copy(what, value string) {
+// Copy records what a plugin put on the clipboard.
+func (h *Harness) Copy(what, value string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.copied = append(h.copied, Copied{What: what, Value: value})
 }
 
-func (h *Harness) open(target string) error {
+// Open records what a plugin asked a browser to show.
+func (h *Harness) Open(target string) error {
 	h.mu.Lock()
 	h.opened = append(h.opened, target)
 	err := h.OpenErr

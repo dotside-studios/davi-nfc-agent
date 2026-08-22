@@ -35,11 +35,11 @@ func (c *Context) Menu() traymenu.Container {
 	defer c.mu.Unlock()
 
 	if c.menu == nil {
-		menus := c.host.menuProvider()
-		if menus == nil {
+		ui := c.host.userInterface()
+		if ui == nil {
 			c.menu = traymenu.Discard()
 		} else {
-			c.menu = menus.MenuFor(c.info)
+			c.menu = ui.MenuFor(c.info)
 		}
 	}
 	return c.menu
@@ -70,21 +70,21 @@ func (c *Context) Host() *Host { return c.host }
 // Copy puts a value on the clipboard. what names it for the log, which is the
 // only feedback a tray menu has for a copy.
 func (c *Context) Copy(what, value string) {
-	clipboard := c.host.config.Clipboard
-	if clipboard == nil {
-		c.Logf("nothing to copy %s to in this build", what)
+	ui := c.host.userInterface()
+	if ui == nil {
+		c.Logf("nothing to copy the %s to in this build", what)
 		return
 	}
-	clipboard(what, value)
+	ui.Copy(what, value)
 }
 
 // Open shows a URL in the operator's browser.
 func (c *Context) Open(target string) error {
-	browser := c.host.config.Browser
-	if browser == nil {
-		return errors.New("this build cannot open a browser")
+	ui := c.host.userInterface()
+	if ui == nil {
+		return errors.New("this build has no interface to open a browser from")
 	}
-	return browser(target)
+	return ui.Open(target)
 }
 
 // Logf writes to the agent's log, tagged with the plugin's ID so a line says

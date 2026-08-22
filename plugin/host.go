@@ -13,28 +13,28 @@ import (
 // off it, so one without an ID could never be looked up, replaced or removed.
 var ErrNoID = errors.New("plugin: plugin has no ID")
 
-// Menus hands a plugin the menu it fills. The tray implements it; a build with
-// no tray leaves [Config.Menus] nil, and a plugin's menu is discarded rather
-// than the plugin having to know whether anything draws one.
-type Menus interface {
+// UI is what the agent's user interface offers a plugin: a menu to fill, the
+// clipboard, and a browser. The tray implements it.
+//
+// A build with no tray registers none, and a plugin still runs: its menu is
+// discarded, a copy is logged, and opening a browser reports that this build
+// cannot. Nothing has to ask whether anyone is drawing.
+type UI interface {
 	MenuFor(Info) traymenu.Container
+	Copy(what, value string)
+	Open(target string) error
 }
 
-// Config assembles a Host. Every field is optional: a host with none of them
-// still runs plugins, they just have nowhere to put a menu, a copy or a line of
-// log.
+// Config assembles a Host.
 type Config struct {
 	// Logf is where plugins' log lines go, tagged with the plugin's ID. Nil
 	// means the standard logger.
 	Logf func(format string, args ...any)
 
-	// Menus hands out the menus plugins fill. Nil discards them.
-	Menus Menus
-
-	// Clipboard is what Context.Copy does, and Browser what Context.Open does.
-	// Nil reports that this build cannot.
-	Clipboard func(what, value string)
-	Browser   func(target string) error
+	// UI is what draws for the plugins, or nil for a build that draws nothing.
+	// It usually arrives later, through SetUI: the runtime is built with the
+	// agent, and a tray only exists once the desktop says so.
+	UI UI
 }
 
 // Host is the agent's plugin runtime: what is registered, what phase each one
@@ -51,7 +51,7 @@ type Host struct {
 	mu      sync.Mutex
 	order   []string
 	entries map[string]*entry
-	menus   Menus
+	ui      UI
 	inited  bool
 	started bool
 
@@ -77,16 +77,16 @@ func New(config Config) *Host {
 	if config.Logf == nil {
 		config.Logf = log.Printf
 	}
-	return &Host{config: config, menus: config.Menus, entries: make(map[string]*entry)}
+	return &Host{config: config, ui: config.UI, entries: make(map[string]*entry)}
 }
 
-// SetMenus gives the host somewhere to put plugin menus, for the usual order of
-// events: the runtime is built with the agent, the tray only exists once the
+// SetUI gives the host something to draw with, for the usual order of events:
+// the runtime is built with the agent, and the tray only exists once the
 // desktop says so.
-func (h *Host) SetMenus(menus Menus) {
+func (h *Host) SetUI(ui UI) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.menus = menus
+	h.ui = ui
 }
 
 // Use registers plugins, in the order they are given.
@@ -457,10 +457,9 @@ func (h *Host) snapshot() []*entry {
 	return entries
 }
 
-// menuProvider is where a plugin's menu comes from, or nil when nothing draws
-// one.
-func (h *Host) menuProvider() Menus {
+// userInterface is what draws for the plugins, or nil when nothing does.
+func (h *Host) userInterface() UI {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.menus
+	return h.ui
 }

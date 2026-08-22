@@ -117,7 +117,7 @@ jobs:
         run: |
           for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             echo "== $target"
-            GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null .
+            GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/davi-nfc-agent
           done
 
       - name: Build the macOS packages

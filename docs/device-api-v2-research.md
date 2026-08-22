@@ -3,8 +3,8 @@
 Research toward freezing the current device protocol (v1) and designing its
 successor. Almost nothing here is decided: this is the evidence and the model
 that came out of it, written down so the design conversation starts from a
-fixed text rather than from memory. The decisions taken so far are in §12 and
-§13.
+fixed text rather than from memory. The decisions taken so far are §12 to
+§14.
 
 It follows [device-bridge-protocols.md](device-bridge-protocols.md) (the survey
 of prior art) and [device-bridge-plan.md](device-bridge-plan.md) (the phased
@@ -605,7 +605,115 @@ avoid. What it is genuinely good for is knowing what is deployed — the questio
 that would have made §12's removal decision a measurement rather than a
 judgement.
 
-## 14. Open questions
+## 14. Decided: pairing, for an attended deployment
+
+**Assumption: a person is present when a device is added.** They can see the
+kiosk screen and they are holding the device. Unattended provisioning — a board
+shipped to a site and plugged in by someone who never sees the agent — is
+deferred rather than rejected, and the note at the end of this section says
+where that has to be recorded in the code.
+
+### The two problems being solved
+
+Pairing today conflates them, which is why it sits awkwardly:
+
+- **Agent authenticity** — "is this the agent I think it is?" Answered by the
+  SPKI pin, learned out of band. Half-built already (`PublicKeyPin` in
+  `ServerInfo`).
+- **Device authorization** — "may this device connect, and can it be revoked on
+  its own?" Answered by a per-device credential.
+
+Three provisioning channels serve the population: an **on-screen QR** for a
+phone, **physical attachment** for a USB or serial board, and an
+**operator-gated window** for a headless network device. Browsers have none of
+the three.
+
+### What gets built
+
+**1. The QR is the root of trust.** It carries `{host, port, spkiHash, code}`,
+and the device pairs **over TLS pinned to that hash**. This closes the
+cleartext hand-off (§1.1, gap 1) with no new cryptography, because the channel
+is authenticated by something that never crossed the network — the SSH and
+CTAP-hybrid model.
+
+The condition that makes it true: the QR must be **rendered on the kiosk** —
+tray or Control Center — and read off the screen. It is currently fetched from
+`/qr.png` over HTTP, and a phone fetching it over the network destroys the
+out-of-band property the whole design rests on.
+
+**2. `/pair` moves to the agent port.** 9470 already carries TLS with the
+certificate the pin covers. The bootstrap server then serves only the
+human-facing setup page, and could eventually become a Control Center route.
+Fewer ports, one certificate, and the pairing endpoint sits where the device is
+about to connect anyway.
+
+**3. Session identity is paired identity.** The agent resolves the presented
+credential to the paired device ID and uses it as the session's identity rather
+than minting a fresh UUID; `deviceName` in the handshake drops to a display
+hint the paired name overrides. Closes gap 3, and is nearly free — the ID is
+already returned by `VerifyToken` and discarded at `server/auth.go:61`.
+
+**4. Revocation closes live sessions.** The registry's `OnChange` already
+exists; wiring it to drop sessions whose device was revoked closes gap 4.
+Without it, "revoked" means "revoked at next connect".
+
+**5. Credential type is declared, not assumed.** A bearer token is the floor; a
+proven-possession keypair is preferred where the platform has somewhere safe to
+keep it — Secure Enclave, Android Keystore, ATECC608. The distinction is worth
+stating because a keypair is *not* unconditionally better: against interception
+the pinned TLS already closes the hole, and a key sitting in plain flash is no
+better than a token in plain flash. It wins where there is a keystore, which is
+the tiers that matter.
+
+**6. Physical attachment is pre-authorization.** A serial or USB device is
+paired by being plugged in, with a credential bound to that port. No code, no
+window.
+
+**7. Browsers do not pair**, and this is documented rather than left implicit,
+so nobody builds half of one. The origin allowlist is their gate.
+
+### What is not being built
+
+**PAKE, at least not first** — a departure from Phase 4.1 and from the survey's
+recommendation, on the grounds that the QR changes the calculus. PAKE earns its
+complexity by turning a *short, low-entropy* secret into a strong key over an
+*unauthenticated* channel. Once the QR carries the SPKI hash the channel is
+authenticated and the code can simply be high-entropy, so the benefit largely
+evaporates. It remains the right answer for a typed-code fallback if that path
+turns out to matter; the existing rate limit and five-attempt lockout covers
+most of that risk for a LAN product in the meantime.
+
+**Credential expiry.** A device that stops working after ninety days is a
+support call, not security. Explicit revocation plus `lastSeen` for spotting
+stale entries, which is the shape already there.
+
+### Sequencing
+
+Most of this does not need the protocol rewrite, and holding security fixes for
+one would be the wrong trade:
+
+- **Now, independent of v2:** the QR carries the SPKI hash and pairing moves to
+  pinned TLS on the agent port; revocation closes sessions; session identity
+  becomes paired identity.
+- **With v2:** `pairing=required` in the mDNS TXT record, the informative
+  refusal (§12), and the device declaring its credential type in the handshake.
+- **Demand-driven:** keypair possession proof, and the operator-gated install
+  window.
+
+### Deferred: unattended provisioning
+
+Not designed now, by decision. If devices are ever added by someone who cannot
+see the kiosk, the QR stops being available and the primary channel changes:
+provisioning moves to flash time (a per-device key burned in, or an enrolment
+secret) or to an install window a remote operator can open — OSDP's install
+mode (§7.4) is the model, with its caveats intact.
+
+**This must reach the code, not only this document.** A TODO at `handlePair`
+(`tls/pairing.go`) — the function that decides how a device proves it may pair
+— naming this section, so that whoever next changes the pairing path sees that
+the attended assumption was a choice rather than an oversight.
+
+## 15. Open questions
 
 1. **Handles or UIDs?** Handles change every client-facing request shape too.
 2. **Which query verbs earn their round trip?** A *status* query looks worth
@@ -619,7 +727,14 @@ judgement.
    connection = one identity".
 6. **Poll-delivered events** for links that cannot hold a socket open, or
    push-only with an adapter for the constrained tier?
-7. **Deferred:** whether physical access control is a product direction. If it
+7. **The client-API boundary.** §12 keeps the client protocol out of the
+   break, but if tags gain handles and credentials that are not UIDs, that
+   protocol has to express them somehow. Three ways out: the agent synthesises
+   a UID for clients (rule 12 violated again), the client protocol grows
+   additively (allowed — additive is not breaking), or some devices cannot be
+   surfaced to clients at all. Writing `example.com/c/$uid` from a holder that
+   reports no UID sits exactly on this line.
+8. **Deferred:** whether physical access control is a product direction. If it
    ever is, OSDP compatibility becomes a market requirement rather than a
    technical choice, and §8 is re-opened. Explicitly not being decided now —
    the agent should serve the use cases others do not, so the rules above are

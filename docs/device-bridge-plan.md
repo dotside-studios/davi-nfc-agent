@@ -13,9 +13,11 @@ Work toward a successor protocol has moved to
 platform and hardware semantics this bridge projects, and records the design
 rules that came out of that. Most of it is undecided; the exceptions are that
 **v0 and v1 are to be removed rather than deprecated** when v2 lands, on the
-device protocol only, and that a device's **`platform` field gives way to a
-User-Agent-shaped self-description** that nothing may branch on. See §12 and
-§13 there for the conditions that attach to each.
+device protocol only, that a device's **`platform` field gives way to a
+User-Agent-shaped self-description** that nothing may branch on, and that
+**pairing is designed for an attended deployment**, with unattended
+provisioning deferred. See §12 to §14 there for the conditions attaching to
+each.
 
 Phase 4 landed agent-side only: the agent issues per-device credentials and
 publishes its key pin, but no client verifies the pin or calls `/pair` yet, and

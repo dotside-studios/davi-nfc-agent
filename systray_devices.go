@@ -71,7 +71,7 @@ func (s *SystrayApp) refreshDevicesMenu() {
 		s.mRevokeAllDevices.Show()
 	}
 
-	s.mRequirePaired.SetChecked(s.agent.RequirePairedDevice)
+	s.mRequirePaired.SetChecked(s.agent.RequiresPairedDevice())
 }
 
 // handleRequirePaired toggles the paired-device requirement live, so it can be
@@ -88,8 +88,9 @@ func (s *SystrayApp) handleRequirePaired() {
 	}
 
 	s.agent.SetRequirePairedDevice(on)
+	s.persist()
 
-	if on {
+	if s.agent.RequiresPairedDevice() {
 		log.Printf("[systray] Requiring paired devices; the shared secret no longer admits one")
 	} else {
 		log.Printf("[systray] No longer requiring paired devices")

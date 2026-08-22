@@ -101,7 +101,7 @@ func TestPartialFileKeepsDefaults(t *testing.T) {
 }
 
 func TestNormalizeRejectsUnknownValues(t *testing.T) {
-	got := normalize(Settings{
+	got := Normalize(Settings{
 		Mode:      "sideways",
 		CardTypes: []string{"NotARealCardType"},
 		Port:      70000,
@@ -124,7 +124,7 @@ func TestNormalizeDeduplicatesAndSorts(t *testing.T) {
 		t.Skip("build supports fewer than two card types")
 	}
 
-	got := normalize(Settings{
+	got := Normalize(Settings{
 		Mode:      ModeReadWrite,
 		CardTypes: []string{all[1], all[0], all[1]},
 	}).CardTypes
@@ -140,7 +140,7 @@ func TestNormalizeDeduplicatesAndSorts(t *testing.T) {
 // "every supported type" and "no filter" are the same policy. Collapsing them
 // keeps unfiltered a single representable state.
 func TestNormalizeCollapsesFullFilterToNone(t *testing.T) {
-	got := normalize(Settings{
+	got := Normalize(Settings{
 		Mode:      ModeReadWrite,
 		CardTypes: nfc.GetAllCardTypes(),
 	})
@@ -207,5 +207,57 @@ func TestInMemoryStoreWhenConfigDirUnset(t *testing.T) {
 	}
 	if got := store.Path(); got != "" {
 		t.Errorf("Path() = %q, want empty", got)
+	}
+}
+
+// A save must not move a field the launcher holds, in either direction: not to
+// the value that was asked for, which the agent refused, and not to the one in
+// force, which would destroy a preference the operator never edited and only
+// applies when the agent is launched without the flag.
+func TestExplicitKeepsTheStoredValue(t *testing.T) {
+	prev := Settings{
+		Mode:                ModeReadWrite,
+		CardTypes:           []string{"NTAG215"},
+		DevicePath:          "ACS ACR1252U 01 00",
+		Port:                9480,
+		RequirePairedDevice: false,
+		ReaderFeedback:      false,
+	}
+
+	next := prev
+	next.Mode = ModeReadOnly
+	next.CardTypes = []string{"DESFire"}
+	next.DevicePath = ""
+	next.Port = 9470
+	next.RequirePairedDevice = true
+	next.ReaderFeedback = true
+
+	Explicit{Port: true, RequirePairedDevice: true}.Keep(&next, prev)
+
+	if next.Port != 9480 {
+		t.Errorf("port = %d, want the stored 9480", next.Port)
+	}
+	if next.RequirePairedDevice {
+		t.Error("the requirement was written over a stored preference")
+	}
+
+	// And nothing else was held back.
+	if next.Mode != ModeReadOnly {
+		t.Errorf("mode = %q, want %q", next.Mode, ModeReadOnly)
+	}
+	if !next.ReaderFeedback {
+		t.Error("reader feedback was held back without being explicit")
+	}
+	if len(next.CardTypes) != 1 || next.CardTypes[0] != "DESFire" {
+		t.Errorf("card types = %v, want [DESFire]", next.CardTypes)
+	}
+}
+
+func TestExplicitAny(t *testing.T) {
+	if (Explicit{}).Any() {
+		t.Error("an empty Explicit reports something set")
+	}
+	if !(Explicit{ReaderFeedback: true}).Any() {
+		t.Error("a set field is not reported")
 	}
 }

@@ -194,6 +194,11 @@ func (s *Server) Handler() http.Handler {
 // Stop stops the unified server: it shuts down mDNS, the HTTP listener, and
 // cancels the shared context (which stops the device and client background
 // workers running under it).
+// Port is the port this server binds. It is what a client should be told to
+// connect to, which is not necessarily what the agent is configured with: a
+// port changed in the settings takes effect only on a fresh listener.
+func (s *Server) Port() int { return s.config.Port }
+
 func (s *Server) Stop() {
 	if s.mdnsServer != nil {
 		s.mdnsServer.Shutdown()

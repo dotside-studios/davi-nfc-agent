@@ -121,7 +121,7 @@ func New(configDir string) (*Store, error) {
 		return nil, fmt.Errorf("parse settings file: %w", err)
 	}
 
-	s.settings = normalize(stored)
+	s.settings = Normalize(stored)
 	return s, nil
 }
 
@@ -142,7 +142,7 @@ func (s *Store) Get() Settings {
 // Save replaces the settings and persists them, normalizing first.
 func (s *Store) Save(next Settings) error {
 	s.mu.Lock()
-	s.settings = normalize(next)
+	s.settings = Normalize(next)
 	saved := s.settings.clone()
 	onChange := s.onChangeFunc
 	err := s.saveLocked()
@@ -163,7 +163,7 @@ func (s *Store) Update(mutate func(*Settings)) (Settings, error) {
 	s.mu.Lock()
 	next := s.settings.clone()
 	mutate(&next)
-	s.settings = normalize(next)
+	s.settings = Normalize(next)
 	saved := s.settings.clone()
 	onChange := s.onChangeFunc
 	err := s.saveLocked()
@@ -220,8 +220,10 @@ func (s Settings) clone() Settings {
 	return out
 }
 
-// normalize coerces settings into a form the agent can apply.
-func normalize(s Settings) Settings {
+// Normalize coerces settings into a form the agent can apply: an unknown mode
+// becomes read/write, the card-type filter is deduplicated and sorted, and a
+// filter naming every known type becomes no filter at all.
+func Normalize(s Settings) Settings {
 	switch s.Mode {
 	case ModeReadWrite, ModeReadOnly, ModeWriteOnly:
 	default:
@@ -263,4 +265,59 @@ func normalize(s Settings) Settings {
 	}
 
 	return s
+}
+
+// Explicit marks the fields a caller set deliberately: on the command line, in
+// the environment, or when building the agent in code. It is per-run state and
+// is never written to the settings file, which records what was chosen rather
+// than what a launcher imposed on top of it.
+//
+// A field marked here belongs to the launcher for the whole run. The stored
+// file does not change it, and neither does an operator at the tray or the
+// console, where the control is shown disabled with the reason. Accepting a
+// change that will not survive is the failure this exists to prevent: it leaves
+// the operator believing something that is not true of the running agent.
+type Explicit struct {
+	Mode                bool `json:"mode"`
+	CardTypes           bool `json:"cardTypes"`
+	DevicePath          bool `json:"devicePath"`
+	Port                bool `json:"port"`
+	RequirePairedDevice bool `json:"requirePairedDevice"`
+	ReaderFeedback      bool `json:"readerFeedback"`
+}
+
+// Any reports whether the launcher set anything.
+func (e Explicit) Any() bool {
+	return e.Mode || e.CardTypes || e.DevicePath || e.Port || e.RequirePairedDevice || e.ReaderFeedback
+}
+
+// Keep restores every field the launcher holds from prev, the stored settings
+// as they were before the change.
+//
+// A held field is not this run's to change, and the file records what the
+// operator wants from the next run onwards. Writing the launcher's value over
+// it would destroy a preference they never edited, and writing the refused
+// change would leave the file claiming something the agent is not doing.
+func (e Explicit) Keep(next *Settings, prev Settings) {
+	if next == nil {
+		return
+	}
+	if e.Mode {
+		next.Mode = prev.Mode
+	}
+	if e.CardTypes {
+		next.CardTypes = append([]string(nil), prev.CardTypes...)
+	}
+	if e.DevicePath {
+		next.DevicePath = prev.DevicePath
+	}
+	if e.Port {
+		next.Port = prev.Port
+	}
+	if e.RequirePairedDevice {
+		next.RequirePairedDevice = prev.RequirePairedDevice
+	}
+	if e.ReaderFeedback {
+		next.ReaderFeedback = prev.ReaderFeedback
+	}
 }

@@ -107,7 +107,7 @@ export default function App() {
           {state.agent.running ? 'running' : 'stopped'}
         </Dot>
 
-        <span className="dim">{modeLabel(state.reader.mode)}</span>
+        <span className="dim">{modeLabel(state.settings.mode)}</span>
 
         <span className="dim">
           {state.reader.cardPresent ? (

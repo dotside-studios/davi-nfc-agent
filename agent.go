@@ -13,6 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -35,7 +36,7 @@ type Agent struct {
 	Logger           *log.Logger
 	Manager          nfc.Manager // NFC device manager (supports hardware and smartphone)
 	Reader           *nfc.NFCReader
-	AllowedCardTypes map[string]bool // Card type filter using map
+	AllowedCardTypes map[string]bool // Card type filter; guarded by settingsMu
 	APISecret        string
 	ConfigDir        string // Config directory; used for persisting the API secret
 
@@ -85,16 +86,18 @@ type Agent struct {
 	// connections. Browser clients are unaffected.
 	RequirePairedDevice bool
 
-	// RequirePairedDeviceLocked stops anything lowering that requirement for
-	// the rest of the run. Set it when the requirement came from the command
-	// line or the environment: an operator who asked for it there should not
-	// have it withdrawn by a preference file or a toggle in the console.
-	RequirePairedDeviceLocked bool
-
-	// ReaderFeedback has the reader flash its LED and sound its buzzer at what
-	// it reads and writes. Held here too because the reader is built in Start,
-	// after the stored settings have been applied.
+	// ReaderMode is the access mode the reader runs in, and ReaderFeedback has
+	// it flash its LED and sound its buzzer at what it reads and writes. Both
+	// are held here as well as on the reader, because the reader is built in
+	// Start, after the stored settings have been applied. A preference that
+	// only reached the reader would be lost with every reader the agent starts.
+	ReaderMode     nfc.ReaderMode
 	ReaderFeedback bool
+
+	// PinnedDevice is the reader the operator chose, empty for auto-detect. It
+	// is the preference, not the reader in use: with the pinned one absent the
+	// agent runs without a reader and takes it up when it appears.
+	PinnedDevice string
 
 	// TLS configuration (optional, used by the unified server)
 	CertFile   string       // Path to TLS certificate file
@@ -102,7 +105,26 @@ type Agent struct {
 	TLSManager *tls.Manager // TLS manager for auto-TLS and network watching
 
 	// Internal state
-	devicePath        string        // Current device path
+	devicePath string // Current device path
+
+	// explicit marks the settings the launcher set, which nothing this run may
+	// change. Assigned once through SetExplicit before the agent serves
+	// anything, and read from every goroutine after that.
+	explicit settings.Explicit
+
+	// settingsMu guards the settings state: the reader mode, the pinned reader,
+	// the card-type filter, the port, and the feedback and pairing preferences.
+	// The console changes them from its own goroutines and reads them back for
+	// every snapshot it draws, and the tray does the same from its dispatch
+	// goroutine.
+	//
+	// The exported fields it covers are assigned directly at startup, before
+	// there is a second goroutine; after that everything goes through the
+	// accessors in agent_settings.go. The card-type filter is the one that
+	// cannot be left to chance, since a write during a read of a map takes the
+	// process down rather than merely racing.
+	settingsMu sync.RWMutex
+
 	serversMu         sync.Mutex    // Protects server restart operations
 	serverRestartChan chan struct{} // Signals when servers are restarted
 }
@@ -112,6 +134,7 @@ func NewAgent(nfcManager nfc.Manager) *Agent {
 		Logger:            log.New(os.Stderr, "[agent] ", log.LstdFlags),
 		Manager:           nfcManager,
 		AllowedCardTypes:  make(map[string]bool),
+		ReaderMode:        nfc.ModeReadWrite,
 		DevicePort:        9470,
 		serverRestartChan: make(chan struct{}, 1),
 	}
@@ -166,7 +189,7 @@ func (a *Agent) Start(devicePath string) error {
 	}
 
 	a.Reader = nfcReader
-	a.Reader.SetFeedback(a.ReaderFeedback)
+	a.adoptReaderSettings()
 
 	// Start network watcher if TLS manager is configured
 	if a.TLSManager != nil {
@@ -332,6 +355,8 @@ func (a *Agent) startServers() error {
 	a.Bridge = server.NewServerBridge()
 
 	// Create device server (handles NFC device connections)
+	requirePaired := a.RequiresPairedDevice()
+
 	a.DeviceServer = deviceserver.New(deviceserver.Config{
 		Reader:           a.Reader,
 		DeviceManager:    findDeviceDriver(a.Manager),
@@ -342,7 +367,7 @@ func (a *Agent) startServers() error {
 		PublicKeyPin:     a.PublicKeyPin,
 		TokenVerifier:    a.tokenVerifier(),
 
-		RequirePairedDevice: a.RequirePairedDevice,
+		RequirePairedDevice: requirePaired,
 	}, a.Bridge)
 
 	// Create client server (handles web client connections)
@@ -355,8 +380,9 @@ func (a *Agent) startServers() error {
 	}, a.Bridge)
 
 	// Single listener fronts the device, client, control and console handlers.
+	port := a.ConfiguredPort()
 	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:           a.DevicePort,
+		Port:           port,
 		CertFile:       a.CertFile,
 		KeyFile:        a.KeyFile,
 		ControlHandler: consoleRoutes(a.Console),
@@ -369,7 +395,7 @@ func (a *Agent) startServers() error {
 		}
 	}()
 
-	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", a.DevicePort)
+	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", port)
 	return nil
 }
 
@@ -406,6 +432,29 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 	}
 }
 
+// SetCardTypeFilter replaces the whole filter, which is what an operator
+// picking types is doing. An empty list is no filter at all.
+func (a *Agent) SetCardTypeFilter(cardTypes []string) {
+	next := settings.Normalize(settings.Settings{CardTypes: cardTypes}).CardTypes
+	if sameCardTypes(a.CardTypeFilter(), next) {
+		return
+	}
+	if a.launcherHolds("the card-type filter", a.Explicit().CardTypes) {
+		return
+	}
+
+	a.settingsMu.Lock()
+	for cardType := range a.AllowedCardTypes {
+		delete(a.AllowedCardTypes, cardType)
+	}
+	for _, cardType := range next {
+		a.AllowedCardTypes[cardType] = true
+	}
+	a.settingsMu.Unlock()
+
+	a.notifyConsole()
+}
+
 // ClearCardTypeFilter drops the filter, so every card is accepted. That is not
 // the same as allowing each known type: a phone reports the tag types it
 // recognizes, which need not be ones this agent enumerates, and listing the
@@ -414,26 +463,42 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 // The map is emptied in place, never replaced: the running device server was
 // handed this same map at construction.
 func (a *Agent) ClearCardTypeFilter() {
+	a.settingsMu.Lock()
 	for cardType := range a.AllowedCardTypes {
 		delete(a.AllowedCardTypes, cardType)
 	}
+	a.settingsMu.Unlock()
+
+	a.notifyConsole()
 }
 
 func (a *Agent) AllowedCardTypesLength() int {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
 	return len(a.AllowedCardTypes)
 }
 
 func (a *Agent) AllowCardType(cardType string) {
+	a.settingsMu.Lock()
 	a.AllowedCardTypes[cardType] = true
+	a.settingsMu.Unlock()
+
+	a.notifyConsole()
 }
 
 func (a *Agent) DisallowCardType(cardType string) {
+	a.settingsMu.Lock()
 	delete(a.AllowedCardTypes, cardType)
+	a.settingsMu.Unlock()
+
+	a.notifyConsole()
 }
 
 // IsCardTypeAllowed answers the question the device server asks of the filter:
 // an empty filter admits everything, including a type this agent does not know.
 func (a *Agent) IsCardTypeAllowed(cardType string) bool {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
 	return len(a.AllowedCardTypes) == 0 || a.AllowedCardTypes[cardType]
 }
 
@@ -452,26 +517,87 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
-	if a.RequirePairedDeviceLocked && !on {
-		// Asked for on the command line. A stored preference or a console
-		// toggle may not withdraw it, which is the direction that matters:
-		// the operator who set the flag is the one who would be surprised.
-		a.Logger.Printf("Ignoring request to stop requiring paired devices: it was set on the command line")
+	if a.RequiresPairedDevice() == on {
 		return
 	}
-	a.RequirePairedDevice = on
-	if a.DeviceServer != nil {
-		a.DeviceServer.SetRequirePairedDevice(on)
+	if a.launcherHolds("the paired-device requirement", a.Explicit().RequirePairedDevice) {
+		return
 	}
+
+	a.settingsMu.Lock()
+	a.RequirePairedDevice = on
+	server := a.DeviceServer
+	a.settingsMu.Unlock()
+
+	if server != nil {
+		server.SetRequirePairedDevice(on)
+	}
+	a.notifyConsole()
+}
+
+// RequiresPairedDevice reports the requirement as it stands.
+func (a *Agent) RequiresPairedDevice() bool {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.RequirePairedDevice
+}
+
+// SetReaderMode changes the reader's access mode, on a running reader as well
+// as on the next one the agent starts. Accepted with no reader running, because
+// the mode is the agent's and Start hands it to the reader it builds.
+func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
+	if a.CurrentReaderMode() == mode {
+		return
+	}
+	if a.launcherHolds("the reader mode", a.Explicit().Mode) {
+		return
+	}
+
+	a.settingsMu.Lock()
+	a.ReaderMode = mode
+	a.settingsMu.Unlock()
+
+	if a.Reader != nil {
+		a.Reader.SetMode(mode)
+	}
+	a.notifyConsole()
 }
 
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
+	if a.ReaderFeedbackEnabled() == on {
+		return
+	}
+	if a.launcherHolds("reader feedback", a.Explicit().ReaderFeedback) {
+		return
+	}
+
+	a.settingsMu.Lock()
 	a.ReaderFeedback = on
+	a.settingsMu.Unlock()
+
 	if a.Reader != nil {
 		a.Reader.SetFeedback(on)
 	}
+	a.notifyConsole()
+}
+
+// ServingPort is the port the listener is bound on. It matches the configured
+// port until one is saved, and again once the listener has been rebound.
+func (a *Agent) ServingPort() int {
+	if a.UnifiedServer != nil {
+		return a.UnifiedServer.Port()
+	}
+	return a.ConfiguredPort()
+}
+
+// ConfiguredPort is the port the agent is set to serve on, which it binds the
+// next time its listener comes up.
+func (a *Agent) ConfiguredPort() int {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.DevicePort
 }
 
 // clientsChanged returns a hook that refreshes the console when the client list

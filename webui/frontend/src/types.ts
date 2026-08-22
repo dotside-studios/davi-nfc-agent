@@ -13,9 +13,8 @@ export interface AgentInfo {
   platform: string
 }
 
+/** What the reader is doing. What it is set to is in Settings. */
 export interface ReaderInfo {
-  mode: Mode
-  devicePath: string
   available: string[]
   cardPresent: boolean
   cardUID?: string
@@ -52,19 +51,33 @@ export interface SecurityInfo {
   apiSecret: string
   pairingPIN?: string
   publicKeyPin?: string
-  requirePairedDevice: boolean
   caInstalled: boolean
   caFingerprint?: string
   cert?: CertInfo
   controlSessions: number
 }
 
+/** What the agent is set to, as the agent reports it. The console's only
+ *  source for a preference, and what every control here is bound to. */
 export interface Settings {
   mode: Mode
   cardTypes: string[] | null
   devicePath: string
   port: number
   requirePairedDevice: boolean
+  readerFeedback: boolean
+}
+
+/** Which settings the launcher set, on the command line or in the environment.
+ *  A field marked here is not this run's to change: the control is shown
+ *  disabled rather than accepting an edit the agent would refuse. */
+export interface Explicit {
+  mode: boolean
+  cardTypes: boolean
+  devicePath: boolean
+  port: boolean
+  requirePairedDevice: boolean
+  readerFeedback: boolean
 }
 
 export interface DeviceInfo {
@@ -104,6 +117,7 @@ export interface ControlState {
   server: ServerInfo
   security: SecurityInfo
   settings: Settings
+  explicit: Explicit
   devices: DeviceInfo[]
   clients: ClientInfo[]
   origins: OriginsInfo

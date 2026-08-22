@@ -138,11 +138,13 @@ func main() {
 	// certificate has no CA to hand out but still has devices to pair, and
 	// coupling the two left that deployment with no way to authenticate one.
 	var bootstrapServer *tls.BootstrapServer
+	var pairingIssuer tls.PairingIssuer
 	if bootstrapPortFlag > 0 {
 		// tlsMgr may be nil here; the CA endpoints report that there is nothing
 		// to install and the pairing endpoint works regardless.
 		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
-		bootstrapServer.SetPairingIssuer(NewPairingIssuer(devices, agentPublicKeyPin), devicePortFlag)
+		pairingIssuer = NewPairingIssuer(devices, agentPublicKeyPin)
+		bootstrapServer.SetPairingIssuer(pairingIssuer, devicePortFlag)
 		if err := bootstrapServer.Start(); err != nil {
 			log.Printf("Warning: Failed to start bootstrap server: %v", err)
 		}
@@ -195,8 +197,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Load persisted preferences. Explicit flags still win: something that
-	// passed -device meant it for this run.
+	// Load persisted preferences. What the launcher asked for still wins.
 	settingsStore, err := settings.New(configDir)
 	if err != nil {
 		log.Printf("Warning: failed to load settings: %v", err)
@@ -204,25 +205,42 @@ func main() {
 	}
 	stored := settingsStore.Get()
 
-	if devicePathFlag == "" {
-		devicePathFlag = stored.DevicePath
-	}
-	if !isFlagSet("device-port") && stored.Port > 0 {
-		agent.DevicePort = stored.Port
-	}
-	// Asked for on the command line or in the environment, as opposed to
-	// remembered from a previous run: a stored preference may raise the
-	// requirement but not withdraw one asked for there. The notice waits until
-	// both sources are in, so it reports what is actually in force.
+	// What this run was launched with, as opposed to what a previous one
+	// remembered. These fields are the launcher's until the agent restarts: the
+	// stored file below does not change them, and neither does an operator at
+	// the tray or the console, both of which show them as held.
+	//
+	// The environment is a launcher too, for the one setting that reads it.
 	askedForPairing := requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
-	agent.RequirePairedDevice, agent.RequirePairedDeviceLocked = resolveRequirePaired(askedForPairing, stored.RequirePairedDevice)
-	if agent.RequirePairedDevice {
+	agent.SetExplicit(settings.Explicit{
+		DevicePath:          isFlagSet("device"),
+		Port:                isFlagSet("device-port"),
+		RequirePairedDevice: isFlagSet("require-paired-devices") || askedForPairing,
+	})
+	agent.RequirePairedDevice = askedForPairing
+	agent.SetPinnedDevice(devicePathFlag)
+
+	// The agent holds the settings from here on, and the console and the tray
+	// read them back from it, so a mode switched in one shows in the other.
+	agent.ApplySettings(stored)
+
+	// Reported once both sources are in, so it names what is in force rather
+	// than what either asked for.
+	if agent.RequiresPairedDevice() {
 		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
 		if devices.Count() == 0 {
 			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
 		}
 	}
-	applySettings(agent, stored)
+
+	// The reader to open: the flag, or the stored preference it just applied.
+	devicePathFlag = agent.CurrentPinnedDevice()
+
+	// A device that pairs is told where to reconnect, and the stored settings
+	// may just have moved the agent to a different port.
+	if bootstrapServer != nil && agent.ConfiguredPort() != devicePortFlag {
+		bootstrapServer.SetPairingIssuer(pairingIssuer, agent.ConfiguredPort())
+	}
 
 	// Nil in a -tags nowebui build, which is why everything below tolerates it.
 	console := setupConsole(agent, settingsStore, logRing)
@@ -236,6 +254,16 @@ func main() {
 	app.AttachConsole(console)
 	app.AttachSettings(settingsStore)
 
+	// One path from a saved preference to the running agent, whoever saved it.
+	// The tray and the console both write to the store and neither applies
+	// anything itself, so the two cannot put the agent in different states. The
+	// menu is then refreshed from the agent rather than from the file just
+	// written, for the same reason the console reads the agent.
+	settingsStore.OnChange(func(next settings.Settings) {
+		agent.ApplySettings(next)
+		app.syncSettingsToMenu(agent.Settings())
+	})
+
 	go func() {
 		<-sigChan
 		if bootstrapServer != nil {
@@ -247,17 +275,9 @@ func main() {
 	app.Run()
 }
 
-// resolveRequirePaired settles the paired-device requirement from its two
-// sources. Either can turn it on. Only the command line locks it on: a stored
-// preference that says false must not withdraw a requirement an operator asked
-// for on the command line, which is the one direction that costs security
-// rather than convenience.
-func resolveRequirePaired(askedForPairing, stored bool) (require, locked bool) {
-	return askedForPairing || stored, askedForPairing
-}
-
 // isFlagSet reports whether a flag was given on the command line, as opposed to
-// holding its default. A stored port must not override an explicit -device-port.
+// holding its default. It is what settings.Explicit is built from: a default
+// leaves the stored preference in charge, a flag takes it over.
 func isFlagSet(name string) bool {
 	found := false
 	flag.Visit(func(f *flag.Flag) {

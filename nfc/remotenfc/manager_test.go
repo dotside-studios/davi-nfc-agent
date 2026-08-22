@@ -33,7 +33,7 @@ func TestManagerRegisterDevice(t *testing.T) {
 		DeviceName: "Test iPhone",
 		Platform:   "ios",
 		AppVersion: "1.0.0",
-		Capabilities: DeviceCapabilities{
+		Capabilities: &DeviceCapabilities{
 			CanRead:  true,
 			CanWrite: true,
 			NFCType:  "isodep",

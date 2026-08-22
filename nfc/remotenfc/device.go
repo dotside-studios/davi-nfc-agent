@@ -10,19 +10,19 @@ import (
 
 // Device implements the nfc.Device interface for smartphone NFC scanning.
 type Device struct {
-	deviceID     string             // Unique ID for this smartphone (UUID)
-	connection   string             // Connection info (e.g., "smartphone:uuid")
-	deviceName   string             // Human-readable name (e.g., "iPhone 12 Pro")
-	platform     string             // "ios" or "android"
-	appVersion   string             // Mobile app version
-	protoVersion int                // Negotiated bridge protocol version
-	isActive     bool               // Whether device is connected
-	closeChannel chan struct{}      // Signal to close device
-	mu           sync.RWMutex       // Protects device state
-	lastSeen     time.Time          // Last activity timestamp (for health monitoring)
-	capabilities DeviceCapabilities // Read/write capabilities
-	tag          nfc.Tag            // The tag it is holding, nil when its field is empty
-	metadata     map[string]string  // Additional device info
+	deviceID     string              // Unique ID for this smartphone (UUID)
+	connection   string              // Connection info (e.g., "smartphone:uuid")
+	deviceName   string              // Human-readable name (e.g., "iPhone 12 Pro")
+	platform     string              // "ios" or "android"
+	appVersion   string              // Mobile app version
+	protoVersion int                 // Negotiated bridge protocol version
+	isActive     bool                // Whether device is connected
+	closeChannel chan struct{}       // Signal to close device
+	mu           sync.RWMutex        // Protects device state
+	lastSeen     time.Time           // Last activity timestamp (for health monitoring)
+	capabilities *DeviceCapabilities // What it said it can do, nil if it said nothing
+	tag          nfc.Tag             // The tag it is holding, nil when its field is empty
+	metadata     map[string]string   // Additional device info
 }
 
 // NewDevice creates a new smartphone device instance.
@@ -90,7 +90,7 @@ func (d *Device) DeviceType() string {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	if d.capabilities.DeviceType != "" {
+	if d.capabilities != nil && d.capabilities.DeviceType != "" {
 		return d.capabilities.DeviceType
 	}
 	return "smartphone"
@@ -102,6 +102,9 @@ func (d *Device) SupportedTagTypes() []string {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
+	if d.capabilities == nil {
+		return nil
+	}
 	if len(d.capabilities.SupportedTagTypes) > 0 {
 		return append([]string(nil), d.capabilities.SupportedTagTypes...)
 	}
@@ -214,11 +217,26 @@ func (d *Device) ProtocolVersion() int {
 	return d.protoVersion
 }
 
-// PhoneCapabilities returns the smartphone-specific device capabilities.
+// PhoneCapabilities returns what the device declared, or the zero value if it
+// declared nothing. Callers that must tell those apart use DeclaredCapabilities.
 func (d *Device) PhoneCapabilities() DeviceCapabilities {
+	caps, _ := d.DeclaredCapabilities()
+	return caps
+}
+
+// DeclaredCapabilities returns what the device said it can do, and whether it
+// said anything at all.
+//
+// The second result is the whole point: an omitted block and a block of falses
+// are different claims, and only one of them is a refusal.
+func (d *Device) DeclaredCapabilities() (DeviceCapabilities, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.capabilities
+
+	if d.capabilities == nil {
+		return DeviceCapabilities{}, false
+	}
+	return *d.capabilities, true
 }
 
 // Metadata returns additional device metadata.

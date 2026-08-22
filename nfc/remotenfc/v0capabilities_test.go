@@ -2,6 +2,7 @@ package remotenfc
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -19,7 +20,6 @@ func (d capableDevice) transceiveTag(_, _ string, _ []byte, _ bool) ([]byte, err
 func (d capableDevice) deviceCanWrite(string) bool      { return d.write }
 func (d capableDevice) deviceCanLock(string) bool       { return d.lock }
 func (d capableDevice) deviceCanTransceive(string) bool { return d.transceive }
-func (d capableDevice) deviceReachable(string) bool     { return true }
 
 var everything = capableDevice{write: true, lock: true, transceive: true}
 
@@ -110,28 +110,58 @@ func TestUndeclaredIsNotReadOnly(t *testing.T) {
 	}
 }
 
-// TestATagThatSpeaksForItselfIsNotVetoedBySilence is the case the device-level
-// declaration used to lose. capableDevice{} declares nothing, which is
-// indistinguishable on the wire from a device that omitted the block: the field
-// is a value, so silence and "all false" arrive the same way.
+// TestSilenceAboutItselfIsNotARefusal is the distinction the device-level
+// declaration could not make while it was a value on the wire. An omitted
+// capabilities block and one of all falses arrived identically, so a device
+// that described the tags it scans while saying nothing about itself had every
+// one of those tags reported incapable.
 //
-// A device that describes the tags it scans is a v1 device saying more than a
-// v0 one, not less, and a bridge carries more than smartphones. Reading its
-// silence about itself as a refusal vetoed the tag it had just described.
-func TestATagThatSpeaksForItselfIsNotVetoedBySilence(t *testing.T) {
-	tag := declaredTag(t, &protocol.TagCapabilities{
-		CanRead: true, CanWrite: true, CanLock: true,
-	}, capableDevice{})
+// A bridge carries more than smartphones, and describing a tag is saying more
+// than a device that cannot, not less. Silence is now unknown, and the
+// operation goes out to the only party that can answer it.
+func TestSilenceAboutItselfIsNotARefusal(t *testing.T) {
+	m := NewManager(30 * time.Second)
+	defer m.Close()
 
-	caps := nfc.GetTagCapabilities(tag)
-	if !caps.CanWrite {
-		t.Error("a tag that declared it can be written is reported unwritable because its device said nothing about itself")
+	silent, err := m.RegisterDevice(DeviceRegistrationRequest{
+		DeviceName: "Bridge that describes its tags",
+		Platform:   "web",
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
 	}
-	if !caps.CanLock {
-		t.Error("a tag that declared it can be locked is reported unlockable because its device said nothing about itself")
+	// Reachability is a map lookup, so a bare entry is enough to stand for a
+	// live session. Removed before Close, which would otherwise close it.
+	m.addSession(silent.DeviceID(), nil)
+	defer m.removeSession(silent.DeviceID())
+
+	if _, declared := silent.DeclaredCapabilities(); declared {
+		t.Error("a device that sent no capabilities block reads as having declared one")
+	}
+	if !m.deviceCanWrite(silent.DeviceID()) {
+		t.Error("a device that said nothing about itself refuses a write it never declined")
+	}
+	if !m.deviceCanLock(silent.DeviceID()) {
+		t.Error("a device that said nothing about itself refuses a lock it never declined")
 	}
 
-	if err := tag.WriteData([]byte{0x03, 0x00}); err != nil {
-		t.Errorf("WriteData = %v, want it routed to the device the tag named", err)
+	// The other half: a device that did describe itself is taken at its word,
+	// which is what the pointer buys. Refusing here is a claim it made.
+	declined, err := m.RegisterDevice(DeviceRegistrationRequest{
+		DeviceName:   "Reader that only reads",
+		Platform:     "web",
+		Capabilities: &DeviceCapabilities{CanRead: true},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
+	}
+	m.addSession(declined.DeviceID(), nil)
+	defer m.removeSession(declined.DeviceID())
+
+	if _, declared := declined.DeclaredCapabilities(); !declared {
+		t.Error("a device that sent a capabilities block reads as having sent none")
+	}
+	if m.deviceCanWrite(declined.DeviceID()) {
+		t.Error("a device that declared it cannot write is reported able to")
 	}
 }

@@ -18,24 +18,25 @@ type tagRoute interface {
 	deviceCanWrite(deviceID string) bool
 	deviceCanLock(deviceID string) bool
 	deviceCanTransceive(deviceID string) bool
-	deviceReachable(deviceID string) bool
 }
 
-// declaredFor answers one capability for this tag, preferring what the device
-// said about the tag itself over what it said about its own abilities.
+// declaredFor answers one capability for this tag from the two claims that bear
+// on it: what the device said about this tag, and what it said about itself.
 //
-// A device that described this tag is taken at its word for it. Only when the
-// tag was not described does the device-level declaration answer, which is the
-// inference the protocol documents. The two are not the same claim: a device
-// bridge is not only smartphones, and one that reports per-tag capabilities
-// while omitting its own block is describing more, not less. Reading that
-// silence as a refusal would veto operations the tag has just said it accepts.
+// A tag that declared it cannot is refused. Otherwise the device answers, and
+// its answer bounds the tag's: a bridge that cannot carry an operation at all
+// cannot carry it for any tag it holds.
+//
+// What makes that safe is that the device-level claim is now three-valued too.
+// A device that said nothing about itself no longer reads as one that refused,
+// so describing a tag while omitting its own block stopped vetoing the tag it
+// had just described.
 func (t *Tag) declaredFor(
 	ofTag func(protocol.TagCapabilities) bool,
 	ofDevice func(string) bool,
 ) bool {
-	if can, declared := t.declared(ofTag); declared {
-		return can && t.route.deviceReachable(t.sourceDevice)
+	if can, declared := t.declared(ofTag); declared && !can {
+		return false
 	}
 	return ofDevice(t.sourceDevice)
 }

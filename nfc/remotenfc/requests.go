@@ -429,7 +429,15 @@ func (m *Manager) deviceDeclared(deviceID string, want func(DeviceCapabilities) 
 	if !ok {
 		return false
 	}
-	return want(device.PhoneCapabilities())
+
+	caps, declared := device.DeclaredCapabilities()
+	if !declared {
+		// It described neither itself nor the tag. Nothing here is a refusal,
+		// so the operation goes out and the device answers it, which is the
+		// only party that knows.
+		return true
+	}
+	return want(caps)
 }
 
 // deviceReachable reports whether an operation could get to the device at all,

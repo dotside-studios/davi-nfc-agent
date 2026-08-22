@@ -60,8 +60,6 @@ type stubWriter struct {
 	gone bool
 }
 
-func (w *stubWriter) deviceReachable(string) bool { return !w.gone }
-
 func (w *stubWriter) writeTag(_, _ string, ndef []byte, _ nfc.WriteOptions) error {
 	if w.err != nil {
 		return w.err
@@ -82,8 +80,8 @@ func (w *stubWriter) transceiveTag(_, _ string, _ []byte, _ bool) ([]byte, error
 	return nil, nfc.NewNotSupportedError("Transceive")
 }
 
-func (w *stubWriter) deviceCanWrite(string) bool      { return w.canWrite }
-func (w *stubWriter) deviceCanLock(string) bool       { return w.canLock }
+func (w *stubWriter) deviceCanWrite(string) bool      { return !w.gone && w.canWrite }
+func (w *stubWriter) deviceCanLock(string) bool       { return !w.gone && w.canLock }
 func (w *stubWriter) deviceCanTransceive(string) bool { return false }
 
 func declaredTag(t *testing.T, caps *protocol.TagCapabilities, route tagRoute) nfc.Tag {
@@ -235,7 +233,7 @@ func TestDeviceReportsDeclaredTagTypes(t *testing.T) {
 	dev := NewDevice("dev1", DeviceRegistrationRequest{
 		DeviceName: "PN532 Reader",
 		Platform:   "android",
-		Capabilities: DeviceCapabilities{
+		Capabilities: &DeviceCapabilities{
 			NFCType:           "nfca",
 			DeviceType:        "pn532-serial",
 			SupportedTagTypes: []string{"MIFARE Classic", "NTAG", "ISO14443-4"},
@@ -263,7 +261,7 @@ func TestDeviceCapabilityFallbacks(t *testing.T) {
 	dev := NewDevice("dev2", DeviceRegistrationRequest{
 		DeviceName:   "Legacy Phone",
 		Platform:     "ios",
-		Capabilities: DeviceCapabilities{CanRead: true, NFCType: "corenfc"},
+		Capabilities: &DeviceCapabilities{CanRead: true, NFCType: "corenfc"},
 	})
 
 	if got := dev.DeviceType(); got != "smartphone" {
@@ -292,7 +290,7 @@ func (w *transceivingWriter) transceiveTag(_, _ string, data []byte, raw bool) (
 	return w.reply, nil
 }
 
-func (w *transceivingWriter) deviceCanTransceive(string) bool { return w.canTransceive }
+func (w *transceivingWriter) deviceCanTransceive(string) bool { return !w.gone && w.canTransceive }
 
 func TestTagTransceivesThroughDevice(t *testing.T) {
 	writer := &transceivingWriter{canTransceive: true, reply: []byte{0x90, 0x00}}
@@ -356,7 +354,7 @@ func TestDeviceLevelTransceiveUnsupported(t *testing.T) {
 	dev := NewDevice("dev3", DeviceRegistrationRequest{
 		DeviceName:   "Capable Reader",
 		Platform:     "android",
-		Capabilities: DeviceCapabilities{CanTransceive: true, NFCType: "nfca"},
+		Capabilities: &DeviceCapabilities{CanTransceive: true, NFCType: "nfca"},
 	})
 
 	if dev.SupportsTransceive() {

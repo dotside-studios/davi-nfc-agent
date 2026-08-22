@@ -159,6 +159,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A device that said nothing about itself no longer refuses for its tags.**
+  `capabilities` on `hello` was a value on the wire, so a device that omitted it
+  and one that declared every field false arrived identically, and both read as
+  a refusal. A device that reports what it finds on each tag while saying
+  nothing about its own abilities therefore had every one of those tags reported
+  incapable: the same collapse of silence into no that the per-tag capabilities
+  work removed one level down, still in place one level up.
+
+  The field is a pointer now, matching the per-tag one, and the three states are
+  distinct. A device that sends the object is taken at its word, and a `false`
+  refuses that operation for every tag it holds, because a bridge that cannot
+  carry an operation cannot carry it for any tag reached through it. A device
+  that omits it has declared nothing, so the request goes out and the device
+  answers it. A v0 device always sends the original triple, so nothing about it
+  changes.
+
+  Reading it either way stays backward compatible: an omitted object and an
+  explicit `null` both mean nothing declared, and an empty object means declared.
+
 - **A tag that declared nothing is unknown, not incapable.** `remotenfc.Tag`
   refused writes, locks and exchanges whenever the scan carried no per-tag
   capabilities, collapsing "the device said this tag cannot" together with "the

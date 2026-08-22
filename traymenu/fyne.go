@@ -2,11 +2,9 @@ package traymenu
 
 import "fyne.io/systray"
 
-// Fyne returns the driver backed by fyne.io/systray, the real tray.
-//
-// It is a process-wide singleton on every platform — there is one tray icon
-// per program — so a second menu running on it would add its items to the
-// first one's.
+// Fyne returns the driver backed by fyne.io/systray, the real tray. There is
+// one tray icon per process, so a second menu on this driver would add its
+// items to the first one's.
 func Fyne() Driver { return fyneDriver{} }
 
 type fyneDriver struct{}
@@ -39,9 +37,8 @@ func (fyneDriver) AddSeparator(parent Native) {
 	parent.(*fyneItem).item.AddSeparator()
 }
 
-// fyneItem adapts a systray menu item to [Native]. The library splits each
-// piece of state into a pair of methods; this is where that is put back
-// together into something a caller can set from a variable.
+// fyneItem adapts a systray menu item to Native, folding the library's pairs of
+// methods back into settable state.
 type fyneItem struct {
 	item *systray.MenuItem
 }

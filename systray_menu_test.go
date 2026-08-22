@@ -18,9 +18,8 @@ func newTestAgent() *Agent {
 	}
 }
 
-// newTestTray builds the real tray menu on a fake driver. That is what the
-// traymenu indirection buys: the menu can be built, read and clicked with no
-// desktop anywhere in sight.
+// newTestTray builds the real tray menu on a fake driver, so it can be read and
+// clicked with no desktop involved.
 func newTestTray(t *testing.T, agent *Agent) (*SystrayApp, *traymenu.Fake) {
 	t.Helper()
 
@@ -86,8 +85,7 @@ func TestMenuLayout(t *testing.T) {
 func TestConsoleEntry(t *testing.T) {
 	_, fake := newTestTray(t, newTestAgent())
 
-	// Built without a console, or built with one but not handed it: either way
-	// there is nothing for the entry to open, so it must not be offered.
+	// Nothing for the entry to open, so it must not be offered.
 	if item := fake.Find("Open Control Center"); item != nil && item.Visible() {
 		t.Error("the control center entry is offered with no console behind it")
 	}
@@ -121,8 +119,8 @@ func TestPairingAndSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
 func TestAgentControlsStartDisabled(t *testing.T) {
 	app, _ := newTestTray(t, newTestAgent())
 
-	// The agent auto-starts, so neither control has anything to do until it
-	// has either come up or failed.
+	// The agent auto-starts, so neither control has anything to do until it has
+	// come up or failed.
 	if app.mStart.Enabled() || app.mStop.Enabled() {
 		t.Fatalf("Start/Stop enabled = %v/%v, want false/false", app.mStart.Enabled(), app.mStop.Enabled())
 	}
@@ -192,8 +190,7 @@ func TestAllTypesClearsIndividualFilters(t *testing.T) {
 func TestModeMenuRevertsWithoutAReader(t *testing.T) {
 	app, _ := newTestTray(t, newTestAgent())
 
-	// No reader to apply it to: the tick has to go back where it was rather
-	// than claiming a mode the agent is not in.
+	// No reader to apply it to, so the tick goes back where it was.
 	app.modes.Item(nfc.ModeWriteOnly).Click()
 
 	if got, _ := app.modes.Value(); got != nfc.ModeReadWrite {
@@ -278,8 +275,8 @@ func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
 	app, _ := newTestTray(t, agent)
 	app.startOriginWatcher()
 
-	// A page that was refused shows up as a one-click offer to allow it, and
-	// the watcher is what puts it there without the menu being reopened.
+	// A refused page shows up as a one-click offer to allow it, put there by
+	// the watcher rather than by reopening the menu.
 	store.RecordBlocked("https://console.example")
 
 	row := findOriginRow(t, app, "Allow console.example")

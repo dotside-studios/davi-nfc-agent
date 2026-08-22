@@ -71,7 +71,7 @@ func (s *SystrayApp) refreshOriginsMenu() {
 }
 
 // toggleOrigin allows an origin that was refused, or revokes one that was
-// allowed — which of the two is what the row was offering.
+// allowed, depending on what the row was offering.
 func (s *SystrayApp) toggleOrigin(row originRow) {
 	if s.agent.Origins == nil || row.origin == "" {
 		return

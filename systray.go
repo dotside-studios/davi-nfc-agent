@@ -78,8 +78,7 @@ type SystrayApp struct {
 	mStart    *traymenu.Item
 	mStop     *traymenu.Item
 
-	// URL menu items. Only the ones that are relabelled later are held; the
-	// copy and regenerate entries do their work from their own handlers.
+	// URL menu items. Only the ones relabelled later are held.
 	mDeviceURL    *traymenu.Item
 	mClientURL    *traymenu.Item
 	mBootstrapURL *traymenu.Item
@@ -121,7 +120,7 @@ type SystrayApp struct {
 	settings *settings.Store
 
 	// mu guards the state below, which the console changes from its own
-	// goroutines while the tray's handlers are reading it.
+	// goroutines while the tray's handlers read it.
 	mu   sync.Mutex
 	mode nfc.ReaderMode
 }
@@ -133,8 +132,8 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 	return newSystrayApp(agent, initialDevice, bootstrapPort, bootstrap, traymenu.Fyne())
 }
 
-// newSystrayApp builds the tray on a given menu driver, which is what lets the
-// menu be built and clicked in a test without a desktop.
+// newSystrayApp builds the tray on a given menu driver, so a test can drive the
+// menu without a desktop.
 func newSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer, driver traymenu.Driver) *SystrayApp {
 	return &SystrayApp{
 		agent:           agent,
@@ -199,45 +198,36 @@ func (s *SystrayApp) onExit() {
 }
 
 // setupUI declares the whole menu, top to bottom. Each item carries the handler
-// it triggers, so an entry can be read — and moved — without cross-referencing
-// an event loop somewhere else.
+// it triggers.
 func (s *SystrayApp) setupUI() {
 	s.menu.SetIcon(iconData)
 	s.menu.SetTooltip(buildinfo.DisplayName)
 
-	// Status section
 	s.mStatus = s.menu.Add("Starting...", traymenu.Tooltip("Agent Status"), traymenu.Disabled())
 
 	s.setupURLsMenu()
 
 	s.menu.AddSeparator()
 
-	// Card info section
 	s.mCardUID = s.menu.Add("Card UID: None", traymenu.Tooltip("Current card UID"), traymenu.Disabled())
 	s.mCardType = s.menu.Add("Card Type: None", traymenu.Tooltip("Current card type"), traymenu.Disabled())
 
 	s.menu.AddSeparator()
 
-	// Device management section
 	s.setupDeviceMenu()
 
 	s.menu.AddSeparator()
 
-	// Mode toggle section, and the reader feedback toggle beside it
 	s.setupModeMenu()
 	s.setupFeedbackMenu()
 
 	s.menu.AddSeparator()
 
-	// Card type filtering section
 	s.setupCardFilterMenu()
 
 	s.menu.AddSeparator()
 
-	// Paired devices section
 	s.setupDevicesMenu()
-
-	// Origin allowlist section
 	s.setupOriginsMenu()
 
 	// Certificate trust, the other half of what a browser needs.
@@ -249,8 +239,8 @@ func (s *SystrayApp) setupUI() {
 
 	s.menu.AddSeparator()
 
-	// Agent control section. Both start disabled: the agent is auto-starting,
-	// and Stop becomes available once it has.
+	// Both start disabled: the agent is auto-starting, and Stop becomes
+	// available once it has.
 	s.mStart = s.menu.Add("Start Agent",
 		traymenu.Tooltip("Start the NFC agent"),
 		traymenu.Disabled(),
@@ -266,8 +256,7 @@ func (s *SystrayApp) setupUI() {
 	s.menu.Add("Quit", traymenu.Tooltip("Quit the application"), traymenu.OnClick(s.menu.Quit))
 }
 
-// setupURLsMenu builds the submenu of addresses, each with the copy entry that
-// puts it on the clipboard.
+// setupURLsMenu builds the submenu of addresses and their copy entries.
 func (s *SystrayApp) setupURLsMenu() {
 	urls := s.menu.AddSubmenu("Server URLs", traymenu.Tooltip("Server addresses"))
 
@@ -344,8 +333,7 @@ func (s *SystrayApp) setupDeviceMenu() {
 	})
 }
 
-// setupModeMenu builds the reader mode picker. The three modes are one choice,
-// so they are a radio group rather than three checkboxes kept in step by hand.
+// setupModeMenu builds the reader mode picker.
 func (s *SystrayApp) setupModeMenu() {
 	s.mModeMenu = s.menu.AddSubmenu("Mode: Read/Write", traymenu.Tooltip("Change operation mode"))
 
@@ -805,8 +793,8 @@ func (s *SystrayApp) getBootstrapURL() string {
 	return base
 }
 
-// copyValue puts a value on the clipboard and says what happened. The log is
-// the only feedback a tray menu has to offer for a copy.
+// copyValue puts a value on the clipboard and logs what happened, which is the
+// only feedback a tray menu has for a copy.
 func (s *SystrayApp) copyValue(what, value string) {
 	if value == "" {
 		return

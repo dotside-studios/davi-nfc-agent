@@ -106,8 +106,8 @@ func TestListHandlerMayRedrawTheList(t *testing.T) {
 	list := traymenu.NewList[string](menu.AddSubmenu("Origins"), 4, traymenu.Checkbox(false))
 	list.Set(rows("https://a.test", "https://b.test"))
 
-	// The real menus all redraw themselves from the store the click just
-	// changed, so Set has to be callable from inside a handler.
+	// The real menus redraw themselves from the store the click just changed,
+	// so Set has to be callable from inside a handler.
 	list.OnActivate(func(row traymenu.Row[string]) {
 		if row.Value == "https://a.test" {
 			list.Set(rows("https://b.test"))

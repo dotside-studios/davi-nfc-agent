@@ -3,8 +3,8 @@
 Declarative system tray menus for Go, with clicks delivered as signals.
 
 `traymenu` sits on top of [`fyne.io/systray`](https://github.com/fyne-io/systray)
-and is deliberately free of anything else in this repository, so it can be
-lifted out into a module of its own.
+and is free of anything else in this repository, so it can be lifted out into a
+module of its own.
 
 ```go
 menu := traymenu.New(nil) // nil driver: the real tray
@@ -25,10 +25,10 @@ menu.Run(func() {
 }, onExit)
 ```
 
-## Why
+## Clicks
 
-The tray library hands out one unbuffered `ClickedCh` per item, and **drops a
-click when nobody happens to be receiving on it**:
+The tray library hands out one unbuffered `ClickedCh` per item and drops a click
+when nobody is receiving on it:
 
 ```go
 select {
@@ -37,45 +37,13 @@ default: // nobody home; the click is gone
 }
 ```
 
-Every caller therefore ends up writing the same loop — one goroutine holding a
-`select` over every item — and that loop stops working the moment the set of
-items changes at runtime. The usual workaround is to poll the dynamic items
-with a `default` branch after each event:
+A caller therefore needs one goroutine holding a `select` over every item, which
+stops working as soon as the set of items changes at runtime: nothing is
+receiving on a device or origin row unless some other item was clicked first.
 
-```go
-for {
-    select {
-    case <-mStart.ClickedCh:
-        start()
-    case <-mQuit.ClickedCh:
-        return
-    }
-
-    // ...and now poll everything the select could not name.
-    for _, filter := range cardTypeFilters {
-        select {
-        case <-filter.item.ClickedCh:
-            toggle(filter)
-        default:
-        }
-    }
-}
-```
-
-Which loses clicks on exactly the items that change most: nothing is receiving
-on a device or origin row unless some *other* item was clicked first.
-
-`traymenu` keeps a receiver on every item for its whole life, so no click is
-dropped, and fans each one out through a signal. Handlers are declared with the
-item they belong to, so an entry can be read — and moved — without
-cross-referencing an event loop somewhere else.
-
-## The signals pattern
-
-A [`signals.Signal[T]`](../signals) is a fan-out point: any number of handlers
-connect, and every `Emit` calls them all. It is the inverse of a channel — a
-channel has one value and races its receivers for it; a signal has many
-receivers and gives each of them the value.
+`traymenu` keeps a receiver on every item for its whole life and fans each click
+out through a [`signals.Signal`](../signals). Handlers are declared with the item
+they belong to:
 
 ```go
 item.OnClick(func() { ... })                    // the common case
@@ -85,10 +53,9 @@ conn := item.Clicked().Connect(func(i *Item) {  // the signal itself
 conn.Disconnect()
 ```
 
-Click handlers all run on **one dispatch goroutine**, in arrival order. That is
-what makes it safe for a handler to read and write menu state without a lock of
-its own — and it means a handler that blocks holds up every other item, so
-anything that can wait on the OS belongs in a goroutine:
+Handlers all run on one dispatch goroutine, in arrival order, so a handler can
+read and write menu state without a lock of its own. A handler that blocks holds
+up every other item, so anything that can wait on the OS goes in a goroutine:
 
 ```go
 menu.Add("Trust This Agent in Browsers", traymenu.OnClick(func() {
@@ -96,7 +63,8 @@ menu.Add("Trust This Agent in Browsers", traymenu.OnClick(func() {
 }))
 ```
 
-Menu state — titles, checkmarks, visibility — may be changed from any goroutine.
+Menu state, titles and checkmarks and visibility, may be changed from any
+goroutine.
 
 ## Radio groups
 
@@ -117,8 +85,7 @@ modes.OnSelect(func(mode nfc.ReaderMode) { reader.SetMode(mode) })
 
 No supported platform can remove a menu item once it is added. A `List` takes a
 fixed pool of items up front and relabels and hides them as the contents change,
-which is the trick every dynamic tray menu ends up reinventing — written once,
-with the cap made explicit rather than silently truncating:
+reporting what did not fit rather than truncating quietly:
 
 ```go
 origins := traymenu.NewList[string](menu.AddSubmenu("Allowed Origins"), 8, traymenu.Checkbox(false))
@@ -134,8 +101,7 @@ look the row up again by its label.
 
 ## Testing
 
-`Fake` is a driver that records a menu instead of drawing one, which is what
-makes a tray menu testable at all:
+`Fake` is a driver that records a menu instead of drawing one:
 
 ```go
 fake := traymenu.NewFake()

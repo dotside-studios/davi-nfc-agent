@@ -144,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The tray menu is a package now, and its clicks are signals.** Every menu
   item the tray library hands out comes with an unbuffered channel that *drops*
   a click when nobody happens to be receiving on it, so the tray was one
-  goroutine holding a `select` over every item — plus a second pass that polled
+  goroutine holding a `select` over every item, plus a second pass that polled
   the card filters, the readers, the origins and the paired devices with a
   `default` branch after each event, because a fixed `select` cannot name a
   changing set. Those rows only had a receiver on them while some *other* item
@@ -157,9 +157,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run one at a time on a single dispatch goroutine, so a handler can still read
   and write menu state without a lock. Two shapes the tray had open-coded three
   times each come with it: a radio group for the reader modes, and a list that
-  reuses a fixed pool of items for contents that change — the readers, paired
-  devices and origins — reporting what did not fit rather than truncating
-  quietly. The reader picker no longer leaks a fresh menu item per refresh.
+  reuses a fixed pool of items for the readers, paired devices and origins,
+  reporting what did not fit rather than truncating quietly. The reader picker
+  no longer leaks a fresh menu item per refresh.
 
   Nothing about the menu the operator sees has changed. Both packages depend on
   nothing else in this repository, and the tray now builds and clicks under

@@ -6,11 +6,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/signals"
 )
 
-// Item is one entry in a menu.
-//
-// It owns its state rather than reading it back from the platform, so
-// [Item.Checked] and friends answer without a round trip and mean the same
-// thing on every driver.
+// Item is one entry in a menu. It owns its state rather than reading it back
+// from the platform, so Checked and friends mean the same thing on every
+// driver.
 type Item struct {
 	owner    *Menu
 	platform Native
@@ -25,13 +23,12 @@ type Item struct {
 	visible  bool
 }
 
-// Clicked is the signal raised when the item is activated. Connect to it
-// directly to hold on to the [signals.Connection]; [Item.OnClick] is the
+// Clicked is the signal raised when the item is activated. OnClick is the
 // shorthand for the common case.
 func (i *Item) Clicked() *signals.Signal[*Item] { return &i.clicked }
 
-// OnClick runs fn whenever the item is activated. More than one handler may be
-// connected, and they run in the order they were connected.
+// OnClick runs fn whenever the item is activated. Handlers run in the order
+// they were connected.
 func (i *Item) OnClick(fn func()) *signals.Connection {
 	if fn == nil {
 		return i.clicked.Connect(nil)
@@ -39,12 +36,11 @@ func (i *Item) OnClick(fn func()) *signals.Connection {
 	return i.clicked.Connect(func(*Item) { fn() })
 }
 
-// Click delivers a click as the platform would, and blocks until the handlers
+// Click delivers a click as the platform would and blocks until the handlers
 // have run. It is how a test drives a menu; a disabled or hidden item ignores
 // it, as a real one would.
 //
-// Calling it from inside a handler would wait on the dispatch goroutine that is
-// already busy running that handler, so don't.
+// Calling it from inside a handler deadlocks on the dispatch goroutine.
 func (i *Item) Click() {
 	i.mu.RLock()
 	live := i.enabled && i.visible
@@ -188,8 +184,8 @@ func (i *Item) SetVisible(visible bool) {
 // Show reveals a hidden item.
 func (i *Item) Show() { i.SetVisible(true) }
 
-// Hide takes the item off the menu without removing it, which is as close to
-// removal as the platforms allow.
+// Hide takes the item off the menu, which is as close to removal as the
+// platforms allow.
 func (i *Item) Hide() { i.SetVisible(false) }
 
 // ---- Container ----
@@ -248,8 +244,8 @@ func Tooltip(tooltip string) Option {
 }
 
 // Checkbox makes the item a checkbox with the given initial state. Prefer
-// [Container.AddCheckbox]; this is for the helpers that build items on the
-// caller's behalf, such as [NewList].
+// AddCheckbox; this is for helpers that build items on the caller's behalf,
+// such as NewList.
 func Checkbox(checked bool) Option {
 	return func(o *options) {
 		o.spec.Checkbox = true
@@ -268,8 +264,7 @@ func Hidden() Option {
 	return func(o *options) { o.visible = false }
 }
 
-// HiddenIf hides the item when cond holds, for entries that only apply to some
-// configurations.
+// HiddenIf hides the item when cond holds.
 func HiddenIf(cond bool) Option {
 	return func(o *options) {
 		if cond {
@@ -278,8 +273,7 @@ func HiddenIf(cond bool) Option {
 	}
 }
 
-// OnClick connects a click handler as the item is added, which keeps the
-// handler next to the item it belongs to.
+// OnClick connects a click handler as the item is added.
 func OnClick(fn func()) Option {
 	return func(o *options) {
 		if fn != nil {

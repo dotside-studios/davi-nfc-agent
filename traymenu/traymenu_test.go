@@ -178,7 +178,7 @@ func TestStateChangesReachTheDriver(t *testing.T) {
 	}
 }
 
-// TestPlatformClicksAreNotDropped covers the reason this package exists: the
+// TestPlatformClicksAreNotDropped covers what the watcher goroutine is for: the
 // tray library drops a click when nobody is receiving on the item's channel.
 func TestPlatformClicksAreNotDropped(t *testing.T) {
 	menu, fake := newMenu(t)

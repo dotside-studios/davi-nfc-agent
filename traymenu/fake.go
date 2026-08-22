@@ -5,9 +5,8 @@ import (
 	"sync"
 )
 
-// Fake is an in-memory [Driver]. It is what makes a menu testable: the whole
-// tree, and every change made to it afterwards, can be read back without a
-// display server.
+// Fake is an in-memory Driver. The whole tree, and every change made to it
+// afterwards, can be read back without a display server.
 //
 //	fake := traymenu.NewFake()
 //	menu := traymenu.New(fake)
@@ -32,9 +31,8 @@ func NewFake() *Fake {
 	return &Fake{quit: make(chan struct{})}
 }
 
-// Run calls onReady and blocks until [Fake.Quit], mirroring the real driver so
-// the same startup code runs in a test. A menu can also be built without ever
-// calling Run.
+// Run calls onReady and blocks until Quit, mirroring the real driver. A menu
+// can also be built without ever calling Run.
 func (f *Fake) Run(onReady, onExit func()) {
 	f.mu.Lock()
 	f.running = true
@@ -49,7 +47,7 @@ func (f *Fake) Run(onReady, onExit func()) {
 	}
 }
 
-// Quit returns from [Fake.Run]. Calling it twice is harmless.
+// Quit returns from Run. Calling it twice is harmless.
 func (f *Fake) Quit() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -95,7 +93,7 @@ func (f *Fake) Tooltip() string {
 	return f.tooltip
 }
 
-// AddItem implements [Driver].
+// AddItem implements Driver.
 func (f *Fake) AddItem(parent Native, spec Spec) Native {
 	item := &FakeItem{
 		fake:    f,
@@ -114,7 +112,7 @@ func (f *Fake) AddItem(parent Native, spec Spec) Native {
 	return item
 }
 
-// AddSeparator implements [Driver].
+// AddSeparator implements Driver.
 func (f *Fake) AddSeparator(parent Native) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -138,8 +136,7 @@ func (f *Fake) Items() []*FakeItem {
 }
 
 // Find returns the item reached by following titles down the menu, or nil.
-// Titles are matched as they read now, so an item is found by what the user
-// would see rather than by what it was created with.
+// Titles are matched as they read now, not as the item was created.
 func (f *Fake) Find(titles ...string) *FakeItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -162,8 +159,8 @@ func (f *Fake) Find(titles ...string) *FakeItem {
 	return found
 }
 
-// Render draws the menu as text, one item per line, indented by depth. It is
-// meant for assertions on shape and state:
+// Render draws the menu as text, one item per line, indented by depth, for
+// assertions on shape and state:
 //
 //	Mode: Read/Write
 //	  [x] Read/Write Mode
@@ -211,16 +208,16 @@ func (f *Fake) renderLocked(b *strings.Builder, items []*FakeItem, depth int) {
 	}
 }
 
-// FakeItem is one item recorded by a [Fake]. Its getters report what the menu
-// last pushed to the platform, which is what a real tray would be showing.
+// FakeItem is one item recorded by a Fake. Its getters report what the menu
+// last pushed to the platform.
 type FakeItem struct {
 	fake      *Fake
 	spec      Spec
 	separator bool
 	clicks    chan struct{}
 
-	// Guarded by fake.mu, so a test reading state races nothing with the
-	// menu's own goroutines.
+	// Guarded by fake.mu, so a test reading state races nothing with the menu's
+	// own goroutines.
 	title    string
 	tooltip  string
 	checked  bool
@@ -229,49 +226,49 @@ type FakeItem struct {
 	children []*FakeItem
 }
 
-// SetTitle implements [Native].
+// SetTitle implements Native.
 func (i *FakeItem) SetTitle(title string) {
 	i.fake.mu.Lock()
 	defer i.fake.mu.Unlock()
 	i.title = title
 }
 
-// SetTooltip implements [Native].
+// SetTooltip implements Native.
 func (i *FakeItem) SetTooltip(tooltip string) {
 	i.fake.mu.Lock()
 	defer i.fake.mu.Unlock()
 	i.tooltip = tooltip
 }
 
-// SetChecked implements [Native].
+// SetChecked implements Native.
 func (i *FakeItem) SetChecked(checked bool) {
 	i.fake.mu.Lock()
 	defer i.fake.mu.Unlock()
 	i.checked = checked
 }
 
-// SetEnabled implements [Native].
+// SetEnabled implements Native.
 func (i *FakeItem) SetEnabled(enabled bool) {
 	i.fake.mu.Lock()
 	defer i.fake.mu.Unlock()
 	i.enabled = enabled
 }
 
-// SetVisible implements [Native].
+// SetVisible implements Native.
 func (i *FakeItem) SetVisible(visible bool) {
 	i.fake.mu.Lock()
 	defer i.fake.mu.Unlock()
 	i.visible = visible
 }
 
-// Clicks implements [Native]. Sending on the returned channel drives the same
-// path a platform click takes, including the menu's watcher goroutine; prefer
-// [Item.Click], which also waits for the handlers to finish.
+// Clicks implements Native. Sending on the returned channel drives the same
+// path a platform click takes; prefer Item.Click, which also waits for the
+// handlers to finish.
 func (i *FakeItem) Clicks() <-chan struct{} { return i.clicks }
 
-// Deliver pushes a click through the click channel, exactly as a platform
-// would. It returns once the menu's watcher has taken it, which is before the
-// handlers have run — a test that needs to wait for those wants [Item.Click].
+// Deliver pushes a click through the click channel as a platform would. It
+// returns once the menu's watcher has taken it, before the handlers have run;
+// use Item.Click to wait for those.
 func (i *FakeItem) Deliver() { i.clicks <- struct{}{} }
 
 // Title returns the item's current label.

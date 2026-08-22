@@ -6,9 +6,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/signals"
 )
 
-// Row is one entry in a [List]. Value carries whatever the caller needs back
-// when the row is clicked — an ID, a struct, a whole record — so the handler
-// does not have to look the row up again by its label.
+// Row is one entry in a List. Value carries whatever the caller needs back when
+// the row is clicked, so the handler does not have to look the row up again by
+// its label.
 type Row[T any] struct {
 	Value   T
 	Title   string
@@ -21,9 +21,8 @@ type Row[T any] struct {
 //
 // No supported platform can remove a menu item once it is added, so a List
 // takes a fixed pool of items up front and relabels and hides them as the
-// contents change. That is a cap, not a resize: [List.Set] reports how many
-// rows did not fit, and a caller that can overflow should say so rather than
-// quietly showing a truncated list.
+// contents change. That is a cap, not a resize: Set reports how many rows did
+// not fit.
 type List[T any] struct {
 	mu    sync.Mutex
 	items []*Item
@@ -34,8 +33,8 @@ type List[T any] struct {
 }
 
 // NewList adds size hidden items to parent and returns the list that drives
-// them. The options apply to every item in the pool; pass [Checkbox] for a list
-// whose rows carry checkmarks.
+// them. The options apply to every item in the pool; pass Checkbox for rows
+// that carry checkmarks.
 func NewList[T any](parent Container, size int, opts ...Option) *List[T] {
 	list := &List[T]{
 		items: make([]*Item, 0, size),
@@ -108,9 +107,8 @@ func (l *List[T]) Rows() []Row[T] {
 	return append([]Row[T](nil), l.rows[:l.shown]...)
 }
 
-// Items returns the pool backing the list, showing and hidden alike. Reach for
-// it when a row needs something the [Row] fields do not cover; the titles and
-// visibility belong to [List.Set].
+// Items returns the pool backing the list, showing and hidden alike, for
+// anything the Row fields do not cover. Titles and visibility belong to Set.
 func (l *List[T]) Items() []*Item {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -126,15 +124,15 @@ func (l *List[T]) OnActivate(fn func(Row[T])) *signals.Connection { return l.act
 func (l *List[T]) activate(slot int) {
 	l.mu.Lock()
 	if slot >= l.shown {
-		// A click that landed on a slot as it was being emptied. Dropping it is
-		// the safe half of the race: the row it named is already gone.
+		// The slot was emptied between the click and here, so the row it named
+		// is already gone.
 		l.mu.Unlock()
 		return
 	}
 	row := l.rows[slot]
 	l.mu.Unlock()
 
-	// Emitted outside the lock: a handler is expected to redraw the list, and
-	// that calls straight back into Set.
+	// Emitted outside the lock: a handler that redraws the list calls straight
+	// back into Set.
 	l.activated.Emit(row)
 }

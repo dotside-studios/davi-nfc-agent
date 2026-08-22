@@ -5,17 +5,16 @@ import (
 	"sync"
 )
 
-// Container is something menu items can be added to: a [Menu] (the top level)
-// or an [Item] (a submenu). The unexported methods keep implementations inside
-// this package — a container has to be backed by a real platform item.
+// Container is something menu items can be added to: a Menu (the top level) or
+// an Item (a submenu). The unexported methods keep implementations inside this
+// package, since a container has to be backed by a real platform item.
 type Container interface {
 	// Add appends a plain item.
 	Add(title string, opts ...Option) *Item
 	// AddCheckbox appends an item that carries a checkmark.
 	AddCheckbox(title string, checked bool, opts ...Option) *Item
-	// AddSubmenu appends an item that other items can be added to. The
-	// returned item is a normal one otherwise: it can be relabelled, hidden and
-	// clicked like any other.
+	// AddSubmenu appends an item that other items can be added to. It is a
+	// normal item otherwise: relabel, hide and click it like any other.
 	AddSubmenu(title string, opts ...Option) *Item
 	// AddSeparator appends a divider.
 	AddSeparator()
@@ -43,14 +42,13 @@ type event struct {
 	done chan struct{}
 }
 
-// clickQueue is the dispatch backlog. It only fills when a handler blocks, and
-// a tray menu that far behind has bigger problems than a bounded queue.
+// clickQueue is the dispatch backlog. It only fills when a handler blocks.
 const clickQueue = 64
 
-// New returns a menu drawn by driver. A nil driver means [Fyne], the real tray.
+// New returns a menu drawn by driver. A nil driver means Fyne, the real tray.
 //
-// Nothing is shown until [Menu.Run] is called, and items may only be added once
-// it has called back.
+// Nothing is shown until Run is called, and items may only be added once it has
+// called back.
 func New(driver Driver) *Menu {
 	if driver == nil {
 		driver = Fyne()
@@ -75,8 +73,8 @@ func (m *Menu) SetLogger(fn func(format string, args ...any)) {
 }
 
 // Run shows the tray icon, calls onReady once items may be added, and blocks
-// until [Menu.Quit] is called. onExit runs on the way out, before the menu
-// stops dispatching clicks, so a handler there can still touch the menu.
+// until Quit is called. onExit runs before the menu stops dispatching clicks,
+// so it can still touch the menu.
 func (m *Menu) Run(onReady, onExit func()) {
 	m.driver.Run(
 		func() {
@@ -93,18 +91,18 @@ func (m *Menu) Run(onReady, onExit func()) {
 	)
 }
 
-// Quit tears the menu down, which returns from [Menu.Run].
+// Quit tears the menu down, which returns from Run.
 func (m *Menu) Quit() { m.driver.Quit() }
 
 // Close stops delivering clicks and releases the goroutines behind the menu.
-// [Menu.Run] does it on the way out; a menu built without Run needs it called.
-// It is safe to call more than once.
+// Run does it on the way out; a menu built without Run needs it called. It is
+// safe to call more than once.
 func (m *Menu) Close() {
 	m.closeOnce.Do(func() { close(m.done) })
 }
 
-// SetIcon sets the tray icon from encoded image bytes (PNG everywhere but
-// Windows, which wants an ICO).
+// SetIcon sets the tray icon from encoded image bytes: PNG everywhere but
+// Windows, which wants an ICO.
 func (m *Menu) SetIcon(icon []byte) { m.driver.SetIcon(icon) }
 
 // SetTooltip sets the text shown when hovering the tray icon.
@@ -131,7 +129,7 @@ func (m *Menu) AddSeparator() { m.driver.AddSeparator(nil) }
 func (m *Menu) menu() *Menu    { return m }
 func (m *Menu) native() Native { return nil }
 
-// add creates the platform item and the [Item] that fronts it.
+// add creates the platform item and the Item that fronts it.
 func (m *Menu) add(parent Native, o options) *Item {
 	item := &Item{
 		owner:    m,
@@ -144,8 +142,8 @@ func (m *Menu) add(parent Native, o options) *Item {
 		visible:  true,
 	}
 
-	// Applied after creation rather than through Spec because that is what the
-	// platforms offer: an item is created live and visible, then told otherwise.
+	// Applied after creation because that is what the platforms offer: an item
+	// is created live and visible, then told otherwise.
 	if !o.enabled {
 		item.SetEnabled(false)
 	}
@@ -161,8 +159,8 @@ func (m *Menu) add(parent Native, o options) *Item {
 }
 
 // watch keeps a receiver on the item's click channel for as long as the menu
-// lives. Drivers drop clicks that nobody is waiting for, so this goroutine —
-// not the handlers — is what makes a click reliable.
+// lives. Drivers drop clicks that nobody is waiting for, so this goroutine, not
+// the handlers, is what makes a click reliable.
 func (m *Menu) watch(item *Item) {
 	clicks := item.platform.Clicks()
 	if clicks == nil {
@@ -205,9 +203,8 @@ func (m *Menu) dispatch() {
 	}
 }
 
-// deliver emits one click. A panicking handler is reported and swallowed: it is
-// a bug in that handler, and taking the tray down with it would leave the user
-// with no way to reach anything else on the menu.
+// deliver emits one click. A panicking handler is reported and swallowed
+// rather than taking the tray down and every other menu item with it.
 func (m *Menu) deliver(item *Item) {
 	defer func() {
 		r := recover()

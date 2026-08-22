@@ -7,17 +7,14 @@ import (
 )
 
 // Radio is a set of checkbox items of which exactly one is ticked, keyed by a
-// value of the caller's own type:
+// value of the caller's own type. It keeps the checkmarks consistent wherever
+// the value changes.
 //
 //	modes := traymenu.NewRadio[nfc.ReaderMode](menu.AddSubmenu("Mode"))
 //	modes.Add(nfc.ModeReadWrite, "Read/Write")
 //	modes.Add(nfc.ModeReadOnly, "Read Only")
 //	modes.Set(nfc.ModeReadWrite)
 //	modes.OnSelect(func(m nfc.ReaderMode) { reader.SetMode(m) })
-//
-// Keeping the checkmarks consistent is the whole point: the alternative, which
-// every hand-rolled tray menu ends up writing, is a fan of Uncheck calls that
-// has to be repeated everywhere the value can change.
 type Radio[T comparable] struct {
 	parent Container
 
@@ -39,7 +36,7 @@ func NewRadio[T comparable](parent Container) *Radio[T] {
 	return &Radio[T]{parent: parent}
 }
 
-// Add appends an option and returns its item, so it can still be relabelled or
+// Add appends an option and returns its item, which can be relabelled and
 // hidden like any other.
 func (r *Radio[T]) Add(value T, title string, opts ...Option) *Item {
 	item := r.parent.AddCheckbox(title, false, opts...)
@@ -47,7 +44,7 @@ func (r *Radio[T]) Add(value T, title string, opts ...Option) *Item {
 
 	r.mu.Lock()
 	r.entries = append(r.entries, radioEntry[T]{value: value, item: item})
-	// A group whose value was set before its options existed still shows it.
+	// A value set before its option existed still shows up.
 	if r.chosen && r.current == value {
 		item.SetChecked(true)
 	}
@@ -57,9 +54,8 @@ func (r *Radio[T]) Add(value T, title string, opts ...Option) *Item {
 }
 
 // Set ticks the option for value and unticks the rest, without raising
-// [Radio.Selected]. It is how a change made elsewhere — restored settings, a
-// second window — is reflected back into the menu without looping into the
-// handler that would apply it again.
+// Selected. It reflects a change made elsewhere, such as restored settings,
+// without looping into the handler that would apply it again.
 func (r *Radio[T]) Set(value T) {
 	r.mu.Lock()
 	r.current = value
@@ -93,8 +89,8 @@ func (r *Radio[T]) Item(value T) *Item {
 }
 
 // Selected is raised when an option is clicked, with the value it stands for.
-// Clicking the option that is already ticked raises it too: the click means
-// "make this so", and a caller that has drifted out of sync needs to hear it.
+// Clicking the option that is already ticked raises it too, so a caller that
+// has drifted out of sync hears about it.
 func (r *Radio[T]) Selected() *signals.Signal[T] { return &r.selected }
 
 // OnSelect runs fn whenever an option is clicked.

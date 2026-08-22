@@ -28,6 +28,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A device that said nothing about itself no longer refuses for its tags.**
+  `capabilities` on `hello` was a value on the wire, so a device that omitted it
+  and one that declared every field false arrived identically, and both read as
+  a refusal. A device that reports what it finds on each tag while saying
+  nothing about its own abilities therefore had every one of those tags reported
+  incapable: the same collapse of silence into no that the per-tag capabilities
+  work removed one level down, still in place one level up.
+
+  The field is a pointer now, matching the per-tag one, and the three states are
+  distinct. A device that sends the object is taken at its word, and a `false`
+  refuses that operation for every tag it holds, because a bridge that cannot
+  carry an operation cannot carry it for any tag reached through it. A device
+  that omits it has declared nothing, so the request goes out and the device
+  answers it. A v0 device always sends the original triple, so nothing about it
+  changes.
+
+  Reading it either way stays backward compatible: an omitted object and an
+  explicit `null` both mean nothing declared, and an empty object means declared.
+
+- **A device is no longer refused for what it calls itself.** Registration
+  required `platform` to be `ios`, `android` or `web`, but nothing branches on
+  the value: it reaches a column in the console and stops. The allowlist turned
+  a description into an admission test on a bridge that carries whatever speaks
+  the protocol, which is why `DeviceCapabilities` documents `deviceType` values
+  like `pn532-serial` that could never register.
+
+  The bundled client failed it too. `nfc-device-client.js` defaults `platform`
+  to `unknown` and its Node example sends `node`, so following the shipped
+  documentation was refused at the door. Any identifier is accepted now, and a
+  device that sends none is recorded as `unknown`.
+
 - **A write to a phone reports its outcome.** The device route answered with a
   bare `{uid, deviceID}` map while the client server reads a write outcome by
   asserting `*nfc.WriteResult`. The assertion failed, the whole block was

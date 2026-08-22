@@ -14,7 +14,7 @@ func scanning(t *testing.T, m *Manager, uid string) *Device {
 
 	dev, err := m.RegisterDevice(DeviceRegistrationRequest{
 		DeviceName: "Test Phone", Platform: "android", ProtocolVersion: protocol.DeviceProtocolV1,
-		Capabilities: DeviceCapabilities{CanRead: true},
+		Capabilities: &DeviceCapabilities{CanRead: true},
 	})
 	if err != nil {
 		t.Fatalf("RegisterDevice: %v", err)

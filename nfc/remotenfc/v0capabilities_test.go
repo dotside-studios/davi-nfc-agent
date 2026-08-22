@@ -2,6 +2,7 @@ package remotenfc
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -106,5 +107,61 @@ func TestDeclaredReadOnlyIsHonoured(t *testing.T) {
 func TestUndeclaredIsNotReadOnly(t *testing.T) {
 	if nfc.GetTagCapabilities(declaredTag(t, nil, everything)).IsReadOnly {
 		t.Error("a tag that declared nothing is reported read-only")
+	}
+}
+
+// TestSilenceAboutItselfIsNotARefusal is the distinction the device-level
+// declaration could not make while it was a value on the wire. An omitted
+// capabilities block and one of all falses arrived identically, so a device
+// that described the tags it scans while saying nothing about itself had every
+// one of those tags reported incapable.
+//
+// A bridge carries more than smartphones, and describing a tag is saying more
+// than a device that cannot, not less. Silence is now unknown, and the
+// operation goes out to the only party that can answer it.
+func TestSilenceAboutItselfIsNotARefusal(t *testing.T) {
+	m := NewManager(30 * time.Second)
+	defer m.Close()
+
+	silent, err := m.RegisterDevice(DeviceRegistrationRequest{
+		DeviceName: "Bridge that describes its tags",
+		Platform:   "web",
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
+	}
+	// Reachability is a map lookup, so a bare entry is enough to stand for a
+	// live session. Removed before Close, which would otherwise close it.
+	m.addSession(silent.DeviceID(), nil)
+	defer m.removeSession(silent.DeviceID())
+
+	if _, declared := silent.DeclaredCapabilities(); declared {
+		t.Error("a device that sent no capabilities block reads as having declared one")
+	}
+	if !m.deviceCanWrite(silent.DeviceID()) {
+		t.Error("a device that said nothing about itself refuses a write it never declined")
+	}
+	if !m.deviceCanLock(silent.DeviceID()) {
+		t.Error("a device that said nothing about itself refuses a lock it never declined")
+	}
+
+	// The other half: a device that did describe itself is taken at its word,
+	// which is what the pointer buys. Refusing here is a claim it made.
+	declined, err := m.RegisterDevice(DeviceRegistrationRequest{
+		DeviceName:   "Reader that only reads",
+		Platform:     "web",
+		Capabilities: &DeviceCapabilities{CanRead: true},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
+	}
+	m.addSession(declined.DeviceID(), nil)
+	defer m.removeSession(declined.DeviceID())
+
+	if _, declared := declined.DeclaredCapabilities(); !declared {
+		t.Error("a device that sent a capabilities block reads as having sent none")
+	}
+	if m.deviceCanWrite(declined.DeviceID()) {
+		t.Error("a device that declared it cannot write is reported able to")
 	}
 }

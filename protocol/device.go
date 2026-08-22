@@ -42,11 +42,17 @@ type DeviceCapabilities struct {
 
 // DeviceRegistrationRequest is sent by a device to register with the server.
 type DeviceRegistrationRequest struct {
-	DeviceName   string             `json:"deviceName"`   // e.g., "John's iPhone 12"
-	Platform     string             `json:"platform"`     // "ios" or "android"
-	AppVersion   string             `json:"appVersion"`   // e.g., "1.0.0"
-	Capabilities DeviceCapabilities `json:"capabilities"` // Device capabilities
-	Metadata     map[string]string  `json:"metadata"`     // Optional metadata
+	DeviceName string            `json:"deviceName"` // e.g., "John's iPhone 12"
+	Platform   string            `json:"platform"`   // "ios" or "android"
+	AppVersion string            `json:"appVersion"` // e.g., "1.0.0"
+	Metadata   map[string]string `json:"metadata"`   // Optional metadata
+
+	// Capabilities is what the device says it can do. A pointer so that saying
+	// nothing is distinguishable from declaring every field false: the two
+	// arrived alike while this was a value, and silence was read as a refusal.
+	// Mirrors DeviceTagData.Capabilities, which has answered this way since a
+	// tag that declared nothing stopped meaning a tag that can do nothing.
+	Capabilities *DeviceCapabilities `json:"capabilities,omitempty"`
 }
 
 // DeviceRegistrationResponse is sent by server after successful registration.

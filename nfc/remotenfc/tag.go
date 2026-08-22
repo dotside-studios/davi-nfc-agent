@@ -20,6 +20,27 @@ type tagRoute interface {
 	deviceCanTransceive(deviceID string) bool
 }
 
+// declaredFor answers one capability for this tag from the two claims that bear
+// on it: what the device said about this tag, and what it said about itself.
+//
+// A tag that declared it cannot is refused. Otherwise the device answers, and
+// its answer bounds the tag's: a bridge that cannot carry an operation at all
+// cannot carry it for any tag it holds.
+//
+// What makes that safe is that the device-level claim is now three-valued too.
+// A device that said nothing about itself no longer reads as one that refused,
+// so describing a tag while omitting its own block stopped vetoing the tag it
+// had just described.
+func (t *Tag) declaredFor(
+	ofTag func(protocol.TagCapabilities) bool,
+	ofDevice func(string) bool,
+) bool {
+	if can, declared := t.declared(ofTag); declared && !can {
+		return false
+	}
+	return ofDevice(t.sourceDevice)
+}
+
 // Tag wraps device NFC data in the nfc.Tag interface.
 //
 // Writes, locks and raw exchanges route back to the device holding the tag when
@@ -129,20 +150,20 @@ func (t *Tag) canWrite() bool {
 	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanWrite }); declared && !can {
-		return false
-	}
-	return t.route.deviceCanWrite(t.sourceDevice)
+	return t.declaredFor(
+		func(c protocol.TagCapabilities) bool { return c.CanWrite },
+		t.route.deviceCanWrite,
+	)
 }
 
 func (t *Tag) canLock() bool {
 	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanLock }); declared && !can {
-		return false
-	}
-	return t.route.deviceCanLock(t.sourceDevice)
+	return t.declaredFor(
+		func(c protocol.TagCapabilities) bool { return c.CanLock },
+		t.route.deviceCanLock,
+	)
 }
 
 // canTransceive reports whether a raw exchange would reach the tag. Callers
@@ -151,10 +172,10 @@ func (t *Tag) canTransceive() bool {
 	if t.route == nil {
 		return false
 	}
-	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanTransceive }); declared && !can {
-		return false
-	}
-	return t.route.deviceCanTransceive(t.sourceDevice)
+	return t.declaredFor(
+		func(c protocol.TagCapabilities) bool { return c.CanTransceive },
+		t.route.deviceCanTransceive,
+	)
 }
 
 // Transceive exchanges raw data with the tag through the device holding it.

@@ -112,8 +112,10 @@ func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error)
 	if req.DeviceName == "" {
 		return nil, fmt.Errorf("device name is required")
 	}
-	if req.Platform != "ios" && req.Platform != "android" && req.Platform != "web" {
-		return nil, fmt.Errorf("invalid platform: %s (must be 'ios', 'android', or 'web')", req.Platform)
+	// Platform describes the device rather than admitting it: nothing branches
+	// on the value, and the bridge carries whatever speaks the protocol.
+	if req.Platform == "" {
+		req.Platform = "unknown"
 	}
 
 	// Generate unique device ID

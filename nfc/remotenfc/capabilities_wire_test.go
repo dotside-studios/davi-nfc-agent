@@ -53,6 +53,11 @@ type stubWriter struct {
 	written  []byte
 	locked   bool
 	err      error
+
+	// gone models a device whose session has ended. Separate from the canX
+	// fields because reachability and capability are separate questions: a
+	// present device that declared nothing is not an absent one.
+	gone bool
 }
 
 func (w *stubWriter) writeTag(_, _ string, ndef []byte, _ nfc.WriteOptions) error {
@@ -75,8 +80,8 @@ func (w *stubWriter) transceiveTag(_, _ string, _ []byte, _ bool) ([]byte, error
 	return nil, nfc.NewNotSupportedError("Transceive")
 }
 
-func (w *stubWriter) deviceCanWrite(string) bool      { return w.canWrite }
-func (w *stubWriter) deviceCanLock(string) bool       { return w.canLock }
+func (w *stubWriter) deviceCanWrite(string) bool      { return !w.gone && w.canWrite }
+func (w *stubWriter) deviceCanLock(string) bool       { return !w.gone && w.canLock }
 func (w *stubWriter) deviceCanTransceive(string) bool { return false }
 
 func declaredTag(t *testing.T, caps *protocol.TagCapabilities, route tagRoute) nfc.Tag {
@@ -155,8 +160,13 @@ func TestTagWritesThroughDevice(t *testing.T) {
 
 // A tag whose device declared write support but has since gone away must stop
 // advertising it, and refuse the write rather than blocking on a dead session.
+//
+// The session ending is what this models, not a capability the device withheld.
+// The two were the same field here until they were separated: a tag speaks for
+// itself while its device is reachable, so a test for a dead session has to say
+// the session is dead.
 func TestTagStopsClaimingWriteWhenDeviceGone(t *testing.T) {
-	writer := &stubWriter{canWrite: false, canLock: false}
+	writer := &stubWriter{canWrite: false, canLock: false, gone: true}
 	tag := declaredTag(t, &protocol.TagCapabilities{CanWrite: true, CanLock: true}, writer)
 
 	caps := nfc.GetTagCapabilities(tag)
@@ -223,7 +233,7 @@ func TestDeviceReportsDeclaredTagTypes(t *testing.T) {
 	dev := NewDevice("dev1", DeviceRegistrationRequest{
 		DeviceName: "PN532 Reader",
 		Platform:   "android",
-		Capabilities: DeviceCapabilities{
+		Capabilities: &DeviceCapabilities{
 			NFCType:           "nfca",
 			DeviceType:        "pn532-serial",
 			SupportedTagTypes: []string{"MIFARE Classic", "NTAG", "ISO14443-4"},
@@ -251,7 +261,7 @@ func TestDeviceCapabilityFallbacks(t *testing.T) {
 	dev := NewDevice("dev2", DeviceRegistrationRequest{
 		DeviceName:   "Legacy Phone",
 		Platform:     "ios",
-		Capabilities: DeviceCapabilities{CanRead: true, NFCType: "corenfc"},
+		Capabilities: &DeviceCapabilities{CanRead: true, NFCType: "corenfc"},
 	})
 
 	if got := dev.DeviceType(); got != "smartphone" {
@@ -280,7 +290,7 @@ func (w *transceivingWriter) transceiveTag(_, _ string, data []byte, raw bool) (
 	return w.reply, nil
 }
 
-func (w *transceivingWriter) deviceCanTransceive(string) bool { return w.canTransceive }
+func (w *transceivingWriter) deviceCanTransceive(string) bool { return !w.gone && w.canTransceive }
 
 func TestTagTransceivesThroughDevice(t *testing.T) {
 	writer := &transceivingWriter{canTransceive: true, reply: []byte{0x90, 0x00}}
@@ -307,9 +317,13 @@ func TestTagTransceivesThroughDevice(t *testing.T) {
 
 // A route with no transceive support reports the capability as absent rather
 // than failing at call time.
+//
+// Asked of a tag that declared nothing, which is where the device's own block
+// still decides. A tag that declared it can be exchanged with is answered from
+// that instead, since only a device able to describe a tag sends one at all.
 func TestTagWithoutTransceiveRoute(t *testing.T) {
 	writer := &stubWriter{canWrite: true}
-	tag := declaredTag(t, &protocol.TagCapabilities{CanTransceive: true}, writer)
+	tag := declaredTag(t, nil, writer)
 
 	if nfc.GetTagCapabilities(tag).CanTransceive {
 		t.Error("CanTransceive = true for a route that cannot transceive")
@@ -323,6 +337,7 @@ func TestTagWithoutTransceiveRoute(t *testing.T) {
 // advertising it.
 func TestTagTransceiveStopsWhenDeviceGone(t *testing.T) {
 	writer := &transceivingWriter{canTransceive: false}
+	writer.gone = true
 	tag := declaredTag(t, &protocol.TagCapabilities{CanTransceive: true}, writer)
 
 	if nfc.GetTagCapabilities(tag).CanTransceive {
@@ -339,7 +354,7 @@ func TestDeviceLevelTransceiveUnsupported(t *testing.T) {
 	dev := NewDevice("dev3", DeviceRegistrationRequest{
 		DeviceName:   "Capable Reader",
 		Platform:     "android",
-		Capabilities: DeviceCapabilities{CanTransceive: true, NFCType: "nfca"},
+		Capabilities: &DeviceCapabilities{CanTransceive: true, NFCType: "nfca"},
 	})
 
 	if dev.SupportsTransceive() {

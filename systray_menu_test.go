@@ -527,3 +527,76 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 
 	waitFor(t, "the trust entry to come back", app.mTrustBrowsers.Visible)
 }
+
+// The tray writes to the same file the console does. A mode picked from a menu
+// used to be forgotten at exit, which made where an operator clicked decide
+// whether their choice survived.
+func TestTrayModeAndFilterPersist(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
+
+	store, err := settings.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("settings.New: %v", err)
+	}
+	app.AttachSettings(store)
+
+	app.modes.Item(nfc.ModeReadOnly).Click()
+	if got := store.Get().Mode; got != settings.ModeReadOnly {
+		t.Errorf("stored mode = %q, want %q", got, settings.ModeReadOnly)
+	}
+
+	cardType := nfc.GetAllCardTypes()[0]
+	app.cardTypes.Item(cardType).Click()
+	if got := store.Get().CardTypes; len(got) != 1 || got[0] != cardType {
+		t.Errorf("stored card types = %v, want [%s]", got, cardType)
+	}
+
+	app.cardTypes.All().Click()
+	if got := store.Get().CardTypes; len(got) != 0 {
+		t.Errorf("stored card types = %v, want none", got)
+	}
+}
+
+// A setting the launcher holds is shown and not offered: the menu says what the
+// agent is set to, greyed out, rather than accepting a click it would drop.
+func TestTrayMenusForHeldSettings(t *testing.T) {
+	agent := newTestAgent()
+	agent.SetReaderMode(nfc.ModeReadOnly)
+	agent.SetExplicit(settings.Explicit{Mode: true, RequirePairedDevice: true})
+
+	app, _ := newTestTray(t, agent)
+
+	store, err := settings.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("settings.New: %v", err)
+	}
+	app.AttachSettings(store)
+
+	if app.modes.Item(nfc.ModeWriteOnly).Enabled() {
+		t.Error("a mode the launcher holds is still offered")
+	}
+	if app.mRequirePaired.Enabled() {
+		t.Error("a pairing requirement the launcher holds is still offered")
+	}
+
+	// Shown as what it is, rather than as the default the menu used to open on.
+	if got, _ := app.modes.Value(); got != nfc.ModeReadOnly {
+		t.Errorf("the tick is on %v, which the reader is not in", got)
+	}
+
+	// A disabled item ignores a click, and the agent refuses one that reaches
+	// it anyway. Neither leaves a trace in the file.
+	app.modes.Item(nfc.ModeWriteOnly).Click()
+	app.handleModeSwitch(nfc.ModeWriteOnly)
+
+	if got := agent.CurrentReaderMode(); got != nfc.ModeReadOnly {
+		t.Errorf("mode = %v, want ModeReadOnly", got)
+	}
+	if got, _ := app.modes.Value(); got != nfc.ModeReadOnly {
+		t.Errorf("the tick moved to %v, which the reader is not in", got)
+	}
+	if store.Get().Mode == settings.ModeWriteOnly {
+		t.Error("a refused change was written to the settings file")
+	}
+}

@@ -51,9 +51,6 @@ export interface SecurityInfo {
   apiSecret: string
   pairingPIN?: string
   publicKeyPin?: string
-  /** The requirement in Settings came from the command line, so it can be
-   *  raised here but not withdrawn. */
-  requirePairedDeviceLocked: boolean
   caInstalled: boolean
   caFingerprint?: string
   cert?: CertInfo
@@ -67,6 +64,18 @@ export interface Settings {
   cardTypes: string[] | null
   devicePath: string
   port: number
+  requirePairedDevice: boolean
+  readerFeedback: boolean
+}
+
+/** Which settings the launcher set, on the command line or in the environment.
+ *  A field marked here is not this run's to change: the control is shown
+ *  disabled rather than accepting an edit the agent would refuse. */
+export interface Explicit {
+  mode: boolean
+  cardTypes: boolean
+  devicePath: boolean
+  port: boolean
   requirePairedDevice: boolean
   readerFeedback: boolean
 }
@@ -108,6 +117,7 @@ export interface ControlState {
   server: ServerInfo
   security: SecurityInfo
   settings: Settings
+  explicit: Explicit
   devices: DeviceInfo[]
   clients: ClientInfo[]
   origins: OriginsInfo

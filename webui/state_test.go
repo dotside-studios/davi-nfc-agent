@@ -65,7 +65,7 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 		DevicePath:          "ACS ACR1252U 01 00",
 		RequirePairedDevice: true,
 	}
-	host.pairingLock = true
+	host.explicit = settings.Explicit{RequirePairedDevice: true}
 
 	console := New(Config{Host: host, Name: "davi-nfc-agent", Version: "test"})
 	state := console.buildState()
@@ -76,24 +76,23 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 	if !state.Settings.RequirePairedDevice {
 		t.Error("the snapshot does not report the requirement the agent is enforcing")
 	}
-	if !state.Security.RequirePairedDeviceLocked {
+	if !state.Explicit.RequirePairedDevice {
 		t.Error("the console is not told the requirement cannot be withdrawn from there")
 	}
 
-	body, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	// Once each, under settings. A reader that reported its own mode, or a
-	// security block that repeated the requirement, would show up here.
-	for key, want := range map[string]int{
-		`"mode":`:                1,
-		`"devicePath":`:          1,
-		`"requirePairedDevice":`: 1,
-	} {
-		if got := strings.Count(string(body), key); got != want {
-			t.Errorf("%s appears %d times in the snapshot, want %d", key, got, want)
+	// The blocks a preference used to be repeated in. Settings and explicit name
+	// the same fields, once for the value and once for who holds it, so counting
+	// keys across the whole snapshot proves nothing; these two are where a
+	// second copy would come back.
+	for name, block := range map[string]any{"reader": state.Reader, "security": state.Security} {
+		body, err := json.Marshal(block)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", name, err)
+		}
+		for _, key := range []string{`"mode":`, `"devicePath":`, `"requirePairedDevice":`, `"cardTypes":`} {
+			if strings.Contains(string(body), key) {
+				t.Errorf("%s repeats %s, which belongs to settings", name, key)
+			}
 		}
 	}
 }

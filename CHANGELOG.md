@@ -28,6 +28,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **What the launcher set, the run keeps.** Three surfaces configure this agent
+  and each had invented its own precedence: the port came with a lock flag, the
+  pairing requirement with a different one under a different name, and the rest
+  with none at all. The tray made it worse by persisting reader feedback and
+  forgetting mode and card types, so where an operator clicked decided whether
+  their choice survived a restart.
+
+  `settings.Explicit` marks the fields a caller set deliberately, on the command
+  line, in the environment, or when building the agent in code, and replaces
+  both lock flags. A field marked there belongs to the launcher for the whole
+  run: the stored file does not change it, an operator does not change it, and
+  both the tray and the console show the control disabled with the reason rather
+  than accepting an edit the agent would refuse. The file keeps the operator's
+  own preference untouched underneath, so a start without the flag applies it
+  again.
+
+  The tray now writes every preference it changes to `settings.json`, as the
+  console does. Both are the same operator at the same machine; only **allow any
+  origin** is still deliberately session-only, in both, because a safety-off
+  should not outlive the session that needed it. The tray also opens its menus
+  from the agent instead of from a hardcoded default, so a stored read-only mode
+  no longer reads as read/write until something else redraws it
+
 - **The agent holds the settings, and the console reads them back from it.**
   Preferences lived in two places at once. `settings.json` had what was last
   saved, the agent had what it was actually doing, and the console rendered a

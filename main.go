@@ -197,8 +197,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Load persisted preferences. Explicit flags still win: something that
-	// passed -device meant it for this run.
+	// Load persisted preferences. What the launcher asked for still wins.
 	settingsStore, err := settings.New(configDir)
 	if err != nil {
 		log.Printf("Warning: failed to load settings: %v", err)
@@ -206,30 +205,36 @@ func main() {
 	}
 	stored := settingsStore.Get()
 
-	if devicePathFlag == "" {
-		devicePathFlag = stored.DevicePath
-	}
-	// A port asked for on the command line is not the preference file's to move,
-	// as the pairing requirement below is not its to withdraw.
-	agent.DevicePortLocked = isFlagSet("device-port")
-	// Asked for on the command line or in the environment, as opposed to
-	// remembered from a previous run: a stored preference may raise the
-	// requirement but not withdraw one asked for there. The notice waits until
-	// both sources are in, so it reports what is actually in force.
+	// What this run was launched with, as opposed to what a previous one
+	// remembered. These fields are the launcher's until the agent restarts: the
+	// stored file below does not change them, and neither does an operator at
+	// the tray or the console, both of which show them as held.
+	//
+	// The environment is a launcher too, for the one setting that reads it.
 	askedForPairing := requirePairedFlag || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
-	agent.RequirePairedDevice, agent.RequirePairedDeviceLocked = resolveRequirePaired(askedForPairing, stored.RequirePairedDevice)
-	if agent.RequirePairedDevice {
+	agent.SetExplicit(settings.Explicit{
+		DevicePath:          isFlagSet("device"),
+		Port:                isFlagSet("device-port"),
+		RequirePairedDevice: isFlagSet("require-paired-devices") || askedForPairing,
+	})
+	agent.RequirePairedDevice = askedForPairing
+	agent.SetPinnedDevice(devicePathFlag)
+
+	// The agent holds the settings from here on, and the console and the tray
+	// read them back from it, so a mode switched in one shows in the other.
+	agent.ApplySettings(stored)
+
+	// Reported once both sources are in, so it names what is in force rather
+	// than what either asked for.
+	if agent.RequiresPairedDevice() {
 		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
 		if devices.Count() == 0 {
 			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
 		}
 	}
-	// The agent holds the settings from here on, and the console and the tray
-	// read them back from it, so a mode switched in one shows in the other.
-	agent.ApplySettings(stored)
 
-	// The flag beats the file and has already fallen back to it when unset.
-	agent.SetPinnedDevice(devicePathFlag)
+	// The reader to open: the flag, or the stored preference it just applied.
+	devicePathFlag = agent.CurrentPinnedDevice()
 
 	// A device that pairs is told where to reconnect, and the stored settings
 	// may just have moved the agent to a different port.
@@ -270,17 +275,9 @@ func main() {
 	app.Run()
 }
 
-// resolveRequirePaired settles the paired-device requirement from its two
-// sources. Either can turn it on. Only the command line locks it on: a stored
-// preference that says false must not withdraw a requirement an operator asked
-// for on the command line, which is the one direction that costs security
-// rather than convenience.
-func resolveRequirePaired(askedForPairing, stored bool) (require, locked bool) {
-	return askedForPairing || stored, askedForPairing
-}
-
 // isFlagSet reports whether a flag was given on the command line, as opposed to
-// holding its default. A stored port must not override an explicit -device-port.
+// holding its default. It is what settings.Explicit is built from: a default
+// leaves the stored preference in charge, a flag takes it over.
 func isFlagSet(name string) bool {
 	found := false
 	flag.Visit(func(f *flag.Flag) {

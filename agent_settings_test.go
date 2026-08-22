@@ -115,9 +115,9 @@ func TestCardTypeFilterIsSortedAndNilWhenOpen(t *testing.T) {
 	}
 }
 
-// The port is the settings' to set, unless the command line placed the agent on
+// The port is the settings' to set, unless the launcher placed the agent on
 // one. A preference file may not move a listener an operator put somewhere.
-func TestStoredPortMovesTheAgentUnlessTheCommandLineSetIt(t *testing.T) {
+func TestStoredPortMovesTheAgentUnlessTheLauncherSetIt(t *testing.T) {
 	agent := NewAgent(nfc.NewMockManager())
 	agent.ApplySettings(settings.Settings{Port: 9480})
 
@@ -129,13 +129,73 @@ func TestStoredPortMovesTheAgentUnlessTheCommandLineSetIt(t *testing.T) {
 		t.Errorf("ServingPort() = %d, want 9480", got)
 	}
 
-	locked := NewAgent(nfc.NewMockManager())
-	locked.DevicePort = 9470
-	locked.DevicePortLocked = true
-	locked.ApplySettings(settings.Settings{Port: 9480})
+	held := NewAgent(nfc.NewMockManager())
+	held.DevicePort = 9470
+	held.SetExplicit(settings.Explicit{Port: true})
+	held.ApplySettings(settings.Settings{Port: 9480})
 
-	if got := locked.ConfiguredPort(); got != 9470 {
-		t.Errorf("a stored port moved a listener the command line placed: port = %d", got)
+	if got := held.ConfiguredPort(); got != 9470 {
+		t.Errorf("a stored port moved a listener the launcher placed: port = %d", got)
+	}
+}
+
+// What the launcher set, the run keeps: not from the file, and not from an
+// operator either. A change accepted and then quietly dropped is what leaves
+// someone believing the reader is read-only while it writes.
+func TestTheLauncherHoldsEveryFieldItSet(t *testing.T) {
+	cardType := nfc.GetAllCardTypes()[0]
+
+	launched := settings.Settings{
+		Mode:                settings.ModeReadOnly,
+		CardTypes:           []string{cardType},
+		DevicePath:          "ACS ACR1252U 01 00",
+		Port:                9470,
+		RequirePairedDevice: true,
+		ReaderFeedback:      true,
+	}
+
+	agent := newReaderAgent(t)
+	agent.ApplySettings(launched)
+	agent.SetExplicit(settings.Explicit{
+		Mode: true, CardTypes: true, DevicePath: true,
+		Port: true, RequirePairedDevice: true, ReaderFeedback: true,
+	})
+
+	// A stored file asking for the opposite of all of it.
+	agent.ApplySettings(settings.Settings{
+		Mode:                settings.ModeWriteOnly,
+		CardTypes:           nil,
+		DevicePath:          "",
+		Port:                9480,
+		RequirePairedDevice: false,
+		ReaderFeedback:      false,
+	})
+	if got := agent.Settings(); !reflect.DeepEqual(got, launched) {
+		t.Errorf("a stored file moved what the launcher set:\n got %+v\nwant %+v", got, launched)
+	}
+
+	// And an operator at a menu, which reaches the setters directly.
+	agent.SetReaderMode(nfc.ModeWriteOnly)
+	agent.SetCardTypeFilter(nil)
+	agent.SetPinnedDevice("")
+	agent.SetRequirePairedDevice(false)
+	agent.SetReaderFeedback(false)
+	if got := agent.Settings(); !reflect.DeepEqual(got, launched) {
+		t.Errorf("a menu moved what the launcher set:\n got %+v\nwant %+v", got, launched)
+	}
+}
+
+// Only the fields it actually set. Marking one must not freeze the rest.
+func TestTheLauncherHoldsNothingElse(t *testing.T) {
+	agent := newReaderAgent(t)
+	agent.SetExplicit(settings.Explicit{Port: true})
+	agent.ApplySettings(settings.Settings{Mode: settings.ModeReadOnly, ReaderFeedback: true})
+
+	if got := agent.Settings().Mode; got != settings.ModeReadOnly {
+		t.Errorf("Mode = %q, want %q", got, settings.ModeReadOnly)
+	}
+	if !agent.Settings().ReaderFeedback {
+		t.Error("a held port also froze reader feedback")
 	}
 }
 

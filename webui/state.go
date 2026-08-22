@@ -29,6 +29,7 @@ type State struct {
 	Server   ServerInfo        `json:"server"`
 	Security SecurityInfo      `json:"security"`
 	Settings settings.Settings `json:"settings"`
+	Explicit settings.Explicit `json:"explicit"`
 	Devices  []DeviceInfo      `json:"devices"`
 	Clients  []ClientInfo      `json:"clients"`
 	Origins  OriginsInfo       `json:"origins"`
@@ -78,10 +79,6 @@ type SecurityInfo struct {
 	APISecret    string `json:"apiSecret"`
 	PairingPIN   string `json:"pairingPIN,omitempty"`
 	PublicKeyPin string `json:"publicKeyPin,omitempty"`
-
-	// RequirePairedDeviceLocked says the requirement in Settings came from the
-	// command line and cannot be withdrawn from here.
-	RequirePairedDeviceLocked bool `json:"requirePairedDeviceLocked"`
 
 	CAInstalled     bool      `json:"caInstalled"`
 	CAFingerprint   string    `json:"caFingerprint,omitempty"`
@@ -150,6 +147,7 @@ func (c *Server) buildState() State {
 			Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 		},
 		Settings: c.host.Settings(),
+		Explicit: c.host.Explicit(),
 	}
 
 	state.Reader = c.buildReaderInfo()
@@ -217,12 +215,11 @@ func (c *Server) buildServerInfo() ServerInfo {
 
 func (c *Server) buildSecurityInfo() SecurityInfo {
 	info := SecurityInfo{
-		APISecret:                 c.host.APISecret(),
-		PairingPIN:                c.host.PairingPIN(),
-		PublicKeyPin:              c.host.PublicKeyPin(),
-		RequirePairedDeviceLocked: c.host.RequirePairedDeviceLocked(),
-		CAInstalled:               c.host.CAInstalled(),
-		ControlSessions:           c.auth.SessionCount(),
+		APISecret:       c.host.APISecret(),
+		PairingPIN:      c.host.PairingPIN(),
+		PublicKeyPin:    c.host.PublicKeyPin(),
+		CAInstalled:     c.host.CAInstalled(),
+		ControlSessions: c.auth.SessionCount(),
 	}
 
 	if info.CAInstalled {

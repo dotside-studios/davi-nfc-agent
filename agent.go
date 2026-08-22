@@ -13,6 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -61,11 +62,6 @@ type Agent struct {
 	ClientServer  *clientserver.Server
 	DevicePort    int // Single agent server port. Default: 9470
 
-	// DevicePortLocked stops a stored preference moving the listener. Set it
-	// when the port came from the command line, so a preference file cannot
-	// move an agent an operator placed on a port deliberately.
-	DevicePortLocked bool
-
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
@@ -90,12 +86,6 @@ type Agent struct {
 	// connections. Browser clients are unaffected.
 	RequirePairedDevice bool
 
-	// RequirePairedDeviceLocked stops anything lowering that requirement for
-	// the rest of the run. Set it when the requirement came from the command
-	// line or the environment: an operator who asked for it there should not
-	// have it withdrawn by a preference file or a toggle in the console.
-	RequirePairedDeviceLocked bool
-
 	// ReaderMode is the access mode the reader runs in, and ReaderFeedback has
 	// it flash its LED and sound its buzzer at what it reads and writes. Both
 	// are held here as well as on the reader, because the reader is built in
@@ -116,6 +106,11 @@ type Agent struct {
 
 	// Internal state
 	devicePath string // Current device path
+
+	// explicit marks the settings the launcher set, which nothing this run may
+	// change. Assigned once through SetExplicit before the agent serves
+	// anything, and read from every goroutine after that.
+	explicit settings.Explicit
 
 	// settingsMu guards the settings state: the reader mode, the pinned reader,
 	// the card-type filter, the port, and the feedback and pairing preferences.
@@ -437,6 +432,29 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 	}
 }
 
+// SetCardTypeFilter replaces the whole filter, which is what an operator
+// picking types is doing. An empty list is no filter at all.
+func (a *Agent) SetCardTypeFilter(cardTypes []string) {
+	next := settings.Normalize(settings.Settings{CardTypes: cardTypes}).CardTypes
+	if sameCardTypes(a.CardTypeFilter(), next) {
+		return
+	}
+	if a.launcherHolds("the card-type filter", a.Explicit().CardTypes) {
+		return
+	}
+
+	a.settingsMu.Lock()
+	for cardType := range a.AllowedCardTypes {
+		delete(a.AllowedCardTypes, cardType)
+	}
+	for _, cardType := range next {
+		a.AllowedCardTypes[cardType] = true
+	}
+	a.settingsMu.Unlock()
+
+	a.notifyConsole()
+}
+
 // ClearCardTypeFilter drops the filter, so every card is accepted. That is not
 // the same as allowing each known type: a phone reports the tag types it
 // recognizes, which need not be ones this agent enumerates, and listing the
@@ -499,15 +517,14 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
-	a.settingsMu.Lock()
-	if a.RequirePairedDeviceLocked && !on {
-		a.settingsMu.Unlock()
-		// Asked for on the command line. A stored preference or a console
-		// toggle may not withdraw it, which is the direction that matters:
-		// the operator who set the flag is the one who would be surprised.
-		a.Logger.Printf("Ignoring request to stop requiring paired devices: it was set on the command line")
+	if a.RequiresPairedDevice() == on {
 		return
 	}
+	if a.launcherHolds("the paired-device requirement", a.Explicit().RequirePairedDevice) {
+		return
+	}
+
+	a.settingsMu.Lock()
 	a.RequirePairedDevice = on
 	server := a.DeviceServer
 	a.settingsMu.Unlock()
@@ -525,18 +542,17 @@ func (a *Agent) RequiresPairedDevice() bool {
 	return a.RequirePairedDevice
 }
 
-// PairingRequirementLocked reports that the requirement came from the command
-// line, so nothing may withdraw it for the rest of the run.
-func (a *Agent) PairingRequirementLocked() bool {
-	a.settingsMu.RLock()
-	defer a.settingsMu.RUnlock()
-	return a.RequirePairedDeviceLocked
-}
-
 // SetReaderMode changes the reader's access mode, on a running reader as well
 // as on the next one the agent starts. Accepted with no reader running, because
 // the mode is the agent's and Start hands it to the reader it builds.
 func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
+	if a.CurrentReaderMode() == mode {
+		return
+	}
+	if a.launcherHolds("the reader mode", a.Explicit().Mode) {
+		return
+	}
+
 	a.settingsMu.Lock()
 	a.ReaderMode = mode
 	a.settingsMu.Unlock()
@@ -550,6 +566,13 @@ func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
+	if a.ReaderFeedbackEnabled() == on {
+		return
+	}
+	if a.launcherHolds("reader feedback", a.Explicit().ReaderFeedback) {
+		return
+	}
+
 	a.settingsMu.Lock()
 	a.ReaderFeedback = on
 	a.settingsMu.Unlock()

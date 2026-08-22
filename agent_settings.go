@@ -24,19 +24,46 @@ func (a *Agent) ApplySettings(s settings.Settings) {
 		return
 	}
 
+	// Each setter refuses a field the launcher holds, so a stored preference
+	// and an operator's click meet the same rule in the same place.
 	a.SetReaderMode(settings.ParseMode(s.Mode))
-
-	a.ClearCardTypeFilter()
-	for _, cardType := range s.CardTypes {
-		a.AllowCardType(cardType)
-	}
-
+	a.SetCardTypeFilter(s.CardTypes)
 	a.SetPinnedDevice(s.DevicePath)
 	a.SetRequirePairedDevice(s.RequirePairedDevice)
 	a.SetReaderFeedback(s.ReaderFeedback)
 	a.setDevicePort(s.Port)
 
 	a.notifyConsole()
+}
+
+// SetExplicit records what the launcher set, from flags, the environment, or a
+// program embedding the agent. Call it before the agent serves anything: it
+// decides which stored preferences are applied at all.
+func (a *Agent) SetExplicit(e settings.Explicit) {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+	a.explicit = e
+}
+
+// Explicit reports the settings the launcher holds for this run.
+func (a *Agent) Explicit() settings.Explicit {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.explicit
+}
+
+// launcherHolds reports that a field was set at launch, so nothing this run may
+// change it. It logs, because a change that disappears without a word is what
+// leaves an operator believing something untrue of the running agent.
+//
+// Callers check whether the value would actually change first, so re-applying
+// the same stored file says nothing.
+func (a *Agent) launcherHolds(what string, explicit bool) bool {
+	if !explicit {
+		return false
+	}
+	a.Logger.Printf("Ignoring a change to %s: it was set at launch and holds until the agent is restarted", what)
+	return true
 }
 
 // Settings reports the agent's live configuration in the shape it is stored in.
@@ -61,6 +88,13 @@ func (a *Agent) Settings() settings.Settings {
 // SetPinnedDevice records the reader the operator chose, empty for auto-detect.
 // Recording the choice does not start that reader.
 func (a *Agent) SetPinnedDevice(devicePath string) {
+	if a.CurrentPinnedDevice() == devicePath {
+		return
+	}
+	if a.launcherHolds("the pinned reader", a.Explicit().DevicePath) {
+		return
+	}
+
 	a.settingsMu.Lock()
 	defer a.settingsMu.Unlock()
 	a.PinnedDevice = devicePath
@@ -133,19 +167,29 @@ func (a *Agent) CardTypeFilter() []string {
 // its current port until it is rebound, so the console asks for a restart after
 // saving one.
 func (a *Agent) setDevicePort(port int) {
+	if port <= 0 || port == a.ConfiguredPort() {
+		return
+	}
+	if a.launcherHolds("the agent port", a.Explicit().Port) {
+		return
+	}
+
 	a.settingsMu.Lock()
 	defer a.settingsMu.Unlock()
-
-	if port <= 0 || port == a.DevicePort {
-		return
-	}
-	if a.DevicePortLocked {
-		// A stored preference may not move a listener the command line placed,
-		// as with the pairing requirement.
-		a.Logger.Printf("Ignoring stored port %d: the port was set on the command line", port)
-		return
-	}
 	a.DevicePort = port
+}
+
+// sameCardTypes compares two normalized filters.
+func sameCardTypes(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // notifyConsole redraws the console, so a change made from the tray reaches it.

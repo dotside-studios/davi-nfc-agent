@@ -32,7 +32,6 @@ type fakeHost struct {
 	apiSecret    string
 	pairingPIN   string
 	publicKeyPin string
-	pairingLock  bool
 	caInstalled  bool
 
 	devices []PairedDevice
@@ -42,8 +41,9 @@ type fakeHost struct {
 
 	// settings stands in for the agent's live configuration, which is what the
 	// real host answers with. The console reads a preference from here and
-	// nowhere else.
+	// nowhere else, and explicit says which of them the launcher holds.
 	settings settings.Settings
+	explicit settings.Explicit
 
 	// Recorded calls, so a test can assert an action reached the agent.
 	started, stopped, quit, restarted int
@@ -189,7 +189,7 @@ func (h *fakeHost) RevokeAllDevices() error {
 	return nil
 }
 
-func (h *fakeHost) RequirePairedDeviceLocked() bool { return h.pairingLock }
+func (h *fakeHost) Explicit() settings.Explicit { return h.explicit }
 
 func (h *fakeHost) AllowedOrigins() []string  { return h.allowed }
 func (h *fakeHost) BlockedOrigins() []string  { return h.blocked }
@@ -222,16 +222,17 @@ func (h *fakeHost) RevokeOrigin(origin string) error {
 
 func (h *fakeHost) Settings() settings.Settings { return h.settings }
 
-// SaveSettings answers with what the agent then holds, as the real host does:
-// a requirement the command line locked on stays on however it was saved.
+// SaveSettings answers with what the agent then holds, as the real host does: a
+// field the launcher holds is left where it was, however it was saved.
 func (h *fakeHost) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	prev := h.settings
 	next := h.settings
 	mutate(&next)
-	if h.pairingLock {
-		next.RequirePairedDevice = true
-	}
+	h.explicit.Keep(&next, prev)
+
 	h.settings = next
 	return next, nil
 }

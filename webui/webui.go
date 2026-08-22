@@ -65,12 +65,6 @@ type Host interface {
 	PairedDevices() []PairedDevice
 	RevokeDevice(id string) error
 	RevokeAllDevices() error
-	// RequirePairedDeviceLocked reports that the requirement came from the
-	// command line, which the console may raise but not withdraw. It is shown
-	// rather than discovered, because a switch that springs back explains
-	// nothing.
-	RequirePairedDeviceLocked() bool
-
 	// ---- browser origins ----
 
 	AllowedOrigins() []string
@@ -90,6 +84,10 @@ type Host interface {
 	// SaveSettings persists a mutation and returns what the agent holds once it
 	// has been applied, which is not necessarily what was asked for.
 	SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error)
+	// Explicit reports the settings the launcher set, which nothing this run
+	// can change. The console shows those controls disabled with the reason,
+	// rather than accepting a change the agent would refuse.
+	Explicit() settings.Explicit
 }
 
 // PairedDevice is the console's view of a stored device credential.

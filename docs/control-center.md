@@ -136,11 +136,10 @@ Lives beside the other config files:
 | `requirePairedDevice` | Admit only devices holding a paired credential |
 | `readerFeedback` | Flash the reader's LED and sound its buzzer at what it reads and writes |
 
-An explicit flag still wins: passing `-device` or `-device-port` means it for
-that run, and `-require-paired-devices` cannot be withdrawn by the file or by
-the console, where the switch is shown disabled rather than springing back. No
-file is written until something is deliberately saved, so its absence keeps
-meaning "never configured".
+A flag still wins: passing `-device`, `-device-port` or `-require-paired-devices`
+means it for that run, and the file cannot change what was asked for there. See
+[What the launcher holds](#what-the-launcher-holds). No file is written until
+something is deliberately saved, so its absence keeps meaning "never configured".
 
 Credentials are deliberately not in this file — the API secret, paired devices
 and origin allowlist keep their own.
@@ -148,8 +147,8 @@ and origin allowlist keep their own.
 ## Where a setting lives
 
 The file persists a preference; the **agent holds it**. Saving anywhere, from
-the console or the tray's feedback toggle, writes to `settings.json`, and the
-store's change hook is the single path from there to the running agent:
+the console or from any tray menu, writes to `settings.json`, and the store's
+change hook is the single path from there to the running agent:
 
 ```
 console ─┐                        ┌─ agent.ApplySettings   (what is in force)
@@ -163,15 +162,38 @@ a mode switched from the tray shows in the console, a pairing requirement the
 command line locked on shows as on, and a reader mode restored from disk is on
 the reader rather than only in the file.
 
-The tray and the console still differ in reach, and deliberately: the tray's
-mode and card-type menus change what the agent is doing for this session, the
-console's change what it does from now on. Both are visible in both places,
-because both read the agent.
+The tray and the console no longer differ in reach. Both are the same operator
+at the same machine, so a mode picked from a menu is written to the file exactly
+as one picked in a browser is, and both are redrawn from the agent afterwards.
+Only one thing is deliberately never persisted: **allow any origin**, in either
+surface, because it is a safety-off that should not outlive the session that
+needed it.
 
-A saved preference means "make the agent match the file", so the next save from
-either place ends a session-only change made from the tray. The tray menu is
-redrawn from the agent when that happens, so it shows the mode now in force
-rather than the one that was picked.
+## What the launcher holds
+
+A flag, an environment variable, or a program embedding the agent settles a
+setting for the whole run. Those fields are recorded as `settings.Explicit`,
+and the rule is one sentence: **what the launcher set, the run keeps.**
+
+The stored file does not change them, and neither does an operator. Both UIs
+show the control disabled with the reason rather than accepting a change that
+would not survive, because a switch that springs back explains nothing:
+
+```
+-device-port 9480   →  explicit.Port      →  console: port field disabled, "set at launch"
+                                             tray:    unaffected, it has no port menu
+                                             file:    port preference untouched
+```
+
+The last line matters. A held field is left exactly as the file has it, so a
+preference the operator set earlier is neither overwritten by the launcher's
+value nor by the change the agent refused. Start the agent without the flag and
+their preference applies again.
+
+The flags that hold a setting today are `-device`, `-device-port` and
+`-require-paired-devices` (or `DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`). Mode, the
+card-type filter and reader feedback have no flags, so they are always the
+operator's; a program embedding the agent can hold those too.
 
 ## Building
 

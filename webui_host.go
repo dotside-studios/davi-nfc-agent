@@ -293,15 +293,25 @@ func (h *webuiHost) SetOriginCheckDisabled(on bool) {
 // requirement the command line will not let a preference withdraw.
 func (h *webuiHost) Settings() settings.Settings { return h.agent.Settings() }
 
-// RequirePairedDeviceLocked reports a requirement the console may not withdraw.
-func (h *webuiHost) RequirePairedDeviceLocked() bool { return h.agent.PairingRequirementLocked() }
+// Explicit reports the settings the launcher holds, which the console shows as
+// disabled controls rather than accepting a change it would have to discard.
+func (h *webuiHost) Explicit() settings.Explicit { return h.agent.Explicit() }
 
 // SaveSettings persists the change and answers with what the agent then holds.
 // It applies nothing itself. The store's change hook is the one path from a
 // saved preference to the running agent, so a save made here and one made from
 // the tray land the same way.
 func (h *webuiHost) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
-	if _, err := h.settings.Update(mutate); err != nil {
+	explicit := h.agent.Explicit()
+	_, err := h.settings.Update(func(next *settings.Settings) {
+		prev := *next
+		mutate(next)
+		// A field the launcher holds is left as the file had it. The agent
+		// would refuse the change, and a file saying otherwise is read back as
+		// fact on the next start.
+		explicit.Keep(next, prev)
+	})
+	if err != nil {
 		return h.agent.Settings(), err
 	}
 	return h.agent.Settings(), nil

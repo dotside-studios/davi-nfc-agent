@@ -1,8 +1,6 @@
 package main
 
 import (
-	"log"
-
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -25,16 +23,9 @@ func (s *SystrayApp) setupFeedbackMenu() {
 }
 
 // handleReaderFeedback toggles the reader's LED and buzzer feedback, live and
-// on disk. A failed save leaves the toggle in effect for this session rather
-// than undoing what the menu already shows.
+// on disk.
 func (s *SystrayApp) handleReaderFeedback() {
-	on := s.mReaderFeedback.Toggle()
-	s.agent.SetReaderFeedback(on)
-
-	if s.settings == nil {
-		return
-	}
-	if _, err := s.settings.Update(func(next *settings.Settings) { next.ReaderFeedback = on }); err != nil {
-		log.Printf("[systray] Reader feedback is on for this session only: it could not be saved: %v", err)
-	}
+	s.agent.SetReaderFeedback(!s.mReaderFeedback.Checked())
+	s.persist()
+	s.syncSettingsToMenu(s.agent.Settings())
 }

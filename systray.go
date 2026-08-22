@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
@@ -114,11 +113,6 @@ type SystrayApp struct {
 	// settings is the store the tray writes its toggles back to. Nil when the
 	// agent has no config directory to persist to.
 	settings *settings.Store
-
-	// mu guards the state below, which the console changes from its own
-	// goroutines while the tray's handlers read it.
-	mu   sync.Mutex
-	mode nfc.ReaderMode
 }
 
 // NewSystrayApp creates a new systray application on the real tray. bootstrap
@@ -137,18 +131,41 @@ func newSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 		bootstrapPort: bootstrapPort,
 		bootstrap:     bootstrap,
 		menu:          traymenu.New(driver),
-		mode:          nfc.ModeReadWrite,
 	}
 }
 
-// syncSettingsToMenu reflects a settings change made in the console.
+// persist writes what the agent holds to the settings file.
+//
+// The tray and the console write the same file: a preference set from a menu is
+// the same operator's decision as one set in a browser, and forgetting it at
+// exit was an accident of which surface it was clicked in. Without a store the
+// menus still work, they are just forgotten.
+//
+// What is written is the agent's state rather than what was clicked, so a
+// change the agent refused is not recorded as if it had happened.
+func (s *SystrayApp) persist() {
+	if s.settings == nil {
+		return
+	}
+
+	inForce, explicit := s.agent.Settings(), s.agent.Explicit()
+	_, err := s.settings.Update(func(next *settings.Settings) {
+		prev := *next
+		*next = inForce
+		explicit.Keep(next, prev)
+	})
+	if err != nil {
+		log.Printf("[systray] The change is in effect for this session only: it could not be saved: %v", err)
+	}
+}
+
+// syncSettingsToMenu reflects a settings change made elsewhere.
 func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 	if s.modes == nil {
 		return
 	}
 
 	mode := settings.ParseMode(next.Mode)
-	s.setMode(mode)
 	s.modes.Set(mode)
 	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
 
@@ -159,6 +176,44 @@ func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 	}
 	if s.mReaderFeedback != nil {
 		s.mReaderFeedback.SetChecked(next.ReaderFeedback)
+	}
+}
+
+// disableHeldMenus greys out the menus for settings the launcher holds. They
+// stay visible: what the agent is set to is worth reading even where it cannot
+// be changed, and an item that vanishes reads as a missing feature.
+func (s *SystrayApp) disableHeldMenus() {
+	explicit := s.agent.Explicit()
+	const heldNote = " (set at launch)"
+
+	if explicit.Mode && s.mModeMenu != nil {
+		for _, mode := range []nfc.ReaderMode{nfc.ModeReadWrite, nfc.ModeReadOnly, nfc.ModeWriteOnly} {
+			if item := s.modes.Item(mode); item != nil {
+				item.Disable()
+			}
+		}
+		s.mModeMenu.SetTooltip("The reader mode was set at launch and holds until the agent is restarted")
+	}
+
+	if explicit.CardTypes && s.cardTypes != nil {
+		if all := s.cardTypes.All(); all != nil {
+			all.Disable()
+		}
+		for _, cardType := range GetAllCardTypeFilterNames() {
+			if item := s.cardTypes.Item(cardType); item != nil {
+				item.Disable()
+			}
+		}
+	}
+
+	if explicit.RequirePairedDevice && s.mRequirePaired != nil {
+		s.mRequirePaired.Disable()
+		s.mRequirePaired.SetTitle("Require Paired Devices" + heldNote)
+	}
+
+	if explicit.ReaderFeedback && s.mReaderFeedback != nil {
+		s.mReaderFeedback.Disable()
+		s.mReaderFeedback.SetTitle("Flash and Beep on Scan" + heldNote)
 	}
 }
 
@@ -224,6 +279,13 @@ func (s *SystrayApp) setupUI() {
 	s.menu.AddSeparator()
 
 	s.setupConsoleMenu()
+
+	// The menus open on what the agent is set to, which is not always the
+	// default: a mode restored from settings, or one the launcher set, was
+	// decided before the tray existed. The ones the launcher holds are shown
+	// and not offered.
+	s.syncSettingsToMenu(s.agent.Settings())
+	s.disableHeldMenus()
 
 	s.menu.AddSeparator()
 
@@ -329,7 +391,6 @@ func (s *SystrayApp) setupModeMenu() {
 	s.modes.Add(nfc.ModeReadWrite, "Read/Write Mode", traymenu.Tooltip("Allow both read and write"))
 	s.modes.Add(nfc.ModeReadOnly, "Read Only Mode", traymenu.Tooltip("Only allow reading"))
 	s.modes.Add(nfc.ModeWriteOnly, "Write Only Mode", traymenu.Tooltip("Only allow writing"))
-	s.modes.Set(nfc.ModeReadWrite)
 
 	s.modes.OnSelect(s.handleModeSwitch)
 }
@@ -497,10 +558,12 @@ func (s *SystrayApp) handleRotateAPISecret() {
 // agent is doing now, the console changes what it does from now on.
 func (s *SystrayApp) handleModeSwitch(mode nfc.ReaderMode) {
 	s.agent.SetReaderMode(mode)
-	s.setMode(mode)
-	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
+	s.persist()
 
-	log.Printf("Switched to %s mode", modeName(mode))
+	// From the agent, not from the click: a mode the launcher holds leaves the
+	// tick where it was rather than showing a mode the reader is not in.
+	s.syncSettingsToMenu(s.agent.Settings())
+	log.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
 }
 
 // modeName is the label a reader mode goes by in the menu.
@@ -515,33 +578,12 @@ func modeName(mode nfc.ReaderMode) string {
 	}
 }
 
-func (s *SystrayApp) currentMode() nfc.ReaderMode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mode
-}
-
-func (s *SystrayApp) setMode(mode nfc.ReaderMode) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.mode = mode
-}
-
 // applyCardTypes narrows the agent to the ticked card types, or opens it back
 // up when none of them are.
 func (s *SystrayApp) applyCardTypes(types []string) {
-	if len(types) == 0 {
-		s.agent.ClearCardTypeFilter()
-		return
-	}
-
-	picked := make(map[string]bool, len(types))
-	for _, cardType := range types {
-		picked[cardType] = true
-	}
-	for _, cardType := range GetAllCardTypeFilterNames() {
-		s.agent.SetAllowCardType(cardType, picked[cardType])
-	}
+	s.agent.SetCardTypeFilter(types)
+	s.persist()
+	s.syncSettingsToMenu(s.agent.Settings())
 }
 
 // switchDevice switches to a different NFC device

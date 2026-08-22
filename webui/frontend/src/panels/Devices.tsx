@@ -1,12 +1,13 @@
 import type { ControlState } from '../types'
 import { useAction } from '../useControl'
 import { fmtDateTime, fmtRelative } from '../format'
-import { ActionLink, Dot, Empty, Notice, Panel } from '../ui'
+import { ActionLink, Dot, Empty, HeldAtLaunch, Notice, Panel } from '../ui'
 
 /** Paired devices, one row each, revocable individually or all at once. */
 export function Devices({ state }: { state: ControlState }) {
   const act = useAction()
-  const { devices, security, settings } = state
+  const { devices, settings } = state
+  const held = state.explicit.requirePairedDevice
 
   return (
     <>
@@ -80,7 +81,7 @@ export function Devices({ state }: { state: ControlState }) {
             <input
               type="checkbox"
               checked={settings.requirePairedDevice}
-              disabled={security.requirePairedDeviceLocked}
+              disabled={held}
               onChange={(e) =>
                 act.mutate({
                   name: 'devices.setRequirePaired',
@@ -100,12 +101,7 @@ export function Devices({ state }: { state: ControlState }) {
             allowlist instead, and are unaffected either way.
           </div>
 
-          {security.requirePairedDeviceLocked ? (
-            <Notice kind="warn">
-              This agent was started with <span className="mono">-require-paired-devices</span>, so
-              the requirement stays on for this run and cannot be turned off from here.
-            </Notice>
-          ) : null}
+          {held ? <HeldAtLaunch flag="-require-paired-devices" /> : null}
 
           {settings.requirePairedDevice && devices.length === 0 ? (
             <Notice kind="err">
@@ -115,8 +111,8 @@ export function Devices({ state }: { state: ControlState }) {
           ) : null}
 
           <div className="dim">
-            Unlike the tray's version of this switch, the setting here is written to
-            <span className="mono"> settings.json</span> and survives a restart.
+            The tray has the same switch, and either writes it to
+            <span className="mono"> settings.json</span>, so it survives a restart.
           </div>
         </div>
       </Panel>

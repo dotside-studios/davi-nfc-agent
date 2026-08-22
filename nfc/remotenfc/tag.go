@@ -18,6 +18,26 @@ type tagRoute interface {
 	deviceCanWrite(deviceID string) bool
 	deviceCanLock(deviceID string) bool
 	deviceCanTransceive(deviceID string) bool
+	deviceReachable(deviceID string) bool
+}
+
+// declaredFor answers one capability for this tag, preferring what the device
+// said about the tag itself over what it said about its own abilities.
+//
+// A device that described this tag is taken at its word for it. Only when the
+// tag was not described does the device-level declaration answer, which is the
+// inference the protocol documents. The two are not the same claim: a device
+// bridge is not only smartphones, and one that reports per-tag capabilities
+// while omitting its own block is describing more, not less. Reading that
+// silence as a refusal would veto operations the tag has just said it accepts.
+func (t *Tag) declaredFor(
+	ofTag func(protocol.TagCapabilities) bool,
+	ofDevice func(string) bool,
+) bool {
+	if can, declared := t.declared(ofTag); declared {
+		return can && t.route.deviceReachable(t.sourceDevice)
+	}
+	return ofDevice(t.sourceDevice)
 }
 
 // Tag wraps device NFC data in the nfc.Tag interface.
@@ -129,20 +149,20 @@ func (t *Tag) canWrite() bool {
 	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanWrite }); declared && !can {
-		return false
-	}
-	return t.route.deviceCanWrite(t.sourceDevice)
+	return t.declaredFor(
+		func(c protocol.TagCapabilities) bool { return c.CanWrite },
+		t.route.deviceCanWrite,
+	)
 }
 
 func (t *Tag) canLock() bool {
 	if t.route == nil || t.readOnly() {
 		return false
 	}
-	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanLock }); declared && !can {
-		return false
-	}
-	return t.route.deviceCanLock(t.sourceDevice)
+	return t.declaredFor(
+		func(c protocol.TagCapabilities) bool { return c.CanLock },
+		t.route.deviceCanLock,
+	)
 }
 
 // canTransceive reports whether a raw exchange would reach the tag. Callers
@@ -151,10 +171,10 @@ func (t *Tag) canTransceive() bool {
 	if t.route == nil {
 		return false
 	}
-	if can, declared := t.declared(func(c protocol.TagCapabilities) bool { return c.CanTransceive }); declared && !can {
-		return false
-	}
-	return t.route.deviceCanTransceive(t.sourceDevice)
+	return t.declaredFor(
+		func(c protocol.TagCapabilities) bool { return c.CanTransceive },
+		t.route.deviceCanTransceive,
+	)
 }
 
 // Transceive exchanges raw data with the tag through the device holding it.

@@ -19,6 +19,7 @@ func (d capableDevice) transceiveTag(_, _ string, _ []byte, _ bool) ([]byte, err
 func (d capableDevice) deviceCanWrite(string) bool      { return d.write }
 func (d capableDevice) deviceCanLock(string) bool       { return d.lock }
 func (d capableDevice) deviceCanTransceive(string) bool { return d.transceive }
+func (d capableDevice) deviceReachable(string) bool     { return true }
 
 var everything = capableDevice{write: true, lock: true, transceive: true}
 
@@ -106,5 +107,31 @@ func TestDeclaredReadOnlyIsHonoured(t *testing.T) {
 func TestUndeclaredIsNotReadOnly(t *testing.T) {
 	if nfc.GetTagCapabilities(declaredTag(t, nil, everything)).IsReadOnly {
 		t.Error("a tag that declared nothing is reported read-only")
+	}
+}
+
+// TestATagThatSpeaksForItselfIsNotVetoedBySilence is the case the device-level
+// declaration used to lose. capableDevice{} declares nothing, which is
+// indistinguishable on the wire from a device that omitted the block: the field
+// is a value, so silence and "all false" arrive the same way.
+//
+// A device that describes the tags it scans is a v1 device saying more than a
+// v0 one, not less, and a bridge carries more than smartphones. Reading its
+// silence about itself as a refusal vetoed the tag it had just described.
+func TestATagThatSpeaksForItselfIsNotVetoedBySilence(t *testing.T) {
+	tag := declaredTag(t, &protocol.TagCapabilities{
+		CanRead: true, CanWrite: true, CanLock: true,
+	}, capableDevice{})
+
+	caps := nfc.GetTagCapabilities(tag)
+	if !caps.CanWrite {
+		t.Error("a tag that declared it can be written is reported unwritable because its device said nothing about itself")
+	}
+	if !caps.CanLock {
+		t.Error("a tag that declared it can be locked is reported unlockable because its device said nothing about itself")
+	}
+
+	if err := tag.WriteData([]byte{0x03, 0x00}); err != nil {
+		t.Errorf("WriteData = %v, want it routed to the device the tag named", err)
 	}
 }

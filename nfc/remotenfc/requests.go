@@ -422,6 +422,25 @@ func (m *Manager) deviceCanTransceive(deviceID string) bool {
 // read-only mode withdraws all of them: a tag must not advertise an operation
 // the manager would refuse.
 func (m *Manager) deviceDeclared(deviceID string, want func(DeviceCapabilities) bool) bool {
+	if !m.deviceReachable(deviceID) {
+		return false
+	}
+	device, ok := m.GetDevice(deviceID)
+	if !ok {
+		return false
+	}
+	return want(device.PhoneCapabilities())
+}
+
+// deviceReachable reports whether an operation could get to the device at all,
+// with nothing said about what it could do once there.
+//
+// Separated from deviceDeclared because the two answer different questions. A
+// device that is gone, inactive or held by read-only mode is a fact about now.
+// Its capability bits are a description it gave at registration, and a device
+// that described the tags it scans while omitting that block is not thereby
+// incapable. Where a tag speaks for itself, this is the only part that applies.
+func (m *Manager) deviceReachable(deviceID string) bool {
 	if !m.tagModificationAllowed() {
 		return false
 	}
@@ -431,10 +450,8 @@ func (m *Manager) deviceDeclared(deviceID string, want func(DeviceCapabilities) 
 		return false
 	}
 
-	if _, connected := m.session(deviceID); !connected {
-		return false
-	}
-	return want(device.PhoneCapabilities())
+	_, connected := m.session(deviceID)
+	return connected
 }
 
 // DeviceMaxHoldMs reports how long a device can keep a tag available for work,

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/systray"
@@ -98,6 +99,25 @@ type App struct {
 	// settings is the store the tray writes its toggles back to. Nil when the
 	// agent has no config directory to persist to.
 	settings *settings.Store
+
+	// menuMu guards what the rebuilt menus point at. A refresh runs on whatever
+	// goroutine noticed the change while a click handler is reading the binding
+	// it is about to act on.
+	menuMu sync.Mutex
+}
+
+// onClick runs fn for every click on item, for as long as the item exists.
+//
+// systray delivers a click only to a receiver already waiting on the channel
+// and drops it otherwise, so an item that is polled between other menu events
+// is an item whose clicks are lost. Removing the item closes the channel, which
+// ends this goroutine.
+func onClick(item *systray.MenuItem, fn func()) {
+	go func() {
+		for range item.ClickedCh {
+			fn()
+		}
+	}()
 }
 
 // New creates a new systray application. bootstrap may be nil
@@ -282,10 +302,9 @@ func (s *App) setupUI() {
 		displayName := agent.GetCardTypeFilterDisplayName(cardType)
 		tooltip := agent.GetCardTypeFilterTooltip(cardType)
 		menuItem := s.mCardFilterMenu.AddSubMenuItemCheckbox(displayName, tooltip, false)
-		s.cardTypeFilters[cardType] = &cardTypeFilterItem{
-			menuItem: menuItem,
-			cardType: cardType,
-		}
+		filter := &cardTypeFilterItem{menuItem: menuItem, cardType: cardType}
+		s.cardTypeFilters[cardType] = filter
+		onClick(menuItem, func() { s.handleCardTypeToggle(filter) })
 	}
 
 	systray.AddSeparator()
@@ -492,18 +511,6 @@ func (s *App) handleMenuEvents(mRefreshDevices, mQuit *systray.MenuItem) {
 			systray.Quit()
 			return
 		}
-
-		// Handle card type filter selection
-		s.handleCardFilterSelection()
-
-		// Handle device selection
-		s.handleDeviceSelection()
-
-		// Handle origin allow/revoke
-		s.handleOriginSelection()
-
-		// Handle paired device revocation
-		s.handleDeviceRevokeSelection()
 	}
 }
 
@@ -569,18 +576,6 @@ func (s *App) handleFilterAll() {
 	s.agent.AllowAllCardTypes()
 }
 
-// handleCardFilterSelection processes card type filter menu selections
-func (s *App) handleCardFilterSelection() {
-	for _, filter := range s.cardTypeFilters {
-		select {
-		case <-filter.menuItem.ClickedCh:
-			s.handleCardTypeToggle(filter)
-		default:
-			// No click event for this filter
-		}
-	}
-}
-
 // handleCardTypeToggle toggles a card type filter
 func (s *App) handleCardTypeToggle(filter *cardTypeFilterItem) {
 	s.mFilterAll.Uncheck()
@@ -598,21 +593,6 @@ func (s *App) handleCardTypeToggle(filter *cardTypeFilterItem) {
 	// If no filters active, revert to All
 	if s.agent.AllowedCardTypesLength() == 0 {
 		s.mFilterAll.Check()
-	}
-}
-
-// handleDeviceSelection processes device menu selections
-func (s *App) handleDeviceSelection() {
-	currentDevice := s.agent.CurrentDevicePath()
-	for deviceName, menuItem := range s.deviceMenuItems {
-		select {
-		case <-menuItem.ClickedCh:
-			if currentDevice != deviceName {
-				s.SwitchDevice(deviceName)
-			}
-		default:
-			// No click event for this menu item
-		}
 	}
 }
 
@@ -645,11 +625,15 @@ func (s *App) SwitchDevice(deviceName string) {
 
 // updateDeviceList refreshes the list of available devices
 func (s *App) updateDeviceList() {
-	// Clear existing device menu items
+	// Removed rather than hidden: a rebuild would otherwise leave the previous
+	// rows in the menu forever, and removing closes the channel their click
+	// receiver is waiting on.
+	s.menuMu.Lock()
 	for _, item := range s.deviceMenuItems {
-		item.Hide()
+		item.Remove()
 	}
 	s.deviceMenuItems = make(map[string]*systray.MenuItem)
+	s.menuMu.Unlock()
 
 	// Get available devices
 	devices, err := s.agent.Manager().ListDevices()
@@ -673,7 +657,16 @@ func (s *App) updateDeviceList() {
 		deviceName := device
 		isChecked := (currentDevice == deviceName)
 		item := s.mDeviceMenu.AddSubMenuItemCheckbox(deviceName, "Select this device", isChecked)
+
+		s.menuMu.Lock()
 		s.deviceMenuItems[deviceName] = item
+		s.menuMu.Unlock()
+
+		onClick(item, func() {
+			if s.agent.CurrentDevicePath() != deviceName {
+				s.SwitchDevice(deviceName)
+			}
+		})
 	}
 }
 

@@ -23,7 +23,9 @@ func (s *App) setupDevicesMenu() {
 	for i := 0; i < deviceSlotCount; i++ {
 		item := s.mDevicesMenu.AddSubMenuItem("", "")
 		item.Hide()
-		s.deviceSlots = append(s.deviceSlots, &deviceSlot{item: item})
+		slot := &deviceSlot{item: item}
+		s.deviceSlots = append(s.deviceSlots, slot)
+		onClick(item, func() { s.revokeDeviceInSlot(slot) })
 	}
 
 	s.mRequirePaired = s.mDevicesMenu.AddSubMenuItemCheckbox(
@@ -54,7 +56,9 @@ func (s *App) refreshDevicesMenu() {
 			break
 		}
 		item := s.deviceSlots[slot]
+		s.menuMu.Lock()
 		item.id = device.ID
+		s.menuMu.Unlock()
 
 		label := device.Name
 		if device.Platform != "" {
@@ -67,7 +71,9 @@ func (s *App) refreshDevicesMenu() {
 	}
 
 	for ; slot < len(s.deviceSlots); slot++ {
+		s.menuMu.Lock()
 		s.deviceSlots[slot].id = ""
+		s.menuMu.Unlock()
 		s.deviceSlots[slot].item.Hide()
 	}
 
@@ -110,28 +116,27 @@ func (s *App) handleRequirePaired() {
 	s.refreshDevicesMenu()
 }
 
-// handleDeviceRevokeSelection polls the device slots, matching how the other
-// dynamic menus are handled.
-func (s *App) handleDeviceRevokeSelection() {
+// revokeDeviceInSlot revokes whichever device this row is showing. The row
+// outlives the device in it, so the id is read when the click arrives rather
+// than bound when the receiver started.
+func (s *App) revokeDeviceInSlot(slot *deviceSlot) {
 	if s.agent.Devices() == nil {
 		return
 	}
 
-	for _, slot := range s.deviceSlots {
-		select {
-		case <-slot.item.ClickedCh:
-			if slot.id == "" {
-				continue
-			}
-			if err := s.agent.Devices().Revoke(slot.id); err != nil {
-				log.Printf("[systray] Failed to revoke device %s: %v", slot.id, err)
-				continue
-			}
-			log.Printf("[systray] Revoked device %s", slot.id)
-			s.refreshDevicesMenu()
-		default:
-		}
+	s.menuMu.Lock()
+	id := slot.id
+	s.menuMu.Unlock()
+
+	if id == "" {
+		return
 	}
+	if err := s.agent.Devices().Revoke(id); err != nil {
+		log.Printf("[systray] Failed to revoke device %s: %v", id, err)
+		return
+	}
+	log.Printf("[systray] Revoked device %s", id)
+	s.refreshDevicesMenu()
 }
 
 // handleRevokeAllDevices clears the registry.

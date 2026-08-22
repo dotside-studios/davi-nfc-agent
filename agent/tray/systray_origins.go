@@ -27,7 +27,9 @@ func (s *App) setupOriginsMenu() {
 	for i := 0; i < originSlotCount; i++ {
 		item := s.mOriginsMenu.AddSubMenuItemCheckbox("", "", false)
 		item.Hide()
-		s.originSlots = append(s.originSlots, &originSlot{item: item})
+		slot := &originSlot{item: item}
+		s.originSlots = append(s.originSlots, slot)
+		onClick(item, func() { s.toggleOriginInSlot(slot) })
 	}
 
 	s.mOriginAllowAny = s.mOriginsMenu.AddSubMenuItemCheckbox(
@@ -67,7 +69,9 @@ func (s *App) refreshOriginsMenu() {
 	}
 
 	for ; slot < len(s.originSlots); slot++ {
+		s.menuMu.Lock()
 		s.originSlots[slot].origin = ""
+		s.menuMu.Unlock()
 		s.originSlots[slot].item.Hide()
 	}
 
@@ -79,8 +83,10 @@ func (s *App) refreshOriginsMenu() {
 }
 
 func (s *App) setOriginSlot(slot *originSlot, origin string, blocked bool) {
+	s.menuMu.Lock()
 	slot.origin = origin
 	slot.blocked = blocked
+	s.menuMu.Unlock()
 
 	if blocked {
 		slot.item.SetTitle("Allow " + origin)
@@ -94,36 +100,35 @@ func (s *App) setOriginSlot(slot *originSlot, origin string, blocked bool) {
 	slot.item.Show()
 }
 
-// handleOriginSelection polls the origin slots, matching how device and card
-// filter items are handled: a fixed select cannot cover a changing set.
-func (s *App) handleOriginSelection() {
+// toggleOriginInSlot allows or revokes whichever origin this row is showing,
+// read when the click arrives because the row is reused across refreshes.
+func (s *App) toggleOriginInSlot(slot *originSlot) {
 	if s.agent.Origins() == nil {
 		return
 	}
 
-	for _, slot := range s.originSlots {
-		select {
-		case <-slot.item.ClickedCh:
-			if slot.origin == "" {
-				continue
-			}
-			if slot.blocked {
-				if err := s.agent.Origins().Allow(slot.origin); err != nil {
-					log.Printf("[systray] Failed to allow origin %q: %v", slot.origin, err)
-					continue
-				}
-				log.Printf("[systray] Allowed origin: %s", slot.origin)
-			} else {
-				if err := s.agent.Origins().Revoke(slot.origin); err != nil {
-					log.Printf("[systray] Failed to revoke origin %q: %v", slot.origin, err)
-					continue
-				}
-				log.Printf("[systray] Revoked origin: %s", slot.origin)
-			}
-			s.refreshOriginsMenu()
-		default:
-		}
+	s.menuMu.Lock()
+	origin, blocked := slot.origin, slot.blocked
+	s.menuMu.Unlock()
+
+	if origin == "" {
+		return
 	}
+
+	if blocked {
+		if err := s.agent.Origins().Allow(origin); err != nil {
+			log.Printf("[systray] Failed to allow origin %q: %v", origin, err)
+			return
+		}
+		log.Printf("[systray] Allowed origin: %s", origin)
+	} else {
+		if err := s.agent.Origins().Revoke(origin); err != nil {
+			log.Printf("[systray] Failed to revoke origin %q: %v", origin, err)
+			return
+		}
+		log.Printf("[systray] Revoked origin: %s", origin)
+	}
+	s.refreshOriginsMenu()
 }
 
 // handleOriginAllowAny toggles the session-only escape hatch.

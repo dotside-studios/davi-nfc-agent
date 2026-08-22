@@ -151,9 +151,13 @@ type gate struct{}
 func (gate) Describe() plugin.Info { return plugin.Info{ID: "turnstile", Title: "Turnstile"} }
 
 func (gate) Routes() []plugin.Route {
-	return []plugin.Route{{Pattern: "/turnstile/", Handler: http.HandlerFunc(
-		func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("gate")) },
-	)}}
+	return []plugin.Route{{
+		Pattern: "/turnstile/",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("gate"))
+		}),
+		Label: "Gate",
+	}}
 }
 
 func TestAPluginsPageIsServedOnTheAgentsPort(t *testing.T) {
@@ -172,6 +176,31 @@ func TestAPluginsPageIsServedOnTheAgentsPort(t *testing.T) {
 	body := get(t, url)
 	if body != "gate" {
 		t.Fatalf("the agent's port answered %q at the plugin's path", body)
+	}
+
+	// And its address is handed out beside the agent's own, built by whatever
+	// bound the port rather than by the plugin guessing at it.
+	route := plugin.Route{Pattern: "/turnstile/", Owner: "turnstile"}
+	endpoint, ok := host.Endpoints().Get(route.EndpointID())
+	if !ok {
+		t.Fatal("the labelled route was not published")
+	}
+	if endpoint.Label != "Gate" {
+		t.Errorf("published as %q, want the name the plugin gave it", endpoint.Label)
+	}
+	if !strings.HasSuffix(endpoint.URL, "/turnstile/") || !strings.Contains(endpoint.URL, strconv.Itoa(agent.port)) {
+		t.Errorf("published URL = %q, want the agent's own port and the route's path", endpoint.URL)
+	}
+	if !strings.HasPrefix(endpoint.URL, "http://") {
+		t.Errorf("published URL = %q, want the scheme the listener is serving", endpoint.URL)
+	}
+
+	// It goes down with the listener, like the agent's own addresses.
+	if err := host.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if endpoint, _ := host.Endpoints().Get(route.EndpointID()); endpoint.Running() {
+		t.Errorf("a stopped listener still hands out %q", endpoint.URL)
 	}
 }
 

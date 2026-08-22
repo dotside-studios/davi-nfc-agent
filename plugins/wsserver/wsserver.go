@@ -168,11 +168,12 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 	certFile, keyFile := agent.Certificates()
 	port := agent.Port()
 
+	routes := ctx.Routes()
 	unified := unifiedserver.New(unifiedserver.Config{
 		Port:     port,
 		CertFile: certFile,
 		KeyFile:  keyFile,
-		Mounts:   mounts(ctx.Routes()),
+		Mounts:   mounts(routes),
 		Logf:     p.logf,
 	}, device, client)
 
@@ -187,6 +188,7 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 	}()
 
 	p.publish(ctx)
+	p.publishRoutes(ctx, routes)
 	ctx.Logf("serving devices and clients on port %d", port)
 	return nil
 }
@@ -215,6 +217,11 @@ func (p *Plugin) Stop(ctx *plugin.Context) error {
 
 	ctx.Endpoints().SetURL(EndpointDevice, "")
 	ctx.Endpoints().SetURL(EndpointClient, "")
+	for _, route := range ctx.Routes() {
+		if route.Label != "" {
+			ctx.Endpoints().SetURL(route.EndpointID(), "")
+		}
+	}
 	return nil
 }
 
@@ -325,6 +332,39 @@ func (p *Plugin) publish(ctx *plugin.Context) {
 
 	ctx.Endpoints().SetURL(EndpointDevice, device)
 	ctx.Endpoints().SetURL(EndpointClient, client)
+}
+
+// publishRoutes hands out an address for every route that asked to be shown.
+//
+// The plugin that asked names it and this builds it, because this is what knows
+// the scheme, the host and the port that was actually bound. A plugin building
+// its own would be guessing at all three.
+func (p *Plugin) publishRoutes(ctx *plugin.Context, routes []plugin.Route) {
+	for _, route := range routes {
+		if route.Label == "" {
+			continue
+		}
+		ctx.Endpoints().Set(plugin.Endpoint{
+			ID:      route.EndpointID(),
+			Label:   route.Label,
+			URL:     p.PageURL(route.Pattern),
+			Tooltip: route.Tooltip,
+		})
+	}
+}
+
+// PageURL is where a path mounted on this listener can be reached.
+func (p *Plugin) PageURL(pattern string) string {
+	port := p.Port()
+	if port == 0 {
+		return ""
+	}
+
+	scheme := "http"
+	if certFile, keyFile := p.config.Agent.Certificates(); certFile != "" && keyFile != "" {
+		scheme = "https"
+	}
+	return scheme + "://" + netaddr.HostPort(netaddr.Host(), port) + pattern
 }
 
 func (p *Plugin) logf(format string, args ...any) {

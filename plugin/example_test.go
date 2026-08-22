@@ -11,11 +11,18 @@ import (
 // turnstile is a consumer's own feature: it opens a gate when a badge is read,
 // serves a page of its own, and wants both on the agent it is built on.
 type turnstile struct {
+	gate   gate
 	held   *traymenu.Item
 	passes *traymenu.Item
 	count  int
 	open   bool
 }
+
+// gate stands in for the hardware.
+type gate struct{}
+
+func (gate) Open() error  { return nil }
+func (gate) Close() error { return nil }
 
 func (t *turnstile) Describe() plugin.Info {
 	return plugin.Info{ID: "turnstile", Title: "Turnstile", Tooltip: "The gate this agent drives"}
@@ -47,25 +54,20 @@ func (t *turnstile) Init(ctx *plugin.Context) error {
 }
 
 // Routes are served on the agent's own listener, so the gate needs no port, no
-// certificate and no trust of its own.
+// certificate and no trust of its own. Labelling one puts its address on the
+// agent's menus, built by whatever bound the port.
 func (t *turnstile) Routes() []plugin.Route {
-	return []plugin.Route{{Pattern: "/turnstile/", Handler: http.NotFoundHandler()}}
+	return []plugin.Route{{
+		Pattern: "/turnstile/",
+		Handler: http.NotFoundHandler(),
+		Label:   "Gate",
+	}}
 }
 
 // Start is where a plugin with something of its own to run would run it.
-func (t *turnstile) Start(ctx *plugin.Context) error {
-	ctx.Endpoints().Set(plugin.Endpoint{
-		ID:    "turnstile",
-		Label: "Gate",
-		URL:   "http://localhost:9470/turnstile/",
-	})
-	return nil
-}
+func (t *turnstile) Start(*plugin.Context) error { return t.gate.Open() }
 
-func (t *turnstile) Stop(ctx *plugin.Context) error {
-	ctx.Endpoints().SetURL("turnstile", "")
-	return nil
-}
+func (t *turnstile) Stop(*plugin.Context) error { return t.gate.Close() }
 
 // A plugin is registered, wired up, started and stopped by the agent, and never
 // asked to draw itself again: it keeps the items it made and changes them as
@@ -82,17 +84,13 @@ func Example() {
 	host.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04A2"}})
 	host.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04B7"}})
 
-	for _, endpoint := range host.Endpoints().List() {
-		fmt.Printf("%s: %s\n", endpoint.Label, endpoint.URL)
-	}
 	for _, route := range host.Routes() {
-		fmt.Printf("%s serves %s\n", route.Owner, route.Pattern)
+		fmt.Printf("%s serves %s as %q\n", route.Owner, route.Pattern, route.Label)
 	}
 	fmt.Print(host.Render())
 
 	// Output:
-	// Gate: http://localhost:9470/turnstile/
-	// turnstile serves /turnstile/
+	// turnstile serves /turnstile/ as "Gate"
 	// Turnstile
 	//   Passes today: 2 (disabled)
 	//   [ ] Hold Gate Open

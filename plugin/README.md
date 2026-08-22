@@ -52,7 +52,7 @@ to another plugin's menu, or to the agent's settings.
 | | |
 |---|---|
 | `Menu()` | a menu of its own — a [`traymenu.Container`](../traymenu), taken on first use |
-| `Endpoints()` | the register of addresses the agent hands out |
+| `Endpoints()` | the register of addresses the agent hands out, for one with no route behind it |
 | `State()` / `Watch(fn)` | what the agent is doing, and a signal raised whenever that changes |
 | `Routes()` | what the plugins want served, for whatever is serving the port |
 | `Peer(id)` / `Host()` | the plugins around it |
@@ -62,20 +62,6 @@ Nothing here names `fyne.io/systray`. A build with no tray leaves `Config.Menus`
 nil and a plugin that fills a menu still runs — its items go to
 `traymenu.Discard()` and behave, they are just not on any tray.
 
-## Addresses
-
-A feature with an address registers it rather than drawing it:
-
-```go
-ctx.Endpoints().Set(plugin.Endpoint{ID: "turnstile", Label: "Gate", URL: gateURL})
-```
-
-It appears under **Server URLs** beside the agent's own and is copied by the same
-entry. An empty `URL` means *not running*, which is what a stopped server
-publishes: the entry keeps its place and says so, rather than handing out an
-address that refuses the connection. Publishing the same ID again — a pairing PIN
-rotating into the URL that carries it — keeps that place too.
-
 ## Serving HTTP
 
 A plugin with a page or an API of its own does not open a listener for it. It
@@ -84,7 +70,7 @@ it returns:
 
 ```go
 func (t *turnstile) Routes() []plugin.Route {
-    return []plugin.Route{{Pattern: "/turnstile/", Handler: t.mux}}
+    return []plugin.Route{{Pattern: "/turnstile/", Handler: t.mux, Label: "Gate"}}
 }
 ```
 
@@ -93,6 +79,27 @@ certificate it already has, with no port of its own. The control center is serve
 exactly this way. A route asking for a path the agent serves itself (`/ws`,
 `/health`) is refused and logged; the root is claimable, since the agent's banner
 is only there while nothing else wants it.
+
+## Addresses
+
+`Endpoints` is the register of addresses the agent hands out — what the tray
+shows under **Server URLs** and copies. Routes and endpoints are not the same
+thing: a route is a handler to mount, an endpoint is an address to give someone.
+Most mounted pages are both, so a `Label` on a route publishes one, with the URL
+built by whatever bound the port rather than by the plugin guessing at the
+scheme, the host and the port.
+
+Register one directly when there is no route behind it — a listener of your own,
+or an address that is not a plain path:
+
+```go
+ctx.Endpoints().Set(plugin.Endpoint{ID: "turnstile", Label: "Gate", URL: gateURL})
+```
+
+An empty `URL` means *not running*, which is what a stopped server publishes: the
+entry keeps its place and says so, rather than handing out an address that
+refuses the connection. Publishing the same ID again — a pairing PIN rotating
+into the URL that carries it — keeps that place too.
 
 ## Capabilities, not names
 

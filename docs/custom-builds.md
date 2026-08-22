@@ -80,15 +80,9 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
     return nil
 }
 
-func (p *Plugin) Start(ctx *plugin.Context) error {
-    ctx.Endpoints().Set(plugin.Endpoint{ID: "turnstile", Label: "Gate", URL: p.url()})
-    return p.gate.Open()
-}
+func (p *Plugin) Start(*plugin.Context) error { return p.gate.Open() }
 
-func (p *Plugin) Stop(ctx *plugin.Context) error {
-    ctx.Endpoints().SetURL("turnstile", "")
-    return p.gate.Close()
-}
+func (p *Plugin) Stop(*plugin.Context) error { return p.gate.Close() }
 ```
 
 `Init` and `Start` run in registration order, `Stop` and `Close` in reverse of
@@ -119,39 +113,17 @@ func init() { plugin.Register(&Plugin{gate: OpenGate()}) }
 `main.go` takes the default registry up at startup, after its own plugins. To
 control where yours sits in the start order instead, call `host.Use` directly.
 
-## Addresses
-
-Register an address rather than drawing one:
-
-```go
-ctx.Endpoints().Set(plugin.Endpoint{
-    ID:      "turnstile",
-    Label:   "Gate",
-    URL:     "http://localhost:9470/turnstile/",
-    Tooltip: "The gate's own console. Click to copy",
-})
-```
-
-It appears under **Server URLs** beside the agent's own and is copied by the same
-entry. The tray draws whatever is in the register; it is not told what any of it
-is.
-
-An empty `URL` means the server behind it is not running, which is what a stopped
-plugin publishes: the entry keeps its place and reads as `Not running` rather
-than disappearing. Setting the same ID again replaces it in place — that is how
-the pairing page survives a PIN rotation without moving on the menu.
-
-`wsserver` declares its two entries in `Init`, before anything is listening, and
-fills in the URLs in `Start` from the port it actually bound. These get pasted
-into a device, and an address naming an unbound port is worse than none.
-
 ## Serving HTTP on the agent's port
 
 A plugin with a page or an API of its own does not open a listener for it:
 
 ```go
 func (p *Plugin) Routes() []plugin.Route {
-    return []plugin.Route{{Pattern: "/turnstile/", Handler: p.mux}}
+    return []plugin.Route{{
+        Pattern: "/turnstile/",
+        Handler: p.mux,
+        Label:   "Gate",   // and put its address on the menus
+    }}
 }
 ```
 
@@ -170,6 +142,41 @@ center is served this way and has no other mechanism.
 The pairing server is the counter-example: it runs a listener of its own, over
 plain HTTP, because a phone that has not installed the agent's certificate
 authority yet is exactly who its page is for.
+
+## Addresses
+
+A `Label` on a route is all a mounted page needs. The address is built by
+whatever bound the port — it knows the scheme, the host and the port that was
+actually taken, none of which the plugin can be sure of — and withdrawn again
+when that listener stops. Leave the label off a route nobody is meant to be
+handed: the control center is opened with a token, not a URL, so it has none.
+
+Register an address directly only when there is no route to hang it on — a
+listener of your own, or an address that is not a plain path:
+
+```go
+ctx.Endpoints().Set(plugin.Endpoint{
+    ID:      "turnstile",
+    Label:   "Gate",
+    URL:     "http://" + hostPort + "/",
+    Tooltip: "The gate's own console. Click to copy",
+})
+```
+
+Either way it appears under **Server URLs** beside the agent's own and is copied
+by the same entry. The tray draws whatever is in the register; it is not told
+what any of it is.
+
+An empty `URL` means the server behind it is not running: the entry keeps its
+place and reads as `Not running` rather than disappearing. Setting the same ID
+again replaces it in place, which is how the pairing page survives a PIN rotation
+without moving on the menu.
+
+`wsserver` is the one that has to do this by hand, since its addresses are
+`ws://` and carry the device mode. It declares both entries in `Init`, before
+anything is listening, and fills in the URLs in `Start` from the port it actually
+bound. These get pasted into a device, and an address naming an unbound port is
+worse than none.
 
 ## Following the agent
 

@@ -45,7 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   claimable, since the agent's banner is only there while nothing else wants it.
 
   The control center is served this way now and has no other mechanism: it is a
-  plugin asking for `/control/` and `/`, like any other
+  plugin asking for `/control/` and `/`, like any other.
+
+  A route may carry a `Label`, which puts its address on the agent's menus
+  beside the agent's own. The URL is built by whatever bound the port — it knows
+  the scheme, the host and the port actually taken, none of which the plugin can
+  be sure of — and withdrawn again when that listener stops, so a mounted page
+  publishes an address without building one
 
 - **The reader can say what it just did.** Someone holding a card at the reader
   had no way to tell a completed scan from one that never happened: the agent

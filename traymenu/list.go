@@ -15,10 +15,14 @@ type Row[T any] struct {
 // List is a menu section whose contents change at runtime: paired devices,
 // allowed origins, the readers currently plugged in.
 //
-// No supported platform can remove a menu item once it is added, so a List
-// takes a fixed pool of items up front and relabels and hides them as the
-// contents change. That is a cap, not a resize: Set reports how many rows did
-// not fit.
+// It takes a fixed pool of items up front and relabels and hides them as the
+// contents change, rather than adding and removing items per refresh. New items
+// go to the end of their parent, so a growing list would jump over whatever
+// follows it; reusing slots keeps the rows where they were declared. That is a
+// cap, not a resize: Set reports how many rows did not fit.
+//
+// For entries registered one at a time, and free to sit at the end, see
+// NewSection.
 type List[T any] struct {
 	mu    sync.Mutex
 	items []*Item

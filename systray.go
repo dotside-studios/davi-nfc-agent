@@ -21,8 +21,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// readerSlotCount bounds the NFC readers offered in the Device submenu. Menu
-// items cannot be removed once created, so the list reuses a fixed pool; see
+// readerSlotCount bounds the NFC readers offered in the Device submenu, which
+// reuses a fixed pool of items rather than rebuilding them per refresh; see
 // [traymenu.NewList].
 const readerSlotCount = 12
 

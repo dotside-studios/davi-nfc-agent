@@ -23,6 +23,10 @@
 // which costs clicks on any menu whose items change at runtime. This package
 // keeps a receiver on every item for its whole life.
 //
+// Items may be added and removed at any time, not only while the menu is being
+// built. New ones go to the end of their parent, so for entries registered
+// later see NewSection.
+//
 // # Concurrency
 //
 // Click handlers all run on one dispatch goroutine, in arrival order, so a

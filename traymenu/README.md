@@ -80,6 +80,40 @@ modes.Set(nfc.ModeReadWrite)
 modes.OnSelect(func(mode nfc.ReaderMode) { reader.SetMode(mode) })
 ```
 
+## Registering items later
+
+Items can be added at any time, not just while the menu is being built: each one
+gets its own watcher when it is created, so nothing needs rewiring. New items go
+to the end of their parent, though, so anything registered late at the top level
+lands under `Quit`. A `Section` is a submenu declared where it belongs, filled in
+from the end, and keyed so that registering twice replaces rather than
+duplicates:
+
+```go
+plugins := traymenu.NewSection(menu, "Plugins")
+menu.AddSeparator()
+menu.Add("Quit", traymenu.OnClick(menu.Quit))
+
+plugins.Set("backup", "Back Up Now", traymenu.OnClick(backup.Run))
+plugins.Remove("backup")
+```
+
+`Container` is the seam for handing that out. Its methods are exported but its
+implementation methods are not, so another package can fill a container without
+being able to fake one:
+
+```go
+func (p *Plugin) Install(c traymenu.Container) {
+    c.Add(p.Name, traymenu.OnClick(p.Run))
+}
+```
+
+`Item.Remove` takes an item off the menu for good, along with its submenu. Every
+other method on a removed item is a no-op, which matters because the tray
+library re-adds an item to the platform menu on any state change: an unguarded
+`SetTitle` would otherwise bring back something that was removed. Use `Hide` for
+something that comes back.
+
 ## Lists
 
 No supported platform can remove a menu item once it is added. A `List` takes a

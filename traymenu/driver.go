@@ -38,8 +38,13 @@ type Driver interface {
 	SetTooltip(tooltip string)
 
 	// AddItem adds an item under parent, or at the top level when parent is
-	// nil. Items cannot be removed once added on any supported platform, so
-	// there is no counterpart; see NewList for menus whose contents change.
+	// nil. New items go to the end of their parent: no platform can insert one
+	// in the middle.
 	AddItem(parent Native, spec Spec) Native
 	AddSeparator(parent Native)
+
+	// RemoveItem takes an item off the menu for good, along with anything in
+	// its submenu. Menu stops touching an item once it has been removed, so an
+	// implementation need not tolerate calls afterwards.
+	RemoveItem(item Native)
 }

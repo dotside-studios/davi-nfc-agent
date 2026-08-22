@@ -130,16 +130,29 @@ func (m *Menu) menu() *Menu    { return m }
 func (m *Menu) native() Native { return nil }
 
 // add creates the platform item and the Item that fronts it.
-func (m *Menu) add(parent Native, o options) *Item {
+func (m *Menu) add(parent *Item, o options) *Item {
+	var native Native
+	if parent != nil {
+		if parent.Removed() {
+			// Nothing left to hang it on. An inert item is safer than one
+			// under a parent the platform has already forgotten.
+			return &Item{owner: m, title: o.spec.Title, tooltip: o.spec.Tooltip, removed: true}
+		}
+		native = parent.platform
+	}
+
 	item := &Item{
 		owner:    m,
-		platform: m.driver.AddItem(parent, o.spec),
+		platform: m.driver.AddItem(native, o.spec),
 		title:    o.spec.Title,
 		tooltip:  o.spec.Tooltip,
 		checkbox: o.spec.Checkbox,
 		checked:  o.spec.Checked,
 		enabled:  true,
 		visible:  true,
+	}
+	if parent != nil {
+		parent.adopt(item)
 	}
 
 	// Applied after creation because that is what the platforms offer: an item

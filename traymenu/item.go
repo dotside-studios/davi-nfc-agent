@@ -11,12 +11,14 @@ type Item struct {
 	clicked  Signal[*Item]
 
 	mu       sync.RWMutex
+	children []*Item
 	title    string
 	tooltip  string
 	checkbox bool
 	checked  bool
 	enabled  bool
 	visible  bool
+	removed  bool
 }
 
 // Clicked is the signal raised when the item is activated. OnClick is the
@@ -39,7 +41,7 @@ func (i *Item) OnClick(fn func()) *Connection {
 // Calling it from inside a handler deadlocks on the dispatch goroutine.
 func (i *Item) Click() {
 	i.mu.RLock()
-	live := i.enabled && i.visible
+	live := i.enabled && i.visible && !i.removed
 	i.mu.RUnlock()
 	if !live {
 		return
@@ -68,8 +70,10 @@ func (i *Item) Title() string {
 // SetTitle relabels the item.
 func (i *Item) SetTitle(title string) {
 	i.mu.Lock()
-	changed := i.title != title
-	i.title = title
+	changed := !i.removed && i.title != title
+	if changed {
+		i.title = title
+	}
 	i.mu.Unlock()
 
 	if changed {
@@ -87,8 +91,10 @@ func (i *Item) Tooltip() string {
 // SetTooltip changes the item's hover text.
 func (i *Item) SetTooltip(tooltip string) {
 	i.mu.Lock()
-	changed := i.tooltip != tooltip
-	i.tooltip = tooltip
+	changed := !i.removed && i.tooltip != tooltip
+	if changed {
+		i.tooltip = tooltip
+	}
 	i.mu.Unlock()
 
 	if changed {
@@ -113,8 +119,10 @@ func (i *Item) Checked() bool {
 // SetChecked shows or hides the item's checkmark.
 func (i *Item) SetChecked(checked bool) {
 	i.mu.Lock()
-	changed := i.checked != checked
-	i.checked = checked
+	changed := !i.removed && i.checked != checked
+	if changed {
+		i.checked = checked
+	}
 	i.mu.Unlock()
 
 	if changed {
@@ -125,6 +133,11 @@ func (i *Item) SetChecked(checked bool) {
 // Toggle flips the checkmark and reports its new state.
 func (i *Item) Toggle() bool {
 	i.mu.Lock()
+	if i.removed {
+		checked := i.checked
+		i.mu.Unlock()
+		return checked
+	}
 	next := !i.checked
 	i.checked = next
 	i.mu.Unlock()
@@ -143,8 +156,10 @@ func (i *Item) Enabled() bool {
 // SetEnabled greys the item out, or brings it back.
 func (i *Item) SetEnabled(enabled bool) {
 	i.mu.Lock()
-	changed := i.enabled != enabled
-	i.enabled = enabled
+	changed := !i.removed && i.enabled != enabled
+	if changed {
+		i.enabled = enabled
+	}
 	i.mu.Unlock()
 
 	if changed {
@@ -168,8 +183,10 @@ func (i *Item) Visible() bool {
 // SetVisible shows or hides the item.
 func (i *Item) SetVisible(visible bool) {
 	i.mu.Lock()
-	changed := i.visible != visible
-	i.visible = visible
+	changed := !i.removed && i.visible != visible
+	if changed {
+		i.visible = visible
+	}
 	i.mu.Unlock()
 
 	if changed {
@@ -180,29 +197,84 @@ func (i *Item) SetVisible(visible bool) {
 // Show reveals a hidden item.
 func (i *Item) Show() { i.SetVisible(true) }
 
-// Hide takes the item off the menu, which is as close to removal as the
-// platforms allow.
+// Hide takes the item off the menu, keeping its place for when it comes back.
 func (i *Item) Hide() { i.SetVisible(false) }
+
+// Removed reports whether the item has been taken off the menu for good.
+func (i *Item) Removed() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.removed
+}
+
+// Remove takes the item off the menu for good, along with anything in its
+// submenu, and disconnects its handlers. Every other method on it becomes a
+// no-op: a removed item cannot be relabelled, shown or clicked again, and
+// anything added to it comes back inert.
+//
+// Removing an item a List or Radio owns leaves that owner inconsistent; go
+// through the owner instead. Use Hide for something that comes back.
+func (i *Item) Remove() {
+	if !i.markRemoved() {
+		return
+	}
+	i.owner.driver.RemoveItem(i.platform)
+}
+
+// markRemoved marks the item and its submenu, and reports whether this call was
+// the one that did it. Only the topmost item is handed to the driver, which
+// takes the subtree with it; the rest have to be marked so that a state change
+// on one cannot put it back on the menu.
+func (i *Item) markRemoved() bool {
+	i.mu.Lock()
+	if i.removed {
+		i.mu.Unlock()
+		return false
+	}
+	i.removed = true
+	children := append([]*Item(nil), i.children...)
+	i.mu.Unlock()
+
+	// Cleared before the driver is told: it may hand the watcher one last click
+	// on the way out, and a removed item should not act on it.
+	i.clicked.Clear()
+	for _, child := range children {
+		child.markRemoved()
+	}
+	return true
+}
+
+// adopt records a child so removal can reach it.
+func (i *Item) adopt(child *Item) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.children = append(i.children, child)
+}
 
 // ---- Container ----
 
 // Add appends a plain item to this item's submenu.
 func (i *Item) Add(title string, opts ...Option) *Item {
-	return i.owner.add(i.platform, build(title, false, false, opts))
+	return i.owner.add(i, build(title, false, false, opts))
 }
 
 // AddCheckbox appends a checkbox item to this item's submenu.
 func (i *Item) AddCheckbox(title string, checked bool, opts ...Option) *Item {
-	return i.owner.add(i.platform, build(title, true, checked, opts))
+	return i.owner.add(i, build(title, true, checked, opts))
 }
 
 // AddSubmenu appends a nested submenu to this item's submenu.
 func (i *Item) AddSubmenu(title string, opts ...Option) *Item {
-	return i.owner.add(i.platform, build(title, false, false, opts))
+	return i.owner.add(i, build(title, false, false, opts))
 }
 
 // AddSeparator appends a divider to this item's submenu.
-func (i *Item) AddSeparator() { i.owner.driver.AddSeparator(i.platform) }
+func (i *Item) AddSeparator() {
+	if i.Removed() {
+		return
+	}
+	i.owner.driver.AddSeparator(i.platform)
+}
 
 func (i *Item) menu() *Menu    { return i.owner }
 func (i *Item) native() Native { return i.platform }

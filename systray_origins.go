@@ -7,8 +7,8 @@ import (
 )
 
 // originSlotCount bounds the origins shown in the menu. The list is a handful
-// of consoles in practice, and systray items cannot be removed once created —
-// only relabelled and hidden — so the pool is fixed and reused.
+// of consoles in practice, and the pool is fixed and reused: a row added on a
+// refresh would land after the allow-any toggle below it.
 const originSlotCount = 8
 
 // originRow is what one row of the Allowed Origins submenu stands for: the

@@ -7,8 +7,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// pairedSlotCount bounds the paired devices shown. Systray items cannot be
-// removed once created, so the pool is fixed and reused, as with origins.
+// pairedSlotCount bounds the paired devices shown. The pool is fixed and
+// reused, as with origins: a row added on a refresh would land after the
+// actions below it.
 const pairedSlotCount = 12
 
 // setupDevicesMenu builds the Paired Devices submenu.

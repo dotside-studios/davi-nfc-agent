@@ -29,6 +29,10 @@ func (fyneDriver) AddItem(parent Native, spec Spec) Native {
 	return &fyneItem{item: p.item.AddSubMenuItem(spec.Title, spec.Tooltip)}
 }
 
+func (fyneDriver) RemoveItem(item Native) {
+	item.(*fyneItem).item.Remove()
+}
+
 func (fyneDriver) AddSeparator(parent Native) {
 	if parent == nil {
 		systray.AddSeparator()

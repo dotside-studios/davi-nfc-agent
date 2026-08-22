@@ -108,8 +108,48 @@ func (f *Fake) AddItem(parent Native, spec Spec) Native {
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if parent != nil {
+		item.parent = parent.(*FakeItem)
+	}
 	f.appendLocked(parent, item)
 	return item
+}
+
+// RemoveItem implements Driver. The item and its submenu leave the tree, and
+// its click channel closes, which is what the real driver does.
+func (f *Fake) RemoveItem(native Native) {
+	item := native.(*FakeItem)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	siblings := &f.children
+	if item.parent != nil {
+		siblings = &item.parent.children
+	}
+	for i, sibling := range *siblings {
+		if sibling == item {
+			*siblings = append((*siblings)[:i], (*siblings)[i+1:]...)
+			break
+		}
+	}
+
+	item.markRemovedLocked()
+}
+
+// markRemovedLocked closes the click channels of an item and everything under
+// it. Called with fake.mu held.
+func (i *FakeItem) markRemovedLocked() {
+	if i.removed {
+		return
+	}
+	i.removed = true
+	if i.clicks != nil {
+		close(i.clicks)
+	}
+	for _, child := range i.children {
+		child.markRemovedLocked()
+	}
 }
 
 // AddSeparator implements Driver.
@@ -212,9 +252,11 @@ func (f *Fake) renderLocked(b *strings.Builder, items []*FakeItem, depth int) {
 // last pushed to the platform.
 type FakeItem struct {
 	fake      *Fake
+	parent    *FakeItem
 	spec      Spec
 	separator bool
 	clicks    chan struct{}
+	removed   bool
 
 	// Guarded by fake.mu, so a test reading state races nothing with the menu's
 	// own goroutines.
@@ -268,8 +310,23 @@ func (i *FakeItem) Clicks() <-chan struct{} { return i.clicks }
 
 // Deliver pushes a click through the click channel as a platform would. It
 // returns once the menu's watcher has taken it, before the handlers have run;
-// use Item.Click to wait for those.
-func (i *FakeItem) Deliver() { i.clicks <- struct{}{} }
+// use Item.Click to wait for those. Delivering to a removed item does nothing.
+func (i *FakeItem) Deliver() {
+	i.fake.mu.Lock()
+	removed := i.removed
+	i.fake.mu.Unlock()
+	if removed {
+		return
+	}
+	i.clicks <- struct{}{}
+}
+
+// Removed reports whether the item has been taken off the menu.
+func (i *FakeItem) Removed() bool {
+	i.fake.mu.Lock()
+	defer i.fake.mu.Unlock()
+	return i.removed
+}
 
 // Title returns the item's current label.
 func (i *FakeItem) Title() string {

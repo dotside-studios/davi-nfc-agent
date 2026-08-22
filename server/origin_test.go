@@ -7,11 +7,11 @@ import (
 
 func TestCheckOrigin(t *testing.T) {
 	tests := []struct {
-		name    string
-		extra   []string
-		host    string
-		origin  string
-		want    bool
+		name   string
+		extra  []string
+		host   string
+		origin string
+		want   bool
 	}{
 		{"empty origin allowed (native apps)", nil, "kiosk:9470", "", true},
 		{"same host:port", nil, "kiosk:9470", "http://kiosk:9470", true},

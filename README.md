@@ -38,7 +38,7 @@ Download pre-built binaries from [releases](https://github.com/dotside-studios/d
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
 cd davi-nfc-agent
-go build .
+go build ./cmd/davi-nfc-agent
 ./davi-nfc-agent
 ```
 
@@ -57,7 +57,7 @@ with a token minted by that tray entry — the origin allowlist plays no part in
 it. See [Control Center](docs/control-center.md).
 
 It is a self-contained package (`webui/`, frontend included) that reaches the
-agent through one interface, so `go build -tags nowebui .` omits the routes, the
+agent through one interface, so `go build -tags nowebui ./cmd/davi-nfc-agent` omits the routes, the
 privileged API and the embedded console without touching anything else.
 
 ### Reader Feedback

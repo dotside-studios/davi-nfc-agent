@@ -1,45 +1,75 @@
 # Custom Builds
 
-The agent is a reader, its settings and the stores behind them. Everything that
-*serves* something is a plugin: the WebSocket endpoints, the pairing server, the
-control center. They are registered by `main.go` and by nothing else, so a build
-can leave any of them out — and an application built on this agent plugs in the
-same way they do.
+The binary this repository ships is one build of the agent, and it is a small
+one:
+
+```
+cmd/davi-nfc-agent/main.go    flags, and the Use lines that pick the plugins
+```
+
+Everything under it is an ordinary package. A build with a different set of
+features is a command of your own, in a repository of your own, importing what
+it wants:
+
+```go
+package main
+
+import (
+    "github.com/dotside-studios/davi-nfc-agent/agent"
+    "github.com/dotside-studios/davi-nfc-agent/plugins/wsserver"
+    "github.com/dotside-studios/davi-nfc-agent/tray"
+
+    "example.com/kiosk/turnstile"
+)
+
+func main() {
+    a := agent.New(manager)
+    ui := tray.New(a, "")
+    a.SetQuit(ui.Quit)
+
+    a.Plugins().Use(
+        wsserver.New(wsserver.Config{Agent: wsserver.ForAgent(a)}),
+        turnstile.New(gate),
+    )
+
+    ui.Run()
+}
+```
+
+That build has the reader, the tray, the WebSocket endpoints and a turnstile. It
+has no pairing server and no control center, because it did not ask for them.
 
 ## What a build is made of
 
 | | |
 |---|---|
-| `agent.go` and friends | the reader, the settings, the origin and device stores |
-| [`plugins/wsserver`](../plugins/wsserver) | the single listener a device and a web page connect to, and the device and client handlers behind it |
-| [`plugins/pairing`](../plugins/pairing) | the phone-pairing server, its PIN, and the tray menu for both |
-| `plugin_console.go` | the control center, mounted on the agent's port |
+| [`agent`](../agent) | the reader, the settings, the origin and device stores. Serves nothing |
+| [`tray`](../tray) | the agent's user interface, and where plugins put their menus |
+| [`plugins/wsserver`](../plugins/wsserver) | the single listener a device and a web page connect to |
+| [`plugins/pairing`](../plugins/pairing) | the phone-pairing server, its PIN and its page |
+| [`plugins/console`](../plugins/console) | the control center, mounted on the agent's port |
+| [`plugin`](../plugin) | the runtime: lifecycle, state, peers |
 | yours | anything else |
 
-The wiring is in `main.go`:
-
-```go
-host := agent.Plugins()
-
-host.Use(wsserver.New(wsserver.Config{Agent: &servingAgent{agent: agent}}))
-host.Use(pairing.New(pairing.Config{Server: bootstrapServer, Port: bootstrapPortFlag}))
-```
+The agent drives a reader and holds what an operator has decided. Everything
+that *serves* something is a plugin, and the only thing that knows which plugins
+exist is the command.
 
 ## Leaving something out
 
-Drop a `Use` line and that feature is not in the build. Without `wsserver` the
-agent has no WebSocket endpoints: it still opens the reader, holds the settings
-and shows a tray, and whatever you registered instead is what serves it. Nothing
-outside `main.go` refers to the plugin — `agent.go` asks its plugins what they
-can do rather than which one they are:
+Drop a `Use` line. Without `wsserver` there are no WebSocket endpoints: the
+agent still opens the reader, holds the settings and shows a tray, and whatever
+you registered instead is what serves it. Nothing else in the build refers to
+the plugin you dropped.
 
-```go
-if serving, ok := plugin.Find[interface{ Port() int }](host); ok { ... }
-```
-
-The control center also comes out with a build tag, since it carries an embedded
-frontend: `go build -tags nowebui .`. See
+The control center is the exception: it comes out with a build tag, because it
+carries an embedded frontend and leaving it unregistered would keep it in the
+binary. `go build -tags nowebui ./cmd/davi-nfc-agent`. See
 [Control Center → Leaving it out](control-center.md#leaving-it-out).
+
+A build with no desktop registers no tray. Plugins still run, their menus are
+discarded, and `Context.Copy` and `Context.Open` say there is nothing to copy to
+or open with.
 
 ## Writing a plugin
 
@@ -50,7 +80,7 @@ interface, so implement the ones you have work in:
 
 | Phase | When | Interface |
 |---|---|---|
-| `Init` | before anything serves: fill a menu, declare an address, find a peer | `Initer` |
+| `Init` | before anything serves: fill a menu, find a peer | `Initer` |
 | `Start` | begin serving; called again after a restart | `Starter` |
 | `Stop` | stop serving | `Stopper` |
 | `Close` | release what outlives serving, on the way out | `Closer` |
@@ -91,27 +121,26 @@ it. A plugin that fails `Init` is dropped and the rest carry on; one that fails
 phase may assume are in [plugin/README.md](../plugin/README.md).
 
 Nothing above names the tray library beyond the menu entries, and nothing names
-`fyne.io/systray`. In a build with no tray the menu is discarded and the plugin
-runs unchanged.
+`fyne.io/systray`.
 
 A plugin that needs more of the agent than `Context` carries — the reader, the
 API secret, the origin policy — states what it needs as an interface of its own
-and takes it in its config. `wsserver.Agent` is the example, implemented by
-`wsserver_host.go` in `package main`, the way the console states `webui.Host`.
-Read each value again per call rather than caching it: a listener that comes back
-after a rotated secret has to come back with the new one.
+and takes it in its config. `wsserver.Agent` is the example, with
+`wsserver.ForAgent` adapting the agent this repository ships. Read each value
+again per call rather than caching it: a listener that comes back after a
+rotated secret has to come back with the new one.
 
-## Registering from your own package
+## Registering without editing the command
 
-Go has no portable dynamic loading, so a plugin is compiled in. Register it from
-an init function and no file in the agent changes:
+A plugin registered from an init function lands in the default registry, which
+the command takes up at startup after its own:
 
 ```go
 func init() { plugin.Register(&Plugin{gate: OpenGate()}) }
 ```
 
-`main.go` takes the default registry up at startup, after its own plugins. To
-control where yours sits in the start order instead, call `host.Use` directly.
+Importing your package for its side effect is then enough. To control where
+yours sits in the start order, call `Use` directly instead.
 
 ## Serving HTTP on the agent's port
 
@@ -127,13 +156,13 @@ func (p *Plugin) Routes() []wsserver.Route {
 }
 ```
 
-`Route` belongs to the server that mounts it, not to the runtime — the runtime
-has no notion of HTTP. `wsserver` collects the declarations by walking its
-peers, so a different server would gather the same ones the same way.
-
 Whatever is serving the agent's port mounts it, so the page is reachable wherever
 the agent already is, under the certificate a device already trusts. The control
 center is served this way and has no other mechanism.
+
+`Route` belongs to the server that mounts it, not to the runtime — the runtime
+has no notion of HTTP. `wsserver` collects the declarations by walking its
+peers, so a different server would gather the same ones the same way.
 
 - Patterns are `http.ServeMux` ones: a trailing slash takes the subtree.
 - `/ws`, `/health` and `/api/v1/health` are refused and logged, naming the plugin
@@ -147,34 +176,25 @@ The pairing server is the counter-example: it runs a listener of its own, over
 plain HTTP, because a phone that has not installed the agent's certificate
 authority yet is exactly who its page is for.
 
-## Addresses
+## Menus and addresses
 
-There is no shared address register. A plugin that serves something draws its
-own menu for it, the way `wsserver` draws **Server URLs** and `pairing` draws
-**Pair a Phone**:
+A plugin draws its own. `wsserver` owns **Server URLs** — the endpoints it
+answers on, the pages mounted on it, and the API secret they ask for — and
+`pairing` owns **Pair a Phone**. There is no shared register of addresses, and
+nothing else on the tray knows what a server address is.
+
+Keep a row and relabel it as the thing behind it comes and goes, rather than an
+entry that vanishes:
 
 ```go
-func (p *Plugin) Init(ctx *plugin.Context) error {
-    p.page = ctx.Menu().Add("Page: Not running",
-        traymenu.Tooltip("Where the gate is. Click to copy"),
-        traymenu.OnClick(func() { ctx.Copy("gate URL", p.url) }),
-    )
-    return nil
-}
+p.page = ctx.Menu().Add("Page: Not running",
+    traymenu.Tooltip("Where the gate is. Click to copy"),
+    traymenu.OnClick(func() { ctx.Copy("gate URL", p.url) }),
+)
 ```
 
-Keep the row and relabel it as the thing behind it comes and goes — `Not
-running` while it is down, rather than an entry that vanishes. A row that copies
-what it is showing cannot drift from it.
-
 If your page is mounted on the agent's listener, a `Label` on the route is
-enough: the server lists it on its own menu, with the address built from the
-port it actually bound.
-
-`wsserver`'s menu therefore carries the device and client endpoints, a row for
-every mounted page that asked to be listed, and the API secret those endpoints
-ask for — which is meaningless away from them, so it is handed out with them
-rather than by the tray.
+enough: the server lists it, with the address built from the port it bound.
 
 ## Following the agent
 
@@ -186,7 +206,6 @@ made and change them; nothing polls, and nothing is redrawn wholesale.
 | `Running` | whether the reader is up |
 | `Device` | the reader in use, empty when there is none |
 | `Card` | the tag on the reader, if any |
-| `Port`, `TLS` | what is being served, and whether over TLS |
 | `Paired` | how many devices hold a pairing credential |
 | `Settings` | mode, card-type filter, pairing requirement, and the rest |
 | `Explicit` | the settings the launcher fixed for this run |
@@ -195,7 +214,10 @@ made and change them; nothing polls, and nothing is redrawn wholesale.
 copy. The agent publishes on every lifecycle and settings change, and otherwise
 from one watcher of its own that looks for what nothing announces — a card
 arriving at the reader, or leaving it. That runs whether or not the build has a
-tray.
+tray, and the tray reads its own controls from it like everything else.
+
+The state carries what the *agent* knows and nothing about what a plugin is
+doing. For that, ask the plugin.
 
 Check `Explicit` before offering a control for a setting. A field marked there
 belongs to the launcher for the whole run, and the agent will refuse a change to
@@ -203,31 +225,29 @@ it; show your entry disabled instead.
 
 ## Reaching other plugins
 
-By capability with `plugin.Find`, by ID with `ctx.Peer("pairing")`, or by
-walking `ctx.Host().Plugins()` and asserting the interface you want — which is
-what the server does to collect its mounts. The agent's own lookups are the same
-three: `ServingPort` asks whatever is serving where it is, the console asks
-whatever serves clients for its client list, and the paired-device requirement
-reaches whatever admits devices.
+By capability with `plugin.Find`, by ID with `ctx.Peer("pairing")`, or by walking
+`ctx.Host().Plugins()` and asserting the interface you want — which is what the
+server does to collect its mounts, and what the console does to find the port it
+is served on and the clients connected to it.
 
-That is the whole extension mechanism. The runtime carries no registry of
-addresses, routes or anything else domain-specific, so the agent's own plugins
-have no seam a consumer's cannot use.
+The agent itself asks its plugins for nothing. What a plugin needs to know, it
+learns from the state; what it needs done, it does. That is the direction the
+reach runs in, and it is why a plugin can be replaced or left out.
 
 ## Where a menu goes
 
-No platform can insert a menu item in the middle, so anything added after the
-tray is built lands under **Quit**. The tray holds a few top-level menus open
-where a feature's menu belongs — beside **Paired Devices** and **Allowed
-Origins** — and hands them out as plugins take them.
+No platform can insert a menu item in the middle, so anything added once the tray
+is built lands under **Quit**. The tray holds `pluginSlotCount` top-level menus
+open, right below the status line where **Server URLs** has always been, and
+hands them out as plugins take them.
 
-A menu is taken on first use. A plugin that only serves something never asks for
-one, and no empty menu is left behind reading as a feature that does nothing.
+A menu is taken on first use, so a plugin that only serves something never asks
+for one and no empty menu is left behind reading as a feature that does nothing.
 
 ## Testing
 
 `plugin.Harness` is a real host — the same lifecycle, the same contexts — over a
-tray that records a menu instead of drawing it:
+tray that records a menu instead of drawing one:
 
 ```go
 h := plugin.NewHarness(&Plugin{gate: fakeGate()})

@@ -197,7 +197,7 @@ operator's; a program embedding the agent can hold those too.
 
 ## Building
 
-`webui/frontend/dist` is committed and embedded with `go:embed`, so `go build .`
+`webui/frontend/dist` is committed and embedded with `go:embed`, so `go build ./cmd/davi-nfc-agent`
 works with no Node installed. After changing anything under
 `webui/frontend/src`:
 
@@ -247,11 +247,11 @@ webui/
 ```
 
 Nothing in `webui` imports the agent. It declares the ~35 methods it needs as
-`webui.Host`, and `webui_host.go` in `package main` implements them — so the
-console's entire reach into the agent is readable in one file, and its tests run
-against a fake host with no hardware behind them.
+`webui.Host`, and `plugins/console/host.go` implements them — so the console's
+entire reach into the agent is readable in one file, and its tests run against a
+fake host with no hardware behind them.
 
-`go build -tags nowebui .` produces an agent without the control center: no
+`go build -tags nowebui ./cmd/davi-nfc-agent` produces an agent without the control center: no
 `/control` routes, no privileged API, no tray entry, and no frontend in the
 binary. Roughly 820 KB smaller, and the console's strings are absent entirely.
 
@@ -260,20 +260,21 @@ make build-nowebui
 make test-nowebui     # the suite under the same tag
 ```
 
-Only three files in `package main` carry `//go:build !nowebui`:
+The console is a plugin, and the whole of it carries `//go:build !nowebui`:
 
 ```
-webui_enabled.go      the one wiring entry point
-webui_host.go         the Host implementation
-systray_console.go    the tray entry
+plugins/console/console.go   the constructor the command line calls
+plugins/console/host.go      the Host implementation
+plugins/console/plugin.go    the routes it serves and the menu it opens from
 ```
 
-`webui_disabled.go` supplies the stubs under the opposite tag. Call sites in
-`agent.go`, `main.go` and `systray.go` hold a nil `*Console` and tolerate it, so
-none of them needs a build tag of its own.
+`plugins/console/disabled.go` supplies the stub under the opposite tag: `New`
+returns a nil plugin, and the command line registers nothing. Nothing else in
+the build mentions the console.
 
-Dropping the console from a custom build is therefore a tag, not a patch — and
-deleting `webui/` outright leaves only those four files to remove.
+It is a tag rather than a `Use` line the command leaves out because the console
+carries an embedded frontend — leaving it unregistered would keep it in the
+binary. Deleting `webui/` and `plugins/console/` outright removes it entirely.
 
 **The agent's protocol is unaffected.** Raw tag exchanges, settings
 persistence and the log ring stay in either build — each is reachable without

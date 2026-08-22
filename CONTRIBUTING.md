@@ -26,7 +26,7 @@ or `-dev` package is involved; `libpcsclite-dev` is only needed to build the
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
 cd davi-nfc-agent
-go build .
+go build ./cmd/davi-nfc-agent
 ```
 
 ### Running Tests
@@ -102,9 +102,14 @@ git push origin v1.0.0
 
 ```
 davi-nfc-agent/
-├── main.go              # Entry point, CLI flags
-├── agent.go             # Core agent logic
-├── systray.go           # System tray UI
+├── cmd/davi-nfc-agent/  # The build this repo ships: flags and Use lines
+├── agent/               # The reader, the settings, the origin and device stores
+├── tray/                # The agent's user interface
+├── plugin/              # The plugin runtime: lifecycle, state, peers
+├── plugins/             # What serves the agent
+│   ├── wsserver/        #   the device and client endpoints
+│   ├── pairing/         #   the phone-pairing server
+│   └── console/         #   the control center
 ├── buildinfo/           # Version and build metadata
 ├── nfc/                 # NFC abstraction layer
 │   ├── manager.go       # Device manager interface
@@ -118,19 +123,17 @@ davi-nfc-agent/
 │   ├── unifiedserver/   # Single listener (port 9470) fronting both roles
 │   ├── deviceserver/    # Auth, and routing between reader and device
 │   └── clientserver/    # Client connection handling logic
+├── webui/               # The control center's API and frontend
 ├── wsconn/              # Write-safe WebSocket wrapper shared by the above
-├── plugin/              # The plugin runtime: lifecycle, endpoints, state, routes
-├── plugins/             # The agent's own plugins
-│   ├── wsserver/        #   the WebSocket endpoints (optional in a custom build)
-│   └── pairing/         #   the phone-pairing server
-├── netaddr/             # What to call this machine when handing out an address
 ├── traymenu/            # Declarative tray menus over fyne.io/systray
+├── netaddr/             # What to call this machine when handing out an address
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
 ├── client/              # JavaScript client library
 ├── scripts/             # Build scripts
 └── docs/                # Documentation
 ```
+
 
 ### Key Components
 
@@ -151,10 +154,11 @@ davi-nfc-agent/
 **Plugin Runtime** (`plugin/`, `plugins/`)
 - The agent drives a reader and holds the settings; everything that *serves*
   something is a plugin with its own lifecycle — Init, Start, Stop, Close
-- A plugin gets a menu of its own, the register of addresses, routes mounted on
-  the agent's listener, and the agent's state to follow
+- A plugin gets a menu of its own, the agent's state to follow, and its peers
 - The WebSocket servers, the pairing server and the control center are all
-  plugins, registered by `main.go` and by nothing else
+  plugins, registered by `cmd/davi-nfc-agent` and by nothing else
+- A build with a different set of features is a command of its own importing
+  these packages, which is what makes them packages
 - See [docs/custom-builds.md](docs/custom-builds.md) and [plugin/README.md](plugin/README.md)
 
 **Tray Menu** (`traymenu/`)

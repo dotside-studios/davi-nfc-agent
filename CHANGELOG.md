@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The default build is a command, and everything under it is a package.**
+  `package main` held the agent, the tray, the console's adapter and the wiring,
+  so a build that left a plugin out and a plugin registered from a consumer's
+  own package were both only true of a fork of this repository: nothing here
+  could be imported.
+
+  `cmd/davi-nfc-agent` is now the build this repository ships — flags, and the
+  `Use` lines that pick the plugins — over `agent`, `tray`, `plugin` and
+  `plugins/*`. A build with a different set of features is a command like it, in
+  a repository of its own, importing what it wants. Both build scripts, the
+  Makefile and the cross-compile matrix name the command now.
+
+  The tray came with it, as the agent's user interface rather than the
+  command's, and it is what the plugins draw through: `plugin.UI` replaces the
+  menu-only seam, so a menu, a copy and a link all go through whoever is
+  drawing, and a build with no tray registers none of it.
+
+  The console stopped reaching into the tray to do its work. Stopping the agent,
+  quitting it and picking a reader are the agent's, the tray follows the state
+  they publish, and a certificate authority installed from the console leaves
+  the tray's offer to install one gone without either knowing about the other
+
 - **The agent is assembled from plugins.** The agent built its own servers, and
   the tray drew every feature's menu, so a feature had to be part of the agent
   to exist at all: the servers' addresses, the pairing PIN and the paired

@@ -90,11 +90,11 @@ answers on, the pages mounted on it, the secret they ask for — and `pairing`
 owns **Pair a Phone**. There is no shared register and nothing else on the tray
 knows what a server address is.
 
-The tray holds a few top-level menus open where a feature's menu belongs and
-hands them out through `Config.Menus`. A menu is taken on first use, so a plugin
-that only serves something never asks for one and leaves nothing empty behind.
-In a build with no tray the menu is `traymenu.Discard()`: the items behave, they
-are just not on any tray.
+The tray implements `plugin.UI` — a menu for each plugin, the clipboard, a
+browser — and the host is given it with `SetUI`. A menu is taken on first use, so
+a plugin that only serves something never asks for one and leaves nothing empty
+behind. A build with no tray registers none: the menu is `traymenu.Discard()`,
+its items behave, and they are simply not on any tray.
 
 ## Registration from outside
 

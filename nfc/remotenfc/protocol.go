@@ -10,12 +10,17 @@ type DeviceCapabilities = protocol.DeviceCapabilities
 
 // DeviceRegistrationRequest is sent by mobile app to register as an NFC device.
 type DeviceRegistrationRequest struct {
-	DeviceName      string             `json:"deviceName"`      // e.g., "John's iPhone 12"
-	Platform        string             `json:"platform"`        // "ios" or "android"
-	AppVersion      string             `json:"appVersion"`      // e.g., "1.0.0"
-	ProtocolVersion int                `json:"protocolVersion"` // Negotiated bridge protocol version
-	Capabilities    DeviceCapabilities `json:"capabilities"`    // Device capabilities
-	Metadata        map[string]string  `json:"metadata"`        // Optional metadata
+	DeviceName      string `json:"deviceName"`      // e.g., "John's iPhone 12"
+	Platform        string `json:"platform"`        // "ios" or "android"
+	AppVersion      string `json:"appVersion"`      // e.g., "1.0.0"
+	ProtocolVersion int    `json:"protocolVersion"` // Negotiated bridge protocol version
+	// Capabilities is what the device says it can do. A pointer so that saying
+	// nothing is distinguishable from declaring every field false: the two
+	// arrived alike while this was a value, and silence was read as refusal.
+	// Mirrors DeviceTagData.Capabilities, which has answered this way since a
+	// tag that declared nothing stopped meaning a tag that can do nothing.
+	Capabilities *DeviceCapabilities `json:"capabilities,omitempty"`
+	Metadata     map[string]string   `json:"metadata"` // Optional metadata
 }
 
 // TagData is what a device reports when it scans a tag.

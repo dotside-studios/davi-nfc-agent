@@ -122,6 +122,17 @@ registration fields, so setup costs one round trip:
 always sent. The rest are v1 additions — omit any that do not apply, and a
 device declaring nothing extra sends exactly the v0 object.
 
+The `capabilities` object itself is optional, and omitting it is not the same as
+sending one of all falses. A device that sends the object is taken at its word:
+a field it sets to `false` refuses that operation for every tag the device
+holds, since a bridge that cannot carry an operation cannot carry it for any
+tag. A device that omits the object has declared nothing about itself, so
+requests go out and it answers them, which is what a bridge that describes the
+tags it scans but not its own abilities should expect.
+
+Per-tag capabilities on `tagScanned` are read the same way, and take precedence
+for the tag they describe. See [Tag Capabilities](#tag-capabilities).
+
 | Field | Meaning |
 |-------|---------|
 | `canRead` / `canWrite` | Device can read / write NDEF |

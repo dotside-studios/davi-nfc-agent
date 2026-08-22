@@ -21,8 +21,10 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/plugin"
+	"github.com/dotside-studios/davi-nfc-agent/plugins/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/plugins/wsserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -146,9 +148,7 @@ func main() {
 		bootstrapServer = tls.NewBootstrapServer(tlsMgr, bootstrapPortFlag)
 		pairingIssuer = NewPairingIssuer(devices, agentPublicKeyPin)
 		bootstrapServer.SetPairingIssuer(pairingIssuer, devicePortFlag)
-		if err := bootstrapServer.Start(); err != nil {
-			log.Printf("Warning: Failed to start bootstrap server: %v", err)
-		}
+		// Started by the pairing plugin, with everything else that serves.
 	}
 
 	// Initialize smartphone manager
@@ -246,26 +246,50 @@ func main() {
 	// Nil in a -tags nowebui build, which is why everything below tolerates it.
 	console := setupConsole(agent, settingsStore, logRing)
 
-	// Redraw the console whenever something changes it from elsewhere.
-	origins.OnChange(console.NotifyChange)
-	devices.OnChange(console.NotifyChange)
+	// Redraw the console whenever something changes it from elsewhere, and hand
+	// the plugins the state that changed with it.
+	origins.OnChange(func() {
+		console.NotifyChange()
+		agent.PublishState()
+	})
+	devices.OnChange(func() {
+		console.NotifyChange()
+		agent.PublishState()
+	})
 
-	// The features that reach the tray as plugins. Pairing is one of the
-	// agent's own; a consumer's, registered from an init function in their own
-	// package, arrives through the default registry and needs no change here.
-	plugins := surface.NewRegistry()
-	if bootstrapServer != nil {
-		if err := plugins.Add(newPairingPlugin(bootstrapServer, bootstrapPortFlag)); err != nil {
-			log.Printf("Warning: the pairing menu is missing: %v", err)
+	// What serves this agent. The agent itself serves nothing: it drives a
+	// reader and holds what an operator has decided, and everything with a
+	// port, a page or a menu of its own is registered here.
+	//
+	// A build that wants none of it registers none of it. The order is the
+	// order they come up in, and the reverse of the order they go down in, so
+	// the listener everything else is mounted on is first.
+	host := agent.Plugins()
+
+	if err := host.Use(wsserver.New(wsserver.Config{Agent: &servingAgent{agent: agent}})); err != nil {
+		log.Printf("Warning: this agent will not serve devices or clients: %v", err)
+	}
+	if served := consolePlugin(console); served != nil {
+		if err := host.Use(served); err != nil {
+			log.Printf("Warning: the control center will not be served: %v", err)
 		}
 	}
-	for _, plugin := range surface.Default().Plugins() {
-		if info := plugin.Describe(); info.ID != "" {
-			if _, taken := plugins.Get(info.ID); taken {
+	if bootstrapServer != nil {
+		err := host.Use(pairing.New(pairing.Config{Server: bootstrapServer, Port: bootstrapPortFlag}))
+		if err != nil {
+			log.Printf("Warning: phones will not be able to pair: %v", err)
+		}
+	}
+
+	// And whatever a consumer registered from an init function of their own,
+	// which needs no change here to be picked up.
+	for _, registered := range plugin.Default().Plugins() {
+		if info := registered.Describe(); info.ID != "" {
+			if _, taken := host.Lookup(info.ID); taken {
 				log.Printf("Warning: a registered plugin replaces the agent's own %q feature", info.ID)
 			}
 		}
-		if err := plugins.Add(plugin); err != nil {
+		if err := host.Use(registered); err != nil {
 			log.Printf("Warning: a registered plugin was ignored: %v", err)
 		}
 	}
@@ -274,7 +298,6 @@ func main() {
 	app := NewSystrayApp(agent, devicePathFlag)
 	app.AttachConsole(console)
 	app.AttachSettings(settingsStore)
-	app.AttachPlugins(plugins)
 
 	// One path from a saved preference to the running agent, whoever saved it.
 	// The tray and the console both write to the store and neither applies
@@ -285,6 +308,10 @@ func main() {
 		agent.ApplySettings(next)
 		app.syncSettingsToMenu(agent.Settings())
 	})
+
+	// One watcher for every plugin, rather than one per plugin: a card arriving
+	// at the reader is announced by nothing, so something has to look.
+	agent.WatchState(0)
 
 	go func() {
 		<-sigChan

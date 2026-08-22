@@ -1,37 +1,42 @@
 # Plugins
 
-A plugin is a feature that puts itself on the agent's tray: its own menu, its
-own address, and whatever it needs to keep both in step with the agent. The
-pairing server is one. So is a turnstile application built on top of this agent.
+The agent is a reader, its settings and the stores behind them. Everything that
+*serves* something is a plugin: the WebSocket endpoints, the pairing server, the
+control center, and whatever you build on top of them.
 
-Everything here lives in [`surface/`](../surface), which is free of the tray
-library beyond the container a plugin fills, and free of `fyne.io/systray`
-entirely.
+That is the whole point of the seam. An application built on this agent — a
+turnstile, a kiosk, a badge desk — plugs in the same way the agent's own
+features do, and a build that wants none of them leaves them out.
+
+Everything here lives in [`plugin/`](../plugin), with the agent's own plugins
+under [`plugins/`](../plugins).
 
 ## Why
 
-The tray is one icon, owned by one process. Every menu the agent has grew inside
-the tray package as a result: the servers' addresses, the pairing PIN, the
-paired devices are drawn by code that knows what each of them is. A feature
-added afterwards had two ways in, and neither was good — edit the tray package,
-or do without a menu.
+The tray is one icon, owned by one process, and the servers were built by the
+agent itself. Every feature therefore had to be part of the agent: its menu was
+drawn by the tray package, its address was computed by the tray package, and its
+listener was constructed in `agent.go`. There were two ways to add a feature —
+edit those files, or do without.
 
 Three questions kept coming back:
 
 - The servers are registered somewhere else. How do they show up on the tray?
 - Pairing runs beside the agent. How does it add its own entry?
-- A consumer's own application wants a menu. Where does it put it?
+- A consumer's own application wants a menu, a page and an address. Where do
+  they go?
 
-They have one answer now. A feature registers itself, is handed a host, and puts
-itself on the menu through that.
+They have one answer now. Everything that serves registers, is handed a context,
+and puts itself where it belongs — including the agent's own servers, which are
+a plugin like any other.
 
-## The shape of a plugin
+## Writing one
 
 ```go
 package turnstile
 
 import (
-    "github.com/dotside-studios/davi-nfc-agent/surface"
+    "github.com/dotside-studios/davi-nfc-agent/plugin"
     "github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -40,102 +45,148 @@ type Plugin struct {
     passes *traymenu.Item
 }
 
-func (p *Plugin) Describe() surface.Info {
-    return surface.Info{
-        ID:      "turnstile",
-        Title:   "Turnstile",
-        Tooltip: "The gate this agent drives",
-    }
+func (p *Plugin) Describe() plugin.Info {
+    return plugin.Info{ID: "turnstile", Title: "Turnstile", Tooltip: "The gate this agent drives"}
 }
 
-func (p *Plugin) Attach(host surface.Host) error {
-    menu := host.Menu()
+// Init: wire up. A menu of its own, an address, and the agent to follow.
+func (p *Plugin) Init(ctx *plugin.Context) error {
+    menu := ctx.Menu()
 
     p.passes = menu.Add("Passes today: 0", traymenu.Disabled())
-
     held := menu.AddCheckbox("Hold Gate Open", false)
     held.OnClick(func() { p.gate.Hold(held.Toggle()) })
 
-    menu.AddSeparator()
-    menu.Add("Open Gate Console", traymenu.OnClick(func() {
-        if err := host.Open("http://localhost:8080/"); err != nil {
-            host.Logf("could not open a browser: %v", err)
+    ctx.Watch(func(state plugin.State) {
+        if state.Card.Present {
+            p.admit(state.Card.UID)
         }
-    }))
+    })
     return nil
 }
 
-func init() { surface.Register(&Plugin{gate: OpenGate()}) }
+// Routes: served on the agent's own listener, so the gate needs no port,
+// no certificate and no trust of its own.
+func (p *Plugin) Routes() []plugin.Route {
+    return []plugin.Route{{Pattern: "/turnstile/", Handler: p.mux}}
+}
+
+// Start and Stop: whatever the plugin runs of its own.
+func (p *Plugin) Start(ctx *plugin.Context) error {
+    if err := p.gate.Open(); err != nil {
+        return err
+    }
+    ctx.Endpoints().Set(plugin.Endpoint{ID: "turnstile", Label: "Gate", URL: p.url()})
+    return nil
+}
+
+func (p *Plugin) Stop(ctx *plugin.Context) error {
+    ctx.Endpoints().SetURL("turnstile", "")
+    return p.gate.Close()
+}
+
+func init() { plugin.Register(&Plugin{gate: OpenGate()}) }
 ```
 
-`Describe` is read once, when the plugin is registered. `Attach` is called once,
-as the tray builds its menu, and everything the plugin puts there stays for the
-life of the process: it is never asked to draw itself again.
+Nothing there names the tray library beyond the entries themselves, and nothing
+names `fyne.io/systray`. Go has no portable dynamic loading, so a plugin is
+compiled in: an init function in a package your build imports, and no edit to
+the agent.
 
-Go has no portable dynamic loading, so a plugin is compiled in — an init
-function in a package the consumer's build imports, and nothing in the agent
-needs editing. The agent takes up the default registry at startup along with the
-features it ships.
+Every phase is optional — `Describe` is the only method a plugin must have. See
+[plugin/README.md](../plugin/README.md) for the full lifecycle, the ordering
+rules, and what happens when a phase fails.
 
-## Showing an address
+## The agent's own plugins
 
-Anything with an address to hand out registers it instead of drawing it:
+| Plugin | What it is |
+|---|---|
+| [`plugins/wsserver`](../plugins/wsserver) | the single listener a device and a web page connect to, and the device and client handlers behind it |
+| [`plugins/pairing`](../plugins/pairing) | the phone-pairing server, its PIN, and the menu an operator works both from |
+| `consolePlugin` (in `plugin_console.go`) | the control center, mounted on the agent's port through the route seam |
+
+They are registered by the command line, in `main.go`, and by nothing else:
 
 ```go
-host.Endpoints().Set(surface.Endpoint{
+host := agent.Plugins()
+host.Use(wsserver.New(wsserver.Config{Agent: &servingAgent{agent: agent}}))
+host.Use(pairing.New(pairing.Config{Server: bootstrapServer, Port: bootstrapPortFlag}))
+```
+
+Drop a line and that feature is gone from the build — including the servers. The
+agent still opens the reader, still holds the settings, still has a tray; it just
+serves nothing. What each plugin needs from the agent is one interface stated in
+its own package (`wsserver.Agent`), implemented in `wsserver_host.go` the way the
+console's `webui.Host` is implemented in `webui_host.go`.
+
+## Addresses
+
+Anything with an address registers it rather than drawing it:
+
+```go
+ctx.Endpoints().Set(plugin.Endpoint{
     ID:      "turnstile",
     Label:   "Gate",
-    URL:     "http://localhost:8080/gate",
+    URL:     "http://localhost:9470/turnstile/",
     Tooltip: "The gate's own console. Click to copy",
 })
 ```
 
 It appears under **Server URLs** beside the agent's own addresses and is copied
-by the same entry that copies theirs. The tray draws whatever is in the
-register; it is not told what any of it is.
+by the same entry — the tray draws whatever is in the register and is told what
+none of it is.
 
-The agent's own servers use exactly this. `Agent.publishEndpoints` registers the
-device and client addresses once the listener is up — the port being served, not
-the one configured, since these are pasted into a device and an address naming an
-unbound port is worse than none — and `withdrawEndpoints` empties their URLs as
-the servers go down, which is what makes a stopped server read as `Not running`
-rather than handing out an address that refuses the connection.
+The servers do exactly this. `wsserver` declares its two entries in `Init`,
+before anything is listening, and fills in the URLs in `Start` from the port it
+actually bound — these are pasted into a device, and an address naming an unbound
+port is worse than none. `Stop` empties them, which is what makes a stopped
+server read as `Not running` rather than disappearing. An address that changes is
+the same ID published again, which is how the pairing page survives a PIN
+rotation without losing its place on the menu.
 
-An address that changes is the same ID published again, so it keeps its place on
-the menu. That is how the pairing page survives a PIN rotation:
+## Serving HTTP without a listener
+
+A plugin implementing `RouteProvider` is mounted on whatever is serving the
+agent's port:
 
 ```go
-func (p *pairingPlugin) publish() {
-    p.host.Endpoints().Set(surface.Endpoint{
-        ID:    "pairing",
-        Label: "Pair Phone",
-        URL:   p.url(), // http://host:9472/?pin=123456
-    })
-    p.pin.SetTitle("Pairing PIN: " + p.server.PIN())
+func (p *Plugin) Routes() []plugin.Route {
+    return []plugin.Route{{Pattern: "/turnstile/", Handler: p.mux}}
 }
 ```
 
+So a page of yours is reachable wherever the agent already is, under the
+certificate a device already trusts, with no port, no TLS and no trust story of
+its own. The control center is served this way and has no other mechanism.
+
+The rules the listener applies:
+
+- A route asking for a path the agent serves itself — `/ws`, `/health`,
+  `/api/v1/health` — is refused and logged, naming the plugin that asked. An
+  agent whose `/ws` answers something else is a broken agent, however it was
+  configured.
+- The root is claimable. The agent's banner is only there while nothing else
+  wants it; the console takes it.
+- Mounts are not wrapped in CORS, unlike the device and client endpoints: a mount
+  is a page or an administrative API, not something another origin should be
+  fetching and reading.
+
+The pairing server is the counter-example — it runs a listener of its own, over
+plain HTTP, because a phone that has not installed the agent's certificate
+authority yet is exactly who its page is for.
+
 ## Following the agent
 
-A plugin never polls, and is never redrawn wholesale. It keeps the items it
-created and changes them when the agent moves:
+A plugin never polls, and is never redrawn wholesale. It keeps the items it made
+and changes them when the agent moves:
 
 ```go
-host.Watch(func(state surface.State) {
-    if !state.Card.Present {
-        return
-    }
-    p.passes.SetTitle(fmt.Sprintf("Passes today: %d", p.count(state.Card.UID)))
-})
+ctx.Watch(func(state plugin.State) { ... })
 ```
-
-`State` is a snapshot rather than a set of deltas, so a plugin cannot render a
-half-applied combination of settings, and `host.State()` returns the last one at
-any time — a plugin that keeps no copy of its own cannot fall behind.
 
 | | |
 |---|---|
-| `Running` | whether the reader and servers are up |
+| `Running` | whether the reader is up |
 | `Device` | the reader in use, empty when there is none |
 | `Card` | the tag on the reader, if any |
 | `Port`, `TLS` | what is being served, and whether over TLS |
@@ -143,58 +194,66 @@ any time — a plugin that keeps no copy of its own cannot fall behind.
 | `Settings` | what the agent is set to: mode, card-type filter, and the rest |
 | `Explicit` | the settings the launcher fixed for this run |
 
-It is published wherever the tray already redraws itself: the agent starting or
-stopping, a card arriving or leaving, a settings change from the tray or the
-console, a device pairing, a restart of the listeners.
+`State` is a snapshot rather than a set of deltas, so a plugin cannot act on a
+half-applied combination, and `ctx.State()` returns the last one at any time.
+
+The agent publishes it: on every lifecycle change, on every settings change, and
+otherwise from one watcher of its own (`Agent.WatchState`) that looks for what
+nothing announces — a card arriving at the reader, or leaving it. One watcher for
+every plugin, rather than one per plugin, and it runs whether or not this build
+has a tray.
 
 `Explicit` is worth reading before offering a control. A setting the launcher
-fixed belongs to it for the whole run, and a plugin offering to change one
-should show its entry disabled rather than accept a change the agent will
-refuse.
+fixed belongs to it for the whole run, and a plugin offering to change one should
+show its entry disabled rather than accept a change the agent will refuse.
+
+## Reaching other plugins
+
+By capability, not by name:
+
+```go
+if serving, ok := plugin.Find[interface{ Port() int }](ctx.Host()); ok { ... }
+```
+
+That is how the agent finds the port it is being served on, how the console finds
+the client list, and how the paired-device requirement reaches the running device
+endpoint. Nothing in `agent.go` names `wsserver`.
+
+`ctx.Peer("pairing")` reaches one by ID, for a plugin that extends another it
+knows.
 
 ## Where a plugin's menu goes
 
-No platform can insert a menu item in the middle, so anything added once the
-tray is built lands at the end, under **Quit**. The tray holds
-`pluginSlotCount` top-level menus open, declared where a feature's menu belongs
-— beside **Paired Devices** and **Allowed Origins** — and hands them out as
-plugins take them.
+No platform can insert a menu item in the middle, so anything added once the tray
+is built lands at the end, under **Quit**. The tray holds `pluginSlotCount`
+top-level menus open, declared where a feature's menu belongs — beside **Paired
+Devices** and **Allowed Origins** — and hands them out as plugins take them.
 
-A menu is taken on first use, so a plugin that only publishes an address never
-asks for one and never leaves an empty menu on the tray reading as a feature
-that does nothing.
+A menu is taken on first use, so a plugin that only serves something never asks
+for one and never leaves an empty menu behind reading as a feature that does
+nothing. In a build with no tray the menu is discarded, and the plugin neither
+knows nor cares.
 
-## What a plugin cannot do
+## Testing
 
-The host is the whole surface. There is no way through it to the tray itself, to
-another plugin's menu, or to the agent's settings: a preference belongs to the
-agent, and the tray and the console are the two places it is changed. A plugin
-that fails to attach is logged and left out, and one that panics in a click
-handler is reported and swallowed rather than taking the tray down with it.
-
-## Testing a plugin
-
-`surface.FakeHost` is a host with no agent behind it, over the tray's own fake
-driver:
+`plugin.Harness` is a real host — the same lifecycle, the same contexts — over a
+tray that records a menu instead of drawing one:
 
 ```go
-fake := traymenu.NewFake()
-menu := traymenu.New(fake)
-defer menu.Close()
+h := plugin.NewHarness(&turnstile{})
+defer h.Close()
 
-host := surface.NewFakeHost(menu.AddSubmenu("Turnstile"))
-if err := plugin.Attach(host); err != nil {
-    t.Fatal(err)
-}
+h.Init()
+h.Start()
+h.Publish(plugin.State{Running: true, Card: plugin.Card{Present: true, UID: "04A2"}})
 
-host.Publish(surface.State{Running: true, Card: surface.Card{Present: true, UID: "04A2"}})
-
-fake.Find("Turnstile", "Hold Gate Open").Click()
-fake.Render()   // the menu as text
-host.Copied()   // what the plugin put on the clipboard
-host.Opened()   // what it asked a browser to show
+h.Tray.Find("Turnstile", "Hold Gate Open").Deliver()
+h.Render()             // the menu as text
+h.Copied()             // what it put on the clipboard
+h.Endpoints().List()   // what it published
+h.Routes()             // what it asked to serve
 ```
 
-No desktop, no tray, no display server. See
-[`surface/example_test.go`](../surface/example_test.go) for the whole of a
-turnstile plugin driven this way.
+No desktop, no tray, no display server. [`plugin/example_test.go`](../plugin/example_test.go)
+is a whole turnstile driven this way, and [`plugins/wsserver/wsserver_test.go`](../plugins/wsserver/wsserver_test.go)
+starts the real listener and fetches a plugin's page off it.

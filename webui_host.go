@@ -5,8 +5,11 @@ package main
 import (
 	"errors"
 
+	"github.com/dotside-studios/davi-nfc-agent/netaddr"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/plugin"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
@@ -66,10 +69,7 @@ func (h *webuiHost) AvailableDevices() []string {
 func (h *webuiHost) AllCardTypes() []string { return nfc.GetAllCardTypes() }
 
 func (h *webuiHost) CurrentCard() (uid, cardType string, present bool) {
-	if h.agent.ClientServer == nil {
-		return "", "", false
-	}
-	card := h.agent.ClientServer.GetLastCard()
+	card := h.agent.LastCard()
 	if card == nil {
 		return "", "", false
 	}
@@ -107,20 +107,41 @@ func (h *webuiHost) Port() int          { return h.agent.ServingPort() }
 func (h *webuiHost) BootstrapPort() int { return h.agent.BootstrapPort }
 func (h *webuiHost) CertFile() string   { return h.agent.CertFile }
 func (h *webuiHost) TLSEnabled() bool   { return h.agent.CertFile != "" && h.agent.KeyFile != "" }
-func (h *webuiHost) LocalIPs() []string { return getLocalIPs() }
+func (h *webuiHost) LocalIPs() []string { return netaddr.LocalIPs() }
+
+// clients is whatever is serving the client applications, or nil when nothing
+// is. The console reads its client list from a plugin, so a build serving
+// clients over something else answers the same questions by registering
+// something else.
+func (h *webuiHost) clients() clientReporter {
+	reporter, ok := plugin.Find[clientReporter](h.agent.Plugins())
+	if !ok {
+		return nil
+	}
+	return reporter
+}
+
+// clientReporter is what the console needs to know about connected clients.
+type clientReporter interface {
+	ClientCount() int
+	Clients() []clientserver.ClientInfo
+	Disconnect(id string) bool
+}
 
 func (h *webuiHost) ClientCount() int {
-	if h.agent.ClientServer == nil {
+	clients := h.clients()
+	if clients == nil {
 		return 0
 	}
-	return h.agent.ClientServer.ClientCount()
+	return clients.ClientCount()
 }
 
 func (h *webuiHost) Clients() []webui.Client {
-	if h.agent.ClientServer == nil {
+	clients := h.clients()
+	if clients == nil {
 		return nil
 	}
-	live := h.agent.ClientServer.Clients()
+	live := clients.Clients()
 	out := make([]webui.Client, 0, len(live))
 	for _, c := range live {
 		out = append(out, webui.Client{
@@ -137,10 +158,11 @@ func (h *webuiHost) Clients() []webui.Client {
 }
 
 func (h *webuiHost) DisconnectClient(id string) error {
-	if h.agent.ClientServer == nil {
+	clients := h.clients()
+	if clients == nil {
 		return errors.New("agent is not running")
 	}
-	if !h.agent.ClientServer.Disconnect(id) {
+	if !clients.Disconnect(id) {
 		return errors.New("no such client — it may have already disconnected")
 	}
 	return nil

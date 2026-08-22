@@ -278,28 +278,34 @@ ws.send(JSON.stringify({
 
 The agent's modular NFC layer supports adding custom readers and tag types beyond the built-in PC/SC and smartphone support. See [Extending NFC Support](docs/extending-nfc-support.md) to integrate your own hardware or protocols.
 
-An application built on this agent — a turnstile, a kiosk, a badge desk — can
-also put itself on the tray: its own menu, its own address under **Server URLs**,
-and both kept in step with what the agent is doing. A plugin says what it is and
-is handed everything it needs, without touching the tray library:
+The agent is a reader, its settings and the stores behind them. Everything that
+*serves* something is a plugin — the WebSocket endpoints, the pairing server, the
+control center — and an application built on this agent plugs in the same way: a
+menu of its own on the tray, a page served on the agent's own port, an address
+listed beside the agent's, and the agent's state to follow.
 
 ```go
-func (p *Plugin) Describe() surface.Info {
-    return surface.Info{ID: "turnstile", Title: "Turnstile"}
+func (p *Plugin) Describe() plugin.Info {
+    return plugin.Info{ID: "turnstile", Title: "Turnstile"}
 }
 
-func (p *Plugin) Attach(host surface.Host) error {
-    held := host.Menu().AddCheckbox("Hold Gate Open", false)
+func (p *Plugin) Init(ctx *plugin.Context) error {
+    held := ctx.Menu().AddCheckbox("Hold Gate Open", false)
     held.OnClick(func() { p.gate.Hold(held.Toggle()) })
 
-    host.Watch(func(state surface.State) { p.showBadge(state.Card) })
+    ctx.Watch(func(state plugin.State) { p.showBadge(state.Card) })
     return nil
 }
 
-func init() { surface.Register(&Plugin{gate: OpenGate()}) }
+// Served on the agent's port, so the gate needs no port or certificate of its own.
+func (p *Plugin) Routes() []plugin.Route {
+    return []plugin.Route{{Pattern: "/turnstile/", Handler: p.mux}}
+}
+
+func init() { plugin.Register(&Plugin{gate: OpenGate()}) }
 ```
 
-See [Plugins](docs/plugins.md). The agent's own pairing menu is written this way.
+See [Plugins](docs/plugins.md).
 
 ## Contributing
 

@@ -9,29 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A feature can put itself on the tray.** There is one tray icon per process,
-  owned by the code that built it, so every menu the agent had grew inside the
-  tray package: the servers' addresses, the pairing PIN and the paired devices
-  are all drawn by code that knows what each of them is. A feature added
-  afterwards had two ways in, and neither was good — edit the tray package, or
-  do without a menu. A consumer building a turnstile on this agent had no way in
-  at all.
+- **The agent is assembled from plugins.** The agent built its own servers, and
+  the tray drew every feature's menu, so a feature had to be part of the agent
+  to exist at all: the servers' addresses, the pairing PIN and the paired
+  devices were all drawn by code that knew what each of them was, and the
+  listener was constructed in `agent.go`. A consumer building a turnstile on
+  this agent had two ways in — edit the agent, or do without.
 
-  `surface` is the plugin surface. A feature says what it is, is handed a
-  `Host`, and puts its own entries on the menu through that: a
-  `traymenu.Container` of its own, a register of addresses, a snapshot of what
-  the agent is doing and a signal raised whenever that changes, and the few
-  things a menu entry needs outside the menu — the clipboard, a browser, the
-  log. Nothing in it reaches `fyne.io/systray`, and a plugin registered from an
-  init function in a consumer's own package needs no change to the agent.
+  `plugin` is the runtime everything that serves now goes through. A plugin
+  declares only the phases it has work in — `Init` to wire up, `Start` and
+  `Stop` to serve, `Close` on the way out — and is handed a context of its own:
+  a menu, the register of addresses the agent hands out, routes mounted on the
+  agent's listener, a snapshot of what the agent is doing and a signal raised
+  whenever that changes, the clipboard, a browser and the log. Init and Start
+  run in registration order and Stop and Close in the reverse of it, so what
+  everything else is mounted on comes up first and goes down last.
 
-  A plugin does not poll and is never redrawn wholesale: it keeps the items it
-  created and changes them when the state says the agent has moved, which is
-  reported wherever the tray already redraws itself — the agent starting or
-  stopping, a card arriving or leaving, a settings change from either surface, a
-  device pairing, a restart of the listeners. `surface.FakeHost` drives one in a
-  test with no desktop involved, as `traymenu.Fake` does for the menu itself.
+  Nothing in it reaches `fyne.io/systray`, and a build with no tray discards the
+  menus rather than making a plugin ask whether anything draws one. A plugin
+  registered from an init function in a consumer's own package needs no change
+  to the agent, one registered after the agent is already up joins it where it
+  is, and one that fails to wire up is dropped without taking the rest with it.
+
+  `plugin.Harness` runs a plugin through the real lifecycle against a tray that
+  records instead of drawing, so a plugin is testable with no desktop involved.
   See [docs/plugins.md](docs/plugins.md)
+
+- **A plugin can serve HTTP without a listener of its own.** The single listener
+  took two handlers it knew by name, both the control center's. It now takes
+  mounts, so any plugin with a page or an API of its own is reachable at the
+  address a device already trusts, under the certificate it already has, with no
+  port, no TLS and no trust story of its own. A mount asking for a path the
+  agent serves itself — `/ws`, `/health` — is refused and logged, naming the
+  plugin that asked, rather than panicking the router at startup; the root is
+  claimable, since the agent's banner is only there while nothing else wants it.
+
+  The control center is served this way now and has no other mechanism: it is a
+  plugin asking for `/control/` and `/`, like any other
 
 - **The reader can say what it just did.** Someone holding a card at the reader
   had no way to tell a completed scan from one that never happened: the agent
@@ -52,30 +66,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The servers publish their addresses, and the tray draws what is published.**
-  The tray built the device, client and pairing URLs itself, from the agent's
-  fields, and drew a fixed entry and a matching copy entry for each. Nothing
-  else could appear there: a feature serving something of its own had no way
-  onto a menu whose contents were a hardcoded list of the three the agent
-  happened to ship with.
+- **The servers are a plugin, not part of the agent.** `agent.go` built the
+  bridge, the device handler, the client handler and the listener, held all four
+  as fields, and computed their URLs in the tray. An agent that served something
+  else, or nothing, was not expressible: the servers were the agent.
 
-  A server registers a `surface.Endpoint` instead. The device and client
-  addresses go out once the listener is up, naming the port being served rather
-  than the one configured, and their URLs are emptied as the servers go down, so
-  a stopped server reads as `Not running` instead of handing out an address that
-  refuses the connection. The tray renders whatever is in the register and knows
-  what none of it is. A row is now the address and its copy entry in one —
-  clicking it copies — so what is copied cannot drift from what is read.
+  `plugins/wsserver` is that stack as a plugin, registered by the command line
+  in one line and by nothing else. Drop the line and the build has no WebSocket
+  endpoints — the agent still opens the reader, still holds the settings, still
+  has a tray. What it needs from the agent is one interface stated in its own
+  package and implemented in `wsserver_host.go`, the way the console's
+  `webui.Host` is implemented in `webui_host.go`, and every value is read again
+  on each restart rather than taken once, so a listener that comes back after a
+  rotated secret comes back with the new one.
+
+  The agent asks its plugins what they can do rather than which one they are:
+  `ServingPort` asks whatever is serving where it is, the console asks whatever
+  serves clients for its client list, and the paired-device requirement reaches
+  whatever admits devices. Nothing in `agent.go` names the server package
+
+- **The servers publish their addresses, and the tray draws what is published.**
+  The tray built the device, client and pairing URLs itself and drew a fixed
+  entry and a matching copy entry for each. Nothing else could appear there: a
+  feature serving something of its own had no way onto a menu whose contents
+  were a hardcoded list of the three the agent shipped with.
+
+  A plugin registers a `plugin.Endpoint` instead. The addresses are declared
+  before anything is listening, so they hold their place on a menu drawn first,
+  and filled in from the port actually bound — these are pasted into a device,
+  and an address naming an unbound port is worse than none. A stopped server
+  empties its own, which is what makes it read as `Not running` rather than
+  disappear. The tray renders whatever is in the register and knows what none of
+  it is. A row is now the address and its copy entry in one — clicking it copies
+  — so what is copied cannot drift from what is read
 
 - **Pairing is a plugin, and the tray no longer knows what pairing is.** The
   pairing PIN, its copy and its regenerate entry lived in the tray's URLs
-  submenu, and the tray held the bootstrap server to work them. Pairing is now a
-  plugin like any other, with a **Pair a Phone** menu of its own carrying the
+  submenu, the tray held the bootstrap server to work them, and `main` started
+  it. It is now a plugin with a **Pair a Phone** menu of its own carrying the
   PIN, the page, both copy entries and the rotation — and, new, an entry that
-  opens the pairing page here, for pairing a phone from the QR code on the
-  operator's own screen. A build with no pairing server registers nothing rather
-  than hiding entries, and `NewSystrayApp` no longer takes a pairing server or
-  its port
+  opens the pairing page here, for pairing a phone from the code on the
+  operator's own screen. It owns its listener's lifecycle, so pairing now comes
+  up and goes down with the agent rather than running whether or not the agent
+  was started, and a build with no pairing server registers nothing rather than
+  hiding entries. `NewSystrayApp` no longer takes a pairing server or its port
+
+- **One watcher for the card, not one per surface.** The tray polled the client
+  server twice a second for the tag on the reader, which is the only way to see
+  one arrive — and it worked only while there was a tray. The agent does the
+  looking now, once, and publishes a snapshot when it differs from the last;
+  the tray's labels and every plugin read the same one, so they cannot disagree
+  about what is on the reader, and a headless build sees card scans too
+
+- **A stop arriving while the listener was still coming up.** `unifiedserver`
+  built its HTTP server and mDNS registration on the goroutine that blocks until
+  shutdown, and `Stop` read the same fields from another, which raced and could
+  leave a listener bound after the stop. Both are now handed over under a lock,
+  and a stop that arrives first is found by the start, which takes itself back
+  down instead of binding
 
 - **What the launcher set, the run keeps.** Three surfaces configure this agent
   and each had invented its own precedence: the port came with a lock flag, the

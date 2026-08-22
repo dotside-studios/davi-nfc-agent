@@ -1,21 +1,21 @@
-package surface_test
+package plugin_test
 
 import (
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/surface"
+	"github.com/dotside-studios/davi-nfc-agent/plugin"
 )
 
 func TestEndpointsKeepTheirPlaceWhenTheyChange(t *testing.T) {
-	var endpoints surface.Endpoints
+	var endpoints plugin.Endpoints
 
-	endpoints.Set(surface.Endpoint{ID: "device", Label: "Device", URL: "ws://host/ws?mode=device"})
-	endpoints.Set(surface.Endpoint{ID: "client", Label: "Client", URL: "ws://host/ws"})
-	endpoints.Set(surface.Endpoint{ID: "pairing", Label: "Pair Phone", URL: "http://host/?pin=111111"})
+	endpoints.Set(plugin.Endpoint{ID: "device", Label: "Device", URL: "ws://host/ws?mode=device"})
+	endpoints.Set(plugin.Endpoint{ID: "client", Label: "Client", URL: "ws://host/ws"})
+	endpoints.Set(plugin.Endpoint{ID: "pairing", Label: "Pair Phone", URL: "http://host/?pin=111111"})
 
 	// A PIN rotation is the same endpoint at a new address, and must not send
 	// the pairing entry to the bottom of the menu.
-	endpoints.Set(surface.Endpoint{ID: "pairing", Label: "Pair Phone", URL: "http://host/?pin=222222"})
+	endpoints.Set(plugin.Endpoint{ID: "pairing", Label: "Pair Phone", URL: "http://host/?pin=222222"})
 
 	list := endpoints.List()
 	if len(list) != 3 {
@@ -33,12 +33,12 @@ func TestEndpointsKeepTheirPlaceWhenTheyChange(t *testing.T) {
 }
 
 func TestEndpointsReportOnlyRealChanges(t *testing.T) {
-	var endpoints surface.Endpoints
+	var endpoints plugin.Endpoints
 
 	changes := 0
-	endpoints.OnChange(func([]surface.Endpoint) { changes++ })
+	endpoints.OnChange(func([]plugin.Endpoint) { changes++ })
 
-	device := surface.Endpoint{ID: "device", Label: "Device", URL: "ws://host/ws?mode=device"}
+	device := plugin.Endpoint{ID: "device", Label: "Device", URL: "ws://host/ws?mode=device"}
 	endpoints.Set(device)
 	// A restart that lands on the same port publishes the same address, which
 	// is not a change and must not redraw the menu.
@@ -61,10 +61,10 @@ func TestEndpointsReportOnlyRealChanges(t *testing.T) {
 }
 
 func TestEndpointsWithoutAnID(t *testing.T) {
-	var endpoints surface.Endpoints
+	var endpoints plugin.Endpoints
 
 	// It could never be replaced or withdrawn again, so it is not taken.
-	endpoints.Set(surface.Endpoint{Label: "Nameless", URL: "http://host/"})
+	endpoints.Set(plugin.Endpoint{Label: "Nameless", URL: "http://host/"})
 
 	if endpoints.Len() != 0 {
 		t.Fatalf("registered %d endpoints, want none", endpoints.Len())
@@ -72,10 +72,10 @@ func TestEndpointsWithoutAnID(t *testing.T) {
 }
 
 func TestEndpointsRemove(t *testing.T) {
-	var endpoints surface.Endpoints
+	var endpoints plugin.Endpoints
 
-	endpoints.Set(surface.Endpoint{ID: "device", Label: "Device"})
-	endpoints.Set(surface.Endpoint{ID: "turnstile", Label: "Turnstile"})
+	endpoints.Set(plugin.Endpoint{ID: "device", Label: "Device"})
+	endpoints.Set(plugin.Endpoint{ID: "turnstile", Label: "Turnstile"})
 
 	if !endpoints.Remove("device") {
 		t.Fatal("Remove reported nothing to remove")
@@ -88,7 +88,7 @@ func TestEndpointsRemove(t *testing.T) {
 	}
 }
 
-func ids(list []surface.Endpoint) []string {
+func ids(list []plugin.Endpoint) []string {
 	out := make([]string, 0, len(list))
 	for _, endpoint := range list {
 		out = append(out, endpoint.ID)

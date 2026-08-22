@@ -9,12 +9,9 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/plugin"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -53,21 +50,16 @@ type Agent struct {
 	// while the agent runs, and reports rejections so they can be surfaced.
 	Origins *OriginStore
 
-	// Server architecture. The device and client endpoints are served from a
-	// single listener (UnifiedServer) on DevicePort. DeviceServer and
-	// ClientServer hold the device/client logic; the unified server fronts
-	// both and routes each /ws connection to the right one.
-	Bridge        *server.ServerBridge
-	UnifiedServer *unifiedserver.Server
-	DeviceServer  *deviceserver.Server
-	ClientServer  *clientserver.Server
-	DevicePort    int // Single agent server port. Default: 9470
+	// DevicePort is the port the agent asks to be served on. What is actually
+	// bound is the plugin's business; see ServingPort.
+	DevicePort int // Default: 9470
 
-	// endpoints is the register of addresses this agent hands out, reached
-	// through Endpoints. It is a value rather than a pointer because its zero
-	// value is ready to use and an agent without one would leave every
-	// publisher checking for nil.
-	endpoints surface.Endpoints
+	// plugins is everything that serves this agent, reached through Plugins.
+	// The agent does not serve anything itself: the WebSocket endpoints, the
+	// pairing page and the control center are plugins the command line
+	// registers, and a build that registers none of them still reads cards.
+	pluginsMu sync.Mutex
+	plugins   *plugin.Host
 
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
@@ -134,17 +126,47 @@ type Agent struct {
 
 	serversMu         sync.Mutex    // Protects server restart operations
 	serverRestartChan chan struct{} // Signals when servers are restarted
+
+	// stateDone stops the state watcher, closed once on the way out.
+	stateDone chan struct{}
+	stateOnce sync.Once
 }
 
 func NewAgent(nfcManager nfc.Manager) *Agent {
-	return &Agent{
+	agent := &Agent{
 		Logger:            log.New(os.Stderr, "[agent] ", log.LstdFlags),
 		Manager:           nfcManager,
 		AllowedCardTypes:  make(map[string]bool),
 		ReaderMode:        nfc.ModeReadWrite,
 		DevicePort:        9470,
 		serverRestartChan: make(chan struct{}, 1),
+		stateDone:         make(chan struct{}),
 	}
+
+	return agent
+}
+
+// Plugins is everything that serves this agent, and the register of addresses
+// they hand out. The command line fills it before the agent starts:
+//
+//	agent.Plugins().Use(wsserver.New(...), pairing.New(...))
+//
+// The runtime is built on first use rather than in a constructor, so an agent
+// assembled field by field — which is how a test builds one — has one too.
+// Where the plugins put their menus is settled later, when there is a tray to
+// put them on.
+func (a *Agent) Plugins() *plugin.Host {
+	a.pluginsMu.Lock()
+	defer a.pluginsMu.Unlock()
+
+	if a.plugins == nil {
+		a.plugins = plugin.New(plugin.Config{
+			Logf:      log.Printf,
+			Clipboard: copyValue,
+			Browser:   openBrowser,
+		})
+	}
+	return a.plugins
 }
 
 // ServerRestarts returns a channel that signals when servers are restarted
@@ -203,37 +225,34 @@ func (a *Agent) Start(devicePath string) error {
 		go a.watchNetworkChanges()
 	}
 
-	// Start the servers using shared code
-	return a.startServers()
+	// Then everything that serves the reader, in the order it was registered.
+	// The agent serves nothing itself, so a build that registered no plugins
+	// simply has a reader running.
+	//
+	// One that will not serve is reported rather than fatal: a pairing port
+	// already in use is not a reason to call the agent failed to start, and the
+	// reader is what the agent is.
+	if err := a.Plugins().Start(); err != nil {
+		a.Logger.Printf("Not everything that serves this agent came up: %v", err)
+	}
+
+	a.PublishState()
+	return nil
 }
 
 func (a *Agent) Stop() {
-	if a.Reader == nil && a.DeviceServer == nil {
+	if a.Reader == nil && !a.Plugins().Running() {
 		a.Logger.Println("Agent is not running")
 		return
 	}
 
 	a.Logger.Println("Stopping agent...")
-	a.withdrawEndpoints()
 
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
-		a.UnifiedServer = nil
-	}
-
-	if a.ClientServer != nil {
-		a.ClientServer.Stop()
-		a.ClientServer = nil
-	}
-
-	if a.DeviceServer != nil {
-		a.DeviceServer.Stop()
-		a.DeviceServer = nil
-	}
-
-	if a.Bridge != nil {
-		a.Bridge.Close()
-		a.Bridge = nil
+	// The plugins first, in the reverse of the order they were registered: they
+	// are serving the reader, and one of them may still be answering a request
+	// against it.
+	if err := a.Plugins().Stop(); err != nil {
+		a.Logger.Printf("Something did not stop cleanly: %v", err)
 	}
 
 	if a.Reader != nil {
@@ -241,6 +260,7 @@ func (a *Agent) Stop() {
 		a.Reader = nil
 	}
 
+	a.PublishState()
 	a.Logger.Println("Agent stopped successfully")
 }
 
@@ -251,6 +271,17 @@ func (a *Agent) Stop() {
 // Closing it belongs here, on the way out.
 func (a *Agent) Shutdown() {
 	a.Stop()
+	a.stateOnce.Do(func() {
+		if a.stateDone != nil {
+			close(a.stateDone)
+		}
+	})
+
+	// Stop is what a plugin comes back from; this is the one it does not, so a
+	// plugin holding a file or a goroutine of its own lets it go here.
+	if err := a.Plugins().Close(); err != nil {
+		a.Logger.Printf("Something did not close cleanly: %v", err)
+	}
 
 	if closer, ok := a.Manager.(interface{ Close() }); ok {
 		closer.Close()
@@ -299,26 +330,41 @@ func (a *Agent) watchNetworkChanges() {
 	}
 }
 
-// RestartServers stops and restarts the HTTP/WebSocket servers with current TLS configuration.
-// The NFC reader continues running during the restart.
+// RestartServers brings everything serving this agent back up, with whatever
+// changed under it: a reissued certificate, a rotated secret, a port that
+// moved. The reader keeps running throughout — it is not what is being
+// restarted.
+//
+// The agent does not know what serves it, so this is every plugin, in the
+// reverse of the order they were registered and then forward again. A plugin
+// with nothing to rebind is stopped and started around a pause, which is the
+// price of not naming the one that had.
 func (a *Agent) RestartServers() error {
 	a.serversMu.Lock()
 	defer a.serversMu.Unlock()
 
+	if !a.Plugins().Running() {
+		// Nothing is serving, so there is nothing to bring back. Starting it
+		// here would serve an agent the operator has stopped.
+		a.Logger.Println("Nothing is serving, so there is nothing to restart")
+		return nil
+	}
+
 	a.Logger.Println("Restarting servers...")
 
-	// Stop servers
-	a.stopServers()
+	if err := a.Plugins().Stop(); err != nil {
+		a.Logger.Printf("Something did not stop cleanly: %v", err)
+	}
 
 	// Brief pause to allow ports to be released
 	time.Sleep(100 * time.Millisecond)
 
-	// Restart servers
-	if err := a.startServers(); err != nil {
+	if err := a.Plugins().Start(); err != nil {
 		return err
 	}
 
 	a.Logger.Println("Servers restarted successfully")
+	a.PublishState()
 
 	// Notify listeners of server restart
 	select {
@@ -327,89 +373,6 @@ func (a *Agent) RestartServers() error {
 		// Channel full, skip
 	}
 
-	return nil
-}
-
-// stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
-func (a *Agent) stopServers() {
-	a.withdrawEndpoints()
-
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
-		a.UnifiedServer = nil
-	}
-
-	if a.ClientServer != nil {
-		a.ClientServer.Stop()
-		a.ClientServer = nil
-	}
-
-	if a.DeviceServer != nil {
-		a.DeviceServer.Stop()
-		a.DeviceServer = nil
-	}
-
-	if a.Bridge != nil {
-		a.Bridge.Close()
-		a.Bridge = nil
-	}
-}
-
-// startServers starts the HTTP/WebSocket servers.
-func (a *Agent) startServers() error {
-	if a.Reader == nil {
-		return errors.New("reader not initialized")
-	}
-
-	// Create bridge for inter-server communication
-	a.Bridge = server.NewServerBridge()
-
-	// Create device server (handles NFC device connections)
-	requirePaired := a.RequiresPairedDevice()
-
-	a.DeviceServer = deviceserver.New(deviceserver.Config{
-		Reader:           a.Reader,
-		DeviceManager:    findDeviceDriver(a.Manager),
-		APISecret:        a.APISecret,
-		AllowedCardTypes: a.AllowedCardTypes,
-		AllowedOrigins:   a.AllowedOrigins,
-		OriginPolicy:     a.originPolicy(),
-		PublicKeyPin:     a.PublicKeyPin,
-		TokenVerifier:    a.tokenVerifier(),
-
-		RequirePairedDevice: requirePaired,
-	}, a.Bridge)
-
-	// Create client server (handles web client connections)
-	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret:      a.APISecret,
-		AllowedOrigins: a.AllowedOrigins,
-		OriginPolicy:   a.originPolicy(),
-		TokenVerifier:  a.tokenVerifier(),
-		OnChange:       a.clientsChanged(),
-	}, a.Bridge)
-
-	// Single listener fronts the device, client, control and console handlers.
-	port := a.ConfiguredPort()
-	a.UnifiedServer = unifiedserver.New(unifiedserver.Config{
-		Port:           port,
-		CertFile:       a.CertFile,
-		KeyFile:        a.KeyFile,
-		ControlHandler: consoleRoutes(a.Console),
-		UIHandler:      consoleAssets(),
-	}, a.DeviceServer, a.ClientServer)
-
-	go func() {
-		if err := a.UnifiedServer.Start(); err != nil {
-			a.Logger.Printf("Unified server error: %v", err)
-		}
-	}()
-
-	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", port)
-
-	// The addresses go out once there is something answering on them, and are
-	// withdrawn again in stopServers.
-	a.publishEndpoints()
 	return nil
 }
 
@@ -540,11 +503,12 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 
 	a.settingsMu.Lock()
 	a.RequirePairedDevice = on
-	server := a.DeviceServer
 	a.settingsMu.Unlock()
 
-	if server != nil {
-		server.SetRequirePairedDevice(on)
+	// Told to whatever is admitting devices, so the policy takes effect on the
+	// connections already open rather than on the next restart.
+	if admits, ok := plugin.Find[deviceAdmitter](a.Plugins()); ok {
+		admits.SetRequirePairedDevice(on)
 	}
 	a.notifyConsole()
 }
@@ -597,13 +561,34 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	a.notifyConsole()
 }
 
-// ServingPort is the port the listener is bound on. It matches the configured
-// port until one is saved, and again once the listener has been rebound.
+// ServingPort is the port being served on. It matches the configured port
+// until one is saved, and again once the listener has been rebound.
+//
+// The agent asks whatever is serving it rather than holding a listener of its
+// own, so a build that serves nothing reports what it would be served on.
 func (a *Agent) ServingPort() int {
-	if a.UnifiedServer != nil {
-		return a.UnifiedServer.Port()
+	if serving, ok := plugin.Find[serverPlugin](a.Plugins()); ok {
+		if port := serving.Port(); port > 0 {
+			return port
+		}
 	}
 	return a.ConfiguredPort()
+}
+
+// Serving reports whether anything is answering on that port.
+func (a *Agent) Serving() bool {
+	serving, ok := plugin.Find[serverPlugin](a.Plugins())
+	return ok && serving.Serving()
+}
+
+// LastCard is the tag last seen by whatever is serving clients, nil when there
+// is none, or when nothing is serving.
+func (a *Agent) LastCard() *nfc.Card {
+	serving, ok := plugin.Find[cardReporter](a.Plugins())
+	if !ok {
+		return nil
+	}
+	return serving.LastCard()
 }
 
 // ConfiguredPort is the port the agent is set to serve on, which it binds the
@@ -613,6 +598,27 @@ func (a *Agent) ConfiguredPort() int {
 	defer a.settingsMu.RUnlock()
 	return a.DevicePort
 }
+
+// The capabilities the agent looks for among its plugins. It names what it
+// needs done rather than which plugin does it, so the plugin that serves this
+// agent can be replaced, or left out, without agent.go knowing.
+type (
+	// serverPlugin is whatever is answering on the agent's port.
+	serverPlugin interface {
+		Serving() bool
+		Port() int
+	}
+
+	// deviceAdmitter is whatever decides which devices are let in.
+	deviceAdmitter interface {
+		SetRequirePairedDevice(on bool)
+	}
+
+	// cardReporter is whatever sees the tags as they are read.
+	cardReporter interface {
+		LastCard() *nfc.Card
+	}
+)
 
 // clientsChanged returns a hook that refreshes the console when the client list
 // moves, or nil when there is no console to refresh.

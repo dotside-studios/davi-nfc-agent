@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
+	"github.com/dotside-studios/davi-nfc-agent/plugin"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
@@ -23,6 +24,10 @@ func (c *Console) NotifyChange() {}
 
 func consoleRoutes(*Console) http.Handler { return nil }
 func consoleAssets() http.Handler         { return nil }
+
+// consolePlugin is what the command line registers to have the console served.
+// There is nothing to serve in this build.
+func consolePlugin(*Console) plugin.Plugin { return nil }
 
 func (s *SystrayApp) setupConsoleMenu()      {}
 func (s *SystrayApp) handleOpenConsole()     {}

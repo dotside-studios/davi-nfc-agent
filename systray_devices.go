@@ -72,8 +72,6 @@ func (s *SystrayApp) refreshDevicesMenu() {
 	}
 
 	s.mRequirePaired.SetChecked(s.agent.RequiresPairedDevice())
-
-	s.publishState()
 }
 
 // handleRequirePaired toggles the paired-device requirement live, so it can be

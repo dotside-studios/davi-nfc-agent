@@ -1,20 +1,13 @@
 package main
 
 import (
-	"fmt"
-	"io"
 	"log"
-	"os"
-	"os/exec"
-	"runtime"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/plugin"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -45,10 +38,10 @@ type SystrayApp struct {
 	mStart    *traymenu.Item
 	mStop     *traymenu.Item
 
-	// Addresses. The rows come from the agent's endpoint register rather than
+	// Addresses. The rows come from the plugins' endpoint register rather than
 	// from the tray, so a feature that serves something appears here without
 	// the tray knowing what it is.
-	endpoints  *traymenu.List[surface.Endpoint]
+	endpoints  *traymenu.List[plugin.Endpoint]
 	mAPISecret *traymenu.Item
 
 	// Reader selection
@@ -81,21 +74,11 @@ type SystrayApp struct {
 	// agent has no config directory to persist to.
 	settings *settings.Store
 
-	// Plugins. The registry is what the tray attaches at startup, the slots are
-	// the top-level menus reserved for them, and the state is what they watch.
-	// See systray_plugins.go.
-	plugins      *surface.Registry
+	// The top-level menus held open for plugins, and how many have been taken.
+	// The tray hands them out as [plugin.Menus]; see systray_plugins.go.
 	pluginMu     sync.Mutex
-	attached     []surface.Plugin
 	pluginSlots  []*traymenu.Item
 	pluginsTaken int
-
-	// publishMu serializes the snapshots handed to the plugins, stateMu guards
-	// the last one so a plugin can read it from a handler.
-	publishMu    sync.Mutex
-	stateMu      sync.Mutex
-	state        surface.State
-	stateChanged traymenu.Signal[surface.State]
 }
 
 // NewSystrayApp creates a new systray application on the real tray.
@@ -159,8 +142,6 @@ func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 	if s.mReaderFeedback != nil {
 		s.mReaderFeedback.SetChecked(next.ReaderFeedback)
 	}
-
-	s.publishState()
 }
 
 // disableHeldMenus greys out the menus for settings the launcher holds. They
@@ -213,7 +194,6 @@ func (s *SystrayApp) Run() {
 func (s *SystrayApp) onReady() {
 	s.setupUI()
 	s.autoStartAgent()
-	s.startCardInfoUpdater()
 	s.startServerRestartListener()
 	s.startOriginWatcher()
 	s.startDeviceWatcher()
@@ -221,9 +201,8 @@ func (s *SystrayApp) onReady() {
 
 // onExit is called when the systray is exiting
 func (s *SystrayApp) onExit() {
-	// Before the agent goes: a plugin holding a listener of its own is closing
-	// it against an agent that is still there.
-	s.detachPlugins()
+	// Which stops the plugins and closes them, in the reverse of the order they
+	// were registered.
 	s.agent.Shutdown()
 }
 
@@ -241,6 +220,7 @@ func (s *SystrayApp) setupUI() {
 
 	s.mCardUID = s.menu.Add("Card UID: None", traymenu.Tooltip("Current card UID"), traymenu.Disabled())
 	s.mCardType = s.menu.Add("Card Type: None", traymenu.Tooltip("Current card type"), traymenu.Disabled())
+	s.watchCard()
 
 	s.menu.AddSeparator()
 
@@ -266,6 +246,7 @@ func (s *SystrayApp) setupUI() {
 	// Where a plugin's own menu goes: beside the agent's features rather than
 	// under Quit, which is where anything added later would land.
 	s.reservePluginSlots()
+	s.agent.Plugins().SetMenus(s)
 
 	s.menu.AddSeparator()
 
@@ -296,11 +277,16 @@ func (s *SystrayApp) setupUI() {
 	s.menu.AddSeparator()
 	s.menu.Add("Quit", traymenu.Tooltip("Quit the application"), traymenu.OnClick(s.menu.Quit))
 
-	// Last, so a plugin attaches to a menu that is already whole: it may read
-	// the state, publish an address, or put an entry of its own in place from
-	// the moment it is handed its host.
-	s.publishState()
-	s.attachPlugins()
+	// Last, so a plugin wires itself up against a menu that is already whole:
+	// it may take a menu of its own, declare an address, or read the state from
+	// the moment it is handed its context.
+	//
+	// The plugins are only wired up here, not started. They come up with the
+	// agent, and go down with it.
+	s.agent.PublishState()
+	if err := s.agent.Plugins().Init(); err != nil {
+		log.Printf("[systray] Not everything registered could be set up: %v", err)
+	}
 }
 
 // setupURLsMenu builds the submenu of addresses.
@@ -313,9 +299,9 @@ func (s *SystrayApp) setupUI() {
 func (s *SystrayApp) setupURLsMenu() {
 	urls := s.menu.AddSubmenu("Server URLs", traymenu.Tooltip("Server addresses"))
 
-	s.endpoints = traymenu.NewList[surface.Endpoint](urls, endpointSlotCount)
-	s.endpoints.OnActivate(func(row traymenu.Row[surface.Endpoint]) {
-		s.copyValue(row.Value.Label+" URL", row.Value.URL)
+	s.endpoints = traymenu.NewList[plugin.Endpoint](urls, endpointSlotCount)
+	s.endpoints.OnActivate(func(row traymenu.Row[plugin.Endpoint]) {
+		copyValue(row.Value.Label+" URL", row.Value.URL)
 	})
 
 	// API secret entries, only shown if a secret is configured. The secret is
@@ -330,7 +316,7 @@ func (s *SystrayApp) setupURLsMenu() {
 	urls.Add("  Copy API Secret",
 		traymenu.Tooltip("Copy the agent's API secret to clipboard"),
 		traymenu.HiddenIf(noSecret),
-		traymenu.OnClick(func() { s.copyValue("API secret", s.agent.APISecret) }),
+		traymenu.OnClick(func() { copyValue("API secret", s.agent.APISecret) }),
 	)
 	urls.Add("  Regenerate API Secret",
 		traymenu.Tooltip("Generate a fresh secret; all phones must re-handshake"),
@@ -340,7 +326,7 @@ func (s *SystrayApp) setupURLsMenu() {
 
 	// Redrawn whenever something is published or withdrawn, so an address that
 	// changes with a restart, or a PIN rotation, does not wait for a click.
-	s.agent.Endpoints().OnChange(func([]surface.Endpoint) { s.refreshURLsMenu() })
+	s.agent.Plugins().Endpoints().OnChange(func([]plugin.Endpoint) { s.refreshURLsMenu() })
 	s.refreshURLsMenu()
 }
 
@@ -350,10 +336,10 @@ func (s *SystrayApp) refreshURLsMenu() {
 		return
 	}
 
-	list := s.agent.Endpoints().List()
-	rows := make([]traymenu.Row[surface.Endpoint], 0, len(list))
+	list := s.agent.Plugins().Endpoints().List()
+	rows := make([]traymenu.Row[plugin.Endpoint], 0, len(list))
 	for _, endpoint := range list {
-		row := traymenu.Row[surface.Endpoint]{
+		row := traymenu.Row[plugin.Endpoint]{
 			Value:   endpoint,
 			Title:   endpoint.Label + ": " + endpoint.URL,
 			Tooltip: endpoint.Tooltip,
@@ -451,40 +437,16 @@ func (s *SystrayApp) setupDeviceChangeListener() {
 	}()
 }
 
-// startCardInfoUpdater starts a goroutine to update card information
-func (s *SystrayApp) startCardInfoUpdater() {
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		lastUID := ""
-		lastType := ""
-
-		for range ticker.C {
-			var card *nfc.Card
-			if s.agent.ClientServer != nil {
-				card = s.agent.ClientServer.GetLastCard()
-			}
-
-			uid, cardType := s.getCardInfo(card)
-			moved := uid != lastUID || cardType != lastType
-
-			if uid != lastUID {
-				s.updateCardUID(uid)
-				lastUID = uid
-			}
-
-			if cardType != lastType {
-				s.updateCardType(cardType)
-				lastType = cardType
-			}
-
-			// A card arriving or leaving is the change a consumer's plugin is
-			// most likely to be waiting for, so it is reported as one.
-			if moved {
-				s.publishState()
-			}
-		}
-	}()
+// watchCard keeps the card labels on the agent's state.
+//
+// The tray used to poll for this itself. The agent does the looking now, once
+// for everything watching, so a plugin sees a card arrive whether or not there
+// is a tray in this build.
+func (s *SystrayApp) watchCard() {
+	s.agent.Plugins().Watch(func(state plugin.State) {
+		s.updateCardUID(state.Card.UID)
+		s.updateCardType(state.Card.Type)
+	})
 }
 
 // startServerRestartListener listens for server restart events from the Agent
@@ -494,7 +456,6 @@ func (s *SystrayApp) startServerRestartListener() {
 		for range s.agent.ServerRestarts() {
 			log.Printf("[systray] Server restart detected, updating the menu")
 			s.updateURLs()
-			s.publishState()
 
 			// CAInstalled is a look at the filesystem, not a decision taken
 			// once: a config directory that loses its CA needs the offer to
@@ -530,7 +491,6 @@ func (s *SystrayApp) showRunning() {
 	s.updateURLs()
 	s.mStart.Disable()
 	s.mStop.Enable()
-	s.publishState()
 }
 
 // showStopped puts the menu into the state of an agent that is not running,
@@ -540,7 +500,6 @@ func (s *SystrayApp) showStopped(status string) {
 	s.clearURLs()
 	s.mStart.Enable()
 	s.mStop.Disable()
-	s.publishState()
 }
 
 // handleRotateAPISecret issues a fresh API secret; every phone must handshake
@@ -667,15 +626,6 @@ func (s *SystrayApp) updateStatus(status string) {
 	}
 }
 
-// getCardInfo extracts UID and type from a card
-func (s *SystrayApp) getCardInfo(card *nfc.Card) (uid, cardType string) {
-	if card != nil {
-		uid = card.UID
-		cardType = card.Type
-	}
-	return
-}
-
 // updateCardUID updates the card UID display
 func (s *SystrayApp) updateCardUID(uid string) {
 	if uid == "" {
@@ -722,117 +672,4 @@ func (s *SystrayApp) updateAPISecretLabel(secret string) {
 // change: what is published is the servers' business, not the tray's.
 func (s *SystrayApp) clearURLs() {
 	s.refreshURLsMenu()
-}
-
-// copyValue puts a value on the clipboard and logs what happened, which is the
-// only feedback a tray menu has for a copy.
-func (s *SystrayApp) copyValue(what, value string) {
-	if value == "" {
-		return
-	}
-
-	if err := copyToClipboard(value); err != nil {
-		log.Printf("[systray] Failed to copy %s: %v", what, err)
-		return
-	}
-	log.Printf("[systray] Copied %s to clipboard", what)
-}
-
-// clipboardCmd describes one candidate clipboard utility.
-type clipboardCmd struct {
-	name string
-	args []string
-}
-
-// copyToClipboard copies text to the system clipboard. On Linux it picks the
-// tool matching the active display server (wl-copy under Wayland, xclip/xsel
-// under X11), falling back to whichever utility is installed if env vars are
-// unset (e.g. headless / virtual sessions).
-func copyToClipboard(text string) error {
-	candidates, err := clipboardCandidates(runtime.GOOS, os.Getenv)
-	if err != nil {
-		return err
-	}
-
-	var lastErr error
-	var tried []string
-	for _, c := range candidates {
-		path, err := exec.LookPath(c.name)
-		if err != nil {
-			continue
-		}
-		tried = append(tried, c.name)
-		if err := pipeStringToCommand(path, c.args, text); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-
-	if lastErr != nil {
-		return fmt.Errorf("clipboard write failed (tried %s): %w", strings.Join(tried, ", "), lastErr)
-	}
-	return clipboardUnavailableError()
-}
-
-// clipboardCandidates returns the ordered list of clipboard utilities to try
-// for the given OS, using getenv to inspect the current display environment.
-// Pure and testable; pass os.Getenv in production.
-func clipboardCandidates(goos string, getenv func(string) string) ([]clipboardCmd, error) {
-	switch goos {
-	case "darwin":
-		return []clipboardCmd{{name: "pbcopy"}}, nil
-	case "windows":
-		return []clipboardCmd{{name: "clip"}}, nil
-	case "linux":
-		var cands []clipboardCmd
-		if getenv("WAYLAND_DISPLAY") != "" {
-			cands = append(cands, clipboardCmd{name: "wl-copy"})
-		}
-		if getenv("DISPLAY") != "" {
-			cands = append(cands,
-				clipboardCmd{name: "xclip", args: []string{"-selection", "clipboard"}},
-				clipboardCmd{name: "xsel", args: []string{"--clipboard", "--input"}},
-			)
-		}
-		// Env didn't tell us the session type — try everything in preference order.
-		if len(cands) == 0 {
-			cands = []clipboardCmd{
-				{name: "wl-copy"},
-				{name: "xclip", args: []string{"-selection", "clipboard"}},
-				{name: "xsel", args: []string{"--clipboard", "--input"}},
-			}
-		}
-		return cands, nil
-	default:
-		return nil, fmt.Errorf("unsupported platform: %s", goos)
-	}
-}
-
-func clipboardUnavailableError() error {
-	if runtime.GOOS == "linux" {
-		return fmt.Errorf("no clipboard utility found; install one of: wl-clipboard (Wayland), xclip, or xsel")
-	}
-	return fmt.Errorf("no clipboard utility found")
-}
-
-func pipeStringToCommand(path string, args []string, text string) error {
-	cmd := exec.Command(path, args...)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(stdin, text); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-		return err
-	}
-	if err := stdin.Close(); err != nil {
-		_ = cmd.Wait()
-		return err
-	}
-	return cmd.Wait()
 }

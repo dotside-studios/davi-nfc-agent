@@ -192,9 +192,12 @@ func sameCardTypes(a, b []string) bool {
 	return true
 }
 
-// notifyConsole redraws the console, so a change made from the tray reaches it.
+// notifyConsole redraws the console, so a change made from the tray reaches it,
+// and hands the plugins the state it changed. Both are the same event told to
+// the two things that render the agent rather than hold it.
 func (a *Agent) notifyConsole() {
 	if a.Console != nil {
 		a.Console.NotifyChange()
 	}
+	a.PublishState()
 }

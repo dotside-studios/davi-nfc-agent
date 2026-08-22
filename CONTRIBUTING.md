@@ -119,7 +119,11 @@ davi-nfc-agent/
 │   ├── deviceserver/    # Auth, and routing between reader and device
 │   └── clientserver/    # Client connection handling logic
 ├── wsconn/              # Write-safe WebSocket wrapper shared by the above
-├── surface/             # Plugin surface: how a feature adds its own tray menu
+├── plugin/              # The plugin runtime: lifecycle, endpoints, state, routes
+├── plugins/             # The agent's own plugins
+│   ├── wsserver/        #   the WebSocket endpoints (optional in a custom build)
+│   └── pairing/         #   the phone-pairing server
+├── netaddr/             # What to call this machine when handing out an address
 ├── traymenu/            # Declarative tray menus over fyne.io/systray
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
@@ -144,11 +148,14 @@ davi-nfc-agent/
   - **ClientServer**: Handles client applications
 - Bridge component connects the device and client handlers in-process
 
-**Plugin Surface** (`surface/`)
-- How a feature puts itself on the tray: its own menu, its own address under
-  Server URLs, and a snapshot of the agent it can follow without polling
-- The pairing menu is a plugin, and so is anything a consumer registers
-- See [docs/plugins.md](docs/plugins.md) and [surface/README.md](surface/README.md)
+**Plugin Runtime** (`plugin/`, `plugins/`)
+- The agent drives a reader and holds the settings; everything that *serves*
+  something is a plugin with its own lifecycle — Init, Start, Stop, Close
+- A plugin gets a menu of its own, the register of addresses, routes mounted on
+  the agent's listener, and the agent's state to follow
+- The WebSocket servers, the pairing server and the control center are all
+  plugins, registered by `main.go` and by nothing else
+- See [docs/plugins.md](docs/plugins.md) and [plugin/README.md](plugin/README.md)
 
 **Tray Menu** (`traymenu/`)
 - Declarative menu building on top of `fyne.io/systray`, with clicks delivered
@@ -203,11 +210,11 @@ refactor: simplify device manager interface
 
 To add support for new NFC readers or tag types, see [docs/extending-nfc-support.md](docs/extending-nfc-support.md).
 
-## Adding a Feature to the Tray
+## Adding a Feature
 
-A feature with a menu of its own — pairing, or an application built on this
-agent — registers as a plugin rather than being drawn by the tray package. See
-[docs/plugins.md](docs/plugins.md).
+A feature that serves something, or has a menu of its own — pairing, the control
+center, or an application built on this agent — is a plugin rather than a part of
+the agent. See [docs/plugins.md](docs/plugins.md).
 
 ## Reporting Issues
 

@@ -406,9 +406,16 @@ func (a *Agent) SetAllowCardType(cardType string, allow bool) {
 	}
 }
 
-func (a *Agent) AllowAllCardTypes() {
-	for _, cardType := range nfc.GetAllCardTypes() {
-		a.AllowedCardTypes[cardType] = true
+// ClearCardTypeFilter drops the filter, so every card is accepted. That is not
+// the same as allowing each known type: a phone reports the tag types it
+// recognizes, which need not be ones this agent enumerates, and listing the
+// known types would refuse the rest.
+//
+// The map is emptied in place, never replaced: the running device server was
+// handed this same map at construction.
+func (a *Agent) ClearCardTypeFilter() {
+	for cardType := range a.AllowedCardTypes {
+		delete(a.AllowedCardTypes, cardType)
 	}
 }
 
@@ -424,8 +431,10 @@ func (a *Agent) DisallowCardType(cardType string) {
 	delete(a.AllowedCardTypes, cardType)
 }
 
+// IsCardTypeAllowed answers the question the device server asks of the filter:
+// an empty filter admits everything, including a type this agent does not know.
 func (a *Agent) IsCardTypeAllowed(cardType string) bool {
-	return a.AllowedCardTypes[cardType]
+	return len(a.AllowedCardTypes) == 0 || a.AllowedCardTypes[cardType]
 }
 
 // CurrentDevicePath returns the current device path from the reader.

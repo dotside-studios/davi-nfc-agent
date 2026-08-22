@@ -131,14 +131,14 @@ func TestCardTypeFilterTogglesOffAllTypes(t *testing.T) {
 	app, _ := newTestTray(t, agent)
 
 	cardType := nfc.GetAllCardTypes()[0]
-	filter := app.cardTypeFilters[cardType]
+	filter := app.cardTypes.Item(cardType)
 
 	filter.Click()
 
 	if !filter.Checked() {
 		t.Error("the clicked card type is not ticked")
 	}
-	if app.mFilterAll.Checked() {
+	if app.cardTypes.All().Checked() {
 		t.Error("All Types is still ticked after picking one type")
 	}
 	if !agent.IsCardTypeAllowed(cardType) {
@@ -151,7 +151,7 @@ func TestUntickingTheLastCardTypeRevertsToAllTypes(t *testing.T) {
 	app, _ := newTestTray(t, agent)
 
 	cardType := nfc.GetAllCardTypes()[0]
-	filter := app.cardTypeFilters[cardType]
+	filter := app.cardTypes.Item(cardType)
 
 	filter.Click()
 	filter.Click()
@@ -159,7 +159,7 @@ func TestUntickingTheLastCardTypeRevertsToAllTypes(t *testing.T) {
 	if filter.Checked() {
 		t.Error("the card type is still ticked after a second click")
 	}
-	if !app.mFilterAll.Checked() {
+	if !app.cardTypes.All().Checked() {
 		t.Error("All Types was not restored when the last filter came off")
 	}
 	if agent.AllowedCardTypesLength() != 0 {
@@ -172,18 +172,23 @@ func TestAllTypesClearsIndividualFilters(t *testing.T) {
 	app, _ := newTestTray(t, agent)
 
 	cardType := nfc.GetAllCardTypes()[0]
-	app.cardTypeFilters[cardType].Click()
+	app.cardTypes.Item(cardType).Click()
 
-	app.mFilterAll.Click()
+	app.cardTypes.All().Click()
 
-	if app.cardTypeFilters[cardType].Checked() {
+	if app.cardTypes.Item(cardType).Checked() {
 		t.Error("an individual filter is still ticked under All Types")
 	}
-	if !app.mFilterAll.Checked() {
+	if !app.cardTypes.All().Checked() {
 		t.Error("All Types is not ticked")
 	}
-	if agent.AllowedCardTypesLength() != len(nfc.GetAllCardTypes()) {
-		t.Error("All Types did not allow every card type on the agent")
+	if agent.AllowedCardTypesLength() != 0 {
+		t.Errorf("All Types left a filter of %d types on the agent", agent.AllowedCardTypesLength())
+	}
+	// A phone can report a tag type this agent does not enumerate, and All
+	// Types has to mean that one too.
+	if !agent.IsCardTypeAllowed("MIFARE Plus") {
+		t.Error("All Types refuses a card type the agent does not know")
 	}
 }
 
@@ -218,10 +223,10 @@ func TestSyncSettingsToMenu(t *testing.T) {
 	if app.mModeMenu.Title() != "Mode: Write Only" {
 		t.Errorf("mode menu title = %q, want %q", app.mModeMenu.Title(), "Mode: Write Only")
 	}
-	if !app.cardTypeFilters[cardType].Checked() {
+	if !app.cardTypes.Item(cardType).Checked() {
 		t.Errorf("%s is not ticked", cardType)
 	}
-	if app.mFilterAll.Checked() {
+	if app.cardTypes.All().Checked() {
 		t.Error("All Types is ticked even though one type is filtered")
 	}
 	if !app.mReaderFeedback.Checked() {
@@ -230,7 +235,7 @@ func TestSyncSettingsToMenu(t *testing.T) {
 
 	// And back to no filter at all.
 	app.syncSettingsToMenu(settings.Settings{Mode: settings.ModeReadWrite})
-	if !app.mFilterAll.Checked() || app.cardTypeFilters[cardType].Checked() {
+	if !app.cardTypes.All().Checked() || app.cardTypes.Item(cardType).Checked() {
 		t.Error("clearing the stored card types did not restore All Types")
 	}
 }
@@ -405,5 +410,51 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 
 	if !app.mRequirePaired.Checked() || !agent.RequirePairedDevice {
 		t.Fatal("pairing was not required once a device had paired")
+	}
+}
+
+func TestCopiedURLsAreTheOnesOnDisplay(t *testing.T) {
+	app, _ := newTestTray(t, newTestAgent())
+	app.updateURLs()
+
+	urls := app.urls()
+
+	// The device entry is what a device connects to, mode and all. Copying
+	// something else would hand out a client URL under a device label.
+	if !strings.HasSuffix(urls.device, "/ws?mode=device") {
+		t.Errorf("device URL = %q, want it to carry the device mode", urls.device)
+	}
+	if got, want := app.mDeviceURL.Title(), "Device: "+urls.device; got != want {
+		t.Errorf("device label = %q, want %q", got, want)
+	}
+	if got, want := app.mClientURL.Title(), "Client: "+urls.client; got != want {
+		t.Errorf("client label = %q, want %q", got, want)
+	}
+	if urls.bootstrap != "" {
+		t.Errorf("pairing URL = %q, want none with the pairing server off", urls.bootstrap)
+	}
+	if got := app.mBootstrapURL.Title(); got != "Pair Phone: Disabled" {
+		t.Errorf("pairing label = %q", got)
+	}
+}
+
+func TestAgentStateDrivesTheControls(t *testing.T) {
+	app, _ := newTestTray(t, newTestAgent())
+
+	app.showRunning()
+	if app.mStatus.Title() != "Running" || app.mStart.Enabled() || !app.mStop.Enabled() {
+		t.Fatalf("running: status %q, start enabled %v, stop enabled %v",
+			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
+	}
+
+	app.showStopped("Stopped")
+	if app.mStatus.Title() != "Stopped" || !app.mStart.Enabled() || app.mStop.Enabled() {
+		t.Fatalf("stopped: status %q, start enabled %v, stop enabled %v",
+			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
+	}
+	for _, item := range []*traymenu.Item{app.mDeviceURL, app.mClientURL, app.mBootstrapURL} {
+		if !strings.HasSuffix(item.Title(), "Not running") {
+			t.Errorf("a stopped agent still shows %q", item.Title())
+		}
 	}
 }

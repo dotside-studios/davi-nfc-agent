@@ -20,13 +20,13 @@ type originRow struct {
 
 // setupOriginsMenu builds the Allowed Origins submenu.
 func (s *SystrayApp) setupOriginsMenu() {
-	s.mOriginsMenu = s.menu.AddSubmenu("Allowed Origins",
+	origins := s.menu.AddSubmenu("Allowed Origins",
 		traymenu.Tooltip("Web pages permitted to use this reader"))
 
-	s.origins = traymenu.NewList[originRow](s.mOriginsMenu, originSlotCount, traymenu.Checkbox(false))
+	s.origins = traymenu.NewList[originRow](origins, originSlotCount, traymenu.Checkbox(false))
 	s.origins.OnActivate(func(row traymenu.Row[originRow]) { s.toggleOrigin(row.Value) })
 
-	s.mOriginAllowAny = s.mOriginsMenu.AddCheckbox(
+	s.mOriginAllowAny = origins.AddCheckbox(
 		"Allow any origin (this session)",
 		false,
 		traymenu.Tooltip("Turns the origin check off until the agent restarts. Any site the operator visits can then read, write and permanently lock cards."),

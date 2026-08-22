@@ -86,8 +86,7 @@ type SystrayApp struct {
 	mAPISecret    *traymenu.Item
 
 	// Reader selection
-	mDeviceMenu *traymenu.Item
-	readers     *traymenu.List[string]
+	readers *traymenu.List[string]
 
 	// Mode menu
 	mModeMenu *traymenu.Item
@@ -100,17 +99,14 @@ type SystrayApp struct {
 	pairedDevices     *traymenu.List[string]
 
 	// Origin allowlist menu items
-	mOriginsMenu    *traymenu.Item
 	mOriginAllowAny *traymenu.Item
 	origins         *traymenu.List[originRow]
 
 	// Reader feedback toggle
 	mReaderFeedback *traymenu.Item
 
-	// Card filter menu items
-	mCardFilterMenu *traymenu.Item
-	mFilterAll      *traymenu.Item
-	cardTypeFilters map[string]*traymenu.Item // Maps card type to filter item
+	// Card type filter
+	cardTypes *traymenu.Checklist[string]
 
 	// Certificate trust
 	mTrustBrowsers *traymenu.Item
@@ -136,13 +132,12 @@ func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootst
 // menu without a desktop.
 func newSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer, driver traymenu.Driver) *SystrayApp {
 	return &SystrayApp{
-		agent:           agent,
-		initialDevice:   initialDevice,
-		bootstrapPort:   bootstrapPort,
-		bootstrap:       bootstrap,
-		menu:            traymenu.New(driver),
-		cardTypeFilters: make(map[string]*traymenu.Item),
-		mode:            nfc.ModeReadWrite,
+		agent:         agent,
+		initialDevice: initialDevice,
+		bootstrapPort: bootstrapPort,
+		bootstrap:     bootstrap,
+		menu:          traymenu.New(driver),
+		mode:          nfc.ModeReadWrite,
 	}
 }
 
@@ -157,14 +152,7 @@ func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 	s.modes.Set(mode)
 	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
 
-	selected := make(map[string]bool, len(next.CardTypes))
-	for _, t := range next.CardTypes {
-		selected[t] = true
-	}
-	for cardType, item := range s.cardTypeFilters {
-		item.SetChecked(selected[cardType])
-	}
-	s.mFilterAll.SetChecked(len(next.CardTypes) == 0)
+	s.cardTypes.Set(next.CardTypes)
 
 	if s.mRequirePaired != nil {
 		s.mRequirePaired.SetChecked(next.RequirePairedDevice)
@@ -263,19 +251,19 @@ func (s *SystrayApp) setupURLsMenu() {
 	s.mDeviceURL = urls.Add("Device: Not running", traymenu.Tooltip("DeviceServer WebSocket URL"), traymenu.Disabled())
 	urls.Add("  Copy Device URL",
 		traymenu.Tooltip("Copy DeviceServer URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("DeviceServer URL", s.getDeviceURL()) }),
+		traymenu.OnClick(func() { s.copyValue("DeviceServer URL", s.urls().device) }),
 	)
 
 	s.mClientURL = urls.Add("Client: Not running", traymenu.Tooltip("ClientServer URL"), traymenu.Disabled())
 	urls.Add("  Copy Client URL",
 		traymenu.Tooltip("Copy ClientServer URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("ClientServer URL", s.getClientURL()) }),
+		traymenu.OnClick(func() { s.copyValue("ClientServer URL", s.urls().client) }),
 	)
 
 	s.mBootstrapURL = urls.Add("Pair Phone: Not running", traymenu.Tooltip("Phone-pairing page URL"), traymenu.Disabled())
 	urls.Add("  Copy Pairing URL",
 		traymenu.Tooltip("Copy phone-pairing URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("phone-pairing URL", s.getBootstrapURL()) }),
+		traymenu.OnClick(func() { s.copyValue("phone-pairing URL", s.urls().bootstrap) }),
 	)
 
 	// The PIN entries only mean anything while the pairing server is running.
@@ -321,11 +309,11 @@ func (s *SystrayApp) setupURLsMenu() {
 
 // setupDeviceMenu builds the reader picker.
 func (s *SystrayApp) setupDeviceMenu() {
-	s.mDeviceMenu = s.menu.AddSubmenu("Device", traymenu.Tooltip("Select NFC Device"))
-	s.mDeviceMenu.Add("Refresh Devices", traymenu.Tooltip("Refresh device list"), traymenu.OnClick(s.updateDeviceList))
-	s.mDeviceMenu.AddCheckbox("Auto-detect", true, traymenu.Tooltip("Auto-detect device"))
+	devices := s.menu.AddSubmenu("Device", traymenu.Tooltip("Select NFC Device"))
+	devices.Add("Refresh Devices", traymenu.Tooltip("Refresh device list"), traymenu.OnClick(s.updateDeviceList))
+	devices.AddCheckbox("Auto-detect", true, traymenu.Tooltip("Auto-detect device"))
 
-	s.readers = traymenu.NewList[string](s.mDeviceMenu, readerSlotCount, traymenu.Checkbox(false))
+	s.readers = traymenu.NewList[string](devices, readerSlotCount, traymenu.Checkbox(false))
 	s.readers.OnActivate(func(row traymenu.Row[string]) {
 		if s.agent.CurrentDevicePath() != row.Value {
 			s.switchDevice(row.Value)
@@ -346,23 +334,21 @@ func (s *SystrayApp) setupModeMenu() {
 	s.modes.OnSelect(s.handleModeSwitch)
 }
 
-// setupCardFilterMenu builds the card type filter.
+// setupCardFilterMenu builds the card type filter. Nothing ticked means no
+// filter, which is what the All Types entry stands for.
 func (s *SystrayApp) setupCardFilterMenu() {
-	s.mCardFilterMenu = s.menu.AddSubmenu("Card Type Filter", traymenu.Tooltip("Filter cards by type"))
-	s.mFilterAll = s.mCardFilterMenu.AddCheckbox("All Types", true,
-		traymenu.Tooltip("Allow all card types"),
-		traymenu.OnClick(s.handleFilterAll),
-	)
+	filters := s.menu.AddSubmenu("Card Type Filter", traymenu.Tooltip("Filter cards by type"))
 
+	s.cardTypes = traymenu.NewChecklist[string](filters)
+	s.cardTypes.AddAll("All Types", traymenu.Tooltip("Allow all card types"))
 	for _, cardType := range GetAllCardTypeFilterNames() {
-		item := s.mCardFilterMenu.AddCheckbox(
+		s.cardTypes.Add(cardType,
 			GetCardTypeFilterDisplayName(cardType),
-			false,
 			traymenu.Tooltip(GetCardTypeFilterTooltip(cardType)),
 		)
-		item.OnClick(func() { s.handleCardTypeToggle(cardType, item) })
-		s.cardTypeFilters[cardType] = item
 	}
+
+	s.cardTypes.OnChange(s.applyCardTypes)
 }
 
 // autoStartAgent starts the agent automatically
@@ -373,12 +359,9 @@ func (s *SystrayApp) autoStartAgent() {
 	go func() {
 		// Start with initial device (may be empty for auto-discovery)
 		if err := s.agent.Start(s.initialDevice); err == nil {
-			s.updateStatus("Running")
-			s.updateURLs()
-			s.mStop.Enable()
+			s.showRunning()
 		} else {
-			s.updateStatus("Failed to Start")
-			s.mStart.Enable()
+			s.showStopped("Failed to Start")
 		}
 		s.updateDeviceList()
 	}()
@@ -443,24 +426,37 @@ func (s *SystrayApp) startServerRestartListener() {
 func (s *SystrayApp) handleStartAgent() {
 	// Use agent's stored device path (or empty for auto-discovery)
 	devicePath := s.agent.CurrentDevicePath()
-	if err := s.agent.Start(devicePath); err == nil {
-		s.updateStatus("Running")
-		s.updateURLs()
-		s.mStart.Disable()
-		s.mStop.Enable()
-		s.updateDeviceList() // Refresh to show current device
-	} else {
-		s.updateStatus("Failed to Start")
+	if err := s.agent.Start(devicePath); err != nil {
+		s.showStopped("Failed to Start")
+		return
 	}
+
+	s.showRunning()
+	s.updateDeviceList() // Refresh to show current device
 }
 
 // handleStopAgent stops the agent
 func (s *SystrayApp) handleStopAgent() {
 	s.agent.Stop()
-	s.updateStatus("Stopped")
+	s.showStopped("Stopped")
+}
+
+// showRunning puts the menu into the state of a running agent: addresses that
+// mean something, and Stop as the control that can be clicked.
+func (s *SystrayApp) showRunning() {
+	s.updateStatus("Running")
+	s.updateURLs()
+	s.mStart.Disable()
+	s.mStop.Enable()
+}
+
+// showStopped puts the menu into the state of an agent that is not running,
+// with the status line saying why.
+func (s *SystrayApp) showStopped(status string) {
+	s.updateStatus(status)
 	s.clearURLs()
-	s.mStop.Disable()
 	s.mStart.Enable()
+	s.mStop.Disable()
 }
 
 // handleRotatePIN issues a fresh pairing PIN, which invalidates the URLs that
@@ -528,28 +524,20 @@ func (s *SystrayApp) setMode(mode nfc.ReaderMode) {
 	s.mode = mode
 }
 
-// handleFilterAll enables all card type filters
-func (s *SystrayApp) handleFilterAll() {
-	s.mFilterAll.SetChecked(true)
-
-	// Uncheck all individual filters
-	for _, item := range s.cardTypeFilters {
-		item.SetChecked(false)
+// applyCardTypes narrows the agent to the ticked card types, or opens it back
+// up when none of them are.
+func (s *SystrayApp) applyCardTypes(types []string) {
+	if len(types) == 0 {
+		s.agent.ClearCardTypeFilter()
+		return
 	}
 
-	s.agent.AllowAllCardTypes()
-}
-
-// handleCardTypeToggle toggles a card type filter
-func (s *SystrayApp) handleCardTypeToggle(cardType string, item *traymenu.Item) {
-	s.mFilterAll.SetChecked(false)
-
-	s.agent.SetAllowCardType(cardType, !item.Checked())
-	item.Toggle()
-
-	// If no filters active, revert to All
-	if s.agent.AllowedCardTypesLength() == 0 {
-		s.mFilterAll.SetChecked(true)
+	picked := make(map[string]bool, len(types))
+	for _, cardType := range types {
+		picked[cardType] = true
+	}
+	for _, cardType := range GetAllCardTypeFilterNames() {
+		s.agent.SetAllowCardType(cardType, picked[cardType])
 	}
 }
 
@@ -558,15 +546,9 @@ func (s *SystrayApp) switchDevice(deviceName string) {
 	// Restart agent with new device
 	s.agent.Stop()
 	if err := s.agent.Start(deviceName); err == nil {
-		s.updateStatus("Running")
-		s.updateURLs()
-		s.mStop.Enable()
-		s.mStart.Disable()
+		s.showRunning()
 	} else {
-		s.updateStatus("Failed to Start")
-		s.clearURLs()
-		s.mStart.Enable()
-		s.mStop.Disable()
+		s.showStopped("Failed to Start")
 	}
 
 	s.markCurrentReader()
@@ -661,47 +643,60 @@ func (s *SystrayApp) updateCardType(cardType string) {
 	}
 }
 
-// updateURLs updates all server URL displays
-func (s *SystrayApp) updateURLs() {
-	ips := getLocalIPs()
+// agentURLs are the addresses the menu shows and copies. They are built
+// together so that what an entry copies is what the entry above it reads.
+type agentURLs struct {
+	device    string
+	client    string
+	bootstrap string // empty when the pairing server is disabled
+}
+
+// urls builds the addresses from the agent's current configuration.
+func (s *SystrayApp) urls() agentURLs {
 	ip := "localhost"
-	if len(ips) > 0 {
+	if ips := getLocalIPs(); len(ips) > 0 {
 		ip = ips[0]
 	}
 
-	// Determine protocol based on TLS
-	tlsEnabled := s.agent.CertFile != "" && s.agent.KeyFile != ""
-	wsProto := "ws"
-	if tlsEnabled {
-		wsProto = "wss"
+	scheme := "ws"
+	if s.agent.CertFile != "" && s.agent.KeyFile != "" {
+		scheme = "wss"
+	}
+	port := s.agent.DevicePort
+	if port == 0 {
+		port = DEFAULT_DEVICE_PORT
 	}
 
-	// Device server URL
-	devicePort := s.agent.DevicePort
-	if devicePort == 0 {
-		devicePort = DEFAULT_DEVICE_PORT
-	}
 	// Devices and clients share the single agent port. Devices connect with
 	// ?mode=device; clients use plain /ws.
-	deviceURL := fmt.Sprintf("%s://%s/ws?mode=device", wsProto, hostPort(ip, devicePort))
-	s.mDeviceURL.SetTitle(fmt.Sprintf("Device: %s", deviceURL))
+	client := fmt.Sprintf("%s://%s/ws", scheme, hostPort(ip, port))
+	urls := agentURLs{device: client + "?mode=device", client: client}
 
-	clientURL := fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
-	s.mClientURL.SetTitle(fmt.Sprintf("Client: %s", clientURL))
-
-	// Phone-pairing URL (always HTTP, only if bootstrap port is set).
-	// The URL embeds the PIN so a clicked link goes straight through.
+	// The pairing page is always HTTP, and carries the PIN so a link clicked
+	// from chat goes straight through.
 	if s.bootstrapPort > 0 {
-		base := fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
+		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
 		if s.bootstrap != nil {
-			pinURL := base + "?pin=" + url.QueryEscape(s.bootstrap.PIN())
-			s.mBootstrapURL.SetTitle(fmt.Sprintf("Pair Phone: %s", pinURL))
-			s.mPairingPIN.SetTitle(fmt.Sprintf("Pairing PIN: %s", s.bootstrap.PIN()))
-		} else {
-			s.mBootstrapURL.SetTitle(fmt.Sprintf("Pair Phone: %s", base))
+			urls.bootstrap += "?pin=" + url.QueryEscape(s.bootstrap.PIN())
 		}
-	} else {
+	}
+	return urls
+}
+
+// updateURLs updates all server URL displays
+func (s *SystrayApp) updateURLs() {
+	urls := s.urls()
+
+	s.mDeviceURL.SetTitle("Device: " + urls.device)
+	s.mClientURL.SetTitle("Client: " + urls.client)
+
+	if urls.bootstrap == "" {
 		s.mBootstrapURL.SetTitle("Pair Phone: Disabled")
+	} else {
+		s.mBootstrapURL.SetTitle("Pair Phone: " + urls.bootstrap)
+	}
+	if s.bootstrap != nil {
+		s.mPairingPIN.SetTitle("Pairing PIN: " + s.bootstrap.PIN())
 	}
 
 	s.updateAPISecretLabel(s.agent.APISecret)
@@ -727,70 +722,7 @@ func (s *SystrayApp) updateAPISecretLabel(secret string) {
 func (s *SystrayApp) clearURLs() {
 	s.mDeviceURL.SetTitle("Device: Not running")
 	s.mClientURL.SetTitle("Client: Not running")
-	s.mBootstrapURL.SetTitle("CA Cert: Not running")
-}
-
-// getDeviceURL returns the current DeviceServer URL
-func (s *SystrayApp) getDeviceURL() string {
-	ips := getLocalIPs()
-	ip := "localhost"
-	if len(ips) > 0 {
-		ip = ips[0]
-	}
-
-	tlsEnabled := s.agent.CertFile != "" && s.agent.KeyFile != ""
-	wsProto := "ws"
-	if tlsEnabled {
-		wsProto = "wss"
-	}
-
-	devicePort := s.agent.DevicePort
-	if devicePort == 0 {
-		devicePort = DEFAULT_DEVICE_PORT
-	}
-	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, devicePort))
-}
-
-// getClientURL returns the current ClientServer URL
-func (s *SystrayApp) getClientURL() string {
-	ips := getLocalIPs()
-	ip := "localhost"
-	if len(ips) > 0 {
-		ip = ips[0]
-	}
-
-	tlsEnabled := s.agent.CertFile != "" && s.agent.KeyFile != ""
-	wsProto := "ws"
-	if tlsEnabled {
-		wsProto = "wss"
-	}
-
-	clientPort := s.agent.DevicePort
-	if clientPort == 0 {
-		clientPort = DEFAULT_DEVICE_PORT
-	}
-	return fmt.Sprintf("%s://%s/ws", wsProto, hostPort(ip, clientPort))
-}
-
-// getBootstrapURL returns the phone-pairing page URL with the PIN
-// pre-filled so a colleague clicking it from chat lands on the QR
-// directly. Returns "" if the pairing server is disabled.
-func (s *SystrayApp) getBootstrapURL() string {
-	if s.bootstrapPort <= 0 {
-		return ""
-	}
-
-	ips := getLocalIPs()
-	ip := "localhost"
-	if len(ips) > 0 {
-		ip = ips[0]
-	}
-
-	base := fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
-	if s.bootstrap != nil {
-		return base + "?pin=" + url.QueryEscape(s.bootstrap.PIN())
-	}
-	return base
+	s.mBootstrapURL.SetTitle("Pair Phone: Not running")
 }
 
 // copyValue puts a value on the clipboard and logs what happened, which is the

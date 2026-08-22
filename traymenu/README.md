@@ -114,6 +114,24 @@ library re-adds an item to the platform menu on any state change: an unguarded
 `SetTitle` would otherwise bring back something that was removed. Use `Hide` for
 something that comes back.
 
+## Checklists
+
+The many-of counterpart. `AddAll` puts an entry at the top standing for the
+whole set, ticked exactly when nothing else is, which is how a filter menu says
+"no filter":
+
+```go
+types := traymenu.NewChecklist[string](menu.AddSubmenu("Card Type Filter"))
+types.AddAll("All Types")
+for _, t := range cardTypes {
+    types.Add(t, t)
+}
+
+types.OnChange(func(picked []string) { agent.Filter(picked) })
+```
+
+`Set` moves the ticks silently, as on `Radio`.
+
 ## Lists
 
 No supported platform can remove a menu item once it is added. A `List` takes a

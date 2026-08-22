@@ -1,9 +1,10 @@
 # Device API v2 — Research Notes
 
 Research toward freezing the current device protocol (v1) and designing its
-successor. Nothing here is decided: this is the evidence and the model that
-came out of it, written down so the design conversation starts from a fixed
-text rather than from memory.
+successor. Almost nothing here is decided: this is the evidence and the model
+that came out of it, written down so the design conversation starts from a
+fixed text rather than from memory. The one decision taken so far is in §12 —
+v0 and v1 are removed rather than deprecated.
 
 It follows [device-bridge-protocols.md](device-bridge-protocols.md) (the survey
 of prior art) and [device-bridge-plan.md](device-bridge-plan.md) (the phased
@@ -397,7 +398,94 @@ The last one is the summary: v1 is a phone protocol that other devices are
 allowed to use. v2 should be a holder-agnostic protocol that phones happen to
 be one instance of.
 
-## 12. Open questions
+## 12. Decided: v0 and v1 are removed, not deprecated
+
+**Scope: the device protocol only.** The client protocol served on the same
+port is untouched by this. It has consumers — the Control Center,
+`client/test-client.html`, and any frontend talking to the agent — and a
+different risk profile. `protocol/` holds both and the boundary is not obvious
+from the package layout, so it needs stating before any deletion sweep.
+
+### The premise, as checked
+
+- `@davi/nfc-client` is **not published to npm** (the registry returns 404), so
+  the bundled JS client has no package consumers.
+- Agent binaries have shipped publicly since **v1.0.0 (January 2026)**.
+  `v1.0.0`–`v1.0.3` are **v0-only**; the v1 dialect first ships in `v1.1.0`
+  (August 2026). `docs/api.md` has published the wire throughout.
+
+So "no consumers" is a claim about the world rather than about this repository.
+It is the product owner's call, and this section records it as taken.
+
+### Why removal rather than a deprecation window
+
+Compatibility with zero users is pure cost, and it has already distorted the
+design: §1 is largely a list of things v1 got wrong *because* it had to be
+additive — the write options collapsed to a single `Lock bool`, and the
+outcome synthesised agent-side because the response shape could not change. A
+v2 designed under the same constraint inherits the same shape.
+
+The surface is not two constants either. It is the dual-dialect
+`awaitRegistration` and `handleRegisterDevice`, `DeviceProtocolV0` and
+`NegotiateDeviceVersion`, `v0capabilities_test.go`, the JS client's
+`protocolVersion >= 1 ? 'hello' : 'registerDevice'` branching, and a section of
+`docs/api.md`.
+
+And the freeze only means something if the old dialect actually goes. v1 is
+described here, preserved in git history, and shipped in tagged releases;
+nothing is lost that cannot be recovered.
+
+### Conditions
+
+**1. Delete the versions, keep the versioning.** Phase 1.1 existed so that a
+protocol change would not need a flag day, and it would be self-defeating to
+spend that mechanism on its first use and then remove it. Keep
+`Sec-WebSocket-Protocol`, move the token to `davi-nfc-device.v2`, and change
+the default: today an absent or unrecognised subprotocol falls through to v0
+forever (`VersionFromSubprotocol` returns 0, and the first frame's type
+re-selects the dialect regardless). **That silent fall-through is the thing to
+remove**, not the mechanism around it. Absent or unknown becomes a typed
+refusal.
+
+**2. Do not delete what v0 forced us to discover.** Four things read like
+legacy scaffolding and are in fact the design the rules in §10 now require:
+
+- **Three-valued capability** (`DeclaredCapabilities` returning
+  `(caps, declared)`) exists because a v0 device says nothing about itself —
+  but it is rule 1. Keep it and generalise it.
+- **`InferTagCapabilities`** serves Cards decoded from the wire and tags that
+  are gone, not only v0 devices. Keep it; make it unreachable from live device
+  paths.
+- **`platform` is descriptive, not an admission test** (`#28`). Keep.
+- **`maxHoldMs` is advisory and never a gate.** That is the seed of hold mode
+  (§9).
+
+**3. One commit, landing with v2 — not before it, not after.** Before leaves
+the agent with no device protocol; after leaves two live paths and a standing
+temptation to keep them. It should be a real deletion: constants, structs,
+tests, the `docs/api.md` section, and the JS client rewritten as v2-only rather
+than gaining branches — its fallback logic teaches implementers the wrong
+shape.
+
+### Two things that follow
+
+**Make the refusal informative.** This is the cheap insurance in place of
+keeping v0: a device offering nothing, or offering `davi-nfc-device.v1`, gets a
+close frame naming what the agent speaks and where to read about it, rather
+than a connection that hangs or half-registers. It costs about ten lines and
+turns a mystery into a support answer for anything built against a January
+binary. It pairs with finally publishing the **device protocol version in the
+mDNS TXT record** — currently `version=1.0`, which is the agent's version, not
+the protocol's (the survey's T0 asked for this and it was never done) — so a
+headless board can discover the mismatch before it connects.
+
+**Spend the whole break budget.** If this is the one hard break, it should be
+the complete one: credential kinds, tag handles, hold mode, query verbs,
+outputs, error classes — everything in §10. A partial break needing a second
+break in six months is the worst outcome, and it is the tempting one, because
+each item looks individually deferrable.
+
+## 13. Open questions
 
 1. **Handles or UIDs?** Handles change every client-facing request shape too.
 2. **Which query verbs earn their round trip?** A *status* query looks worth
@@ -411,9 +499,7 @@ be one instance of.
    connection = one identity".
 6. **Poll-delivered events** for links that cannot hold a socket open, or
    push-only with an adapter for the constrained tier?
-7. **What exactly gets frozen** — is v1 served indefinitely (first-frame type
-   selects the dialect, so it can be), or deprecated with a date?
-8. **Deferred:** whether physical access control is a product direction. If it
+7. **Deferred:** whether physical access control is a product direction. If it
    ever is, OSDP compatibility becomes a market requirement rather than a
    technical choice, and §8 is re-opened. Explicitly not being decided now —
    the agent should serve the use cases others do not, so the rules above are

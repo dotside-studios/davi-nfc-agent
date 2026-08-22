@@ -206,6 +206,18 @@ func (m *Menu) dispatch() {
 		case <-m.done:
 			return
 		case ev := <-m.events:
+			// A click that was already queued when the menu closed. Both cases
+			// above are ready at once and the choice between them is random, so
+			// without this a handler could still run after Close returned.
+			select {
+			case <-m.done:
+				if ev.done != nil {
+					close(ev.done)
+				}
+				return
+			default:
+			}
+
 			if ev.item != nil {
 				m.deliver(ev.item)
 			}

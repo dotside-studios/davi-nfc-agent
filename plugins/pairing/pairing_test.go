@@ -90,14 +90,12 @@ func TestRotatingThePINMovesEverythingShowingIt(t *testing.T) {
 	page := pageRow(t, host)
 
 	host.Tray.Find("Pair a Phone", "Regenerate Pairing PIN").Deliver()
-	waitFor(t, "the PIN to rotate", func() bool { return !strings.Contains(label.Title(), "111111") })
 
-	if got := label.Title(); got != "Pairing PIN: 222222" {
-		t.Errorf("the menu shows %q after a rotation", got)
-	}
-	if !strings.Contains(page.Title(), "pin=222222") {
-		t.Errorf("the page entry %q still carries the old PIN", page.Title())
-	}
+	// Waiting on both, in no particular order: everything showing the old PIN
+	// has to move, and which entry the plugin redraws first is its business.
+	waitFor(t, "the rotated PIN to reach the menu", func() bool {
+		return label.Title() == "Pairing PIN: 222222" && strings.Contains(page.Title(), "pin=222222")
+	})
 }
 
 func TestCopyEntriesHandOutWhatTheMenuShows(t *testing.T) {

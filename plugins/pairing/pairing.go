@@ -11,6 +11,7 @@ package pairing
 import (
 	"errors"
 	"net/url"
+	"sync"
 
 	"github.com/dotside-studios/davi-nfc-agent/netaddr"
 	"github.com/dotside-studios/davi-nfc-agent/plugin"
@@ -47,9 +48,14 @@ type Config struct {
 type Plugin struct {
 	config Config
 
-	ctx     *plugin.Context
-	page    *traymenu.Item
-	pin     *traymenu.Item
+	ctx  *plugin.Context
+	page *traymenu.Item
+	pin  *traymenu.Item
+
+	// mu guards whether the listener is up. It is set as the plugin starts and
+	// stops, and read when the menu redraws — which happens on the tray's own
+	// goroutine, from a click that can land mid-stop.
+	mu      sync.Mutex
 	serving bool
 }
 
@@ -108,7 +114,7 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 	if err := p.config.Server.Start(); err != nil {
 		return err
 	}
-	p.serving = true
+	p.setServing(true)
 
 	p.show()
 	ctx.Logf("pairing on port %d, PIN %s", p.config.Port, p.config.Server.PIN())
@@ -120,8 +126,7 @@ func (p *Plugin) Start(ctx *plugin.Context) error {
 // build does not have.
 func (p *Plugin) Stop(*plugin.Context) error {
 	p.config.Server.Stop()
-	p.serving = false
-	p.show()
+	p.setServing(false)
 	return nil
 }
 
@@ -150,6 +155,21 @@ func (p *Plugin) open() {
 	}
 }
 
+// setServing records whether the listener is up and redraws the menu for it.
+func (p *Plugin) setServing(on bool) {
+	p.mu.Lock()
+	p.serving = on
+	p.mu.Unlock()
+
+	p.show()
+}
+
+func (p *Plugin) isServing() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.serving
+}
+
 // show redraws the menu from the pairing server as it stands: the page it is
 // answering on, and the PIN it is asking for.
 func (p *Plugin) show() {
@@ -158,7 +178,7 @@ func (p *Plugin) show() {
 	}
 
 	p.pin.SetTitle("Pairing PIN: " + p.config.Server.PIN())
-	if p.serving {
+	if p.isServing() {
 		p.page.SetTitle("Page: " + p.URL())
 		p.page.Enable()
 		return

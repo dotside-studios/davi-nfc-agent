@@ -144,9 +144,6 @@ type Config struct {
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// Reader is the reader currently open, nil before Start and after Stop.
-	Reader *nfc.NFCReader
-
 	// UnifiedServer is the listener the device and client endpoints are served
 	// from, routing each /ws connection to the device driver or the client
 	// server. It is the one the caller supplied, held for the agent's whole
@@ -162,8 +159,9 @@ type Agent struct {
 	// and cleared on stop.
 	serving atomic.Pointer[endpoints]
 
-	// reader mirrors Reader for the handlers, which read it from their own
-	// goroutines and must not take the lifecycle lock to do so.
+	// reader is the reader currently open, nil before Start and after Stop.
+	// Atomic because the handlers read it from their own goroutines, and Stop
+	// holds the lifecycle lock while the server waits for them to finish.
 	reader     atomic.Pointer[nfc.NFCReader]
 	Router     *tagrouter.Router
 	DeviceAuth *server.DeviceAuth
@@ -202,8 +200,13 @@ type Agent struct {
 	pumpCancel        context.CancelFunc
 	onTag             []func(nfc.NFCData)
 	clientHooks       []func()
-	devicePath        string
 	serverRestartChan chan struct{} // Signals when servers are restarted
+
+	// devicePath is the reader Start resolved to, kept so a restart reopens the
+	// same one. Atomic for the same reason as reader: the console and the tray
+	// ask for it through CurrentDevicePath from their own goroutines while a
+	// start is writing it.
+	devicePath atomic.Pointer[string]
 }
 
 // New builds an agent from cfg. The configuration is copied, so later changes
@@ -321,6 +324,11 @@ func (a *Agent) RequirePairedDevice() bool { return a.requirePairedDevice }
 // line and cannot be lowered while this agent runs.
 func (a *Agent) RequirePairedDeviceLocked() bool { return a.requirePairedLocked }
 
+// Reader is the reader currently open, nil before Start and after Stop. Safe
+// to call from any goroutine, though the answer can go stale the moment it is
+// returned: a caller acting on it should hold the value it read.
+func (a *Agent) Reader() *nfc.NFCReader { return a.reader.Load() }
+
 // ReaderFeedback reports whether the reader answers for its own work with its
 // LED and buzzer.
 func (a *Agent) ReaderFeedback() bool { return a.readerFeedback }
@@ -358,7 +366,7 @@ func (a *Agent) startLocked(devicePath string) error {
 	}
 
 	// Store device path for potential restarts
-	a.devicePath = devicePath
+	a.devicePath.Store(&devicePath)
 
 	// Create NFC reader with manager (supports both hardware and smartphone devices)
 	nfcReader, err := nfc.NewNFCReader(devicePath, a.manager, 5*time.Second)
@@ -367,7 +375,6 @@ func (a *Agent) startLocked(devicePath string) error {
 		return err
 	}
 
-	a.Reader = nfcReader
 	a.reader.Store(nfcReader)
 	nfcReader.SetFeedback(a.readerFeedback)
 
@@ -384,7 +391,7 @@ func (a *Agent) startLocked(devicePath string) error {
 // lifecycle lock and owns the state transition; see Stop. It is safe to call on
 // a partly started agent, which is what makes an aborted Start recoverable.
 func (a *Agent) stopLocked() {
-	if a.Reader == nil && a.serving.Load() == nil {
+	if a.reader.Load() == nil && a.serving.Load() == nil {
 		return
 	}
 
@@ -399,9 +406,8 @@ func (a *Agent) stopLocked() {
 
 	a.serving.Store(nil)
 
-	if a.Reader != nil {
-		a.Reader.Stop()
-		a.Reader = nil
+	if reader := a.reader.Load(); reader != nil {
+		reader.Stop()
 		a.reader.Store(nil)
 	}
 
@@ -486,12 +492,13 @@ func (a *Agent) stopServers() {
 
 // startServers starts the HTTP/WebSocket servers.
 func (a *Agent) startServers() error {
-	if a.Reader == nil {
+	reader := a.reader.Load()
+	if reader == nil {
 		return errors.New("reader not initialized")
 	}
 
 	// Routes each client request to whichever source holds the tag it names.
-	a.Router = tagrouter.New(tagrouter.Config{Reader: a.Reader, Devices: a.remoteOps})
+	a.Router = tagrouter.New(tagrouter.Config{Reader: reader, Devices: a.remoteOps})
 
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.apiSecret,
@@ -507,8 +514,8 @@ func (a *Agent) startServers() error {
 	// channel between them any more, so there is nothing to drain and nothing
 	// to remember to start.
 	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
-	a.Reader.Start()
-	go a.pumpReader(a.pumpCtx, a.Reader, a.ClientServer)
+	reader.Start()
+	go a.pumpReader(a.pumpCtx, reader, a.ClientServer)
 	if a.remoteScans != nil {
 		go pumpDevices(a.pumpCtx, a.remoteScans, a.ClientServer)
 	}
@@ -594,10 +601,13 @@ func (a *Agent) IsCardTypeAllowed(cardType string) bool {
 // CurrentDevicePath returns the current device path from the reader.
 // Returns empty string if no reader is active.
 func (a *Agent) CurrentDevicePath() string {
-	if a.Reader == nil {
-		return a.devicePath // Return stored path if reader not started
+	if reader := a.reader.Load(); reader != nil {
+		return reader.DevicePath()
 	}
-	return a.Reader.DevicePath()
+	if stored := a.devicePath.Load(); stored != nil {
+		return *stored // The path a previous start resolved to
+	}
+	return ""
 }
 
 // checkOrigin admits or rejects a device upgrade by Origin, preferring the
@@ -610,9 +620,6 @@ func (a *Agent) checkOrigin() func(r *http.Request) bool {
 	return server.CheckOrigin(a.allowedOrigins)
 }
 
-// originPolicy returns the live allowlist as an origin policy, or nil to fall
-// back to the static AllowedOrigins list. Returning a typed nil would satisfy
-// the interface and defeat that fallback, so the check is explicit.
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
@@ -694,6 +701,9 @@ func (a *Agent) tokenVerifier() server.TokenVerifier {
 	return a.devices
 }
 
+// originPolicy returns the live allowlist as an origin policy, or nil to fall
+// back to the static AllowedOrigins list. Returning a typed nil would satisfy
+// the interface and defeat that fallback, so the check is explicit.
 func (a *Agent) originPolicy() server.OriginPolicy {
 	if a.origins == nil {
 		return nil

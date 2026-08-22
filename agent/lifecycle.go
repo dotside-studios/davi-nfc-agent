@@ -169,7 +169,7 @@ func (a *Agent) Start(devicePath string) error {
 	a.lifecycleMu.Lock()
 
 	if State(a.state.Load()) != StateStopped {
-		reader := a.Reader
+		reader := a.reader.Load()
 		a.lifecycleMu.Unlock()
 		if reader != nil && devicePath == reader.DevicePath() {
 			a.logger.Printf("NFC reader already running on device: %s", devicePath)

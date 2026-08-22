@@ -9,8 +9,8 @@ func (agent *Agent) ApplySettings(s settings.Settings) {
 		return
 	}
 
-	if agent.Reader != nil {
-		agent.Reader.SetMode(settings.ParseMode(s.Mode))
+	if reader := agent.Reader(); reader != nil {
+		reader.SetMode(settings.ParseMode(s.Mode))
 	}
 
 	agent.cardTypes.clear()

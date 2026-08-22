@@ -43,6 +43,32 @@ func TestConcurrentLifecycle(t *testing.T) {
 	}
 }
 
+// TestReaderIsSafeToReadWhileTheLifecycleMoves covers the other half of the
+// lock: the tray, the console and ApplySettings ask for the reader from their
+// own goroutines while Start and Stop replace it. TestConcurrentLifecycle only
+// ever calls Start and Stop, so a reader read concurrently with them went
+// unexercised, which is how an exported Reader field survived beside the atomic
+// it was mirrored from, and how devicePath kept being read without the lock
+// that guards its write.
+func TestReaderIsSafeToReadWhileTheLifecycleMoves(t *testing.T) {
+	a := runningAgent(t, 9469)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(4)
+		go func() { defer wg.Done(); _ = a.Start("") }()
+		go func() { defer wg.Done(); a.Stop() }()
+		go func() { defer wg.Done(); _ = a.Reader() }()
+		go func() { defer wg.Done(); _ = a.CurrentDevicePath() }()
+	}
+	wg.Wait()
+
+	a.Stop()
+	if got := a.Reader(); got != nil {
+		t.Errorf("Reader() = %v after Stop, want nil", got)
+	}
+}
+
 // TestStateTransitions pins what a hook observes.
 func TestStateTransitions(t *testing.T) {
 	a := runningAgent(t, 9468)
@@ -194,7 +220,7 @@ func TestComponentFailureAbortsStart(t *testing.T) {
 	if !good.stopped {
 		t.Error("a component started before the failure should be stopped again")
 	}
-	if a.Reader != nil {
+	if a.Reader() != nil {
 		t.Error("a failed Start must not leave a reader open")
 	}
 }

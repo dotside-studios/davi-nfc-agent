@@ -533,11 +533,11 @@ func (s *App) StopAgent() {
 
 // handleModeSwitch switches the reader mode
 func (s *App) handleModeSwitch(mode nfc.ReaderMode, modeName string) {
-	if s.agent.Reader == nil {
+	if s.agent.Reader() == nil {
 		return
 	}
 
-	s.agent.Reader.SetMode(mode)
+	s.agent.Reader().SetMode(mode)
 	s.mModeMenu.SetTitle("Mode: " + modeName)
 
 	// Update checkboxes
@@ -662,7 +662,7 @@ func (s *App) updateDeviceList() {
 	currentDevice := s.agent.CurrentDevicePath()
 
 	// If agent is running but no device selected, auto-select first available
-	if s.agent.Reader != nil && currentDevice == "" && len(devices) > 0 {
+	if s.agent.Reader() != nil && currentDevice == "" && len(devices) > 0 {
 		log.Printf("[systray] Auto-selecting discovered device: %s", devices[0])
 		s.SwitchDevice(devices[0])
 		currentDevice = s.agent.CurrentDevicePath()

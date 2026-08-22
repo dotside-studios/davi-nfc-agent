@@ -26,7 +26,7 @@ var _ webui.Host = (*host)(nil)
 
 // ---- identity and lifecycle ----
 
-func (h *host) Running() bool     { return h.agent.Reader != nil }
+func (h *host) Running() bool     { return h.agent.Reader() != nil }
 func (h *host) ConfigDir() string { return h.agent.ConfigDir() }
 
 func (h *host) StartAgent() error {
@@ -53,10 +53,11 @@ func (h *host) RestartServers() error { return h.agent.RestartServers() }
 // ---- reader ----
 
 func (h *host) ReaderMode() string {
-	if h.agent.Reader == nil {
+	reader := h.agent.Reader()
+	if reader == nil {
 		return settings.ModeReadWrite
 	}
-	return settings.FormatMode(h.agent.Reader.GetMode())
+	return settings.FormatMode(reader.GetMode())
 }
 
 func (h *host) DevicePath() string { return h.agent.CurrentDevicePath() }

@@ -278,6 +278,29 @@ ws.send(JSON.stringify({
 
 The agent's modular NFC layer supports adding custom readers and tag types beyond the built-in PC/SC and smartphone support. See [Extending NFC Support](docs/extending-nfc-support.md) to integrate your own hardware or protocols.
 
+An application built on this agent — a turnstile, a kiosk, a badge desk — can
+also put itself on the tray: its own menu, its own address under **Server URLs**,
+and both kept in step with what the agent is doing. A plugin says what it is and
+is handed everything it needs, without touching the tray library:
+
+```go
+func (p *Plugin) Describe() surface.Info {
+    return surface.Info{ID: "turnstile", Title: "Turnstile"}
+}
+
+func (p *Plugin) Attach(host surface.Host) error {
+    held := host.Menu().AddCheckbox("Hold Gate Open", false)
+    held.OnClick(func() { p.gate.Hold(held.Toggle()) })
+
+    host.Watch(func(state surface.State) { p.showBadge(state.Card) })
+    return nil
+}
+
+func init() { surface.Register(&Plugin{gate: OpenGate()}) }
+```
+
+See [Plugins](docs/plugins.md). The agent's own pairing menu is written this way.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, cross-compilation, and guidelines.

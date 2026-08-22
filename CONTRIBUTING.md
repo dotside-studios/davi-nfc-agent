@@ -119,6 +119,7 @@ davi-nfc-agent/
 │   ├── deviceserver/    # Auth, and routing between reader and device
 │   └── clientserver/    # Client connection handling logic
 ├── wsconn/              # Write-safe WebSocket wrapper shared by the above
+├── surface/             # Plugin surface: how a feature adds its own tray menu
 ├── traymenu/            # Declarative tray menus over fyne.io/systray
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
@@ -142,6 +143,12 @@ davi-nfc-agent/
   - **DeviceServer**: Handles NFC devices and hardware readers
   - **ClientServer**: Handles client applications
 - Bridge component connects the device and client handlers in-process
+
+**Plugin Surface** (`surface/`)
+- How a feature puts itself on the tray: its own menu, its own address under
+  Server URLs, and a snapshot of the agent it can follow without polling
+- The pairing menu is a plugin, and so is anything a consumer registers
+- See [docs/plugins.md](docs/plugins.md) and [surface/README.md](surface/README.md)
 
 **Tray Menu** (`traymenu/`)
 - Declarative menu building on top of `fyne.io/systray`, with clicks delivered
@@ -195,6 +202,12 @@ refactor: simplify device manager interface
 ## Adding NFC Support
 
 To add support for new NFC readers or tag types, see [docs/extending-nfc-support.md](docs/extending-nfc-support.md).
+
+## Adding a Feature to the Tray
+
+A feature with a menu of its own — pairing, or an application built on this
+agent — registers as a plugin rather than being drawn by the tray package. See
+[docs/plugins.md](docs/plugins.md).
 
 ## Reporting Issues
 

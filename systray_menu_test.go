@@ -11,6 +11,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
+	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -28,15 +29,18 @@ func newTestTray(t *testing.T, agent *Agent) (*SystrayApp, *traymenu.Fake) {
 	t.Helper()
 
 	fake := traymenu.NewFake()
-	app := newSystrayApp(agent, "", 0, nil, fake)
+	app := newSystrayApp(agent, "", fake)
 	t.Cleanup(app.menu.Close)
 	app.setupUI()
 	return app, fake
 }
 
-// titles lists the top level as the user reads it, separators included. The
-// control center entry is left out: a -tags nowebui build has no console, so
-// the entry is not there to read. TestConsoleEntry covers it instead.
+// titles lists the top level as the user reads it, separators included.
+//
+// Hidden entries are left out, which is what makes this readable across builds:
+// a -tags nowebui build has no control center entry at all, one with nothing
+// paired hides an action, and the menus held open for plugins are empty until
+// one takes them. TestConsoleEntry and TestPluginMenu cover those on their own.
 func titles(fake *traymenu.Fake) []string {
 	var out []string
 	for _, item := range fake.Items() {
@@ -44,7 +48,7 @@ func titles(fake *traymenu.Fake) []string {
 			out = append(out, "----")
 			continue
 		}
-		if item.Title() == "Open Control Center" {
+		if !item.Visible() {
 			continue
 		}
 		out = append(out, item.Title())
@@ -53,7 +57,12 @@ func titles(fake *traymenu.Fake) []string {
 }
 
 func TestMenuLayout(t *testing.T) {
-	_, fake := newTestTray(t, newTestAgent())
+	agent := newTestAgent()
+	// With certificates of its own to manage, so the trust entry is on the menu
+	// to be read in place rather than hidden with nothing to install.
+	agent.TLSManager = tls.NewManager(t.TempDir())
+
+	_, fake := newTestTray(t, agent)
 
 	want := []string{
 		"Starting...",
@@ -105,11 +114,10 @@ func TestStatusAndCardLabelsAreNotClickable(t *testing.T) {
 	}
 }
 
-func TestPairingAndSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
+func TestSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
 	_, fake := newTestTray(t, newTestAgent())
 
-	for _, title := range []string{"Pairing PIN: --", "  Copy Pairing PIN", "  Regenerate Pairing PIN",
-		"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
+	for _, title := range []string{"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
 		item := fake.Find("Server URLs", title)
 		if item == nil {
 			t.Fatalf("%q is missing from the URLs submenu", title)
@@ -117,6 +125,12 @@ func TestPairingAndSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
 		if item.Visible() {
 			t.Errorf("%q is shown even though it has nothing behind it", title)
 		}
+	}
+
+	// Pairing is a plugin, and none is attached here, so the menu should not be
+	// offering something with nothing behind it.
+	if item := fake.Find("Pair a Phone"); item != nil && item.Visible() {
+		t.Error("the pairing menu is on the tray with no pairing server behind it")
 	}
 }
 
@@ -428,28 +442,64 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 	}
 }
 
-func TestCopiedURLsAreTheOnesOnDisplay(t *testing.T) {
-	app, _ := newTestTray(t, newTestAgent())
-	app.updateURLs()
+func TestPublishedAddressesAreWhatTheMenuCopies(t *testing.T) {
+	agent := newTestAgent()
+	app, fake := newTestTray(t, agent)
 
-	urls := app.urls()
+	// What the servers publish as they come up.
+	agent.publishEndpoints()
+
+	client, device := agent.serverURLs()
 
 	// The device entry is what a device connects to, mode and all. Copying
 	// something else would hand out a client URL under a device label.
-	if !strings.HasSuffix(urls.device, "/ws?mode=device") {
-		t.Errorf("device URL = %q, want it to carry the device mode", urls.device)
+	if !strings.HasSuffix(device, "/ws?mode=device") {
+		t.Errorf("device URL = %q, want it to carry the device mode", device)
 	}
-	if got, want := app.mDeviceURL.Title(), "Device: "+urls.device; got != want {
-		t.Errorf("device label = %q, want %q", got, want)
+
+	rows := app.endpoints.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("the menu shows %d addresses, want the two the servers published", len(rows))
 	}
-	if got, want := app.mClientURL.Title(), "Client: "+urls.client; got != want {
-		t.Errorf("client label = %q, want %q", got, want)
+	if got, want := rows[0].Title, "Device: "+device; got != want {
+		t.Errorf("device row = %q, want %q", got, want)
 	}
-	if urls.bootstrap != "" {
-		t.Errorf("pairing URL = %q, want none with the pairing server off", urls.bootstrap)
+	if got, want := rows[1].Title, "Client: "+client; got != want {
+		t.Errorf("client row = %q, want %q", got, want)
 	}
-	if got := app.mBootstrapURL.Title(); got != "Pair Phone: Disabled" {
-		t.Errorf("pairing label = %q", got)
+
+	// A row is the address and its copy entry in one, so what is copied cannot
+	// drift from what is read.
+	if got := rows[0].Value.URL; got != device {
+		t.Errorf("the device row copies %q, want %q", got, device)
+	}
+
+	if item := fake.Find("Server URLs", "Device: "+device); item == nil {
+		t.Error("the device address is not on the menu")
+	}
+}
+
+func TestAnAddressPublishedLaterAppears(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
+
+	// What a plugin serving something of its own does. The tray is not told
+	// about it and needs no change to show it.
+	agent.Endpoints().Set(surface.Endpoint{
+		ID:    "turnstile",
+		Label: "Turnstile",
+		URL:   "http://localhost:8080/",
+	})
+
+	rows := app.endpoints.Rows()
+	if len(rows) != 1 || rows[0].Title != "Turnstile: http://localhost:8080/" {
+		t.Fatalf("the menu shows %v, want the address the plugin published", rows)
+	}
+
+	// And an address that stops being served says so rather than disappearing.
+	agent.Endpoints().SetURL("turnstile", "")
+	if rows := app.endpoints.Rows(); len(rows) != 1 || rows[0].Title != "Turnstile: Not running" {
+		t.Fatalf("a withdrawn address reads as %v", rows)
 	}
 }
 
@@ -467,9 +517,9 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 		t.Fatalf("stopped: status %q, start enabled %v, stop enabled %v",
 			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
 	}
-	for _, item := range []*traymenu.Item{app.mDeviceURL, app.mClientURL, app.mBootstrapURL} {
-		if !strings.HasSuffix(item.Title(), "Not running") {
-			t.Errorf("a stopped agent still shows %q", item.Title())
+	for _, row := range app.endpoints.Rows() {
+		if !strings.HasSuffix(row.Title, "Not running") {
+			t.Errorf("a stopped agent still shows %q", row.Title)
 		}
 	}
 }

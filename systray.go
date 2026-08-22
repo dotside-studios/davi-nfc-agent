@@ -4,19 +4,17 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
+	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -25,46 +23,16 @@ import (
 // [traymenu.NewList].
 const readerSlotCount = 12
 
-// getLocalIPs returns local non-loopback IP addresses (both IPv4 and IPv6 globals).
-// IPv4 addresses come first so callers that pick ips[0] get the most broadly
-// compatible address. Link-local and unspecified addresses are skipped.
-func getLocalIPs() []string {
-	var v4, v6 []string
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil
-	}
-
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		ip := ipNet.IP
-		if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			continue
-		}
-		if ip.To4() != nil {
-			v4 = append(v4, ip.String())
-		} else {
-			v6 = append(v6, ip.String())
-		}
-	}
-	return append(v4, v6...)
-}
-
-// hostPort joins a host and port using bracket notation for IPv6 literals.
-func hostPort(host string, port int) string {
-	return net.JoinHostPort(host, strconv.Itoa(port))
-}
+// endpointSlotCount bounds the addresses shown under Server URLs. The pool is
+// fixed and reused, as everywhere else the contents change at runtime: a row
+// added on a refresh would land under the API secret entries below it.
+const endpointSlotCount = 8
 
 // SystrayApp manages the system tray interface for the NFC agent
 type SystrayApp struct {
 	agent         *Agent
 	initialDevice string
-	bootstrapPort int
-	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
-	console       *Console             // nil if the control center is not built in
+	console       *Console // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
 	// are added, so there is no central event loop to keep in step with them.
@@ -77,12 +45,11 @@ type SystrayApp struct {
 	mStart    *traymenu.Item
 	mStop     *traymenu.Item
 
-	// URL menu items. Only the ones relabelled later are held.
-	mDeviceURL    *traymenu.Item
-	mClientURL    *traymenu.Item
-	mBootstrapURL *traymenu.Item
-	mPairingPIN   *traymenu.Item
-	mAPISecret    *traymenu.Item
+	// Addresses. The rows come from the agent's endpoint register rather than
+	// from the tray, so a feature that serves something appears here without
+	// the tray knowing what it is.
+	endpoints  *traymenu.List[surface.Endpoint]
+	mAPISecret *traymenu.Item
 
 	// Reader selection
 	readers *traymenu.List[string]
@@ -113,23 +80,38 @@ type SystrayApp struct {
 	// settings is the store the tray writes its toggles back to. Nil when the
 	// agent has no config directory to persist to.
 	settings *settings.Store
+
+	// Plugins. The registry is what the tray attaches at startup, the slots are
+	// the top-level menus reserved for them, and the state is what they watch.
+	// See systray_plugins.go.
+	plugins      *surface.Registry
+	pluginMu     sync.Mutex
+	attached     []surface.Plugin
+	pluginSlots  []*traymenu.Item
+	pluginsTaken int
+
+	// publishMu serializes the snapshots handed to the plugins, stateMu guards
+	// the last one so a plugin can read it from a handler.
+	publishMu    sync.Mutex
+	stateMu      sync.Mutex
+	state        surface.State
+	stateChanged traymenu.Signal[surface.State]
 }
 
-// NewSystrayApp creates a new systray application on the real tray. bootstrap
-// may be nil if the pairing server is disabled (e.g. -bootstrap-port 0); the
-// pairing PIN menu item is hidden in that case.
-func NewSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer) *SystrayApp {
-	return newSystrayApp(agent, initialDevice, bootstrapPort, bootstrap, traymenu.Fyne())
+// NewSystrayApp creates a new systray application on the real tray.
+//
+// The tray knows about the agent and nothing else. Pairing, and anything else a
+// build adds, reach the menu as plugins through AttachPlugins.
+func NewSystrayApp(agent *Agent, initialDevice string) *SystrayApp {
+	return newSystrayApp(agent, initialDevice, traymenu.Fyne())
 }
 
 // newSystrayApp builds the tray on a given menu driver, so a test can drive the
 // menu without a desktop.
-func newSystrayApp(agent *Agent, initialDevice string, bootstrapPort int, bootstrap *tls.BootstrapServer, driver traymenu.Driver) *SystrayApp {
+func newSystrayApp(agent *Agent, initialDevice string, driver traymenu.Driver) *SystrayApp {
 	return &SystrayApp{
 		agent:         agent,
 		initialDevice: initialDevice,
-		bootstrapPort: bootstrapPort,
-		bootstrap:     bootstrap,
 		menu:          traymenu.New(driver),
 	}
 }
@@ -177,6 +159,8 @@ func (s *SystrayApp) syncSettingsToMenu(next settings.Settings) {
 	if s.mReaderFeedback != nil {
 		s.mReaderFeedback.SetChecked(next.ReaderFeedback)
 	}
+
+	s.publishState()
 }
 
 // disableHeldMenus greys out the menus for settings the launcher holds. They
@@ -237,6 +221,9 @@ func (s *SystrayApp) onReady() {
 
 // onExit is called when the systray is exiting
 func (s *SystrayApp) onExit() {
+	// Before the agent goes: a plugin holding a listener of its own is closing
+	// it against an agent that is still there.
+	s.detachPlugins()
 	s.agent.Shutdown()
 }
 
@@ -276,6 +263,10 @@ func (s *SystrayApp) setupUI() {
 	// Certificate trust, the other half of what a browser needs.
 	s.setupTrustMenu()
 
+	// Where a plugin's own menu goes: beside the agent's features rather than
+	// under Quit, which is where anything added later would land.
+	s.reservePluginSlots()
+
 	s.menu.AddSeparator()
 
 	s.setupConsoleMenu()
@@ -304,53 +295,32 @@ func (s *SystrayApp) setupUI() {
 
 	s.menu.AddSeparator()
 	s.menu.Add("Quit", traymenu.Tooltip("Quit the application"), traymenu.OnClick(s.menu.Quit))
+
+	// Last, so a plugin attaches to a menu that is already whole: it may read
+	// the state, publish an address, or put an entry of its own in place from
+	// the moment it is handed its host.
+	s.publishState()
+	s.attachPlugins()
 }
 
-// setupURLsMenu builds the submenu of addresses and their copy entries.
+// setupURLsMenu builds the submenu of addresses.
+//
+// What is in it comes from the agent's endpoint register, not from here. The
+// servers publish theirs as they start, the pairing plugin publishes its page,
+// and a consumer's plugin serving something of its own is listed beside them
+// without this function being told about it. Clicking a row copies it, which is
+// what the separate copy entries here used to be for.
 func (s *SystrayApp) setupURLsMenu() {
 	urls := s.menu.AddSubmenu("Server URLs", traymenu.Tooltip("Server addresses"))
 
-	s.mDeviceURL = urls.Add("Device: Not running", traymenu.Tooltip("DeviceServer WebSocket URL"), traymenu.Disabled())
-	urls.Add("  Copy Device URL",
-		traymenu.Tooltip("Copy DeviceServer URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("DeviceServer URL", s.urls().device) }),
-	)
+	s.endpoints = traymenu.NewList[surface.Endpoint](urls, endpointSlotCount)
+	s.endpoints.OnActivate(func(row traymenu.Row[surface.Endpoint]) {
+		s.copyValue(row.Value.Label+" URL", row.Value.URL)
+	})
 
-	s.mClientURL = urls.Add("Client: Not running", traymenu.Tooltip("ClientServer URL"), traymenu.Disabled())
-	urls.Add("  Copy Client URL",
-		traymenu.Tooltip("Copy ClientServer URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("ClientServer URL", s.urls().client) }),
-	)
-
-	s.mBootstrapURL = urls.Add("Pair Phone: Not running", traymenu.Tooltip("Phone-pairing page URL"), traymenu.Disabled())
-	urls.Add("  Copy Pairing URL",
-		traymenu.Tooltip("Copy phone-pairing URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("phone-pairing URL", s.urls().bootstrap) }),
-	)
-
-	// The PIN entries only mean anything while the pairing server is running.
-	noPairing := s.bootstrap == nil
-	s.mPairingPIN = urls.Add("Pairing PIN: --",
-		traymenu.Tooltip("PIN required when pairing a phone"),
-		traymenu.Disabled(),
-		traymenu.HiddenIf(noPairing),
-	)
-	urls.Add("  Copy Pairing PIN",
-		traymenu.Tooltip("Copy 6-digit pairing PIN to clipboard"),
-		traymenu.HiddenIf(noPairing),
-		traymenu.OnClick(func() {
-			if s.bootstrap != nil {
-				s.copyValue("pairing PIN", s.bootstrap.PIN())
-			}
-		}),
-	)
-	urls.Add("  Regenerate Pairing PIN",
-		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
-		traymenu.HiddenIf(noPairing),
-		traymenu.OnClick(s.handleRotatePIN),
-	)
-
-	// API secret entries, only shown if a secret is configured.
+	// API secret entries, only shown if a secret is configured. The secret is
+	// not an address, but it is the other half of what a device needs to be let
+	// in, and this is where an operator goes to hand a device its details.
 	noSecret := s.agent.APISecret == ""
 	s.mAPISecret = urls.Add("API Secret: hidden",
 		traymenu.Tooltip("Required from non-loopback phones/clients"),
@@ -367,6 +337,44 @@ func (s *SystrayApp) setupURLsMenu() {
 		traymenu.HiddenIf(noSecret),
 		traymenu.OnClick(s.handleRotateAPISecret),
 	)
+
+	// Redrawn whenever something is published or withdrawn, so an address that
+	// changes with a restart, or a PIN rotation, does not wait for a click.
+	s.agent.Endpoints().OnChange(func([]surface.Endpoint) { s.refreshURLsMenu() })
+	s.refreshURLsMenu()
+}
+
+// refreshURLsMenu redraws the addresses from the register.
+func (s *SystrayApp) refreshURLsMenu() {
+	if s.endpoints == nil {
+		return
+	}
+
+	list := s.agent.Endpoints().List()
+	rows := make([]traymenu.Row[surface.Endpoint], 0, len(list))
+	for _, endpoint := range list {
+		row := traymenu.Row[surface.Endpoint]{
+			Value:   endpoint,
+			Title:   endpoint.Label + ": " + endpoint.URL,
+			Tooltip: endpoint.Tooltip,
+		}
+		if row.Tooltip == "" {
+			// A row is its own copy entry, so an address that said nothing
+			// about itself still says what clicking it does.
+			row.Tooltip = "Click to copy"
+		}
+		if !endpoint.Running() {
+			// The label stays: a server that is down is worth reading as down,
+			// and it keeps its place for when it comes back.
+			row.Title = endpoint.Label + ": Not running"
+			row.Tooltip = "Nothing is serving this address"
+		}
+		rows = append(rows, row)
+	}
+
+	if dropped := s.endpoints.Set(rows); dropped > 0 {
+		log.Printf("[systray] %d more addresses are published than the menu can show", dropped)
+	}
 }
 
 // setupDeviceMenu builds the reader picker.
@@ -458,6 +466,7 @@ func (s *SystrayApp) startCardInfoUpdater() {
 			}
 
 			uid, cardType := s.getCardInfo(card)
+			moved := uid != lastUID || cardType != lastType
 
 			if uid != lastUID {
 				s.updateCardUID(uid)
@@ -467,6 +476,12 @@ func (s *SystrayApp) startCardInfoUpdater() {
 			if cardType != lastType {
 				s.updateCardType(cardType)
 				lastType = cardType
+			}
+
+			// A card arriving or leaving is the change a consumer's plugin is
+			// most likely to be waiting for, so it is reported as one.
+			if moved {
+				s.publishState()
 			}
 		}
 	}()
@@ -479,6 +494,7 @@ func (s *SystrayApp) startServerRestartListener() {
 		for range s.agent.ServerRestarts() {
 			log.Printf("[systray] Server restart detected, updating the menu")
 			s.updateURLs()
+			s.publishState()
 
 			// CAInstalled is a look at the filesystem, not a decision taken
 			// once: a config directory that loses its CA needs the offer to
@@ -514,6 +530,7 @@ func (s *SystrayApp) showRunning() {
 	s.updateURLs()
 	s.mStart.Disable()
 	s.mStop.Enable()
+	s.publishState()
 }
 
 // showStopped puts the menu into the state of an agent that is not running,
@@ -523,18 +540,7 @@ func (s *SystrayApp) showStopped(status string) {
 	s.clearURLs()
 	s.mStart.Enable()
 	s.mStop.Disable()
-}
-
-// handleRotatePIN issues a fresh pairing PIN, which invalidates the URLs that
-// carried the old one.
-func (s *SystrayApp) handleRotatePIN() {
-	if s.bootstrap == nil {
-		return
-	}
-
-	fresh := s.bootstrap.RotatePIN()
-	log.Printf("[systray] Pairing PIN rotated to %s", fresh)
-	s.updateURLs()
+	s.publishState()
 }
 
 // handleRotateAPISecret issues a fresh API secret; every phone must handshake
@@ -688,64 +694,10 @@ func (s *SystrayApp) updateCardType(cardType string) {
 	}
 }
 
-// agentURLs are the addresses the menu shows and copies. They are built
-// together so that what an entry copies is what the entry above it reads.
-type agentURLs struct {
-	device    string
-	client    string
-	bootstrap string // empty when the pairing server is disabled
-}
-
-// urls builds the addresses from the agent's current configuration.
-func (s *SystrayApp) urls() agentURLs {
-	ip := "localhost"
-	if ips := getLocalIPs(); len(ips) > 0 {
-		ip = ips[0]
-	}
-
-	scheme := "ws"
-	if s.agent.CertFile != "" && s.agent.KeyFile != "" {
-		scheme = "wss"
-	}
-	// The port being served, not the one configured. These URLs are copied and
-	// pasted into a device, so one naming an unbound port is worse than none.
-	port := s.agent.ServingPort()
-	if port == 0 {
-		port = DEFAULT_DEVICE_PORT
-	}
-
-	// Devices and clients share the single agent port. Devices connect with
-	// ?mode=device; clients use plain /ws.
-	client := fmt.Sprintf("%s://%s/ws", scheme, hostPort(ip, port))
-	urls := agentURLs{device: client + "?mode=device", client: client}
-
-	// The pairing page is always HTTP, and carries the PIN so a link clicked
-	// from chat goes straight through.
-	if s.bootstrapPort > 0 {
-		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
-		if s.bootstrap != nil {
-			urls.bootstrap += "?pin=" + url.QueryEscape(s.bootstrap.PIN())
-		}
-	}
-	return urls
-}
-
-// updateURLs updates all server URL displays
+// updateURLs brings the addresses and the API secret label back in step with
+// what the agent is serving.
 func (s *SystrayApp) updateURLs() {
-	urls := s.urls()
-
-	s.mDeviceURL.SetTitle("Device: " + urls.device)
-	s.mClientURL.SetTitle("Client: " + urls.client)
-
-	if urls.bootstrap == "" {
-		s.mBootstrapURL.SetTitle("Pair Phone: Disabled")
-	} else {
-		s.mBootstrapURL.SetTitle("Pair Phone: " + urls.bootstrap)
-	}
-	if s.bootstrap != nil {
-		s.mPairingPIN.SetTitle("Pairing PIN: " + s.bootstrap.PIN())
-	}
-
+	s.refreshURLsMenu()
 	s.updateAPISecretLabel(s.agent.APISecret)
 }
 
@@ -765,11 +717,11 @@ func (s *SystrayApp) updateAPISecretLabel(secret string) {
 	s.mAPISecret.SetTitle("API Secret: " + preview)
 }
 
-// clearURLs resets all URL displays to "Not running"
+// clearURLs redraws the addresses of an agent that has stopped. The servers
+// withdrew theirs on the way down, so this is the redraw rather than the
+// change: what is published is the servers' business, not the tray's.
 func (s *SystrayApp) clearURLs() {
-	s.mDeviceURL.SetTitle("Device: Not running")
-	s.mClientURL.SetTitle("Client: Not running")
-	s.mBootstrapURL.SetTitle("Pair Phone: Not running")
+	s.refreshURLsMenu()
 }
 
 // copyValue puts a value on the clipboard and logs what happened, which is the

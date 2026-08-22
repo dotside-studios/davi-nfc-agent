@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A feature can put itself on the tray.** There is one tray icon per process,
+  owned by the code that built it, so every menu the agent had grew inside the
+  tray package: the servers' addresses, the pairing PIN and the paired devices
+  are all drawn by code that knows what each of them is. A feature added
+  afterwards had two ways in, and neither was good — edit the tray package, or
+  do without a menu. A consumer building a turnstile on this agent had no way in
+  at all.
+
+  `surface` is the plugin surface. A feature says what it is, is handed a
+  `Host`, and puts its own entries on the menu through that: a
+  `traymenu.Container` of its own, a register of addresses, a snapshot of what
+  the agent is doing and a signal raised whenever that changes, and the few
+  things a menu entry needs outside the menu — the clipboard, a browser, the
+  log. Nothing in it reaches `fyne.io/systray`, and a plugin registered from an
+  init function in a consumer's own package needs no change to the agent.
+
+  A plugin does not poll and is never redrawn wholesale: it keeps the items it
+  created and changes them when the state says the agent has moved, which is
+  reported wherever the tray already redraws itself — the agent starting or
+  stopping, a card arriving or leaving, a settings change from either surface, a
+  device pairing, a restart of the listeners. `surface.FakeHost` drives one in a
+  test with no desktop involved, as `traymenu.Fake` does for the menu itself.
+  See [docs/plugins.md](docs/plugins.md)
+
 - **The reader can say what it just did.** Someone holding a card at the reader
   had no way to tell a completed scan from one that never happened: the agent
   said so on a screen they were not looking at. **Flash and Beep on Scan** in
@@ -27,6 +51,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered per connection, and a reader that answers on neither is left alone
 
 ### Changed
+
+- **The servers publish their addresses, and the tray draws what is published.**
+  The tray built the device, client and pairing URLs itself, from the agent's
+  fields, and drew a fixed entry and a matching copy entry for each. Nothing
+  else could appear there: a feature serving something of its own had no way
+  onto a menu whose contents were a hardcoded list of the three the agent
+  happened to ship with.
+
+  A server registers a `surface.Endpoint` instead. The device and client
+  addresses go out once the listener is up, naming the port being served rather
+  than the one configured, and their URLs are emptied as the servers go down, so
+  a stopped server reads as `Not running` instead of handing out an address that
+  refuses the connection. The tray renders whatever is in the register and knows
+  what none of it is. A row is now the address and its copy entry in one —
+  clicking it copies — so what is copied cannot drift from what is read.
+
+- **Pairing is a plugin, and the tray no longer knows what pairing is.** The
+  pairing PIN, its copy and its regenerate entry lived in the tray's URLs
+  submenu, and the tray held the bootstrap server to work them. Pairing is now a
+  plugin like any other, with a **Pair a Phone** menu of its own carrying the
+  PIN, the page, both copy entries and the rotation — and, new, an entry that
+  opens the pairing page here, for pairing a phone from the QR code on the
+  operator's own screen. A build with no pairing server registers nothing rather
+  than hiding entries, and `NewSystrayApp` no longer takes a pairing server or
+  its port
 
 - **What the launcher set, the run keeps.** Three surfaces configure this agent
   and each had invented its own precedence: the port came with a lock flag, the

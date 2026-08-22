@@ -14,6 +14,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/deviceserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
+	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -61,6 +62,12 @@ type Agent struct {
 	DeviceServer  *deviceserver.Server
 	ClientServer  *clientserver.Server
 	DevicePort    int // Single agent server port. Default: 9470
+
+	// endpoints is the register of addresses this agent hands out, reached
+	// through Endpoints. It is a value rather than a pointer because its zero
+	// value is ready to use and an agent without one would leave every
+	// publisher checking for nil.
+	endpoints surface.Endpoints
 
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
@@ -207,6 +214,7 @@ func (a *Agent) Stop() {
 	}
 
 	a.Logger.Println("Stopping agent...")
+	a.withdrawEndpoints()
 
 	if a.UnifiedServer != nil {
 		a.UnifiedServer.Stop()
@@ -324,6 +332,8 @@ func (a *Agent) RestartServers() error {
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
 func (a *Agent) stopServers() {
+	a.withdrawEndpoints()
+
 	if a.UnifiedServer != nil {
 		a.UnifiedServer.Stop()
 		a.UnifiedServer = nil
@@ -396,6 +406,10 @@ func (a *Agent) startServers() error {
 	}()
 
 	a.Logger.Printf("Server started on port %d (NFC devices + web clients)", port)
+
+	// The addresses go out once there is something answering on them, and are
+	// withdrawn again in stopServers.
+	a.publishEndpoints()
 	return nil
 }
 

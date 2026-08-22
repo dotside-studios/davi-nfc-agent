@@ -22,6 +22,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
+	"github.com/dotside-studios/davi-nfc-agent/surface"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -249,10 +250,31 @@ func main() {
 	origins.OnChange(console.NotifyChange)
 	devices.OnChange(console.NotifyChange)
 
+	// The features that reach the tray as plugins. Pairing is one of the
+	// agent's own; a consumer's, registered from an init function in their own
+	// package, arrives through the default registry and needs no change here.
+	plugins := surface.NewRegistry()
+	if bootstrapServer != nil {
+		if err := plugins.Add(newPairingPlugin(bootstrapServer, bootstrapPortFlag)); err != nil {
+			log.Printf("Warning: the pairing menu is missing: %v", err)
+		}
+	}
+	for _, plugin := range surface.Default().Plugins() {
+		if info := plugin.Describe(); info.ID != "" {
+			if _, taken := plugins.Get(info.ID); taken {
+				log.Printf("Warning: a registered plugin replaces the agent's own %q feature", info.ID)
+			}
+		}
+		if err := plugins.Add(plugin); err != nil {
+			log.Printf("Warning: a registered plugin was ignored: %v", err)
+		}
+	}
+
 	// Create and run systray app
-	app := NewSystrayApp(agent, devicePathFlag, bootstrapPortFlag, bootstrapServer)
+	app := NewSystrayApp(agent, devicePathFlag)
 	app.AttachConsole(console)
 	app.AttachSettings(settingsStore)
+	app.AttachPlugins(plugins)
 
 	// One path from a saved preference to the running agent, whoever saved it.
 	// The tray and the console both write to the store and neither applies

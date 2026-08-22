@@ -15,8 +15,6 @@ import (
 	"strings"
 	"syscall"
 
-	"fyne.io/systray"
-
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -192,17 +190,10 @@ func main() {
 	agent.KeyFile = keyFileFlag
 	agent.TLSManager = tlsMgr // For network change watching and cert regeneration
 
-	// Set up signal handling for graceful shutdown
+	// Set up signal handling for graceful shutdown. The interrupt is acted on
+	// below, once there is a tray to quit.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		if bootstrapServer != nil {
-			bootstrapServer.Stop()
-		}
-		systray.Quit()
-	}()
 
 	// Load persisted preferences. Explicit flags still win: something that
 	// passed -device meant it for this run.
@@ -244,6 +235,15 @@ func main() {
 	app := NewSystrayApp(agent, devicePathFlag, bootstrapPortFlag, bootstrapServer)
 	app.AttachConsole(console)
 	app.AttachSettings(settingsStore)
+
+	go func() {
+		<-sigChan
+		if bootstrapServer != nil {
+			bootstrapServer.Stop()
+		}
+		app.Quit()
+	}()
+
 	app.Run()
 }
 

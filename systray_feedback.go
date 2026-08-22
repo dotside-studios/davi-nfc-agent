@@ -3,9 +3,8 @@ package main
 import (
 	"log"
 
-	"fyne.io/systray"
-
 	"github.com/dotside-studios/davi-nfc-agent/settings"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // AttachSettings gives the tray the settings store, so a preference toggled
@@ -17,10 +16,11 @@ func (s *SystrayApp) AttachSettings(store *settings.Store) {
 
 // setupFeedbackMenu adds the reader feedback toggle, beside the mode menu.
 func (s *SystrayApp) setupFeedbackMenu() {
-	s.mReaderFeedback = systray.AddMenuItemCheckbox(
+	s.mReaderFeedback = s.menu.AddCheckbox(
 		"Flash and Beep on Scan",
-		"Flash the reader's LED and sound its buzzer when a tag is read or written",
 		s.agent.ReaderFeedback,
+		traymenu.Tooltip("Flash the reader's LED and sound its buzzer when a tag is read or written"),
+		traymenu.OnClick(s.handleReaderFeedback),
 	)
 }
 
@@ -28,14 +28,8 @@ func (s *SystrayApp) setupFeedbackMenu() {
 // on disk. A failed save leaves the toggle in effect for this session rather
 // than undoing what the menu already shows.
 func (s *SystrayApp) handleReaderFeedback() {
-	on := !s.mReaderFeedback.Checked()
-
+	on := s.mReaderFeedback.Toggle()
 	s.agent.SetReaderFeedback(on)
-	if on {
-		s.mReaderFeedback.Check()
-	} else {
-		s.mReaderFeedback.Uncheck()
-	}
 
 	if s.settings == nil {
 		return

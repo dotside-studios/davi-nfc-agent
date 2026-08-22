@@ -26,7 +26,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pseudo-APDU over the card connection instead. The channel that answers is
   remembered per connection, and a reader that answers on neither is left alone
 
+### Changed
+
+- **The tray menu is a package now, and its clicks are signals.** A menu item
+  from the tray library *drops* a click when nobody is receiving on its channel,
+  and a `select` cannot name a changing set of items, so the card filters, the
+  readers, the origins and the paired devices were polled with a `default`
+  branch after each event. A click on one of those rows was lost unless another
+  item happened to be handled at the same moment.
+
+  `traymenu` builds the menu declaratively on the same library, keeps a receiver
+  on every item for its whole life, and fans each click out through a `Signal`.
+  Handlers are declared next to their item and run one at a time on a single
+  dispatch goroutine, so they still need no lock to touch menu state. A radio
+  group and a fixed-pool list replace what the tray had open-coded three times
+  each, the list reporting what did not fit rather than truncating quietly, and
+  the reader picker no longer leaks a menu item per refresh.
+
+  The menu the operator sees is unchanged, and a fake driver builds and clicks
+  it under test with no desktop involved
+
 ### Fixed
+
+- **Copying a device URL from the tray hands out a device URL.** The Server URLs
+  submenu showed `ws://host:9470/ws?mode=device` and copied
+  `ws://host:9470/ws`, which is the client address: a device set up from that
+  clipboard connected as a client and was never routed a tag. Both now come from
+  one builder, so an entry copies what it reads. The pairing entry also stopped
+  labelling itself `CA Cert` once the agent stopped
+
+- **The offer to trust this agent in browsers comes back if the certificate
+  authority goes away.** `CAInstalled` is a look at the filesystem taken on
+  every call, not a decision taken once, but the tray only looked at it at
+  startup and after an install of its own. A config directory that lost its CA
+  therefore left the menu entry hidden until the agent was restarted, which is
+  the one entry that would put the CA back. The tray now looks again whenever
+  the listeners restart
+
+- **All Types accepts a card type the agent has never heard of.** The filter
+  admitted everything when it was empty, but **All Types** filled it with the
+  eight types this agent enumerates instead of emptying it. A phone reports the
+  tag types it recognizes, and one outside that list was then refused under a
+  setting that says every type is welcome. Stored settings with no card types
+  took the same path at startup
 
 - **A device that said nothing about itself no longer refuses for its tags.**
   `capabilities` on `hello` was a value on the wire, so a device that omitted it

@@ -4,37 +4,35 @@ import (
 	"fmt"
 	"log"
 
-	"fyne.io/systray"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// deviceSlotCount bounds the paired devices shown. Systray items cannot be
-// removed once created, so the pool is fixed and reused, as with origins.
-const deviceSlotCount = 12
-
-type deviceSlot struct {
-	item *systray.MenuItem
-	id   string
-}
+// pairedSlotCount bounds the paired devices shown. The pool is fixed and
+// reused, as with origins: a row added on a refresh would land after the
+// actions below it.
+const pairedSlotCount = 12
 
 // setupDevicesMenu builds the Paired Devices submenu.
 func (s *SystrayApp) setupDevicesMenu() {
-	s.mDevicesMenu = systray.AddMenuItem("Paired Devices", "Phones and readers that have paired with this agent")
+	s.mDevicesMenu = s.menu.AddSubmenu("Paired Devices",
+		traymenu.Tooltip("Phones and readers that have paired with this agent"))
 
-	for i := 0; i < deviceSlotCount; i++ {
-		item := s.mDevicesMenu.AddSubMenuItem("", "")
-		item.Hide()
-		s.deviceSlots = append(s.deviceSlots, &deviceSlot{item: item})
-	}
+	// Declared first so the devices sit above the actions that apply to all of
+	// them: menu order is the order items are added.
+	s.pairedDevices = traymenu.NewList[string](s.mDevicesMenu, pairedSlotCount)
+	s.pairedDevices.OnActivate(func(row traymenu.Row[string]) { s.revokeDevice(row.Value) })
 
-	s.mRequirePaired = s.mDevicesMenu.AddSubMenuItemCheckbox(
+	s.mRequirePaired = s.mDevicesMenu.AddCheckbox(
 		"Require pairing",
-		"Admit only devices that have paired. The shared secret and loopback bypass stop admitting devices; browser consoles are unaffected.",
 		false,
+		traymenu.Tooltip("Admit only devices that have paired. The shared secret and loopback bypass stop admitting devices; browser consoles are unaffected."),
+		traymenu.OnClick(s.handleRequirePaired),
 	)
 
-	s.mRevokeAllDevices = s.mDevicesMenu.AddSubMenuItem(
+	s.mRevokeAllDevices = s.mDevicesMenu.Add(
 		"Revoke all devices",
-		"Every paired device must pair again. Use when the machine changes hands.",
+		traymenu.Tooltip("Every paired device must pair again. Use when the machine changes hands."),
+		traymenu.OnClick(s.handleRevokeAllDevices),
 	)
 
 	s.refreshDevicesMenu()
@@ -42,33 +40,27 @@ func (s *SystrayApp) setupDevicesMenu() {
 
 // refreshDevicesMenu redraws the submenu from the registry.
 func (s *SystrayApp) refreshDevicesMenu() {
-	if s.agent.Devices == nil || len(s.deviceSlots) == 0 {
+	if s.agent.Devices == nil || s.pairedDevices == nil {
 		return
 	}
 
 	devices := s.agent.Devices.List()
 
-	slot := 0
+	rows := make([]traymenu.Row[string], 0, len(devices))
 	for _, device := range devices {
-		if slot >= len(s.deviceSlots) {
-			break
-		}
-		item := s.deviceSlots[slot]
-		item.id = device.ID
-
 		label := device.Name
 		if device.Platform != "" {
 			label = fmt.Sprintf("%s (%s)", device.Name, device.Platform)
 		}
-		item.item.SetTitle(label)
-		item.item.SetTooltip(fmt.Sprintf("Paired %s — click to revoke", device.PairedAt.Local().Format("2006-01-02 15:04")))
-		item.item.Show()
-		slot++
+		rows = append(rows, traymenu.Row[string]{
+			Value:   device.ID,
+			Title:   label,
+			Tooltip: fmt.Sprintf("Paired %s — click to revoke", device.PairedAt.Local().Format("2006-01-02 15:04")),
+		})
 	}
 
-	for ; slot < len(s.deviceSlots); slot++ {
-		s.deviceSlots[slot].id = ""
-		s.deviceSlots[slot].item.Hide()
+	if dropped := s.pairedDevices.Set(rows); dropped > 0 {
+		log.Printf("[systray] %d more devices are paired than the menu can show; revoke from the control center", dropped)
 	}
 
 	if len(devices) == 0 {
@@ -79,11 +71,7 @@ func (s *SystrayApp) refreshDevicesMenu() {
 		s.mRevokeAllDevices.Show()
 	}
 
-	if s.agent.RequirePairedDevice {
-		s.mRequirePaired.Check()
-	} else {
-		s.mRequirePaired.Uncheck()
-	}
+	s.mRequirePaired.SetChecked(s.agent.RequirePairedDevice)
 }
 
 // handleRequirePaired toggles the paired-device requirement live, so it can be
@@ -95,7 +83,7 @@ func (s *SystrayApp) handleRequirePaired() {
 		// Turning this on with nothing paired locks out every device, which is
 		// unlikely to be what the operator meant from this menu.
 		log.Printf("[systray] Not requiring pairing: no devices are paired, so every device would be refused")
-		s.mRequirePaired.Uncheck()
+		s.mRequirePaired.SetChecked(false)
 		return
 	}
 
@@ -110,28 +98,19 @@ func (s *SystrayApp) handleRequirePaired() {
 	s.refreshDevicesMenu()
 }
 
-// handleDeviceRevokeSelection polls the device slots, matching how the other
-// dynamic menus are handled.
-func (s *SystrayApp) handleDeviceRevokeSelection() {
-	if s.agent.Devices == nil {
+// revokeDevice drops one paired device, which then has to pair again.
+func (s *SystrayApp) revokeDevice(id string) {
+	if s.agent.Devices == nil || id == "" {
 		return
 	}
 
-	for _, slot := range s.deviceSlots {
-		select {
-		case <-slot.item.ClickedCh:
-			if slot.id == "" {
-				continue
-			}
-			if err := s.agent.Devices.Revoke(slot.id); err != nil {
-				log.Printf("[systray] Failed to revoke device %s: %v", slot.id, err)
-				continue
-			}
-			log.Printf("[systray] Revoked device %s", slot.id)
-			s.refreshDevicesMenu()
-		default:
-		}
+	if err := s.agent.Devices.Revoke(id); err != nil {
+		log.Printf("[systray] Failed to revoke device %s: %v", id, err)
+		return
 	}
+
+	log.Printf("[systray] Revoked device %s", id)
+	s.refreshDevicesMenu()
 }
 
 // handleRevokeAllDevices clears the registry.

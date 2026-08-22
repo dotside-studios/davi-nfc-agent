@@ -13,18 +13,9 @@ func applySettings(agent *Agent, s settings.Settings) {
 		agent.Reader.SetMode(settings.ParseMode(s.Mode))
 	}
 
-	// Mutated in place, never replaced: the running device server was handed
-	// this same map at construction, so assigning a new one here would leave it
-	// filtering on a snapshot that no longer changes.
-	for t := range agent.AllowedCardTypes {
-		delete(agent.AllowedCardTypes, t)
-	}
-	if len(s.CardTypes) == 0 {
-		agent.AllowAllCardTypes()
-	} else {
-		for _, t := range s.CardTypes {
-			agent.AllowCardType(t)
-		}
+	agent.ClearCardTypeFilter()
+	for _, t := range s.CardTypes {
+		agent.AllowCardType(t)
 	}
 
 	agent.SetRequirePairedDevice(s.RequirePairedDevice)

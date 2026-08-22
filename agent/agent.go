@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -127,11 +129,10 @@ type Config struct {
 	// directly. New mounts the agent's own routes on a non-nil one.
 	Server *unifiedserver.Server
 
-	// RequirePairedDeviceLocked stops anything lowering that requirement for
-	// the rest of the run. Set it when the requirement came from the command
-	// line or the environment: an operator who asked for it there should not
-	// have it withdrawn by a preference file or a toggle in the console.
-	RequirePairedDeviceLocked bool
+	// Explicit marks what the launcher set deliberately, on the command line,
+	// in the environment, or here. A field marked there belongs to the launcher
+	// for the whole run: no stored preference and no operator may change it.
+	Explicit settings.Explicit
 
 	// TLS configuration, used by the unified server. TLSManager also drives
 	// certificate regeneration and network-change watching.
@@ -185,8 +186,24 @@ type Agent struct {
 	keyFile             string
 	tlsManager          *tls.Manager
 	requirePairedDevice bool
-	requirePairedLocked bool
 	readerFeedback      bool
+
+	// Settings state. Held on the agent as well as on the reader, because the
+	// reader is built in Start, after the stored settings have been applied: a
+	// preference that only reached the reader would be lost with every reader
+	// the agent starts.
+	readerMode   nfc.ReaderMode
+	pinnedDevice string
+
+	// explicit marks the settings the launcher set, which nothing this run may
+	// change. Assigned through SetExplicit before the agent serves anything.
+	explicit settings.Explicit
+
+	// settingsMu guards the settings state above. The console changes it from
+	// its own goroutines and reads it back for every snapshot it draws, and the
+	// tray does the same from its dispatch goroutine. The card-type filter
+	// guards itself.
+	settingsMu sync.RWMutex
 
 	// Mutable state. lifecycle carries the state machine, the hooks and the
 	// registered components; every transition below runs under its lock.
@@ -243,8 +260,9 @@ func New(cfg Config) *Agent {
 		certFile:            cfg.CertFile,
 		keyFile:             cfg.KeyFile,
 		tlsManager:          cfg.TLSManager,
-		requirePairedDevice: cfg.RequirePairedDevice || cfg.RequirePairedDeviceLocked,
-		requirePairedLocked: cfg.RequirePairedDeviceLocked,
+		requirePairedDevice: cfg.RequirePairedDevice,
+		explicit:            cfg.Explicit,
+		readerMode:          nfc.ModeReadWrite,
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
@@ -293,8 +311,25 @@ func (a *Agent) APISecret() string        { return a.apiSecret }
 func (a *Agent) ConfigDir() string        { return a.configDir }
 func (a *Agent) Origins() *OriginStore    { return a.origins }
 func (a *Agent) Devices() *DeviceRegistry { return a.devices }
-func (a *Agent) DevicePort() int          { return a.devicePort }
-func (a *Agent) PublicKeyPin() string     { return a.publicKeyPin }
+
+// ServingPort is the port actually being served, which is what a client should
+// be told to connect to. It differs from DevicePort after a port is saved and
+// before the listener is rebound.
+func (a *Agent) ServingPort() int {
+	if a.UnifiedServer != nil {
+		return a.UnifiedServer.Port()
+	}
+	return a.DevicePort()
+}
+
+// DevicePort is the port the agent serves on, which a saved preference can
+// change; the listener keeps the port it is bound on until it is rebound.
+func (a *Agent) DevicePort() int {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.devicePort
+}
+func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
 // Pairing returns the pairing component, or nil when pairing is disabled.
 func (a *Agent) Pairing() *PairingServer { return a.pairing }
@@ -315,14 +350,14 @@ func (a *Agent) BootstrapPort() int {
 	}
 	return a.pairing.Port()
 }
-func (a *Agent) CertFile() string          { return a.certFile }
-func (a *Agent) KeyFile() string           { return a.keyFile }
-func (a *Agent) TLSManager() *tls.Manager  { return a.tlsManager }
-func (a *Agent) RequirePairedDevice() bool { return a.requirePairedDevice }
-
-// RequirePairedDeviceLocked reports that the requirement came from the command
-// line and cannot be lowered while this agent runs.
-func (a *Agent) RequirePairedDeviceLocked() bool { return a.requirePairedLocked }
+func (a *Agent) CertFile() string         { return a.certFile }
+func (a *Agent) KeyFile() string          { return a.keyFile }
+func (a *Agent) TLSManager() *tls.Manager { return a.tlsManager }
+func (a *Agent) RequirePairedDevice() bool {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.requirePairedDevice
+}
 
 // Reader is the reader currently open, nil before Start and after Stop. Safe
 // to call from any goroutine, though the answer can go stale the moment it is
@@ -331,7 +366,14 @@ func (a *Agent) Reader() *nfc.NFCReader { return a.reader.Load() }
 
 // ReaderFeedback reports whether the reader answers for its own work with its
 // LED and buzzer.
-func (a *Agent) ReaderFeedback() bool { return a.readerFeedback }
+func (a *Agent) ReaderFeedback() bool {
+	if reader := a.reader.Load(); reader != nil {
+		return reader.FeedbackEnabled()
+	}
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.readerFeedback
+}
 
 // ServerRestarts returns a channel that signals when servers are restarted
 // due to network changes or certificate regeneration.
@@ -629,26 +671,41 @@ func (a *Agent) checkOrigin() func(r *http.Request) bool {
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
-	if a.requirePairedLocked && !on {
-		// Asked for on the command line. A stored preference or a console
-		// toggle may not withdraw it, which is the direction that matters:
-		// the operator who set the flag is the one who would be surprised.
-		a.logger.Printf("Ignoring request to stop requiring paired devices: it was set on the command line")
+	if a.RequirePairedDevice() == on {
 		return
 	}
+	if a.launcherHolds("the paired-device requirement", a.Explicit().RequirePairedDevice) {
+		return
+	}
+
+	a.settingsMu.Lock()
 	a.requirePairedDevice = on
+	a.settingsMu.Unlock()
+
 	if a.DeviceAuth != nil {
 		a.DeviceAuth.SetRequirePaired(on)
 	}
+	a.notifySettingsChanged()
 }
 
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
+	if a.ReaderFeedback() == on {
+		return
+	}
+	if a.launcherHolds("reader feedback", a.Explicit().ReaderFeedback) {
+		return
+	}
+
+	a.settingsMu.Lock()
 	a.readerFeedback = on
+	a.settingsMu.Unlock()
+
 	if reader := a.reader.Load(); reader != nil {
 		reader.SetFeedback(on)
 	}
+	a.notifySettingsChanged()
 }
 
 // OnTag registers fn to receive every scan the agent broadcasts, so a program

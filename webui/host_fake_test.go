@@ -16,13 +16,11 @@ type fakeHost struct {
 	running   bool
 	configDir string
 
-	mode       string
-	devicePath string
-	available  []string
-	cardTypes  []string
-	cardUID    string
-	cardType   string
-	cardOn     bool
+	available []string
+	cardTypes []string
+	cardUID   string
+	cardType  string
+	cardOn    bool
 
 	port          int
 	bootstrapPort int
@@ -34,7 +32,6 @@ type fakeHost struct {
 	apiSecret    string
 	pairingPIN   string
 	publicKeyPin string
-	requirePair  bool
 	caInstalled  bool
 
 	devices []PairedDevice
@@ -42,7 +39,11 @@ type fakeHost struct {
 	blocked []string
 	anyOrig bool
 
-	stored settings.Settings
+	// settings stands in for the agent's live configuration, which is what the
+	// real host answers with. The console reads a preference from here and
+	// nowhere else, and explicit says which of them the launcher holds.
+	settings settings.Settings
+	explicit settings.Explicit
 
 	// Recorded calls, so a test can assert an action reached the agent.
 	started, stopped, quit, restarted int
@@ -60,13 +61,12 @@ func newFakeHost() *fakeHost {
 	return &fakeHost{
 		running:       true,
 		configDir:     "/tmp/agent",
-		mode:          settings.ModeReadWrite,
 		available:     []string{"ACS ACR1252U 01 00"},
 		cardTypes:     []string{"NTAG215", "MIFARE Classic 1K"},
 		port:          9470,
 		bootstrapPort: 9472,
 		apiSecret:     "test-secret",
-		stored:        settings.Defaults(),
+		settings:      settings.Defaults(),
 	}
 }
 
@@ -101,8 +101,6 @@ func (h *fakeHost) RestartServers() error {
 	return nil
 }
 
-func (h *fakeHost) ReaderMode() string         { return h.mode }
-func (h *fakeHost) DevicePath() string         { return h.devicePath }
 func (h *fakeHost) AvailableDevices() []string { return h.available }
 func (h *fakeHost) AllCardTypes() []string     { return h.cardTypes }
 
@@ -112,7 +110,7 @@ func (h *fakeHost) RemoteDevices() (int, int)           { return 0, 0 }
 func (h *fakeHost) SelectDevice(path string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.devicePath = path
+	h.settings.DevicePath = path
 	return nil
 }
 
@@ -191,7 +189,7 @@ func (h *fakeHost) RevokeAllDevices() error {
 	return nil
 }
 
-func (h *fakeHost) RequirePairedDevice() bool { return h.requirePair }
+func (h *fakeHost) Explicit() settings.Explicit { return h.explicit }
 
 func (h *fakeHost) AllowedOrigins() []string  { return h.allowed }
 func (h *fakeHost) BlockedOrigins() []string  { return h.blocked }
@@ -222,14 +220,20 @@ func (h *fakeHost) RevokeOrigin(origin string) error {
 	return nil
 }
 
-func (h *fakeHost) Settings() settings.Settings { return h.stored }
+func (h *fakeHost) Settings() settings.Settings { return h.settings }
 
+// SaveSettings answers with what the agent then holds, as the real host does: a
+// field the launcher holds is left where it was, however it was saved.
 func (h *fakeHost) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	next := h.stored
+
+	prev := h.settings
+	next := h.settings
 	mutate(&next)
-	h.stored = next
+	h.explicit.Keep(&next, prev)
+
+	h.settings = next
 	return next, nil
 }
 

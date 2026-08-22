@@ -52,16 +52,6 @@ func (h *host) RestartServers() error { return h.agent.RestartServers() }
 
 // ---- reader ----
 
-func (h *host) ReaderMode() string {
-	reader := h.agent.Reader()
-	if reader == nil {
-		return settings.ModeReadWrite
-	}
-	return settings.FormatMode(reader.GetMode())
-}
-
-func (h *host) DevicePath() string { return h.agent.CurrentDevicePath() }
-
 func (h *host) AvailableDevices() []string {
 	if h.agent.Manager() == nil {
 		return nil
@@ -113,7 +103,10 @@ func (h *host) SelectDevice(devicePath string) error {
 
 // ---- server ----
 
-func (h *host) Port() int          { return h.agent.DevicePort() }
+// Port is the port being served, not the one configured. A port saved in the
+// console is bound only once the listener has been restarted, and until then
+// the console must not hand out a URL nothing is listening on.
+func (h *host) Port() int          { return h.agent.ServingPort() }
 func (h *host) BootstrapPort() int { return h.agent.BootstrapPort() }
 func (h *host) CertFile() string   { return h.agent.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.agent.CertFile() != "" && h.agent.KeyFile() != "" }
@@ -256,8 +249,6 @@ func (h *host) RevokeAllDevices() error {
 	return h.agent.Devices().RevokeAll()
 }
 
-func (h *host) RequirePairedDevice() bool { return h.agent.RequirePairedDevice() }
-
 // ---- browser origins ----
 
 func (h *host) AllowedOrigins() []string {
@@ -300,19 +291,32 @@ func (h *host) SetOriginCheckDisabled(on bool) {
 
 // ---- settings ----
 
-func (h *host) Settings() settings.Settings { return h.settings.Get() }
+// Settings comes from the agent rather than from the file, so the console shows
+// what is in force, such as a mode switched from the tray or a pairing
+// requirement the command line will not let a preference withdraw.
+func (h *host) Settings() settings.Settings { return h.agent.Settings() }
 
+// Explicit reports the settings the launcher holds, which the console shows as
+// disabled controls rather than accepting a change it would have to discard.
+func (h *host) Explicit() settings.Explicit { return h.agent.Explicit() }
+
+// SaveSettings persists the change and answers with what the agent then holds.
+// It applies nothing itself: the store's change hook is the one path from a
+// saved preference to the running agent, so a save made here and one made from
+// the tray land the same way.
 func (h *host) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
-	saved, err := h.settings.Update(mutate)
-	if err != nil {
-		return saved, err
+	explicit := h.agent.Explicit()
+	if _, err := h.settings.Update(func(next *settings.Settings) {
+		prev := *next
+		mutate(next)
+		// A field the launcher holds is left as the file had it. The agent
+		// would refuse the change, and a file saying otherwise is read back as
+		// fact on the next start.
+		explicit.Keep(next, prev)
+	}); err != nil {
+		return h.agent.Settings(), err
 	}
-
-	h.agent.ApplySettings(saved)
-	if h.app != nil {
-		h.app.SyncSettingsToMenu(saved)
-	}
-	return saved, nil
+	return h.agent.Settings(), nil
 }
 
 // remoteManager returns the remote device manager, held either directly or

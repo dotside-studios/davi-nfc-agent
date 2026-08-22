@@ -15,7 +15,7 @@ func runningAgent(t *testing.T, port int) *Agent {
 
 	opts := testOptions(t)
 	opts.DevicePort = port
-	opts.DevicePortSet = true
+	opts.Explicit.Port = true
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)

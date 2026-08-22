@@ -50,11 +50,12 @@ type Options struct {
 	RemoteScans    <-chan nfc.NFCData
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
-	// DevicePortSet reports that DevicePort is a deliberate choice rather than
-	// a default, so a port persisted in settings must not override it. The
-	// command sets it when -device-port is given; set it yourself whenever you
-	// assign DevicePort and mean it.
-	DevicePortSet bool
+	// Explicit marks the fields this launcher set deliberately rather than left
+	// at a default. A field marked here belongs to the launcher for the whole
+	// run: the stored file does not change it and an operator cannot either.
+	// The command builds it from which flags were given; a program embedding
+	// the agent sets whichever fields it means.
+	Explicit settings.Explicit
 
 	// Info is what this build calls itself; see agent.Config.Info. It decides
 	// the default config directory, so a program with its own identity should
@@ -229,12 +230,14 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		// listener on whatever the kernel hands out.
 		devicePort = DefaultDevicePort
 	}
-	if !opts.DevicePortSet && stored.Port > 0 {
+	if !opts.Explicit.Port && stored.Port > 0 {
 		devicePort = stored.Port
 	}
 
-	// Either source can turn the requirement on; only the command line can be
-	// relied on to keep it on, which is what RequirePairedDeviceLocked carries.
+	// Either source can turn the requirement on; only a launcher can be relied
+	// on to keep it on, which is what Explicit carries.
+	explicit := opts.Explicit
+	explicit.RequirePairedDevice = explicit.RequirePairedDevice || askedForPairing
 	requirePaired := askedForPairing || stored.RequirePairedDevice
 	if requirePaired {
 		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
@@ -255,24 +258,24 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// Everything the agent runs on is settled by this point, which is why it
 	// can be handed over in one piece.
 	a := New(Config{
-		Server:                    srv,
-		RemoteOps:                 opts.RemoteOps,
-		RemoteScans:               opts.RemoteScans,
-		DeviceEndpoint:            opts.DeviceEndpoint,
-		Manager:                   manager,
-		Info:                      info,
-		DevicePort:                devicePort,
-		APISecret:                 apiSecret,
-		ConfigDir:                 configDir,
-		Origins:                   origins,
-		Devices:                   devices,
-		PublicKeyPin:              agentPublicKeyPin,
-		Pairing:                   pairing,
-		RequirePairedDevice:       requirePaired,
-		RequirePairedDeviceLocked: askedForPairing,
-		CertFile:                  certFile,
-		KeyFile:                   keyFile,
-		TLSManager:                tlsMgr,
+		Server:              srv,
+		RemoteOps:           opts.RemoteOps,
+		RemoteScans:         opts.RemoteScans,
+		DeviceEndpoint:      opts.DeviceEndpoint,
+		Manager:             manager,
+		Info:                info,
+		DevicePort:          devicePort,
+		APISecret:           apiSecret,
+		ConfigDir:           configDir,
+		Origins:             origins,
+		Devices:             devices,
+		PublicKeyPin:        agentPublicKeyPin,
+		Pairing:             pairing,
+		RequirePairedDevice: requirePaired,
+		Explicit:            explicit,
+		CertFile:            certFile,
+		KeyFile:             keyFile,
+		TLSManager:          tlsMgr,
 	})
 
 	a.ApplySettings(stored)

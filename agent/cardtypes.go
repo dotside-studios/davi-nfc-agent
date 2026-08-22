@@ -1,6 +1,9 @@
 package agent
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 // cardTypeFilter decides which card types a scan may carry. An empty filter
 // allows every type.
@@ -52,6 +55,34 @@ func (f *cardTypeFilter) explicitlyAllowed(cardType string) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.allowed[cardType]
+}
+
+// replace swaps the whole filter, which is what an operator picking types does.
+func (f *cardTypeFilter) replace(cardTypes []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.allowed = make(map[string]bool, len(cardTypes))
+	for _, cardType := range cardTypes {
+		f.allowed[cardType] = true
+	}
+}
+
+// list names what is allowed, sorted, or nil when nothing is filtered.
+func (f *cardTypeFilter) list() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if len(f.allowed) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(f.allowed))
+	for cardType := range f.allowed {
+		out = append(out, cardType)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (f *cardTypeFilter) len() int {

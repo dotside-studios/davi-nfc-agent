@@ -359,3 +359,38 @@ func TestConsoleURLIsLoopback(t *testing.T) {
 		t.Errorf("ConsoleURL = %q", url)
 	}
 }
+
+// A save of a field the launcher holds leaves the file alone. The agent would
+// refuse the change, and a file that recorded it anyway would be read back as
+// fact on the next start, when the flag may well be gone.
+func TestSavingAFieldTheLauncherHoldsChangesNothing(t *testing.T) {
+	_, host, handler, cookie := newTestServer(t)
+	host.settings = settings.Settings{Mode: settings.ModeReadOnly, Port: 9480}
+	host.explicit = settings.Explicit{Mode: true}
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, authorized(http.MethodPost, "/control/action",
+		`{"action":"reader.setMode","params":{"mode":"write"}}`, cookie))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if got := host.Settings().Mode; got != settings.ModeReadOnly {
+		t.Errorf("stored mode = %q, want the launcher's %q", got, settings.ModeReadOnly)
+	}
+
+	// And the console is told which controls to disable.
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, authorized(http.MethodGet, "/control/state", "", cookie))
+
+	var state State
+	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !state.Explicit.Mode {
+		t.Error("the snapshot does not report the mode as the launcher's")
+	}
+	if state.Explicit.Port {
+		t.Error("the snapshot reports a port the launcher never set")
+	}
+}

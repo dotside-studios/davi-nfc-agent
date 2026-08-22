@@ -4,6 +4,7 @@ import (
 	"flag"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // parseFlags defines the agent's command line and parses it into the options
@@ -31,9 +32,13 @@ func parseFlags() *agent.Options {
 	flag.StringVar(&opts.AllowedOrigins, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
 	flag.Parse()
 
-	// A port that came from the command line outranks one persisted in
-	// settings; the default alone does not.
-	opts.DevicePortSet = isFlagSet("device-port")
+	// What the command line set outranks what is persisted, for the whole run.
+	// A default alone does not: it leaves the stored preference in charge.
+	opts.Explicit = settings.Explicit{
+		DevicePath:          isFlagSet("device"),
+		Port:                isFlagSet("device-port"),
+		RequirePairedDevice: isFlagSet("require-paired-devices"),
+	}
 
 	return opts
 }

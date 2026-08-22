@@ -226,6 +226,11 @@ func (s *Server) handlerLocked() http.Handler {
 // Stop stops the unified server: it shuts down mDNS, the HTTP listener, and
 // cancels the shared context (which stops the device and client background
 // workers running under it).
+// Port is the port this server binds. It is what a client should be told to
+// connect to, which is not necessarily what the agent is configured with: a
+// port changed in the settings takes effect only on a fresh listener.
+func (s *Server) Port() int { return s.config.Port }
+
 func (s *Server) Stop() {
 	// Take what needs shutting down under the lock, then do the shutting down
 	// outside it: Shutdown blocks, and Start must not be held up behind it.

@@ -68,10 +68,10 @@ func TestSetupWithoutLogRing(t *testing.T) {
 	}
 }
 
-// TestDevicePortSetOutranksStoredPort covers the flag-precedence bit that moved
+// TestAnExplicitPortOutranksStoredPort covers the flag-precedence bit that moved
 // into the API when the flags left this package: a port the caller means must
 // survive a port persisted in settings.
-func TestDevicePortSetOutranksStoredPort(t *testing.T) {
+func TestAnExplicitPortOutranksStoredPort(t *testing.T) {
 	dir := t.TempDir()
 
 	// Persist a port, the way the console would.
@@ -89,7 +89,7 @@ func TestDevicePortSetOutranksStoredPort(t *testing.T) {
 		opts := testOptions(t)
 		opts.ConfigDir = dir
 		opts.DevicePort = DefaultDevicePort
-		opts.DevicePortSet = false
+		opts.Explicit.Port = false
 
 		rt, err := Setup(opts, nfc.NewMockManager())
 		if err != nil {
@@ -104,7 +104,7 @@ func TestDevicePortSetOutranksStoredPort(t *testing.T) {
 		opts := testOptions(t)
 		opts.ConfigDir = dir
 		opts.DevicePort = 9123
-		opts.DevicePortSet = true
+		opts.Explicit.Port = true
 
 		rt, err := Setup(opts, nfc.NewMockManager())
 		if err != nil {

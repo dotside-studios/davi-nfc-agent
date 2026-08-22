@@ -21,8 +21,7 @@ func newTestAgent() *nfcagent.Agent {
 }
 
 // newTestAgentWith builds a test agent around cfg. The stores are settled at
-// construction here rather than assigned afterwards, which is what Config is
-// for.
+// construction here rather than assigned afterwards, which is what Config is for.
 func newTestAgentWith(cfg nfcagent.Config) *nfcagent.Agent {
 	cfg.Manager = nfc.NewMockManager()
 	cfg.Logger = log.New(io.Discard, "", 0)
@@ -203,17 +202,28 @@ func TestAllTypesClearsIndividualFilters(t *testing.T) {
 	}
 }
 
-func TestModeMenuRevertsWithoutAReader(t *testing.T) {
-	app, _ := newTestTray(t, newTestAgent())
+// The mode is the agent's, not the running reader's, so it can be picked with
+// the agent stopped and the reader Start builds is started in it. The tick used
+// to spring back here, leaving the operator with no way to tell which mode the
+// next reader would use.
+func TestModeMenuHoldsWithoutAReader(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
 
-	// No reader to apply it to, so the tick goes back where it was.
 	app.modes.Item(nfc.ModeWriteOnly).Click()
 
-	if got, _ := app.modes.Value(); got != nfc.ModeReadWrite {
-		t.Errorf("mode = %v, want ModeReadWrite", got)
+	if got, _ := app.modes.Value(); got != nfc.ModeWriteOnly {
+		t.Errorf("mode = %v, want ModeWriteOnly", got)
 	}
-	if app.mModeMenu.Title() != "Mode: Read/Write" {
-		t.Errorf("mode menu title = %q, want %q", app.mModeMenu.Title(), "Mode: Read/Write")
+	if app.mModeMenu.Title() != "Mode: Write Only" {
+		t.Errorf("mode menu title = %q, want %q", app.mModeMenu.Title(), "Mode: Write Only")
+	}
+	// And the agent is what holds it, so the console shows the same thing.
+	if got := agent.CurrentReaderMode(); got != nfc.ModeWriteOnly {
+		t.Errorf("agent mode = %v, want ModeWriteOnly", got)
+	}
+	if got := agent.Settings().Mode; got != settings.ModeWriteOnly {
+		t.Errorf("agent settings mode = %q, want %q", got, settings.ModeWriteOnly)
 	}
 }
 
@@ -488,9 +498,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	dir := t.TempDir()
 
-	// New makes the restart channel, so unlike the root package's tray test
-	// there is nothing to wire up here beyond the manager itself.
-	agent := newTestAgentWith(nfcagent.Config{TLSManager: tls.NewManager(dir)})
+	agent := newTestAgent()
+	agent = newTestAgentWith(nfcagent.Config{TLSManager: tls.NewManager(dir)})
 
 	app, _ := newTestTray(t, agent)
 
@@ -520,9 +529,81 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	}
 	// The root package's version drove this through the agent's restart
 	// channel. ServerRestarts only hands out the receive side, so from here the
-	// refresh is called directly; that the tray subscribes to the channel is
-	// covered by startServerRestartListener's own wiring.
+	// refresh is called directly.
 	app.RefreshTrustMenu()
 
 	waitFor(t, "the trust entry to come back", app.mTrustBrowsers.Visible)
+}
+
+// The tray writes to the same file the console does. A mode picked from a menu
+// used to be forgotten at exit, which made where an operator clicked decide
+// whether their choice survived.
+func TestTrayModeAndFilterPersist(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
+
+	store, err := settings.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("settings.New: %v", err)
+	}
+	app.settings = store
+
+	app.modes.Item(nfc.ModeReadOnly).Click()
+	if got := store.Get().Mode; got != settings.ModeReadOnly {
+		t.Errorf("stored mode = %q, want %q", got, settings.ModeReadOnly)
+	}
+
+	cardType := nfc.GetAllCardTypes()[0]
+	app.cardTypes.Item(cardType).Click()
+	if got := store.Get().CardTypes; len(got) != 1 || got[0] != cardType {
+		t.Errorf("stored card types = %v, want [%s]", got, cardType)
+	}
+
+	app.cardTypes.All().Click()
+	if got := store.Get().CardTypes; len(got) != 0 {
+		t.Errorf("stored card types = %v, want none", got)
+	}
+}
+
+// A setting the launcher holds is shown and not offered: the menu says what the
+// agent is set to, greyed out, rather than accepting a click it would drop.
+func TestTrayMenusForHeldSettings(t *testing.T) {
+	agent := newTestAgent()
+	agent.SetReaderMode(nfc.ModeReadOnly)
+	agent.SetExplicit(settings.Explicit{Mode: true, RequirePairedDevice: true})
+
+	app, _ := newTestTray(t, agent)
+
+	store, err := settings.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("settings.New: %v", err)
+	}
+	app.settings = store
+
+	if app.modes.Item(nfc.ModeWriteOnly).Enabled() {
+		t.Error("a mode the launcher holds is still offered")
+	}
+	if app.mRequirePaired.Enabled() {
+		t.Error("a pairing requirement the launcher holds is still offered")
+	}
+
+	// Shown as what it is, rather than as the default the menu used to open on.
+	if got, _ := app.modes.Value(); got != nfc.ModeReadOnly {
+		t.Errorf("the tick is on %v, which the reader is not in", got)
+	}
+
+	// A disabled item ignores a click, and the agent refuses one that reaches
+	// it anyway. Neither leaves a trace in the file.
+	app.modes.Item(nfc.ModeWriteOnly).Click()
+	app.handleModeSwitch(nfc.ModeWriteOnly)
+
+	if got := agent.CurrentReaderMode(); got != nfc.ModeReadOnly {
+		t.Errorf("mode = %v, want ModeReadOnly", got)
+	}
+	if got, _ := app.modes.Value(); got != nfc.ModeReadOnly {
+		t.Errorf("the tick moved to %v, which the reader is not in", got)
+	}
+	if store.Get().Mode == settings.ModeWriteOnly {
+		t.Error("a refused change was written to the settings file")
+	}
 }

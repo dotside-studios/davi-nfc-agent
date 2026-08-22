@@ -71,15 +71,14 @@ func (c *Server) dispatch(req action) (any, error) {
 	// ---- settings ----
 
 	case "settings.save":
+		// The whole snapshot, as the console received it from the agent and
+		// edited one field of. Replacing rather than merging is what makes an
+		// unticked card type stick.
 		var params settings.Settings
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.saveSettings(func(s *settings.Settings) {
-			port := params.Port
-			*s = params
-			s.Port = port
-		})
+		return nil, c.saveSettings(func(s *settings.Settings) { *s = params })
 
 	case "clients.disconnect":
 		var params struct {
@@ -190,7 +189,8 @@ func (c *Server) dispatch(req action) (any, error) {
 	}
 }
 
-// saveSettings persists a change; the host applies it to the running agent.
+// saveSettings persists a change. Applying it is the host's business, and what
+// the agent holds afterwards arrives in the next snapshot.
 func (c *Server) saveSettings(mutate func(*settings.Settings)) error {
 	_, err := c.host.SaveSettings(mutate)
 	return err

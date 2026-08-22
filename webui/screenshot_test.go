@@ -31,7 +31,6 @@ func TestScreenshotHarness(t *testing.T) {
 
 	host := newFakeHost()
 	host.configDir = "/home/operator/.config/davi-nfc-agent"
-	host.devicePath = ""
 	host.available = []string{"ACS ACR1252U 01 00"}
 	host.cardTypes = []string{
 		"MIFARE Classic 1K", "MIFARE Classic 4K", "MIFARE Ultralight",
@@ -42,7 +41,7 @@ func TestScreenshotHarness(t *testing.T) {
 	host.localIPs = []string{"192.168.1.44"}
 	host.allowed = []string{"console.davi.social", "davi.social", "localhost:3000", "localhost:3002", "shop.davi.social"}
 	host.blocked = []string{"localhost:5173", "staging.example.com"}
-	host.stored = settings.Settings{Mode: settings.ModeReadWrite}
+	host.settings = settings.Settings{Mode: settings.ModeReadWrite}
 	host.seedDevices()
 	host.devices = append(host.devices, PairedDevice{
 		ID: "dev-3", Name: "Workshop ACR1252U", Platform: "reader",

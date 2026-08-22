@@ -7,130 +7,97 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
-// storedRequirePaired writes a settings file in dir with the given value, the
-// way a previous run or the console would have left one.
-func storedRequirePaired(t *testing.T, dir string, on bool) {
-	t.Helper()
+// The paired-device requirement is where a launcher's choice costs security to
+// get wrong, and it is governed by the same rule as every other setting: what
+// the launcher set, the run keeps.
 
-	opts := testOptions(t)
-	opts.ConfigDir = dir
-	rt, err := Setup(opts, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("seed Setup: %v", err)
+// The console's path: saving any preference re-applies the stored settings,
+// which must not lower a requirement the launcher set.
+func TestStoredSettingCannotWithdrawALaunchedRequirement(t *testing.T) {
+	agent := New(Config{
+		Manager:             nfc.NewMockManager(),
+		RequirePairedDevice: true,
+		Explicit:            settings.Explicit{RequirePairedDevice: true},
+	})
+
+	agent.ApplySettings(settings.Settings{RequirePairedDevice: false})
+
+	if !agent.RequirePairedDevice() {
+		t.Error("applying a stored setting withdrew a launched requirement")
 	}
-	if _, err := rt.Settings.Update(func(s *settings.Settings) { s.RequirePairedDevice = on }); err != nil {
-		t.Fatalf("seed settings: %v", err)
+
+	// And the console is told the truth about it, rather than the file's version.
+	if !agent.Settings().RequirePairedDevice {
+		t.Error("the agent reports a requirement it is enforcing as withdrawn")
+	}
+	if !agent.Explicit().RequirePairedDevice {
+		t.Error("the agent does not report the requirement as the launcher's")
 	}
 }
 
-// TestPairingRequirementPrecedence covers the whole matrix. Either source may
-// turn the requirement on; the case that regressed is the command line asking
-// for it and a stored preference withdrawing it, which is the one direction
-// that costs security rather than convenience.
-func TestPairingRequirementPrecedence(t *testing.T) {
+// The tray's switch, which reaches SetRequirePairedDevice directly.
+func TestLaunchedRequirementSurvivesDirectToggle(t *testing.T) {
+	agent := New(Config{
+		Manager:             nfc.NewMockManager(),
+		RequirePairedDevice: true,
+		Explicit:            settings.Explicit{RequirePairedDevice: true},
+	})
+
+	agent.SetRequirePairedDevice(false)
+
+	if !agent.RequirePairedDevice() {
+		t.Error("SetRequirePairedDevice(false) withdrew a launched requirement")
+	}
+}
+
+// The other side of the guard: a requirement that came from the file is the
+// operator's to turn off, which is what the switches are for.
+func TestStoredRequirementStaysToggleable(t *testing.T) {
+	agent := New(Config{Manager: nfc.NewMockManager()})
+	agent.ApplySettings(settings.Settings{RequirePairedDevice: true})
+
+	if !agent.RequirePairedDevice() {
+		t.Fatal("a stored requirement was not applied")
+	}
+
+	agent.SetRequirePairedDevice(false)
+
+	if agent.RequirePairedDevice() {
+		t.Error("a requirement that came only from settings should still be toggleable")
+	}
+}
+
+// The whole matrix. Launching without the flag leaves the file in charge, which
+// is how a requirement stored by a previous run comes back; launching with it
+// settles the question either way, including the case the old resolution could
+// not express, -require-paired-devices=false against a stored true.
+func TestWhoDecidesTheRequirement(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		flag   bool
-		stored bool
-		want   bool
+		name     string
+		explicit bool
+		launched bool
+		stored   bool
+		want     bool
 	}{
-		{"neither", false, false, false},
-		{"stored only", false, true, true},
-		{"command line only", true, false, true},
-		{"both", true, true, true},
+		{"neither", false, false, false, false},
+		{"stored only", false, false, true, true},
+		{"launched on", true, true, false, true},
+		{"launched on over a stored no", true, true, false, true},
+		{"launched off over a stored yes", true, false, true, false},
+		{"both on", true, true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			storedRequirePaired(t, dir, tc.stored)
+			agent := New(Config{
+				Manager:             nfc.NewMockManager(),
+				RequirePairedDevice: tc.launched,
+				Explicit:            settings.Explicit{RequirePairedDevice: tc.explicit},
+			})
 
-			opts := testOptions(t)
-			opts.ConfigDir = dir
-			opts.RequirePaired = tc.flag
+			agent.ApplySettings(settings.Settings{RequirePairedDevice: tc.stored})
 
-			rt, err := Setup(opts, nfc.NewMockManager())
-			if err != nil {
-				t.Fatalf("Setup: %v", err)
-			}
-			if got := rt.Agent.RequirePairedDevice(); got != tc.want {
-				t.Errorf("RequirePairedDevice() = %v, want %v", got, tc.want)
+			if got := agent.RequirePairedDevice(); got != tc.want {
+				t.Errorf("requirement = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-// TestPairingRequirementFromEnvironment checks the other way of asking, which
-// is what an unattended install uses.
-func TestPairingRequirementFromEnvironment(t *testing.T) {
-	dir := t.TempDir()
-	storedRequirePaired(t, dir, false)
-	t.Setenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES", "1")
-
-	opts := testOptions(t)
-	opts.ConfigDir = dir
-
-	rt, err := Setup(opts, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if !rt.Agent.RequirePairedDevice() {
-		t.Error("the environment asked for paired devices and a stored setting withdrew it")
-	}
-	if !rt.Agent.RequirePairedDeviceLocked() {
-		t.Error("a requirement from the environment should be locked")
-	}
-}
-
-// TestCommandLineRequirementCannotBeWithdrawn is the console's path: saving any
-// setting re-applies the stored ones, which must not lower a requirement the
-// command line set.
-func TestCommandLineRequirementCannotBeWithdrawn(t *testing.T) {
-	dir := t.TempDir()
-	storedRequirePaired(t, dir, false)
-
-	opts := testOptions(t)
-	opts.ConfigDir = dir
-	opts.RequirePaired = true
-
-	rt, err := Setup(opts, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-
-	// What SaveSettings does after the console writes a preference.
-	rt.Agent.ApplySettings(settings.Settings{RequirePairedDevice: false})
-	if !rt.Agent.RequirePairedDevice() {
-		t.Error("applying stored settings withdrew a command-line requirement")
-	}
-
-	// And the direct toggle.
-	rt.Agent.SetRequirePairedDevice(false)
-	if !rt.Agent.RequirePairedDevice() {
-		t.Error("SetRequirePairedDevice(false) withdrew a command-line requirement")
-	}
-}
-
-// TestStoredRequirementStaysToggleable guards the other side: a requirement
-// that only came from settings is the operator's to turn off in the console.
-func TestStoredRequirementStaysToggleable(t *testing.T) {
-	dir := t.TempDir()
-	storedRequirePaired(t, dir, true)
-
-	opts := testOptions(t)
-	opts.ConfigDir = dir
-
-	rt, err := Setup(opts, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if !rt.Agent.RequirePairedDevice() {
-		t.Fatal("stored setting should have turned the requirement on")
-	}
-	if rt.Agent.RequirePairedDeviceLocked() {
-		t.Error("a requirement from settings alone must not be locked")
-	}
-
-	rt.Agent.SetRequirePairedDevice(false)
-	if rt.Agent.RequirePairedDevice() {
-		t.Error("a requirement that came only from settings should be toggleable off")
 	}
 }

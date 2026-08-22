@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
@@ -116,11 +115,6 @@ type App struct {
 	// settings is the store the tray writes its toggles back to. Nil when the
 	// agent has no config directory to persist to.
 	settings *settings.Store
-
-	// mu guards the state below, which the console changes from its own
-	// goroutines while the tray's handlers read it.
-	mu   sync.Mutex
-	mode nfc.ReaderMode
 }
 
 // New creates the tray on the real system tray. The pairing entries are hidden
@@ -139,18 +133,41 @@ func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
 		bootstrapPort: rt.Agent.BootstrapPort(),
 		bootstrap:     rt.Agent.Bootstrap(),
 		menu:          traymenu.New(driver),
-		mode:          nfc.ModeReadWrite,
 	}
 }
 
-// SyncSettingsToMenu reflects a settings change made in the console.
+// persist writes what the agent holds to the settings file.
+//
+// The tray and the console write the same file: a preference set from a menu is
+// the same operator's decision as one set in a browser, and forgetting it at
+// exit was an accident of which surface it was clicked in. Without a store the
+// menus still work, they are just forgotten.
+//
+// What is written is the agent's state rather than what was clicked, so a
+// change the agent refused is not recorded as if it had happened.
+func (s *App) persist() {
+	if s.settings == nil {
+		return
+	}
+
+	inForce, explicit := s.agent.Settings(), s.agent.Explicit()
+	_, err := s.settings.Update(func(next *settings.Settings) {
+		prev := *next
+		*next = inForce
+		explicit.Keep(next, prev)
+	})
+	if err != nil {
+		log.Printf("[systray] The change is in effect for this session only: it could not be saved: %v", err)
+	}
+}
+
+// SyncSettingsToMenu reflects a settings change made elsewhere.
 func (s *App) SyncSettingsToMenu(next settings.Settings) {
 	if s.modes == nil {
 		return
 	}
 
 	mode := settings.ParseMode(next.Mode)
-	s.setMode(mode)
 	s.modes.Set(mode)
 	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
 
@@ -161,6 +178,44 @@ func (s *App) SyncSettingsToMenu(next settings.Settings) {
 	}
 	if s.mReaderFeedback != nil {
 		s.mReaderFeedback.SetChecked(next.ReaderFeedback)
+	}
+}
+
+// disableHeldMenus greys out the menus for settings the launcher holds. They
+// stay visible: what the agent is set to is worth reading even where it cannot
+// be changed, and an item that vanishes reads as a missing feature.
+func (s *App) disableHeldMenus() {
+	explicit := s.agent.Explicit()
+	const heldNote = " (set at launch)"
+
+	if explicit.Mode && s.mModeMenu != nil {
+		for _, mode := range []nfc.ReaderMode{nfc.ModeReadWrite, nfc.ModeReadOnly, nfc.ModeWriteOnly} {
+			if item := s.modes.Item(mode); item != nil {
+				item.Disable()
+			}
+		}
+		s.mModeMenu.SetTooltip("The reader mode was set at launch and holds until the agent is restarted")
+	}
+
+	if explicit.CardTypes && s.cardTypes != nil {
+		if all := s.cardTypes.All(); all != nil {
+			all.Disable()
+		}
+		for _, cardType := range agent.GetAllCardTypeFilterNames() {
+			if item := s.cardTypes.Item(cardType); item != nil {
+				item.Disable()
+			}
+		}
+	}
+
+	if explicit.RequirePairedDevice && s.mRequirePaired != nil {
+		s.mRequirePaired.Disable()
+		s.mRequirePaired.SetTitle("Require Paired Devices" + heldNote)
+	}
+
+	if explicit.ReaderFeedback && s.mReaderFeedback != nil {
+		s.mReaderFeedback.Disable()
+		s.mReaderFeedback.SetTitle("Flash and Beep on Scan" + heldNote)
 	}
 }
 
@@ -226,6 +281,13 @@ func (s *App) setupUI() {
 	s.menu.AddSeparator()
 
 	s.setupConsoleMenu()
+
+	// The menus open on what the agent is set to, which is not always the
+	// default: a mode restored from settings, or one the launcher set, was
+	// decided before the tray existed. The ones the launcher holds are shown
+	// and not offered.
+	s.SyncSettingsToMenu(s.agent.Settings())
+	s.disableHeldMenus()
 
 	s.menu.AddSeparator()
 
@@ -331,7 +393,6 @@ func (s *App) setupModeMenu() {
 	s.modes.Add(nfc.ModeReadWrite, "Read/Write Mode", traymenu.Tooltip("Allow both read and write"))
 	s.modes.Add(nfc.ModeReadOnly, "Read Only Mode", traymenu.Tooltip("Only allow reading"))
 	s.modes.Add(nfc.ModeWriteOnly, "Write Only Mode", traymenu.Tooltip("Only allow writing"))
-	s.modes.Set(nfc.ModeReadWrite)
 
 	s.modes.OnSelect(s.handleModeSwitch)
 }
@@ -491,20 +552,20 @@ func (s *App) handleRotateAPISecret() {
 	s.updateAPISecretLabel(fresh)
 }
 
-// handleModeSwitch applies a mode picked from the menu.
+// handleModeSwitch applies a mode picked from the menu. The mode belongs to the
+// agent rather than to the running reader, so it can be picked with the agent
+// stopped, and the console sees it because the console reads the agent.
+//
+// Session-only, like the card-type filter beside it: the tray changes what the
+// agent is doing now, the console changes what it does from now on.
 func (s *App) handleModeSwitch(mode nfc.ReaderMode) {
-	if s.agent.Reader() == nil {
-		// Nothing to apply it to. Put the tick back rather than showing a mode
-		// the reader is not in.
-		s.modes.Set(s.currentMode())
-		return
-	}
+	s.agent.SetReaderMode(mode)
+	s.persist()
 
-	s.agent.Reader().SetMode(mode)
-	s.setMode(mode)
-	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
-
-	log.Printf("Switched to %s mode", modeName(mode))
+	// From the agent, not from the click: a mode the launcher holds leaves the
+	// tick where it was rather than showing a mode the reader is not in.
+	s.SyncSettingsToMenu(s.agent.Settings())
+	log.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
 }
 
 // modeName is the label a reader mode goes by in the menu.
@@ -519,33 +580,12 @@ func modeName(mode nfc.ReaderMode) string {
 	}
 }
 
-func (s *App) currentMode() nfc.ReaderMode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mode
-}
-
-func (s *App) setMode(mode nfc.ReaderMode) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.mode = mode
-}
-
 // applyCardTypes narrows the agent to the ticked card types, or opens it back
 // up when none of them are.
 func (s *App) applyCardTypes(types []string) {
-	if len(types) == 0 {
-		s.agent.ClearCardTypeFilter()
-		return
-	}
-
-	picked := make(map[string]bool, len(types))
-	for _, cardType := range types {
-		picked[cardType] = true
-	}
-	for _, cardType := range agent.GetAllCardTypeFilterNames() {
-		s.agent.SetAllowCardType(cardType, picked[cardType])
-	}
+	s.agent.SetCardTypeFilter(types)
+	s.persist()
+	s.SyncSettingsToMenu(s.agent.Settings())
 }
 
 // SwitchDevice switches to a different NFC device
@@ -669,7 +709,9 @@ func (s *App) urls() agentURLs {
 	if s.agent.CertFile() != "" && s.agent.KeyFile() != "" {
 		scheme = "wss"
 	}
-	port := s.agent.DevicePort()
+	// The port being served, not the one configured. These URLs are copied and
+	// pasted into a device, so one naming an unbound port is worse than none.
+	port := s.agent.ServingPort()
 	if port == 0 {
 		port = agent.DefaultDevicePort
 	}

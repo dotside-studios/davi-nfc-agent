@@ -66,7 +66,7 @@ func start(t *testing.T, opts options) *harness {
 	// Not the default port, so these tests can run beside an agent already
 	// running on this machine.
 	o.DevicePort = freePort(t)
-	o.DevicePortSet = true
+	o.Explicit.Port = true
 	o.BootstrapPort = 0
 	if opts.Pairing {
 		o.BootstrapPort = freePort(t)

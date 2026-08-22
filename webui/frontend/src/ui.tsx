@@ -158,3 +158,14 @@ export function Empty({ children }: { children: ReactNode }) {
 export function Notice({ kind, children }: { kind?: 'warn' | 'err'; children: ReactNode }) {
   return <div className={kind ? `notice ${kind}` : 'notice'}>{children}</div>
 }
+
+/** Why a control is disabled: whatever launched this agent set the value, so it
+ *  holds until the agent is restarted. Naming the flag says where to change it. */
+export function HeldAtLaunch({ flag }: { flag?: string }) {
+  return (
+    <Notice>
+      Set at launch{flag ? <> with <span className="mono">{flag}</span></> : null}, so it holds until the agent
+      is restarted. The saved preference is untouched and applies again on a start without it.
+    </Notice>
+  )
+}

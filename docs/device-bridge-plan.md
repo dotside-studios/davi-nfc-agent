@@ -11,9 +11,11 @@ Phases 1–4 are implemented. Phase 5 (reach) is not started.
 Work toward a successor protocol has moved to
 [device-api-v2-research.md](device-api-v2-research.md), which surveys the tag,
 platform and hardware semantics this bridge projects, and records the design
-rules that came out of that. Most of it is undecided; the exception is that
+rules that came out of that. Most of it is undecided; the exceptions are that
 **v0 and v1 are to be removed rather than deprecated** when v2 lands, on the
-device protocol only. See §12 there for the conditions that attach to it.
+device protocol only, and that a device's **`platform` field gives way to a
+User-Agent-shaped self-description** that nothing may branch on. See §12 and
+§13 there for the conditions that attach to each.
 
 Phase 4 landed agent-side only: the agent issues per-device credentials and
 publishes its key pin, but no client verifies the pin or calls `/pair` yet, and

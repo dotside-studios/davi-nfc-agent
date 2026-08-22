@@ -3,8 +3,8 @@
 Research toward freezing the current device protocol (v1) and designing its
 successor. Almost nothing here is decided: this is the evidence and the model
 that came out of it, written down so the design conversation starts from a
-fixed text rather than from memory. The one decision taken so far is in §12 —
-v0 and v1 are removed rather than deprecated.
+fixed text rather than from memory. The decisions taken so far are in §12 and
+§13.
 
 It follows [device-bridge-protocols.md](device-bridge-protocols.md) (the survey
 of prior art) and [device-bridge-plan.md](device-bridge-plan.md) (the phased
@@ -179,6 +179,70 @@ Wiegand reader has no UID at all. Meanwhile every platform hands out a handle �
 Android's `Tag`, CoreNFC's tag-in-session, PC/SC's card handle — valid exactly
 while the tag is in the field. Our wire discards it and re-derives from a hex
 string.
+
+### 6.1 Addressing and data are different questions
+
+Handles-versus-UIDs is about **addressing**: how a request names the tag it
+applies to. It is not about whether the UID is available. A scan event carries
+the credential either way, so an application that wants the UID as a *value* —
+to key a record, or to compose a URL — is unaffected by the choice.
+
+```jsonc
+// UID addressing — "whoever is holding this UID"
+{"type":"writeRequest","payload":{"uid":"04:A2:24:52:9F:5C:80","records":[…]}}
+
+// handle addressing — this tag, this holder, this presentation
+{"type":"writeRequest","payload":{"tagRef":"t_8f21c…","records":[…]}}
+// the scan event still carries {"credential":{"kind":"uid","value":"04a224529f5c80"}}
+```
+
+Two failure modes motivate the handle. **Two holders, one UID** — a cloned
+card, a non-unique 4-byte UID, or the same card moved between readers — and
+`deviceHoldingUID` takes the first match in iteration order. And **lift and
+re-tap**: between the scan and the write the card leaves and returns, the UID
+still matches, but it is a different presentation, so a late write lands on the
+second tap. A handle goes stale with the presentation, so the operation fails
+loudly instead of applying somewhere else.
+
+### 6.2 A UID as an application identifier
+
+Distinct from addressing, and worth writing down because applications do this —
+writing `example.com/c/$uid` onto a card is a real use case here. Three
+hazards:
+
+- **Spelling.** Our canonical form is colon-separated uppercase
+  (`ParseUID`, `protocol/convert.go:40` → `04:A2:24:52:9F:5C:80`), Android
+  hands out a `byte[]`, ESPHome prints `74-10-37-94`, PC/SC gives raw bytes. A
+  mismatch between whoever writes the value and whoever looks it up is silent
+  and surfaces much later as "not found". Pick one canonical spelling for
+  application use — lowercase hex, no separators — and normalise at the edge.
+- **A UID is not an authenticator.** 4-byte UIDs are explicitly non-unique
+  under ISO/IEC 14443-3, and UID-writable cards will present whatever is asked
+  of them. Adequate as a lookup key, never as proof the card is genuine; that
+  needs the card to demonstrate something (a password, a signature).
+- **Random UIDs.** DESFire and Plus can be configured to emit a fresh
+  identifier per activation, so a value captured once stops matching the card.
+
+### 6.3 A write path that never needs the UID
+
+NTAG213/215/216 can mirror their own UID into the NDEF message at read time.
+With `MIRROR_CONF = 01b`, `MIRROR_PAGE > 03h` and `MIRROR_BYTE` selecting the
+offset, the tag substitutes its UID as exactly **14 ASCII bytes** at that
+position on every read (the NFC counter mirror adds 6 more, 21 with both — 14
+plus an `x` separator plus 6), and the mirror must not cross the user-memory
+boundary.
+
+The consequence is a production flow with no personalisation step: write one
+identical NDEF to every card and each serves its own URL, with the writing
+device never learning any UID. It is NTAG21x only, it is a configuration-page
+write — the same class this codebase currently gates off pending hardware
+validation (`nfc/password.go`) — and the mirrored value's hex case should be
+confirmed on real hardware before anything depends on it.
+
+This converges with §7.2 from the other direction: "write this NDEF to the next
+card presented" is the same armed-intent primitive the badge-reader tier needs,
+and it is what bulk card production wants too. The IoT constraint is not a
+special case being accommodated; it is a primitive worth having anyway.
 
 ## 7. The IoT tier
 
@@ -375,6 +439,12 @@ Checkable rules, each traceable to something above.
 18. Give extensions a sanctioned channel; ignore unknown fields; answer unknown
     message types with a typed error (§7.3).
 
+**Self-description**
+
+19. The device's account of itself is descriptive and inert: User-Agent-shaped,
+    bounded in length and character set, never branched on, and kept out of the
+    types the deciding code can see (§13).
+
 ## 11. What to resist
 
 - **A second, "simple" protocol.** Two implementations, two test matrices, and
@@ -485,7 +555,57 @@ outputs, error classes — everything in §10. A partial break needing a second
 break in six months is the worst outcome, and it is the tempting one, because
 each item looks individually deferrable.
 
-## 13. Open questions
+## 13. Decided: self-description is a User-Agent string, not a platform enum
+
+v0 required `platform` to be `ios`, `android` or `web` and refused registration
+otherwise; `#28` removed the allowlist, leaving a free-form string that nothing
+branches on. v2 replaces the field outright with a **User-Agent-shaped**
+self-description, folding `appVersion` into it.
+
+The shape is RFC 9110's: an ordered list of `product/version` tokens with
+parenthesised comments.
+
+```
+DaviDevice/2.0 (esp32; pn532; fw 1.4.2) ArduinoJson/7.0
+DaviDevice/2.0 (ios 18.2; iPhone15,2) CoreNFC/1.0
+DaviDevice/2.0 (web; Chrome/131) WebNFC/1.0
+DaviDevice/2.0 (linux/amd64; acr1252u) libdavi/0.3
+```
+
+It extends without a registry, reads well in a log and a device list, and
+carries the version of the *implementation* beside the platform — which
+`platform` and `appVersion` did separately and incompletely. Firmware version
+in particular matters on the IoT tier, where capability follows the build
+(§7.6).
+
+**And it must be inert.** The User-Agent is the web's own cautionary tale:
+sites branched on it, so every browser learned to lie, and the platform ended
+up at capability detection instead. This protocol already made the small
+version of that mistake, so the rule attaches to the field permanently:
+
+> Nothing in the agent may branch on the self-description. Behaviour follows
+> declared capabilities (rule 4), never the string.
+
+Enforce that structurally rather than by comment: keep the string out of any
+type the routing and capability code can see. It belongs in the descriptor the
+console and the logs read, not beside `Capabilities`. A field the deciding code
+cannot reach cannot be sniffed.
+
+**Bound it.** This is device-controlled text that reaches the logs, the tray
+and the Control Center's device list (`webui/state.go:42`), so: a maximum
+length — real User-Agent strings grow without limit — printable ASCII only per
+RFC 9110's `token` and comment rules, no control characters and no line breaks.
+Truncate rather than refuse: a malformed description is not a reason to turn
+away a device that otherwise speaks the protocol.
+
+**It does not negotiate.** Protocol version stays in the subprotocol token and
+the handshake (§12); `DaviDevice/2.0` inside the string is informational, and
+treating it as a version would rebuild the sniffing problem the field exists to
+avoid. What it is genuinely good for is knowing what is deployed — the question
+that would have made §12's removal decision a measurement rather than a
+judgement.
+
+## 14. Open questions
 
 1. **Handles or UIDs?** Handles change every client-facing request shape too.
 2. **Which query verbs earn their round trip?** A *status* query looks worth
@@ -529,3 +649,8 @@ Primary sources checked for this document, beyond those in
 - [ESP-IDF mbedTLS memory guidance](https://docs.espressif.com/projects/esp-faq/en/latest/software-framework/protocols/mbedtls.html)
 - [PN532 `MaxTarget`](https://learn.microsoft.com/en-us/dotnet/api/iot.device.pn532.listpassive.maxtarget?view=iot-dotnet-latest)
   — one or two targets
+- [NTAG213/215/216 data sheet (NXP)](https://www.nxp.com/docs/en/data-sheet/NTAG213_215_216.pdf)
+  — UID and NFC counter ASCII mirror, `MIRROR_CONF` / `MIRROR_BYTE` /
+  `MIRROR_PAGE`, and the 14/6/21-byte mirror sizes
+- [RFC 9110 §10.1.5 — User-Agent](https://www.rfc-editor.org/rfc/rfc9110#field.user-agent)
+  — the `product/version` and comment grammar §13 borrows

@@ -505,11 +505,9 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	a.RequirePairedDevice = on
 	a.settingsMu.Unlock()
 
-	// Told to whatever is admitting devices, so the policy takes effect on the
-	// connections already open rather than on the next restart.
-	if admits, ok := plugin.Find[deviceAdmitter](a.Plugins()); ok {
-		admits.SetRequirePairedDevice(on)
-	}
+	// Nothing is told to apply it. notifyConsole publishes the settings, and
+	// whatever admits devices is watching them: a plugin follows the agent
+	// rather than the agent reaching into the plugin.
 	a.notifyConsole()
 }
 
@@ -561,34 +559,13 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	a.notifyConsole()
 }
 
-// ServingPort is the port being served on. It matches the configured port
-// until one is saved, and again once the listener has been rebound.
-//
-// The agent asks whatever is serving it rather than holding a listener of its
-// own, so a build that serves nothing reports what it would be served on.
-func (a *Agent) ServingPort() int {
-	if serving, ok := plugin.Find[serverPlugin](a.Plugins()); ok {
-		if port := serving.Port(); port > 0 {
-			return port
-		}
-	}
-	return a.ConfiguredPort()
-}
-
-// Serving reports whether anything is answering on that port.
-func (a *Agent) Serving() bool {
-	serving, ok := plugin.Find[serverPlugin](a.Plugins())
-	return ok && serving.Serving()
-}
-
-// LastCard is the tag last seen by whatever is serving clients, nil when there
-// is none, or when nothing is serving.
+// LastCard is the card on the reader, nil when there is none.
 func (a *Agent) LastCard() *nfc.Card {
-	serving, ok := plugin.Find[cardReporter](a.Plugins())
-	if !ok {
+	reader := a.Reader
+	if reader == nil {
 		return nil
 	}
-	return serving.LastCard()
+	return reader.LastCard()
 }
 
 // ConfiguredPort is the port the agent is set to serve on, which it binds the
@@ -598,27 +575,6 @@ func (a *Agent) ConfiguredPort() int {
 	defer a.settingsMu.RUnlock()
 	return a.DevicePort
 }
-
-// The capabilities the agent looks for among its plugins. It names what it
-// needs done rather than which plugin does it, so the plugin that serves this
-// agent can be replaced, or left out, without agent.go knowing.
-type (
-	// serverPlugin is whatever is answering on the agent's port.
-	serverPlugin interface {
-		Serving() bool
-		Port() int
-	}
-
-	// deviceAdmitter is whatever decides which devices are let in.
-	deviceAdmitter interface {
-		SetRequirePairedDevice(on bool)
-	}
-
-	// cardReporter is whatever sees the tags as they are read.
-	cardReporter interface {
-		LastCard() *nfc.Card
-	}
-)
 
 // clientsChanged returns a hook that refreshes the console when the client list
 // moves, or nil when there is no console to refresh.

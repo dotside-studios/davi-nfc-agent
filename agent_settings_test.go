@@ -124,10 +124,6 @@ func TestStoredPortMovesTheAgentUnlessTheLauncherSetIt(t *testing.T) {
 	if got := agent.ConfiguredPort(); got != 9480 {
 		t.Errorf("ConfiguredPort() = %d, want 9480", got)
 	}
-	// Nothing is bound, so the port being served is the one configured.
-	if got := agent.ServingPort(); got != 9480 {
-		t.Errorf("ServingPort() = %d, want 9480", got)
-	}
 
 	held := NewAgent(nfc.NewMockManager())
 	held.DevicePort = 9470

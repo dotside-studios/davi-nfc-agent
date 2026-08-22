@@ -160,7 +160,26 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 
 	p.showSecret()
 	p.showAddresses(nil)
+
+	// The paired-device requirement is a setting, and this is what enforces it.
+	// Following the agent's state is how it hears about a change — from the
+	// tray, from the console, from the settings file — without the agent having
+	// to know that anything enforces anything.
+	ctx.Watch(func(state plugin.State) { p.admit(state.Settings.RequirePairedDevice) })
 	return nil
+}
+
+// admit applies the paired-device requirement to the running device endpoint,
+// so a change takes effect on the connections already open rather than on the
+// next restart.
+func (p *Plugin) admit(required bool) {
+	p.mu.Lock()
+	device := p.device
+	p.mu.Unlock()
+
+	if device != nil {
+		device.SetRequirePairedDevice(required)
+	}
 }
 
 // rotateSecret issues a fresh secret. The agent restarts its listeners for it,
@@ -373,18 +392,6 @@ func (p *Plugin) Disconnect(id string) bool {
 		return false
 	}
 	return client.Disconnect(id)
-}
-
-// SetRequirePairedDevice changes the requirement on the running device
-// endpoint, so the policy can be tried against a real device without a restart.
-func (p *Plugin) SetRequirePairedDevice(on bool) {
-	p.mu.Lock()
-	device := p.device
-	p.mu.Unlock()
-
-	if device != nil {
-		device.SetRequirePairedDevice(on)
-	}
 }
 
 // URLs are the two addresses the listener answers on. Devices and clients share

@@ -57,6 +57,7 @@ type NFCReader struct {
 	clock            Clock             // Clock abstraction for time operations
 	statusMux        sync.RWMutex
 	cardPresent      bool           // Internal tracking of card presence
+	lastCard         *Card          // The card last read (guarded by statusMux)
 	isWriting        bool           // Tracks if a write operation is in progress
 	operationMutex   sync.Mutex     // Protects tag operations (read/write)
 	operationTimeout time.Duration  // Timeout for tag operations
@@ -453,6 +454,8 @@ func (r *NFCReader) handleTagPolling(tags []Tag) {
 			continue
 		}
 
+		r.setLastCard(card)
+
 		if r.cache.HasChanged(uid) {
 			log.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
 			r.dataChan <- NFCData{Card: card, Err: nil}
@@ -619,6 +622,26 @@ func (r *NFCReader) GetLastScannedData() string {
 	return r.cache.GetLastScanned()
 }
 
+// LastCard is the card this reader last read, nil until it reads one and again
+// once the card is taken away.
+//
+// The reader is the one that read it, so the reader is what remembers it.
+// Anything else holding the only copy — a fanout server downstream, say — makes
+// the last card a question only that thing can answer, and unanswerable in a
+// build without it.
+func (r *NFCReader) LastCard() *Card {
+	r.statusMux.RLock()
+	defer r.statusMux.RUnlock()
+	return r.lastCard
+}
+
+// setLastCard records what was just read, or clears it when the card is gone.
+func (r *NFCReader) setLastCard(card *Card) {
+	r.statusMux.Lock()
+	r.lastCard = card
+	r.statusMux.Unlock()
+}
+
 func (r *NFCReader) setCardPresent(present bool) {
 	r.statusMux.Lock()
 	if r.cardPresent == present { // Avoid redundant updates
@@ -626,6 +649,9 @@ func (r *NFCReader) setCardPresent(present bool) {
 		return
 	}
 	r.cardPresent = present
+	if !present {
+		r.lastCard = nil
+	}
 	r.statusMux.Unlock()
 
 	// Construct message based on card presence

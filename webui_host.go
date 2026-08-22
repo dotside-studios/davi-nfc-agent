@@ -103,29 +103,44 @@ func (h *webuiHost) SelectDevice(devicePath string) error {
 // Port is the port being served, not the one configured. A port saved in the
 // console is bound only once the listener has been restarted, and until then
 // the console must not hand out a URL nothing is listening on.
-func (h *webuiHost) Port() int          { return h.agent.ServingPort() }
+//
+// The console is a plugin, so it asks the plugin that bound the port. Where
+// nothing has, the configured one is the best answer there is.
+func (h *webuiHost) Port() int {
+	if serving, ok := plugin.Find[serving](h.agent.Plugins()); ok {
+		if port := serving.Port(); port > 0 {
+			return port
+		}
+	}
+	return h.agent.ConfiguredPort()
+}
 func (h *webuiHost) BootstrapPort() int { return h.agent.BootstrapPort }
 func (h *webuiHost) CertFile() string   { return h.agent.CertFile }
 func (h *webuiHost) TLSEnabled() bool   { return h.agent.CertFile != "" && h.agent.KeyFile != "" }
 func (h *webuiHost) LocalIPs() []string { return netaddr.LocalIPs() }
 
+// serving is what the console needs from whatever is serving the agent: where
+// it is, and who is connected to it. Both are that plugin's to answer, and a
+// build serving clients over something else answers the same questions by
+// registering something else.
+//
+// This is one plugin asking another, which is the direction that reach is meant
+// to run in. The agent asks its plugins for nothing.
+type serving interface {
+	Port() int
+	ClientCount() int
+	Clients() []clientserver.ClientInfo
+	Disconnect(id string) bool
+}
+
 // clients is whatever is serving the client applications, or nil when nothing
-// is. The console reads its client list from a plugin, so a build serving
-// clients over something else answers the same questions by registering
-// something else.
-func (h *webuiHost) clients() clientReporter {
-	reporter, ok := plugin.Find[clientReporter](h.agent.Plugins())
+// is.
+func (h *webuiHost) clients() serving {
+	reporter, ok := plugin.Find[serving](h.agent.Plugins())
 	if !ok {
 		return nil
 	}
 	return reporter
-}
-
-// clientReporter is what the console needs to know about connected clients.
-type clientReporter interface {
-	ClientCount() int
-	Clients() []clientserver.ClientInfo
-	Disconnect(id string) bool
 }
 
 func (h *webuiHost) ClientCount() int {

@@ -14,15 +14,13 @@ const stateInterval = 500 * time.Millisecond
 // Snapshot is what the agent looks like right now, as much of it as a plugin
 // has any business seeing.
 //
-// Every value comes from the agent or from whatever is serving it, never from a
-// menu: what a plugin acts on should be what the agent will do, not what a
+// Every value comes from the agent itself, never from a menu and never from a
+// plugin: what a plugin acts on should be what the agent will do, not what a
 // checkbox happens to show.
 func (a *Agent) Snapshot() plugin.State {
 	state := plugin.State{
 		Running:  a.Reader != nil,
 		Device:   a.CurrentDevicePath(),
-		Port:     a.ServingPort(),
-		TLS:      a.CertFile != "" && a.KeyFile != "",
 		Settings: a.Settings(),
 		Explicit: a.Explicit(),
 	}

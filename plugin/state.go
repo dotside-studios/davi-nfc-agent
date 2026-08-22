@@ -2,9 +2,13 @@ package plugin
 
 import "github.com/dotside-studios/davi-nfc-agent/settings"
 
-// State is what the agent looks like at one moment, as much of it as a plugin
-// has any business seeing. It is a snapshot rather than a set of deltas, so a
-// plugin can never act on a half-applied combination.
+// State is what the agent looks like at one moment: what it is doing and what
+// it is set to, and nothing about what any plugin is doing with that. It is a
+// snapshot rather than a set of deltas, so a plugin can never act on a
+// half-applied combination.
+//
+// A plugin wanting something of another plugin — the port a listener actually
+// bound, say — asks that plugin, not this.
 type State struct {
 	// Running reports whether the reader is up.
 	Running bool
@@ -14,13 +18,6 @@ type State struct {
 
 	// Card is the tag on the reader, if any.
 	Card Card
-
-	// Port is the port being served, 0 when nothing is serving.
-	Port int
-
-	// TLS reports whether that port is served over TLS, which decides whether
-	// the addresses are ws:// or wss://.
-	TLS bool
 
 	// Paired counts the devices holding a pairing credential.
 	Paired int

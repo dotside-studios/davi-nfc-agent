@@ -20,8 +20,12 @@ type Server struct {
 
 // New builds the console for a. The caller mounts its routes; a build that
 // wants no control center mounts none.
-func New(a *agent.Agent, store *settings.Store, logs *logbuf.Ring) *Server {
-	h := &host{agent: a, settings: store}
+//
+// pairing is the pairing server this build runs, or nil for a build that pairs
+// no devices. The agent does not hold one, so whoever built it hands it to
+// whatever displays the PIN.
+func New(a *agent.Agent, store *settings.Store, logs *logbuf.Ring, pairing *agent.PairingServer) *Server {
+	h := &host{agent: a, settings: store, pairing: pairing}
 	info := a.Info()
 	return &Server{
 		Server: webui.New(webui.Config{

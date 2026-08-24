@@ -29,12 +29,19 @@ func newTestAgentWith(cfg nfcagent.Config) *nfcagent.Agent {
 }
 
 // newTestTray builds the real tray menu on a fake driver, so it can be read and
-// clicked with no desktop involved.
+// clicked with no desktop involved. This build pairs no devices; see
+// newTestTrayWithPairing.
 func newTestTray(t *testing.T, a *nfcagent.Agent) (*App, *traymenu.Fake) {
+	t.Helper()
+	return newTestTrayWithPairing(t, a, nil)
+}
+
+// newTestTrayWithPairing builds one that has a pairing server behind it.
+func newTestTrayWithPairing(t *testing.T, a *nfcagent.Agent, pairing *nfcagent.PairingServer) (*App, *traymenu.Fake) {
 	t.Helper()
 
 	fake := traymenu.NewFake()
-	app := newApp(&nfcagent.Runtime{Agent: a}, fake)
+	app := newApp(&nfcagent.Runtime{Agent: a}, fake, pairing)
 	t.Cleanup(app.menu.Close)
 	app.setupUI()
 	return app, fake

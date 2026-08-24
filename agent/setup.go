@@ -28,10 +28,15 @@ const (
 // DefaultOptions rather than the zero value, which would ask for no TLS and
 // port 0.
 type Options struct {
-	Version        bool
-	DevicePath     string
-	DevicePort     int
-	BootstrapPort  int
+	Version    bool
+	DevicePath string
+	DevicePort int
+
+	// BootstrapPort is the pairing listener the launcher asked for, 0 for
+	// none. Setup does not read it: whether an agent pairs devices, and what
+	// displays the PIN, is the program's decision. See [PairingFor].
+	BootstrapPort int
+
 	APISecret      string
 	CertFile       string
 	KeyFile        string
@@ -79,9 +84,8 @@ func DefaultOptions() *Options {
 }
 
 // Runtime is what Setup built. It carries only what is not already reachable
-// through the agent: the origin and device stores, the pairing server and its
-// port all live on Agent, and reads of those go through rt.Agent so there is
-// one copy to keep true.
+// through the agent: the origin and device stores live on Agent, and reads of
+// those go through rt.Agent so there is one copy to keep true.
 type Runtime struct {
 	Agent    *Agent
 	Settings *settings.Store
@@ -161,25 +165,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		devices, _ = NewDeviceRegistry("")
 	}
 
-	// Build the pairing server. It is available whenever pairing is possible,
-	// not only under auto-TLS: an agent using an externally provisioned
-	// certificate has no CA to hand out but still has devices to pair, and
-	// coupling the two left that deployment with no way to authenticate one.
-	//
-	// It is not started here. It is a component now, so the agent starts it
-	// with everything else and stops it again on the way down.
-	var pairing *PairingServer
-	if opts.BootstrapPort > 0 {
-		pairing = NewPairingServer(PairingConfig{
-			Port:         opts.BootstrapPort,
-			CA:           tlsMgr,
-			Devices:      devices,
-			PublicKeyPin: agentPublicKeyPin,
-			AppName:      info.DisplayName,
-			AgentPort:    opts.DevicePort,
-		})
-	}
-
 	// The allowlist persists in the config dir and starts with the first-party
 	// consoles, so the shipped console connects on a fresh install. Anything
 	// passed on the command line is added to it.
@@ -257,7 +242,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Origins:             origins,
 		Devices:             devices,
 		PublicKeyPin:        agentPublicKeyPin,
-		Pairing:             pairing,
 		Settings:            settingsStore,
 		Logs:                opts.Logs,
 		RequirePairedDevice: requirePaired,

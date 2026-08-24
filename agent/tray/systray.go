@@ -18,7 +18,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu/fynetray"
 )
@@ -65,8 +64,7 @@ func hostPort(host string, port int) string {
 type App struct {
 	agent         *agent.Agent
 	initialDevice string
-	bootstrapPort int
-	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
+	pairing       *agent.PairingServer // nil if this build pairs no devices
 	console       *console.Server      // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
@@ -123,21 +121,23 @@ type App struct {
 	settings *settings.Store
 }
 
-// New creates the tray on the real system tray. The pairing entries are hidden
-// when the runtime has no pairing server.
-func New(rt *agent.Runtime) *App {
-	return newApp(rt, fynetray.New())
+// New creates the tray on the real system tray.
+//
+// pairing is the pairing server this build runs, or nil for a build that pairs
+// no devices, in which case the PIN entries are hidden. The agent does not hold
+// one, so whoever built it hands it over here.
+func New(rt *agent.Runtime, pairing *agent.PairingServer) *App {
+	return newApp(rt, fynetray.New(), pairing)
 }
 
 // newApp builds the tray on a given menu driver, so a test can drive the menu
 // without a desktop.
-func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
+func newApp(rt *agent.Runtime, driver traymenu.Driver, pairing *agent.PairingServer) *App {
 	return &App{
 		agent:         rt.Agent,
 		settings:      rt.Settings,
 		initialDevice: rt.DevicePath,
-		bootstrapPort: rt.Agent.BootstrapPort(),
-		bootstrap:     rt.Agent.Bootstrap(),
+		pairing:       pairing,
 		menu:          traymenu.New(driver),
 	}
 }
@@ -346,7 +346,7 @@ func (s *App) setupURLsMenu() {
 	)
 
 	// The PIN entries only mean anything while the pairing server is running.
-	noPairing := s.bootstrap == nil
+	noPairing := s.pairing == nil
 	s.mPairingPIN = urls.Add("Pairing PIN: --",
 		traymenu.Tooltip("PIN required when pairing a phone"),
 		traymenu.Disabled(),
@@ -355,11 +355,7 @@ func (s *App) setupURLsMenu() {
 	urls.Add("  Copy Pairing PIN",
 		traymenu.Tooltip("Copy 6-digit pairing PIN to clipboard"),
 		traymenu.HiddenIf(noPairing),
-		traymenu.OnClick(func() {
-			if s.bootstrap != nil {
-				s.copyValue("pairing PIN", s.bootstrap.PIN())
-			}
-		}),
+		traymenu.OnClick(func() { s.copyValue("pairing PIN", s.pairing.PIN()) }),
 	)
 	urls.Add("  Regenerate Pairing PIN",
 		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
@@ -564,11 +560,11 @@ func (s *App) showStopped(status string) {
 // handleRotatePIN issues a fresh pairing PIN, which invalidates the URLs that
 // carried the old one.
 func (s *App) handleRotatePIN() {
-	if s.bootstrap == nil {
+	if s.pairing == nil {
 		return
 	}
 
-	fresh := s.bootstrap.RotatePIN()
+	fresh := s.pairing.RotatePIN()
 	log.Printf("[systray] Pairing PIN rotated to %s", fresh)
 	s.updateURLs()
 }
@@ -757,11 +753,9 @@ func (s *App) urls() agentURLs {
 
 	// The pairing page is always HTTP, and carries the PIN so a link clicked
 	// from chat goes straight through.
-	if s.bootstrapPort > 0 {
-		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
-		if s.bootstrap != nil {
-			urls.bootstrap += "?pin=" + url.QueryEscape(s.bootstrap.PIN())
-		}
+	if port := s.pairing.Port(); port > 0 {
+		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, port))
+		urls.bootstrap += "?pin=" + url.QueryEscape(s.pairing.PIN())
 	}
 	return urls
 }
@@ -778,8 +772,8 @@ func (s *App) updateURLs() {
 	} else {
 		s.mBootstrapURL.SetTitle("Pair Phone: " + urls.bootstrap)
 	}
-	if s.bootstrap != nil {
-		s.mPairingPIN.SetTitle("Pairing PIN: " + s.bootstrap.PIN())
+	if s.pairing != nil {
+		s.mPairingPIN.SetTitle("Pairing PIN: " + s.pairing.PIN())
 	}
 
 	s.updateAPISecretLabel(s.agent.APISecret())

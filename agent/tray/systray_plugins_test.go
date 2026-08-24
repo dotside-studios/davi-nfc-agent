@@ -45,3 +45,28 @@ func TestExtensionsSectionAppearsOnlyWhenAPluginFillsIt(t *testing.T) {
 		t.Error("the Extensions submenu is hidden with an entry in it")
 	}
 }
+
+// The agent holds no pairing server, so the tray is handed one by whoever built
+// it. Without one the PIN entries stay off the menu.
+func TestPairingEntriesFollowTheServerTheTrayWasGiven(t *testing.T) {
+	if _, fake := newTestTray(t, newTestAgent()); fake.Find("Server URLs", "Pairing PIN: --").Visible() {
+		t.Error("the PIN entry is shown with no pairing server behind it")
+	}
+
+	a := newTestAgent()
+	pairing := nfcagent.PairingFor(a, 9498)
+	app, fake := newTestTrayWithPairing(t, a, pairing)
+
+	pin := fake.Find("Server URLs", "Pairing PIN: --")
+	if pin == nil {
+		t.Fatalf("the pairing PIN entry was not declared:\n%s", fake.Render())
+	}
+	if !pin.Visible() {
+		t.Error("the PIN entry is hidden with a pairing server behind it")
+	}
+
+	app.updateURLs()
+	if got := pin.Title(); got != "Pairing PIN: "+pairing.PIN() {
+		t.Errorf("PIN entry reads %q, want the server's PIN", got)
+	}
+}

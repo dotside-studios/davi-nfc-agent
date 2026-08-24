@@ -19,6 +19,7 @@ import (
 type host struct {
 	agent    *agent.Agent
 	settings *settings.Store
+	pairing  *agent.PairingServer
 	app      Tray
 }
 
@@ -107,7 +108,7 @@ func (h *host) SelectDevice(devicePath string) error {
 // console is bound only once the listener has been restarted, and until then
 // the console must not hand out a URL nothing is listening on.
 func (h *host) Port() int          { return h.agent.ServingPort() }
-func (h *host) BootstrapPort() int { return h.agent.BootstrapPort() }
+func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.agent.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.agent.CertFile() != "" && h.agent.KeyFile() != "" }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
@@ -156,18 +157,13 @@ func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
 
 func (h *host) RotateAPISecret() (string, error) { return h.agent.RotateAPISecret() }
 
-func (h *host) PairingPIN() string {
-	if h.agent.Bootstrap() == nil {
-		return ""
-	}
-	return h.agent.Bootstrap().PIN()
-}
+func (h *host) PairingPIN() string { return h.pairing.PIN() }
 
 func (h *host) RotatePairingPIN() (string, error) {
-	if h.agent.Bootstrap() == nil {
+	if h.pairing == nil {
 		return "", errors.New("pairing server is disabled")
 	}
-	return h.agent.Bootstrap().RotatePIN(), nil
+	return h.pairing.RotatePIN(), nil
 }
 
 func (h *host) CAInstalled() bool {

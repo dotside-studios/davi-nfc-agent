@@ -78,10 +78,19 @@ func main() {
 	// plugin at all leaves an agent that drives the reader and serves nothing.
 	servers := &agent.ServerPlugin{}
 
+	// The pairing server, on a listener of its own. The agent does not hold
+	// one, so this is where it is built and where it is handed to the two
+	// things that show its PIN.
+	var pairing *agent.PairingServer
+	if opts.BootstrapPort > 0 {
+		pairing = agent.PairingFor(rt.Agent, opts.BootstrapPort)
+		servers.Add(agent.Endpoint{Name: "pairing", Component: pairing})
+	}
+
 	// Nil in a -tags nowebui build, where the control center is not compiled
 	// in. Listing it as an endpoint is all there is to attaching one: a build
 	// that wants none lists none, and the agent is no wiser either way.
-	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs)
+	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
 	if consoleServer != nil {
 		// The control API and the console page are deliberately not wrapped in
 		// CORS: one administers the agent and the other is a page, so no other
@@ -101,7 +110,7 @@ func main() {
 		log.Fatalf("Failed to register the server: %v", err)
 	}
 
-	app := tray.New(rt)
+	app := tray.New(rt, pairing)
 	app.AttachConsole(consoleServer)
 
 	// Set up signal handling for graceful shutdown
@@ -109,8 +118,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		// The pairing server is a component of the agent now, so the tray's
-		// quit path takes it down with everything else.
+		// The pairing server is a component of the agent, so the tray's quit
+		// path takes it down with everything else.
 		app.Quit()
 	}()
 

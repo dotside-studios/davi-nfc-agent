@@ -89,11 +89,6 @@ type Config struct {
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
 
-	// Pairing is the pairing server, registered as a component so it starts and
-	// stops with the agent. Nil disables pairing entirely. Everything it needs
-	// lives on PairingConfig rather than here.
-	Pairing *PairingServer
-
 	// Plugins are activated once, in order, before the agent first starts.
 	// They are what mount the routes and register the components a build is
 	// made of; see [Plugin]. More can be added through [Agent.Plugins], up
@@ -213,7 +208,6 @@ type Agent struct {
 	readerFeedback      bool
 	settingsStore       *settings.Store
 	logs                *logbuf.Ring
-	pairing             *PairingServer
 
 	// Settings state. Held on the agent as well as on the reader, because the
 	// reader is built in Start, after the stored settings have been applied: a
@@ -283,7 +277,6 @@ func New(cfg Config) *Agent {
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
-		pairing:             cfg.Pairing,
 		certFile:            cfg.CertFile,
 		keyFile:             cfg.KeyFile,
 		tlsManager:          cfg.TLSManager,
@@ -313,15 +306,6 @@ func New(cfg Config) *Agent {
 			AllowTagModification: a.TagModificationAllowed,
 			PublicKeyPin:         a.publicKeyPin,
 		})
-	}
-
-	// Registered here rather than left to the caller: the pairing server's
-	// lifetime is the agent's, and forgetting to wire it is exactly the class
-	// of mistake this component list exists to remove.
-	if cfg.Pairing != nil {
-		if err := a.useLocked(cfg.Pairing); err != nil {
-			logger.Printf("Failed to register the pairing server: %v", err)
-		}
 	}
 
 	// The agent's own routes go on before the caller's, so a mount cannot
@@ -376,25 +360,6 @@ func (a *Agent) DevicePort() int {
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
-// Pairing returns the pairing component, or nil when pairing is disabled.
-func (a *Agent) Pairing() *PairingServer { return a.pairing }
-
-// Bootstrap returns the pairing server itself, for the PIN and the URLs the
-// tray and console show. Nil when pairing is disabled.
-func (a *Agent) Bootstrap() *tls.BootstrapServer {
-	if a.pairing == nil {
-		return nil
-	}
-	return a.pairing.Server()
-}
-
-// BootstrapPort reports the pairing server's port, 0 when disabled.
-func (a *Agent) BootstrapPort() int {
-	if a.pairing == nil {
-		return 0
-	}
-	return a.pairing.Port()
-}
 func (a *Agent) CertFile() string         { return a.certFile }
 func (a *Agent) KeyFile() string          { return a.keyFile }
 func (a *Agent) TLSManager() *tls.Manager { return a.tlsManager }

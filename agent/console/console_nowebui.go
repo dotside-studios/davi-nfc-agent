@@ -20,7 +20,7 @@ import (
 type Server struct{}
 
 // New reports that there is no console in this build.
-func New(*agent.Agent, *settings.Store, *logbuf.Ring) *Server { return nil }
+func New(*agent.Agent, *settings.Store, *logbuf.Ring, *agent.PairingServer) *Server { return nil }
 
 func (s *Server) Routes() http.Handler { return nil }
 func (s *Server) Assets() http.Handler { return nil }

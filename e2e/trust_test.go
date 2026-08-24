@@ -52,7 +52,7 @@ func TestHealthAnswersOverTLS(t *testing.T) {
 func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 	h := start(t, options{Pairing: true})
 
-	pin := h.Agent.Pairing().Server().PIN()
+	pin := h.Pairing.PIN()
 	body, _ := json.Marshal(map[string]string{"deviceName": "Operator iPhone", "platform": "ios"})
 
 	resp, err := http.Post(h.Pair+"/pair?pin="+pin, "application/json", bytes.NewReader(body))
@@ -101,7 +101,7 @@ func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 func TestARevokedDeviceIsRefused(t *testing.T) {
 	h := start(t, options{Pairing: true})
 
-	pin := h.Agent.Pairing().Server().PIN()
+	pin := h.Pairing.PIN()
 	resp, err := http.Post(h.Pair+"/pair?pin="+pin, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST /pair: %v", err)

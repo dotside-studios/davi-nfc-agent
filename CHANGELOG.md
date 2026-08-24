@@ -125,6 +125,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The agent has no opinion about pairing.** `Agent.Pairing`, `Bootstrap` and
+  `BootstrapPort` existed because the tray and the console both needed a handle
+  to the pairing server and the agent was the object both of them held. Nothing
+  in the agent used them. They are gone, along with `Config.Pairing`: the
+  program builds the pairing server, registers it as a component or as an
+  endpoint of the server plugin, and hands it to whatever shows the PIN, which
+  is now an argument to `console.New` and `tray.New`.
+
+  `agent.PairingFor(a, port)` builds one from what the agent already carries:
+  its certificate authority, device registry, key pin, name and port. A nil
+  `*PairingServer` answers for a build with no pairing, so `Port`, `PIN` and
+  `RotatePIN` tolerate one rather than making every caller check first.
+  `Setup` no longer builds a pairing server, and does not read
+  `Options.BootstrapPort`; the program does
+
 - **The tray lives on `traymenu/fynetray`, and `traymenu` has no toolkit.**
   `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.
   With the agent handing plugins a menu, `traymenu` had to stop being the place

@@ -75,9 +75,15 @@ func main() {
 	// agent serves is the program's decision.
 	servers := &agent.ServerPlugin{}
 
+	// The pairing server, on a listener of its own. The agent does not hold
+	// one, so this is where it is built and where it is handed to the two
+	// things that show its PIN.
+	pairing := agent.PairingFor(rt.Agent, opts.BootstrapPort)
+	servers.Add(agent.Endpoint{Name: "pairing", Component: pairing})
+
 	// Nil in a -tags nowebui build. Listing it as an endpoint is all there is
 	// to attaching a control center, so a build that wants none lists none.
-	c := console.New(rt.Agent, rt.Settings, rt.Logs)
+	c := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
 	if c != nil {
 		servers.Add(
 			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
@@ -92,7 +98,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	app := tray.New(rt)
+	app := tray.New(rt, pairing)
 	app.AttachConsole(c)
 	app.Run()
 }
@@ -100,15 +106,23 @@ func main() {
 
 `agent.Setup` performs the work the flags imply: it resolves the config
 directory, loads or generates the TLS certificate and the API secret, reads the
-paired devices and the origin allowlist, builds the pairing server, and applies
-stored settings. It returns an `*agent.Runtime` holding the configured agent
-alongside the stores a front end needs.
+paired devices and the origin allowlist, and applies stored settings. It returns
+an `*agent.Runtime` holding the configured agent alongside the stores a front
+end needs.
 
-It does not build the listener. That is `agent.ServerPlugin`, registered above,
-and what goes on it is listed with it. An agent with none registered drives the
-reader and serves no HTTP, which is a build rather than a broken one. Nothing
-binds until the agent starts, so a route is declared before the port it will be
-served from is bound. See [Plugins](#plugins).
+It builds neither the listener nor the pairing server. The listener is
+`agent.ServerPlugin`, registered above, and what goes on it is listed with it;
+an agent with none registered drives the reader and serves no HTTP, which is a
+build rather than a broken one. Nothing binds until the agent starts, so a route
+is declared before the port it will be served from is bound. See
+[Plugins](#plugins).
+
+The pairing server is a component the program builds. `agent.PairingFor` takes
+what it needs from the agent: the certificate authority, the device registry,
+the key pin, the name and the port, so nothing already given to `Setup` is
+repeated. The agent does not hold the result: whoever builds one hands it to
+whatever shows the PIN, which is why it is passed to both `console.New` and
+`tray.New`. Pass `nil` to either for a build that pairs no devices.
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
@@ -305,7 +319,6 @@ import (
 func main() {
 	opts := agent.DefaultOptions()
 	opts.ConfigDir = "/var/lib/davi-nfc"
-	opts.BootstrapPort = 0 // no pairing server
 	opts.AllowedOrigins = "console.example.com"
 
 	// Explicit.Port marks the port as a decision, so a port persisted in
@@ -340,8 +353,10 @@ func main() {
 ```
 
 A server plugin with no endpoints serves the agent's own routes: `/ws` and the
-two health checks, with the root falling back to a plain-text banner.
-`-tags nowebui` additionally removes the console from the binary.
+two health checks, with the root falling back to a plain-text banner. Building
+no pairing server leaves a build that pairs no devices, so a phone reaches it
+through the API secret rather than a credential of its own. `-tags nowebui`
+additionally removes the console from the binary.
 
 ## Building without a hardware backend
 

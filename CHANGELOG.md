@@ -120,6 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent happened to hold. The pairing plugin is that handle now, and an argument
   to `console.New`; `tray.New` takes the runtime and nothing else
 
+- **`console.NewPlugin` serves the control center.** Mounting its two routes,
+  following the three stores that redraw it, and declaring the tray entry that
+  opens it were spread across `main.go` and `agent/tray`. They are the console's
+  now: registering the plugin is all a build does, and `-tags nowebui` returns
+  one that registers nothing, so no program needs a build tag of its own. The
+  tray keeps `AttachConsole`, which a plugin cannot do: the console needs the
+  tray itself, and an activating plugin is handed a menu rather than whatever
+  draws it
+
 - **`Agent.RebindListener` serves a reissued certificate; `RestartServers`
   rebuilds what captured configuration.** One method did both, so installing a
   certificate authority or reissuing a certificate tore down the router, the

@@ -268,8 +268,6 @@ func (s *App) setupUI() {
 
 	s.menu.AddSeparator()
 
-	s.setupConsoleMenu()
-
 	// The plugins add theirs here, between the entries this build declares
 	// itself and the ones that start and stop the agent. They go on the top
 	// level like any other, which is what makes a plugin's entry

@@ -80,27 +80,19 @@ func main() {
 	// built and where it is handed to the console.
 	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
 
-	// Nil in a -tags nowebui build. Listing it as an endpoint is all there is
-	// to attaching a control center, so a build that wants none lists none.
-	c := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
-	if c != nil {
-		servers.Add(
-			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
-			agent.Endpoint{Name: "control center", Pattern: "/", Handler: c.Assets()},
-		)
-		rt.Agent.Origins().OnChange(c.NotifyChange)
-		rt.Agent.Devices().OnChange(c.NotifyChange)
-		rt.Agent.OnClientsChange(c.NotifyChange)
-	}
+	// The control center, which mounts its own routes on the listener above
+	// and adds the tray entry that opens it. Registering it is all there is to
+	// attaching one; a -tags nowebui build gets a plugin that serves nothing.
+	c := console.NewPlugin(rt.Agent, rt.Settings, rt.Logs, pairing)
 
 	// The server goes on first: it publishes the listener the rest mount on,
 	// and plugins are activated in the order they were added.
-	if err := rt.Agent.Plugins.Add(servers, pairing); err != nil {
+	if err := rt.Agent.Plugins.Add(servers, pairing, c); err != nil {
 		log.Fatal(err)
 	}
 
 	app := tray.New(rt)
-	app.AttachConsole(c)
+	app.AttachConsole(c.Server())
 	app.Run()
 }
 ```
@@ -111,12 +103,11 @@ paired devices and the origin allowlist, and applies stored settings. It returns
 an `*agent.Runtime` holding the configured agent alongside the stores a front
 end needs.
 
-It builds neither the listener nor the pairing server. The listener is
-`agent.ServerPlugin`, registered above, and what goes on it is listed with it;
-an agent with none registered drives the reader and serves no HTTP, which is a
-build rather than a broken one. Nothing binds until the agent starts, so a route
-is declared before the port it will be served from is bound. See
-[Plugins](#plugins).
+It builds neither the listener nor the pairing server nor the control center.
+Each is a plugin the program registers, and an agent with none of them drives
+the reader and serves no HTTP, which is a build rather than a broken one.
+Nothing binds until the agent starts, so a route is declared before the port it
+will be served from is bound. See [Plugins](#plugins).
 
 Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
 menu entries that hand out its address and PIN.
@@ -231,13 +222,17 @@ a lifetime, a menu entry, or any combination:
 
 ```go
 servers := &agent.ServerPlugin{Endpoints: []agent.Endpoint{
-	{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
-	{Name: "control center", Pattern: "/", Handler: c.Assets()},
+	{Name: "metrics", Pattern: "/metrics", Handler: metrics},
+	{Name: "queue drain", Component: drain},
 }}
-servers.Add(agent.Endpoint{Name: "metrics", Pattern: "/metrics", Handler: metrics})
+servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
 
 rt.Agent.Plugins.Add(servers)
 ```
+
+An endpoint is for a handler you already hold. A plugin with an `Activate` of
+its own mounts itself instead, with `ctx.Mount`, which is what the console does:
+it wants the agent as well as the route, and only a plugin is given one.
 
 Registered with no `Config`, it serves on the port, certificate and name the
 agent was set up with. Set `Config` for a listener that differs from them, or
@@ -250,6 +245,27 @@ agent was set up with. Set `Config` for a listener that differs from them, or
 The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
 health checks; two endpoints on one path fail the start rather than leaving the
 mux to decide.
+
+### The console plugin
+
+`console.NewPlugin` builds the control center and the plugin that serves it. It
+mounts `/control/` and `/` on the listener a plugin registered before it
+published, follows the origin, device and client changes that redraw it, and
+adds the tray entry that opens it.
+
+```go
+c := console.NewPlugin(rt.Agent, rt.Settings, rt.Logs, pairing)
+rt.Agent.Plugins.Add(servers, c)
+```
+
+`c.Server()` is the console itself, which a tray is given so that an action
+taken in either moves the other: see `tray.App.AttachConsole`. That half stays
+with the program, because the console needs the tray, and an activating plugin
+is handed a menu rather than whatever draws it.
+
+Under `-tags nowebui` there is no console compiled in, so `NewPlugin` returns a
+plugin that registers nothing and `Server()` is nil. A program needs no build
+tag of its own either way.
 
 ### The pairing plugin
 

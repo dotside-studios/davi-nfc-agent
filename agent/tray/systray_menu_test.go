@@ -40,17 +40,12 @@ func newTestTray(t *testing.T, a *nfcagent.Agent) (*App, *traymenu.Fake) {
 	return app, fake
 }
 
-// titles lists the top level as the user reads it, separators included. The
-// control center entry is left out: a -tags nowebui build has no console, so
-// the entry is not there to read. TestConsoleEntry covers it instead.
+// titles lists the top level as the user reads it, separators included.
 func titles(fake *traymenu.Fake) []string {
 	var out []string
 	for _, item := range fake.Items() {
 		if item.IsSeparator() {
 			out = append(out, "----")
-			continue
-		}
-		if item.Title() == "Open Control Center" {
 			continue
 		}
 		out = append(out, item.Title())
@@ -92,12 +87,13 @@ func TestMenuLayout(t *testing.T) {
 	}
 }
 
-func TestConsoleEntry(t *testing.T) {
+// The entry that opens the console belongs to the console plugin, so a tray
+// with no plugin behind it declares none of its own.
+func TestTheTrayDeclaresNoConsoleEntry(t *testing.T) {
 	_, fake := newTestTray(t, newTestAgent())
 
-	// Nothing for the entry to open, so it must not be offered.
-	if item := fake.Find("Open Control Center"); item != nil && item.Visible() {
-		t.Error("the control center entry is offered with no console behind it")
+	if item := fake.Find("Open Control Center"); item != nil {
+		t.Errorf("the tray declares a control center entry with no plugin behind it:\n%s", fake.Render())
 	}
 }
 

@@ -34,3 +34,16 @@ func (s *Server) ConsoleURL() (string, error) {
 }
 
 func (s *Server) AttachTray(Tray) {}
+
+// Plugin is the absent control center's plugin: registering it costs nothing
+// and serves nothing, so a program need not build-tag its own wiring.
+type Plugin struct{}
+
+// NewPlugin reports that there is no console in this build.
+func NewPlugin(*agent.Agent, *settings.Store, *logbuf.Ring, *agent.PairingPlugin) *Plugin {
+	return nil
+}
+
+func (p *Plugin) Name() string                      { return "control center" }
+func (p *Plugin) Server() *Server                   { return nil }
+func (p *Plugin) Activate(agent.AgentContext) error { return nil }

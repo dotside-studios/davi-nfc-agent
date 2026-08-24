@@ -86,38 +86,25 @@ func main() {
 		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
 	}
 
-	// Nil in a -tags nowebui build, where the control center is not compiled
-	// in. Listing it as an endpoint is all there is to attaching one: a build
-	// that wants none lists none, and the agent is no wiser either way.
-	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
-	if consoleServer != nil {
-		// The control API and the console page are deliberately not wrapped in
-		// CORS: one administers the agent and the other is a page, so no other
-		// origin has business calling them.
-		servers.Add(
-			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: consoleServer.Routes()},
-			agent.Endpoint{Name: "control center", Pattern: "/", Handler: consoleServer.Assets()},
-		)
-
-		// Redraw the console whenever something changes it from elsewhere.
-		rt.Agent.Origins().OnChange(consoleServer.NotifyChange)
-		rt.Agent.Devices().OnChange(consoleServer.NotifyChange)
-		rt.Agent.OnClientsChange(consoleServer.NotifyChange)
-	}
+	// The control center, which mounts itself on the listener above and adds
+	// the tray entry that opens it. Nil in a -tags nowebui build, where there
+	// is no console compiled in and registering it costs nothing.
+	controlCenter := console.NewPlugin(rt.Agent, rt.Settings, rt.Logs, pairing)
 
 	// The server goes on first: it publishes the listener the rest mount on,
 	// and plugins are activated in the order they were added.
-	if err := rt.Agent.Plugins.Add(servers); err != nil {
-		log.Fatalf("Failed to register the server: %v", err)
-	}
+	plugins := []agent.Plugin{servers}
 	if pairing != nil {
-		if err := rt.Agent.Plugins.Add(pairing); err != nil {
-			log.Fatalf("Failed to register pairing: %v", err)
-		}
+		plugins = append(plugins, pairing)
+	}
+	plugins = append(plugins, controlCenter)
+
+	if err := rt.Agent.Plugins.Add(plugins...); err != nil {
+		log.Fatalf("Failed to register a plugin: %v", err)
 	}
 
 	app := tray.New(rt)
-	app.AttachConsole(consoleServer)
+	app.AttachConsole(controlCenter.Server())
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

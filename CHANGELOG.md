@@ -9,30 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A plugin API.** The agent could be embedded but not extended: a program
-  adding anything of its own wired it into a `main.go` that knew about every
-  part it touched, and the parts it forgot never ran. `agent.Plugin` is one
-  method, `Activate(agent.AgentContext) error`, run once before the agent
-  starts. What a plugin wants to happen afterwards it registers there:
-  `ctx.Use` for a `Component`, `ctx.Mount` for a route, `ctx.Systray` for a menu
-  entry. The context carries the agent, its log, identity, config directory,
-  preference store and log ring as well, so a plugin is built from its own
-  configuration and gets the rest when it is activated.
-
-  Nothing is loaded at run time. Which plugins a build has is decided by what it
-  imports, so one left out takes its dependencies with it. They go on through
-  `Agent.Plugins.Add`, activate in order, and are refused afterwards rather than
-  accepted and never activated. `ctx.Systray` is the tray's own top level, so a
-  plugin's entry is not marked out from one the tray declared itself, and it is
-  never nil: an agent with no tray hands over a menu that draws nothing.
-
-  Two implementations ship. `agent.ServerPlugin` owns the listener and the
-  `agent.Endpoint`s served from it, each a route, a lifetime, a menu entry or
-  any combination. `agent.PairingPlugin` runs the pairing server and owns the
-  entries that hand out its address and PIN. Supporting them:
-  `Agent.OnServerRestart` for a label that follows a rebuilt listener,
-  `traymenu.Discard` for a menu that draws nothing, and `traymenu.Section` as a
-  `Container`. `docs/custom-builds.md` has the rest
+- **A plugin API.** `agent.Plugin` is one method, `Activate(agent.AgentContext)
+  error`, run once before the agent starts. A plugin registers what it adds
+  through the context: `ctx.Use` for a `Component`, `ctx.Mount` for a route,
+  `ctx.Systray` for a tray entry. Plugins are Go values the program constructs,
+  registered with `Agent.Plugins.Add` and activated in order; nothing is loaded
+  at run time, and adding one after activation is an error. Two ship:
+  `agent.ServerPlugin`, which owns the listener and the `agent.Endpoint`s served
+  from it, and `agent.PairingPlugin`, which runs the pairing server and the tray
+  entries that hand out its PIN. Also adds `Agent.OnServerRestart`,
+  `traymenu.Discard`, and `traymenu.Section` as a `Container`
 
 - **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary

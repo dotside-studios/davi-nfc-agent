@@ -9,65 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`README.md` and `docs/api.md` say what a build is assembled from.** The
-  README's Extending section carries the plugin API and a plugin worth reading,
-  and its Ports section no longer states two listeners as facts of the agent,
-  since both are plugins a build registers. `docs/api.md` says the same at the
-  top, notes that the health checks are the agent's own routes on whatever
-  listener the build registers, and gained a related-documentation footer, since
-  someone looking for "the API" lands there and the Go one is a page away
-
 - **A plugin API.** The agent could be embedded but not extended: a program
-  wanting to add anything of its own had to wire it into a `main.go` that knew
-  about every part it touched, and the parts it forgot were the ones that never
-  ran. `agent.Plugin` is one method, `Activate(agent.AgentContext) error`, run
-  once before the agent starts. What a plugin wants to happen afterwards it
-  registers there: a `Component` through `ctx.Use` for anything with a lifetime,
-  an entry on `ctx.Systray` for anything with a menu, a route through
-  `ctx.Mount`. `ctx` also carries the agent, its log, its identity, its config
-  directory, its preference store and its log ring, so a plugin is constructed
-  from its own configuration and gets the rest when it is activated.
+  adding anything of its own wired it into a `main.go` that knew about every
+  part it touched, and the parts it forgot never ran. `agent.Plugin` is one
+  method, `Activate(agent.AgentContext) error`, run once before the agent
+  starts. What a plugin wants to happen afterwards it registers there:
+  `ctx.Use` for a `Component`, `ctx.Mount` for a route, `ctx.Systray` for a menu
+  entry. The context carries the agent, its log, identity, config directory,
+  preference store and log ring as well, so a plugin is built from its own
+  configuration and gets the rest when it is activated.
 
-  Nothing is loaded at run time and nothing is discovered. Which plugins a build
-  has is decided by what it imports, which is what lets one be left out with its
-  dependencies. Plugins are registered through `Agent.Plugins.Add`, activated in
-  order, and refused afterwards rather than accepted and never activated.
-  `ctx.Systray` is the top level of the tray's own menu, so a plugin's entry is
-  not marked out from one the tray declared itself: the shipped tray is one
-  composition of a menu, and a custom build composes its own. Entries land where
-  the tray activated the plugins, since a menu item always goes to the end of
-  its parent. It is never nil either: an agent with no tray hands over a menu
-  that draws nothing, so a plugin adds its entries without asking whether anyone
-  is looking
+  Nothing is loaded at run time. Which plugins a build has is decided by what it
+  imports, so one left out takes its dependencies with it. They go on through
+  `Agent.Plugins.Add`, activate in order, and are refused afterwards rather than
+  accepted and never activated. `ctx.Systray` is the tray's own top level, so a
+  plugin's entry is not marked out from one the tray declared itself, and it is
+  never nil: an agent with no tray hands over a menu that draws nothing.
 
-- **`agent.PairingPlugin`, the pairing server and its tray entries.** The
-  second implementation, and the smaller one: it wraps the pairing server,
-  registers it as a component, and owns the entries that hand out its address
-  and PIN. Those used to be declared by the tray, in its Server URLs submenu,
-  which is why the tray had to be told whether this build pairs devices at all.
-  They live with the pairing code now, under a `Pairing` submenu of their own on
-  the tray's top level, and follow the server: rotating the PIN from the menu or
-  from the control center relabels both. The tray knows nothing about pairing,
-  so `tray.New` takes the runtime and nothing else again
-
-- **`agent.ServerPlugin`, the listener and everything served from it.** The
-  first implementation of the above. It owns the `*unifiedserver.Server`,
-  publishes it to the agent, which mounts its own routes on it, and then mounts
-  the `agent.Endpoint`s listed with it. An endpoint is a route, something with a
-  lifetime, a menu entry, or any combination: the control center is two routes
-  with no lifetime, a pairing server would be one with no route and a listener
-  of its own. Two endpoints on one path fail the start, naming the second,
-  rather than leaving the mux to decide
-
-- **`Agent.OnServerRestart`** registers an observer of a completed restart, for
-  a menu or a page whose addresses can have changed. `ServerRestarts` has a
-  single consumer, so a second reader would take the signal from the first; the
-  tray keeps the channel and the plugins use the hook. Restart observers run
-  outside the lifecycle lock, as the state hooks already did
-
-- **`traymenu.Discard`, a driver that draws nothing**, and `traymenu.Section` is
-  now a `Container`, so it can be handed to a plugin, a `List`, a `Radio` or a
-  `Checklist` like any other menu
+  Two implementations ship. `agent.ServerPlugin` owns the listener and the
+  `agent.Endpoint`s served from it, each a route, a lifetime, a menu entry or
+  any combination. `agent.PairingPlugin` runs the pairing server and owns the
+  entries that hand out its address and PIN. Supporting them:
+  `Agent.OnServerRestart` for a label that follows a rebuilt listener,
+  `traymenu.Discard` for a menu that draws nothing, and `traymenu.Section` as a
+  `Container`. `docs/custom-builds.md` has the rest
 
 - **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary
@@ -112,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   embedder calling `Stop` leaked a listener. It now starts and stops with the
   agent like anything else registered through `Use`. `agent.Config` loses
   `Bootstrap` and `BootstrapPort`; what the pairing server needs lives on
-  `PairingConfig` instead, and `Config.Pairing` being nil disables it.
+  `PairingConfig` instead.
 
   One consequence worth knowing: the pairing listener now binds at `Start`
   rather than during `Setup`, so a port already in use is reported when the
@@ -153,48 +118,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The clipboard moved to a package of its own.** `copyToClipboard` and its
-  per-platform candidate list lived in `agent/tray`, which is no use to a plugin
-  offering to copy something. `clipboard.Copy` is the same code, and the tray
-  and the pairing plugin both call it
-
-- **The agent has no opinion about pairing.** `Agent.Pairing`, `Bootstrap` and
-  `BootstrapPort` existed because the tray and the console both needed a handle
-  to the pairing server and the agent was the object both of them held. Nothing
-  in the agent used them. They are gone, along with `Config.Pairing`: the
-  program builds the pairing server, registers it as a component or as an
-  endpoint of the server plugin, and hands it to whatever shows the PIN, which
-  is now an argument to `console.New` and `tray.New`.
-
-  `agent.PairingFor(a, port)` builds one from what the agent already carries:
-  its certificate authority, device registry, key pin, name and port. A nil
-  `*PairingServer` answers for a build with no pairing, so `Port`, `PIN` and
-  `RotatePIN` tolerate one rather than making every caller check first.
-  `Setup` no longer builds a pairing server, and does not read
-  `Options.BootstrapPort`; the program does
-
-- **The tray lives on `traymenu/fynetray`, and `traymenu` has no toolkit.**
-  `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.
-  With the agent handing plugins a menu, `traymenu` had to stop being the place
-  the toolkit arrived: the Fyne driver moved into `traymenu/fynetray` and
-  `traymenu.New(nil)` now draws nothing rather than meaning the real tray.
-  `agent` depends on no GUI toolkit, as before
-
-- **`Setup` no longer builds the listener, and `Runtime.Server` is gone.** What
-  an agent serves is the program's decision, so the listener is a plugin the
-  program registers, and its routes are listed with it:
+- **`Setup` builds neither the listener nor the pairing server.** What an agent
+  serves is the program's decision, so both are plugins it registers:
 
   ```go
   servers := &agent.ServerPlugin{}
   servers.Add(agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()})
-  rt.Agent.Plugins.Add(servers)
+  rt.Agent.Plugins.Add(servers, agent.NewPairingPlugin(rt.Agent, 9472))
   ```
 
-  Registered with no configuration it serves on the port, certificate and name
-  the agent was set up with. An agent with none registered drives the reader and
-  serves no HTTP, which is what a program using it as a library wants and what
-  the `Config.Server` path already allowed. Nothing binds until the agent
-  starts, so a route is declared before the port it will be served from is bound
+  Registered with no configuration, each serves what the agent was already set
+  up with; an agent with neither drives the reader and serves no HTTP. Gone with
+  them: `Runtime.Server`, and `Agent.Pairing`, `Bootstrap` and `BootstrapPort`,
+  which existed only because the tray and the console both needed a handle the
+  agent happened to hold. The pairing plugin is that handle now, and an argument
+  to `console.New`; `tray.New` takes the runtime and nothing else
+
+- **`traymenu` has no toolkit, and the clipboard has a package of its own.**
+  `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.
+  With the agent handing plugins a menu, the Fyne driver moved to
+  `traymenu/fynetray`, and `traymenu.New(nil)` now draws nothing rather than
+  meaning the real tray. `clipboard.Copy` is the tray's per-platform clipboard
+  code, which a plugin offering to copy something could not reach. `agent`
+  depends on no GUI toolkit, as before
 
 - **What a tag cannot support is declared, not branched around.** A write to a
   tag on the reader was confirmed by reading it back; a write to a tag a phone

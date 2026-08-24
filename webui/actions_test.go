@@ -28,8 +28,13 @@ func TestInstallCAAction(t *testing.T) {
 		t.Error("CA still reports as not installed")
 	}
 	// A browser only sees the reissued certificate on a fresh listener.
-	if host.restarted != 1 {
-		t.Errorf("listeners restarted %d times, want 1", host.restarted)
+	if host.rebound != 1 {
+		t.Errorf("listener rebound %d times, want 1", host.rebound)
+	}
+	// The certificate is all that changed, so the connections' backing state
+	// is not rebuilt with it.
+	if host.restarted != 0 {
+		t.Errorf("servers restarted %d times, want none for a certificate", host.restarted)
 	}
 }
 

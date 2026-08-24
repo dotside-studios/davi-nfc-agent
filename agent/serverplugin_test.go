@@ -3,10 +3,13 @@ package agent
 import (
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
@@ -241,5 +244,182 @@ func TestAnAgentWithNoServerPluginServesNothing(t *testing.T) {
 
 	if rt.Agent.UnifiedServer != nil {
 		t.Error("a listener appeared with no server plugin registered")
+	}
+}
+
+// fakeCertificates stands in for the TLS manager's watching half.
+type fakeCertificates struct {
+	changes chan struct{}
+	stopped chan struct{}
+}
+
+func newFakeCertificates() *fakeCertificates {
+	return &fakeCertificates{changes: make(chan struct{}, 1), stopped: make(chan struct{})}
+}
+
+func (f *fakeCertificates) WatchNetworkChanges() <-chan struct{} { return f.changes }
+
+func (f *fakeCertificates) StopWatching() {
+	select {
+	case <-f.stopped:
+	default:
+		close(f.stopped)
+	}
+}
+
+// A certificate reissued for a change of address reaches a browser only on a
+// fresh listener, so the plugin binds again when its watcher reports one.
+func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
+	certificates := newFakeCertificates()
+
+	opts := testOptions(t)
+	opts.DevicePort = freePort(t)
+	opts.Explicit.Port = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := rt.Agent.Plugins.Add(&ServerPlugin{Certificates: certificates}); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+
+	rebound := make(chan struct{}, 1)
+	rt.Agent.OnServerRestart(func() {
+		select {
+		case rebound <- struct{}{}:
+		default:
+		}
+	})
+
+	if err := rt.Agent.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	certificates.changes <- struct{}{}
+	select {
+	case <-rebound:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a reissued certificate did not rebind the listener")
+	}
+
+	// The watch ends with the agent. Nothing used to end it at all.
+	rt.Agent.Stop()
+	select {
+	case <-certificates.stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopping the agent left the certificate watch running")
+	}
+}
+
+// The listener is rebound, not rebuilt: what the client server captured when it
+// was built is still there afterwards.
+func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
+	opts := testOptions(t)
+	opts.DevicePort = freePort(t)
+	opts.Explicit.Port = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := rt.Agent.Plugins.Add(&ServerPlugin{}); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	if err := rt.Agent.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Agent.Stop()
+
+	before := rt.Agent.ClientServer
+	if before == nil {
+		t.Fatal("no client server after Start")
+	}
+
+	if err := rt.Agent.RebindListener(); err != nil {
+		t.Fatalf("RebindListener: %v", err)
+	}
+	if rt.Agent.ClientServer != before {
+		t.Error("rebinding rebuilt the client server; only the listener should have moved")
+	}
+
+	// RestartServers is the one that rebuilds it, which is what an API secret
+	// rotation needs.
+	if err := rt.Agent.RestartServers(); err != nil {
+		t.Fatalf("RestartServers: %v", err)
+	}
+	if rt.Agent.ClientServer == before {
+		t.Error("RestartServers left the old client server in place")
+	}
+}
+
+// An agent with no listener says so rather than reporting a rebind that did not
+// happen.
+func TestRebindingWithNoListener(t *testing.T) {
+	a := quietAgent(t)
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if err := a.RebindListener(); err == nil {
+		t.Error("rebinding succeeded with no listener to rebind")
+	}
+}
+
+// freePort asks the kernel for a port nothing is using, so these tests can bind
+// beside an agent already running on this machine.
+func freePort(t *testing.T) int {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	defer listener.Close()
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("read the reserved port: %v", err)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatalf("parse the reserved port: %v", err)
+	}
+	return n
+}
+
+// Restarting the servers left a second worker polling the same reader, racing
+// the first and reporting every card twice. The reader's lifetime is the
+// agent's, so a restart leaves it alone.
+func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
+	opts := testOptions(t)
+	opts.DevicePort = freePort(t)
+	opts.Explicit.Port = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := rt.Agent.Plugins.Add(&ServerPlugin{}); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	if err := rt.Agent.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Agent.Stop()
+
+	reader := rt.Agent.Reader()
+	if reader == nil {
+		t.Fatal("no reader after Start")
+	}
+
+	if err := rt.Agent.RestartServers(); err != nil {
+		t.Fatalf("RestartServers: %v", err)
+	}
+	if err := rt.Agent.RebindListener(); err != nil {
+		t.Fatalf("RebindListener: %v", err)
+	}
+
+	if rt.Agent.Reader() != reader {
+		t.Error("the reader was replaced by a restart of the servers")
 	}
 }

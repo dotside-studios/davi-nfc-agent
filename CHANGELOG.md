@@ -120,6 +120,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent happened to hold. The pairing plugin is that handle now, and an argument
   to `console.New`; `tray.New` takes the runtime and nothing else
 
+- **`Agent.RebindListener` serves a reissued certificate; `RestartServers`
+  rebuilds what captured configuration.** One method did both, so installing a
+  certificate authority or reissuing a certificate tore down the router, the
+  client server and the pumps to change a file the listener reads at bind time.
+  Certificate work rebinds now and leaves the connections' backing state alone;
+  `RestartServers` is for a change the serving state captured, such as the API
+  secret rotated into the client server. `webui.Host` gains `RebindListener`.
+
+  The network watch moves with it: the certificate is the server plugin's
+  configuration, so `ServerPlugin.Certificates` watches for a reissue and
+  rebinds, rather than the agent watching networks on behalf of a listener it
+  does not configure. It ends with the agent, which nothing used to do
+
 - **Two narrower contracts, so certificate material can move off the agent.**
   `PairingConfig.CA` is `tls.CertificateAuthority`, the two methods the pairing
   server reads, rather than the whole `*tls.Manager`; the interface was already
@@ -202,6 +215,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   let an operation return its refusal rather than report it beside a value.
 
 ### Fixed
+
+- **Restarting the servers no longer doubles the reader.** `startServers` called
+  `NFCReader.Start` every time, and `RestartServers` deliberately leaves the
+  reader running, so each certificate reissue, API secret rotation or change of
+  address left another worker polling the same reader: two goroutines racing on
+  its state and reporting every card twice. The reader's lifetime is the
+  agent's, so it starts where it is opened and a restart of the servers leaves
+  it alone
 
 - **A device is no longer refused for what it calls itself.** Registration
   required `platform` to be `ios`, `android` or `web`, but nothing branches on

@@ -46,8 +46,8 @@ func (s *App) handleTrustBrowsers() {
 			log.Printf("[systray] Could not trust this agent in browsers: %v", err)
 			return
 		}
-		if err := s.agent.RestartServers(); err != nil {
-			log.Printf("[systray] Certificate authority installed, but the listeners did not restart: %v", err)
+		if err := s.agent.RebindListener(); err != nil {
+			log.Printf("[systray] Certificate authority installed, but the listener did not rebind: %v", err)
 			return
 		}
 

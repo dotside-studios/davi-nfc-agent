@@ -50,6 +50,7 @@ func (h *host) QuitAgent() {
 }
 
 func (h *host) RestartServers() error { return h.agent.RestartServers() }
+func (h *host) RebindListener() error { return h.agent.RebindListener() }
 
 // ---- reader ----
 

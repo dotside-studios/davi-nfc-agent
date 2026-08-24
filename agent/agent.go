@@ -431,13 +431,15 @@ func (a *Agent) startLocked(devicePath string) error {
 	a.reader.Store(nfcReader)
 	nfcReader.SetFeedback(a.readerFeedback)
 
-	// Start network watcher if TLS manager is configured
-	if a.tlsManager != nil {
-		go a.watchNetworkChanges()
+	// Start the servers using shared code
+	if err := a.startServers(); err != nil {
+		return err
 	}
 
-	// Start the servers using shared code
-	return a.startServers()
+	// After them, so the pump draining it is already running: a card presented
+	// in between would otherwise wait on a channel nobody is reading.
+	nfcReader.Start()
+	return nil
 }
 
 // stopLocked tears down the servers and the reader. The caller holds the
@@ -490,23 +492,46 @@ func (a *Agent) Shutdown() {
 	}
 }
 
-// watchNetworkChanges listens for network changes from TLS manager and restarts servers.
-func (a *Agent) watchNetworkChanges() {
-	if a.tlsManager == nil {
-		return
+// RebindListener stops the listener and starts it again, so a certificate
+// reissued on disk is the one served. Installing a certificate authority,
+// reissuing a certificate and a change of address all end here.
+//
+// The listener only: the reader, the router and the client server carry on, and
+// the connections they hold are dropped by the listener's own shutdown. Nothing
+// that captured configuration at start is rebuilt, which is what separates this
+// from RestartServers.
+func (a *Agent) RebindListener() error {
+	a.lifecycleMu.Lock()
+	srv := a.UnifiedServer
+	if srv == nil {
+		a.lifecycleMu.Unlock()
+		return errors.New("agent: no listener to rebind")
 	}
 
-	ch := a.tlsManager.WatchNetworkChanges()
-	for range ch {
-		a.logger.Println("Network change detected, restarting servers with new certificates...")
-		if err := a.RestartServers(); err != nil {
-			a.logger.Printf("Failed to restart servers: %v", err)
-		}
+	a.logger.Println("Rebinding the listener...")
+	srv.Stop()
+
+	// Brief pause to allow the port to be released
+	time.Sleep(100 * time.Millisecond)
+
+	err := srv.Start()
+	a.lifecycleMu.Unlock()
+
+	if err != nil {
+		return err
 	}
+
+	a.logger.Println("Listener rebound successfully")
+	a.notifyServerRestart()
+	return nil
 }
 
-// RestartServers stops and restarts the HTTP/WebSocket servers with current TLS configuration.
-// The NFC reader continues running during the restart.
+// RestartServers rebuilds everything the agent serves from and binds the
+// listener again. The NFC reader continues running.
+//
+// For a change the serving state captured when it was built, such as the API
+// secret the client server holds. A certificate reissued on disk needs only
+// RebindListener, which leaves the connections' backing state alone.
 func (a *Agent) RestartServers() error {
 	a.lifecycleMu.Lock()
 
@@ -531,16 +556,19 @@ func (a *Agent) RestartServers() error {
 	}
 
 	a.logger.Println("Servers restarted successfully")
+	a.notifyServerRestart()
+	return nil
+}
 
-	// Notify listeners of server restart
+// notifyServerRestart tells whatever follows the listeners that they have been
+// rebuilt. Called with the lifecycle released, as the state hooks are.
+func (a *Agent) notifyServerRestart() {
 	select {
 	case a.serverRestartChan <- struct{}{}:
 	default:
 		// Channel full, skip
 	}
 	a.fireServerRestart()
-
-	return nil
 }
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
@@ -583,8 +611,12 @@ func (a *Agent) startServers() error {
 	// The agent's tag sources feed the client server directly. There is no
 	// channel between them any more, so there is nothing to drain and nothing
 	// to remember to start.
+	//
+	// The reader is not started here. Its lifetime is the agent's, not the
+	// servers': starting it on every restart left a second worker polling the
+	// same reader, racing the first and scanning every card twice. See
+	// startLocked, which starts the one it opened.
 	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
-	reader.Start()
 	go a.pumpReader(a.pumpCtx, reader, a.ClientServer)
 	if a.remoteScans != nil {
 		go pumpDevices(a.pumpCtx, a.remoteScans, a.ClientServer)

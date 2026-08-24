@@ -170,14 +170,14 @@ func (c *Server) dispatch(req action) (any, error) {
 			return nil, err
 		}
 		// The new certificate only reaches a browser on a fresh listener.
-		return nil, c.host.RestartServers()
+		return nil, c.host.RebindListener()
 
 	case "security.regenerateCertificate":
 		if err := c.host.RegenerateCertificate(); err != nil {
 			return nil, err
 		}
 		// Takes effect only on a fresh listener.
-		return nil, c.host.RestartServers()
+		return nil, c.host.RebindListener()
 
 	case "security.revokeControlSessions":
 		// Includes the caller's own session, which is the point.

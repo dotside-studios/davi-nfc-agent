@@ -404,6 +404,19 @@ func (m *Manager) ReadCACert() ([]byte, error) {
 	return os.ReadFile(m.caCertFile)
 }
 
+// CertificateWatcher reissues the certificate when the machine's addresses
+// change, and reports that it has. A receive means the files on disk are new,
+// so whoever serves them should bind again.
+//
+// Named so that a listener can be handed the watching without the whole
+// manager, as [CertificateAuthority] is for the pairing server.
+type CertificateWatcher interface {
+	WatchNetworkChanges() <-chan struct{}
+	StopWatching()
+}
+
+var _ CertificateWatcher = (*Manager)(nil)
+
 // WatchNetworkChanges starts watching for network changes and returns a channel
 // that signals when certificates have been regenerated due to IP changes.
 // The channel receives a signal after new certificates are ready.

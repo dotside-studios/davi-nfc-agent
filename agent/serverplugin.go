@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -87,6 +89,12 @@ type ServerPlugin struct {
 	// MenuTitle names the tray submenu the endpoints' entries are grouped
 	// under. Blank uses "Servers".
 	MenuTitle string
+
+	// Certificates reissues the listener's certificate when the machine's
+	// addresses change; the listener binds again when it reports one. Blank
+	// takes the agent's, and an agent without one is a build serving a
+	// certificate nothing here manages.
+	Certificates tlspkg.CertificateWatcher
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -114,6 +122,10 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 		p.Server = unifiedserver.New(p.config(ctx.Agent))
 	}
 	if err := ctx.Serve(p.Server); err != nil {
+		return err
+	}
+
+	if err := p.watchCertificates(ctx); err != nil {
 		return err
 	}
 
@@ -155,6 +167,67 @@ func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint, menu func()
 	if endpoint.Menu != nil {
 		endpoint.Menu(menu())
 	}
+	return nil
+}
+
+// watchCertificates registers the component that rebinds the listener when its
+// certificate is reissued. It is here rather than on the agent because the
+// certificate is this plugin's configuration: an agent that serves no HTTP has
+// nothing to keep current.
+func (p *ServerPlugin) watchCertificates(ctx AgentContext) error {
+	if p.Certificates == nil {
+		// Explicitly, since a nil *tls.Manager in an interface is not nil.
+		if manager := ctx.Agent.TLSManager(); manager != nil {
+			p.Certificates = manager
+		}
+	}
+	if p.Certificates == nil {
+		return nil
+	}
+
+	return ctx.Use(&certificateWatch{
+		certificates: p.Certificates,
+		rebind:       ctx.Agent.RebindListener,
+		logf:         ctx.Logger().Printf,
+	})
+}
+
+// certificateWatch rebinds the listener whenever the certificate behind it is
+// reissued.
+type certificateWatch struct {
+	certificates tlspkg.CertificateWatcher
+	rebind       func() error
+	logf         func(format string, args ...any)
+}
+
+func (w *certificateWatch) Name() string { return "certificate watch" }
+
+func (w *certificateWatch) Start(ctx context.Context) error {
+	changes := w.certificates.WatchNetworkChanges()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-changes:
+				if !ok {
+					return
+				}
+				w.logf("Certificate reissued for a change of address; rebinding the listener")
+				if err := w.rebind(); err != nil {
+					w.logf("Failed to rebind the listener: %v", err)
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+// Stop ends the watch, which nothing used to do: the manager's goroutine
+// outlived every agent that started one.
+func (w *certificateWatch) Stop() error {
+	w.certificates.StopWatching()
 	return nil
 }
 

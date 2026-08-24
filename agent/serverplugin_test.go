@@ -75,8 +75,8 @@ func TestServerPluginRegistersItsEndpoints(t *testing.T) {
 			w.WriteHeader(http.StatusTeapot)
 		})},
 	}}
-	p.Add(Endpoint{Name: "extras", Menu: func(c traymenu.Container) {
-		c.Add("Copy Device URL")
+	p.Add(Endpoint{Name: "extras", Pattern: "/extras/", Handler: http.NotFoundHandler(), Menu: func(menu traymenu.Container, url string) {
+		menu.Add("Extras: " + url)
 	}})
 
 	fake := traymenu.NewFake()
@@ -94,14 +94,14 @@ func TestServerPluginRegistersItsEndpoints(t *testing.T) {
 	if comps := a.Components(); len(comps) != 1 || comps[0].Name() != "pairing" {
 		t.Errorf("Components() = %v, want the endpoint's component", comps)
 	}
-	if item := fake.Find("Servers", "Copy Device URL"); item == nil {
-		t.Errorf("the endpoint's menu entry is missing:\n%s", fake.Render())
+	if item := fake.Find("Server URLs", "Extras: http://"+serviceAddress(serviceHost(), p.Listener().Port())+"/extras/"); item == nil {
+		t.Errorf("the endpoint's menu entry is missing, or does not carry its address:\n%s", fake.Render())
 	}
 }
 
-// The section is the plugin's, so it is created only if an endpoint puts
-// something in it: a headless build should not grow an empty submenu.
-func TestServerPluginAddsNoEmptySection(t *testing.T) {
+// An endpoint is listed only if it asks to be: a route nobody opens by hand is
+// noise beside the addresses worth copying.
+func TestAnEndpointIsListedOnlyIfItAsks(t *testing.T) {
 	fake := traymenu.NewFake()
 	menu := traymenu.New(fake)
 	t.Cleanup(menu.Close)
@@ -111,8 +111,12 @@ func TestServerPluginAddsNoEmptySection(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	if item := fake.Find("Servers"); item != nil {
-		t.Errorf("an empty section was added:\n%s", fake.Render())
+	if item := fake.Find("Server URLs", "quiet"); item != nil {
+		t.Errorf("an endpoint with no menu of its own was listed:\n%s", fake.Render())
+	}
+	// The addresses the listener answers on are always there.
+	if item := fake.Find("Server URLs", "Device: Not running"); item == nil {
+		t.Errorf("the device address is missing:\n%s", fake.Render())
 	}
 }
 
@@ -421,5 +425,86 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 
 	if rt.Agent.Reader() != reader {
 		t.Error("the reader was replaced by a restart of the servers")
+	}
+}
+
+// The addresses follow the agent: a stopped one hands out nothing, and starting
+// it fills them in.
+func TestTheAddressesFollowTheAgent(t *testing.T) {
+	opts := testOptions(t)
+	opts.DevicePort = freePort(t)
+	opts.Explicit.Port = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	servers := &ServerPlugin{}
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+
+	fake := traymenu.NewFake()
+	menu := traymenu.New(fake)
+	t.Cleanup(menu.Close)
+	if err := rt.Agent.Activate(menu); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	device := fake.Find("Server URLs", "Device: Not running")
+	if device == nil {
+		t.Fatalf("the device address is missing:\n%s", fake.Render())
+	}
+
+	if err := rt.Agent.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := device.Title(); got != "Device: "+servers.deviceURL() {
+		t.Errorf("device entry reads %q, want the address it is serving on", got)
+	}
+	if !strings.HasSuffix(device.Title(), "/ws?mode=device") {
+		t.Errorf("device entry reads %q, want it to carry the device mode", device.Title())
+	}
+
+	rt.Agent.Stop()
+	if got := device.Title(); got != "Device: Not running" {
+		t.Errorf("a stopped agent still shows %q", got)
+	}
+}
+
+// The secret is shown redacted, so an operator can tell it changed without it
+// being readable over their shoulder. No secret, no entries.
+func TestTheAPISecretIsListedRedacted(t *testing.T) {
+	withSecret := New(Config{
+		Manager:   nfc.NewMockManager(),
+		Logger:    log.New(io.Discard, "", 0),
+		APISecret: "abcdefgh-ijklmnop",
+		Plugins:   []Plugin{&ServerPlugin{}},
+	})
+
+	fake := traymenu.NewFake()
+	menu := traymenu.New(fake)
+	t.Cleanup(menu.Close)
+	if err := withSecret.Activate(menu); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	secret := fake.Find("Server URLs", "API Secret: hidden")
+	if secret == nil {
+		t.Fatalf("the API secret entry is missing:\n%s", fake.Render())
+	}
+	if got := redact("abcdefgh-ijklmnop"); strings.Contains(got, "efgh-ijkl") {
+		t.Errorf("redact() = %q, want the middle hidden", got)
+	}
+
+	without := serverAgent(t, &ServerPlugin{})
+	plainFake := traymenu.NewFake()
+	plainMenu := traymenu.New(plainFake)
+	t.Cleanup(plainMenu.Close)
+	if err := without.Activate(plainMenu); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if item := plainFake.Find("Server URLs", "API Secret: hidden"); item != nil {
+		t.Errorf("the API secret is listed with none configured:\n%s", plainFake.Render())
 	}
 }

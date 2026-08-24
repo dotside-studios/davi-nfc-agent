@@ -3,11 +3,8 @@ package agent
 import (
 	"fmt"
 	"log"
-	"net"
 	"net/url"
-	"strconv"
 
-	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -86,11 +83,7 @@ func (p *PairingPlugin) URL() string {
 		return ""
 	}
 
-	host := "localhost"
-	if ips := LocalIPs(); len(ips) > 0 {
-		host = ips[0]
-	}
-	return "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/?pin=" + url.QueryEscape(p.PIN())
+	return "http://" + serviceAddress(serviceHost(), port) + "/?pin=" + url.QueryEscape(p.PIN())
 }
 
 // Activate registers the pairing server and adds the plugin's menu entries.
@@ -107,12 +100,12 @@ func (p *PairingPlugin) Activate(ctx AgentContext) error {
 	p.address = section.Set("address", "Pair Phone: --", traymenu.Disabled())
 	section.Set("copy-address", "Copy Pairing URL",
 		traymenu.Tooltip("Copy the phone-pairing URL to the clipboard"),
-		traymenu.OnClick(func() { p.copy("phone-pairing URL", p.URL()) }),
+		traymenu.OnClick(func() { copyValue(p.logger, "phone-pairing URL", p.URL()) }),
 	)
 	p.pin = section.Set("pin", "Pairing PIN: --", traymenu.Disabled())
 	section.Set("copy-pin", "Copy Pairing PIN",
 		traymenu.Tooltip("Copy the 6-digit pairing PIN to the clipboard"),
-		traymenu.OnClick(func() { p.copy("pairing PIN", p.PIN()) }),
+		traymenu.OnClick(func() { copyValue(p.logger, "pairing PIN", p.PIN()) }),
 	)
 	section.Set("rotate", "Regenerate Pairing PIN",
 		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
@@ -139,19 +132,6 @@ func (p *PairingPlugin) refresh() {
 	if p.pin != nil {
 		p.pin.SetTitle("Pairing PIN: " + p.PIN())
 	}
-}
-
-// copy puts a value on the clipboard and logs what happened, which is the only
-// feedback a tray menu has for a copy.
-func (p *PairingPlugin) copy(what, value string) {
-	if value == "" {
-		return
-	}
-	if err := clipboard.Copy(value); err != nil {
-		p.logf("Failed to copy the %s: %v", what, err)
-		return
-	}
-	p.logf("Copied the %s to the clipboard", what)
 }
 
 func (p *PairingPlugin) logf(format string, args ...any) {

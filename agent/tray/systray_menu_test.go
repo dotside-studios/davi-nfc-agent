@@ -58,7 +58,6 @@ func TestMenuLayout(t *testing.T) {
 
 	want := []string{
 		"Starting...",
-		"Server URLs",
 		"----",
 		"Card UID: None",
 		"Card Type: None",
@@ -103,20 +102,6 @@ func TestStatusAndCardLabelsAreNotClickable(t *testing.T) {
 	for _, title := range []string{"Starting...", "Card UID: None", "Card Type: None"} {
 		if item := fake.Find(title); item == nil || item.Enabled() {
 			t.Errorf("%q should be a disabled label", title)
-		}
-	}
-}
-
-func TestSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
-	_, fake := newTestTray(t, newTestAgent())
-
-	for _, title := range []string{"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
-		item := fake.Find("Server URLs", title)
-		if item == nil {
-			t.Fatalf("%q is missing from the URLs submenu", title)
-		}
-		if item.Visible() {
-			t.Errorf("%q is shown even though it has nothing behind it", title)
 		}
 	}
 }
@@ -429,25 +414,6 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 	}
 }
 
-func TestCopiedURLsAreTheOnesOnDisplay(t *testing.T) {
-	app, _ := newTestTray(t, newTestAgent())
-	app.updateURLs()
-
-	urls := app.urls()
-
-	// The device entry is what a device connects to, mode and all. Copying
-	// something else would hand out a client URL under a device label.
-	if !strings.HasSuffix(urls.device, "/ws?mode=device") {
-		t.Errorf("device URL = %q, want it to carry the device mode", urls.device)
-	}
-	if got, want := app.mDeviceURL.Title(), "Device: "+urls.device; got != want {
-		t.Errorf("device label = %q, want %q", got, want)
-	}
-	if got, want := app.mClientURL.Title(), "Client: "+urls.client; got != want {
-		t.Errorf("client label = %q, want %q", got, want)
-	}
-}
-
 func TestAgentStateDrivesTheControls(t *testing.T) {
 	app, _ := newTestTray(t, newTestAgent())
 
@@ -461,11 +427,6 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 	if app.mStatus.Title() != "Stopped" || !app.mStart.Enabled() || app.mStop.Enabled() {
 		t.Fatalf("stopped: status %q, start enabled %v, stop enabled %v",
 			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
-	}
-	for _, item := range []*traymenu.Item{app.mDeviceURL, app.mClientURL} {
-		if !strings.HasSuffix(item.Title(), "Not running") {
-			t.Errorf("a stopped agent still shows %q", item.Title())
-		}
 	}
 }
 

@@ -35,10 +35,12 @@ func TestAPluginsEntryIsATopLevelEntry(t *testing.T) {
 		t.Error("the plugin's entry is hidden")
 	}
 
+	// Under the status line, above what the tray declares itself: the
+	// addresses a listener serves on are what this menu is opened for.
 	got := titles(fake)
-	backup, quit := indexOf(got, "Back Up Now"), indexOf(got, "Quit")
-	if backup < 0 || quit < 0 || backup > quit {
-		t.Errorf("menu reads:\n%s\n\nthe plugin's entry should come before Quit", strings.Join(got, "\n"))
+	status, backup, device := indexOf(got, "Starting..."), indexOf(got, "Back Up Now"), indexOf(got, "Device")
+	if status < 0 || backup < 0 || device < 0 || backup < status || backup > device {
+		t.Errorf("menu reads:\n%s\n\nthe plugin's entry should sit between the status and the tray's own entries", strings.Join(got, "\n"))
 	}
 }
 

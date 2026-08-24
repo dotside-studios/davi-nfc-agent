@@ -5,8 +5,10 @@ package console
 import (
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,13 +26,15 @@ func quietAgent(t *testing.T) *agent.Agent {
 	})
 }
 
-// Registering the plugin is all there is to having a control center: it mounts
-// its own routes and adds the entry that opens it.
-func TestThePluginServesTheConsoleAndOffersIt(t *testing.T) {
+// Listing the console's endpoints is all there is to serving it: the routes go
+// on the listener, and the page's address is listed with the others.
+func TestTheEndpointsServeTheConsoleAndListIt(t *testing.T) {
 	a := quietAgent(t)
 
+	c := New(a, nil, nil, nil)
 	servers := &agent.ServerPlugin{}
-	if err := a.Plugins.Add(servers, NewPlugin(a, nil, nil, nil)); err != nil {
+	servers.Add(c.Endpoints()...)
+	if err := a.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
@@ -41,6 +45,14 @@ func TestThePluginServesTheConsoleAndOffersIt(t *testing.T) {
 	if err := a.Activate(menu); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
+
+	hostPort := ""
+	if ips := agent.LocalIPs(); len(ips) > 0 {
+		hostPort = ips[0]
+	} else {
+		hostPort = "localhost"
+	}
+	hostPort = net.JoinHostPort(hostPort, strconv.Itoa(servers.Listener().Port()))
 
 	handler := servers.Listener().Handler()
 
@@ -58,24 +70,21 @@ func TestThePluginServesTheConsoleAndOffersIt(t *testing.T) {
 		t.Error("the root still serves the listener's banner; the console page is not mounted")
 	}
 
-	if item := fake.Find("Open Control Center"); item == nil {
-		t.Errorf("the entry that opens the console is missing:\n%s", fake.Render())
+	for _, title := range []string{"  Copy Control Center URL", "  Open Control Center"} {
+		if item := fake.Find("Server URLs", title); item == nil {
+			t.Errorf("%q is missing from the addresses:\n%s", title, fake.Render())
+		}
+	}
+	if item := fake.Find("Server URLs", "Control Center: http://"+strings.TrimSuffix(hostPort, "/")+"/"); item == nil {
+		t.Errorf("the console's address is not listed:\n%s", fake.Render())
 	}
 }
 
-// It mounts on a listener some earlier plugin published, so registering it
-// without one says so rather than serving nothing.
-func TestThePluginNeedsAListenerToMountOn(t *testing.T) {
-	a := quietAgent(t)
-	if err := a.Plugins.Add(NewPlugin(a, nil, nil, nil)); err != nil {
-		t.Fatalf("Plugins.Add: %v", err)
-	}
-
-	err := a.Activate(nil)
-	if err == nil {
-		t.Fatal("the console mounted with no listener to mount on")
-	}
-	if !strings.Contains(err.Error(), "control center") {
-		t.Errorf("error = %q, want it to name the plugin", err)
+// A build with no console compiled in lists no endpoints, so a program needs no
+// build tag of its own to leave one out.
+func TestAnAbsentConsoleListsNoEndpoints(t *testing.T) {
+	var absent *Server
+	if got := absent.Endpoints(); got != nil {
+		t.Errorf("Endpoints() = %v, want none", got)
 	}
 }

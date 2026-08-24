@@ -86,10 +86,11 @@ func main() {
 		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
 	}
 
-	// The control center, which mounts itself on the listener above and adds
-	// the tray entry that opens it. Nil in a -tags nowebui build, where there
-	// is no console compiled in and registering it costs nothing.
-	controlCenter := console.NewPlugin(rt.Agent, rt.Settings, rt.Logs, pairing)
+	// The control center, served from the same listener. Nil in a -tags nowebui
+	// build, where there is none compiled in and Endpoints is empty, so this
+	// program needs no build tag of its own.
+	controlCenter := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
+	servers.Add(controlCenter.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,
 	// and plugins are activated in the order they were added.
@@ -97,14 +98,13 @@ func main() {
 	if pairing != nil {
 		plugins = append(plugins, pairing)
 	}
-	plugins = append(plugins, controlCenter)
 
 	if err := rt.Agent.Plugins.Add(plugins...); err != nil {
 		log.Fatalf("Failed to register a plugin: %v", err)
 	}
 
 	app := tray.New(rt)
-	app.AttachConsole(controlCenter.Server())
+	app.AttachConsole(controlCenter)
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

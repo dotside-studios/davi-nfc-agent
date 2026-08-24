@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
@@ -36,10 +37,14 @@ type Endpoint struct {
 	// endpoints are listed.
 	Component Component
 
-	// Menu, when set, adds the endpoint's tray entries. It is handed the
-	// section the plugin groups its endpoints under, created only when an
-	// endpoint asks for it.
-	Menu func(traymenu.Container)
+	// Menu, when set, adds the endpoint's entries to the tray's Server URLs
+	// submenu, beside the addresses the agent serves from the same listener.
+	// url is where this endpoint answers, empty for one with no route.
+	//
+	// An endpoint is not listed unless it asks to be: a route a person would
+	// never open, such as an API behind a page, is noise beside the addresses
+	// worth copying.
+	Menu func(menu traymenu.Container, url string)
 }
 
 // name is what to call the endpoint in an error.
@@ -86,8 +91,8 @@ type ServerPlugin struct {
 	// registered, and its menu entries added. See [ServerPlugin.Add].
 	Endpoints []Endpoint
 
-	// MenuTitle names the tray submenu the endpoints' entries are grouped
-	// under. Blank uses "Servers".
+	// MenuTitle names the tray submenu the addresses are listed under. Blank
+	// uses "Server URLs".
 	MenuTitle string
 
 	// Certificates reissues the listener's certificate when the machine's
@@ -95,6 +100,12 @@ type ServerPlugin struct {
 	// takes the agent's, and an agent without one is a build serving a
 	// certificate nothing here manages.
 	Certificates tlspkg.CertificateWatcher
+
+	// The entries whose labels follow what is being served.
+	device *traymenu.Item
+	client *traymenu.Item
+	secret *traymenu.Item
+	logger *log.Logger
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -128,27 +139,142 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if err := p.watchCertificates(ctx); err != nil {
 		return err
 	}
-
-	// Built on first use, so endpoints that show nothing leave no empty
-	// submenu behind.
-	var section traymenu.Container
-	menu := func() traymenu.Container {
-		if section == nil {
-			section = ctx.Systray.Section(p.menuTitle())
-		}
-		return section
-	}
+	p.logger = ctx.Logger()
 
 	for _, endpoint := range p.Endpoints {
-		if err := p.register(ctx, endpoint, menu); err != nil {
+		if err := p.register(ctx, endpoint); err != nil {
 			return err
 		}
 	}
+
+	return p.serverURLs(ctx)
+}
+
+// serverURLs builds the submenu of addresses this listener answers on, and the
+// credential a client presents to them. The plugin owns it because it owns the
+// listener: what is served from a port is what the thing holding the port
+// knows.
+func (p *ServerPlugin) serverURLs(ctx AgentContext) error {
+	menu := ctx.Systray.Section(p.menuTitle(), traymenu.Tooltip("Addresses this agent serves on"))
+
+	p.device = menu.Set("device", "Device: Not running", traymenu.Tooltip("The URL a reader or a phone connects to"), traymenu.Disabled())
+	menu.Set("copy-device", "  Copy Device URL",
+		traymenu.OnClick(func() { copyValue(p.logger, "device URL", p.deviceURL()) }),
+	)
+
+	p.client = menu.Set("client", "Client: Not running", traymenu.Tooltip("The URL a web app connects to"), traymenu.Disabled())
+	menu.Set("copy-client", "  Copy Client URL",
+		traymenu.OnClick(func() { copyValue(p.logger, "client URL", p.clientURL()) }),
+	)
+
+	// Then whatever is mounted on the same listener, each under its own name.
+	for _, endpoint := range p.Endpoints {
+		if endpoint.Menu == nil {
+			continue
+		}
+		endpoint.Menu(menu, p.endpointURL(endpoint))
+	}
+
+	p.apiSecret(ctx, menu)
+
+	// The addresses follow the machine's own, so they are redrawn whenever the
+	// agent starts or stops and whenever the listener is bound again.
+	p.refresh(ctx.Agent)
+	ctx.Agent.OnStateChange(func(State) { p.refresh(ctx.Agent) })
+	ctx.Agent.OnServerRestart(func() { p.refresh(ctx.Agent) })
 	return nil
 }
 
-// register wires one endpoint: its route, its lifetime, its menu.
-func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint, menu func() traymenu.Container) error {
+// apiSecret adds the credential entries, which mean nothing without one.
+func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
+	if ctx.Agent.APISecret() == "" {
+		return
+	}
+
+	p.secret = menu.Set("secret", "API Secret: hidden",
+		traymenu.Tooltip("Required from non-loopback phones and clients"),
+		traymenu.Disabled(),
+	)
+	menu.Set("copy-secret", "  Copy API Secret",
+		traymenu.OnClick(func() { copyValue(p.logger, "API secret", ctx.Agent.APISecret()) }),
+	)
+	menu.Set("rotate-secret", "  Regenerate API Secret",
+		traymenu.Tooltip("Generate a fresh secret; every phone must handshake again"),
+		traymenu.OnClick(func() {
+			fresh, err := ctx.Agent.RotateAPISecret()
+			if err != nil {
+				p.logf("Failed to rotate the API secret: %v", err)
+				return
+			}
+			p.logf("API secret rotated; the servers were restarted")
+			p.secret.SetTitle("API Secret: " + redact(fresh))
+		}),
+	)
+}
+
+// refresh brings the addresses back in step with what is being served. Safe
+// from any goroutine, which is what the hooks calling it need.
+func (p *ServerPlugin) refresh(a *Agent) {
+	if !a.Running() {
+		p.device.SetTitle("Device: Not running")
+		p.client.SetTitle("Client: Not running")
+		return
+	}
+
+	p.device.SetTitle("Device: " + p.deviceURL())
+	p.client.SetTitle("Client: " + p.clientURL())
+	if p.secret != nil {
+		p.secret.SetTitle("API Secret: " + redact(a.APISecret()))
+	}
+}
+
+// clientURL is where a web app connects, and deviceURL where a reader or a
+// phone does. They share the port and the path, and differ by the mode a
+// device declares.
+func (p *ServerPlugin) clientURL() string {
+	scheme := "ws"
+	if p.Config.TLSEnabled() {
+		scheme = "wss"
+	}
+	return scheme + "://" + serviceAddress(serviceHost(), p.Server.Port()) + "/ws"
+}
+
+func (p *ServerPlugin) deviceURL() string { return p.clientURL() + "?mode=device" }
+
+// endpointURL is where an endpoint answers, empty for one with no route.
+func (p *ServerPlugin) endpointURL(endpoint Endpoint) string {
+	if endpoint.Pattern == "" {
+		return ""
+	}
+
+	scheme := "http"
+	if p.Config.TLSEnabled() {
+		scheme = "https"
+	}
+	return scheme + "://" + serviceAddress(serviceHost(), p.Server.Port()) + endpoint.Pattern
+}
+
+// redact shows enough of a secret to tell it apart from the one it replaced,
+// and no more: this ends up on a screen someone else can be looking at.
+func redact(secret string) string {
+	if secret == "" {
+		return "not set"
+	}
+	if len(secret) > 12 {
+		return secret[:4] + "…" + secret[len(secret)-4:]
+	}
+	return secret
+}
+
+func (p *ServerPlugin) logf(format string, args ...any) {
+	if p.logger != nil {
+		p.logger.Printf(format, args...)
+	}
+}
+
+// register wires one endpoint: its route and its lifetime. Its menu entries
+// come later, with the addresses; see serverURLs.
+func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint) error {
 	if endpoint.Pattern != "" {
 		if endpoint.Handler == nil {
 			return fmt.Errorf("endpoint %q: mounted on %q with no handler", endpoint.name(), endpoint.Pattern)
@@ -164,9 +290,6 @@ func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint, menu func()
 		}
 	}
 
-	if endpoint.Menu != nil {
-		endpoint.Menu(menu())
-	}
 	return nil
 }
 
@@ -252,5 +375,5 @@ func (p *ServerPlugin) menuTitle() string {
 	if p.MenuTitle != "" {
 		return p.MenuTitle
 	}
-	return "Servers"
+	return "Server URLs"
 }

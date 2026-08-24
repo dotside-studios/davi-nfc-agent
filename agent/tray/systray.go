@@ -1,16 +1,12 @@
 package tray
 
 import (
-	"fmt"
 	"log"
-	"net"
-	"strconv"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
-	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -21,39 +17,6 @@ import (
 // reuses a fixed pool of items rather than rebuilding them per refresh; see
 // [traymenu.NewList].
 const readerSlotCount = 12
-
-// getLocalIPs returns local non-loopback IP addresses (both IPv4 and IPv6 globals).
-// IPv4 addresses come first so callers that pick ips[0] get the most broadly
-// compatible address. Link-local and unspecified addresses are skipped.
-func getLocalIPs() []string {
-	var v4, v6 []string
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil
-	}
-
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		ip := ipNet.IP
-		if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			continue
-		}
-		if ip.To4() != nil {
-			v4 = append(v4, ip.String())
-		} else {
-			v6 = append(v6, ip.String())
-		}
-	}
-	return append(v4, v6...)
-}
-
-// hostPort joins a host and port using bracket notation for IPv6 literals.
-func hostPort(host string, port int) string {
-	return net.JoinHostPort(host, strconv.Itoa(port))
-}
 
 // App manages the system tray interface for the NFC agent
 type App struct {
@@ -71,11 +34,6 @@ type App struct {
 	mCardType *traymenu.Item
 	mStart    *traymenu.Item
 	mStop     *traymenu.Item
-
-	// URL menu items. Only the ones relabelled later are held.
-	mDeviceURL *traymenu.Item
-	mClientURL *traymenu.Item
-	mAPISecret *traymenu.Item
 
 	// Reader selection
 	readers *traymenu.List[string]
@@ -238,7 +196,14 @@ func (s *App) setupUI() {
 
 	s.mStatus = s.menu.Add("Starting...", traymenu.Tooltip("Agent Status"), traymenu.Disabled())
 
-	s.setupURLsMenu()
+	// The plugins add theirs here, under the status and above what this build
+	// declares itself: the addresses a listener serves on are what an operator
+	// opens this menu for, and they are a plugin's now.
+	//
+	// Done from inside the menu rather than after it, because a menu item
+	// always goes to the end of its parent: activated once Quit was on, every
+	// plugin entry would land under it.
+	s.activatePlugins()
 
 	s.menu.AddSeparator()
 
@@ -302,41 +267,6 @@ func (s *App) setupUI() {
 
 	s.menu.AddSeparator()
 	s.menu.Add("Quit", traymenu.Tooltip("Quit the application"), traymenu.OnClick(s.menu.Quit))
-}
-
-// setupURLsMenu builds the submenu of addresses and their copy entries.
-func (s *App) setupURLsMenu() {
-	urls := s.menu.AddSubmenu("Server URLs", traymenu.Tooltip("Server addresses"))
-
-	s.mDeviceURL = urls.Add("Device: Not running", traymenu.Tooltip("DeviceServer WebSocket URL"), traymenu.Disabled())
-	urls.Add("  Copy Device URL",
-		traymenu.Tooltip("Copy DeviceServer URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("DeviceServer URL", s.urls().device) }),
-	)
-
-	s.mClientURL = urls.Add("Client: Not running", traymenu.Tooltip("ClientServer URL"), traymenu.Disabled())
-	urls.Add("  Copy Client URL",
-		traymenu.Tooltip("Copy ClientServer URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("ClientServer URL", s.urls().client) }),
-	)
-
-	// API secret entries, only shown if a secret is configured.
-	noSecret := s.agent.APISecret() == ""
-	s.mAPISecret = urls.Add("API Secret: hidden",
-		traymenu.Tooltip("Required from non-loopback phones/clients"),
-		traymenu.Disabled(),
-		traymenu.HiddenIf(noSecret),
-	)
-	urls.Add("  Copy API Secret",
-		traymenu.Tooltip("Copy the agent's API secret to clipboard"),
-		traymenu.HiddenIf(noSecret),
-		traymenu.OnClick(func() { s.copyValue("API secret", s.agent.APISecret()) }),
-	)
-	urls.Add("  Regenerate API Secret",
-		traymenu.Tooltip("Generate a fresh secret; all phones must re-handshake"),
-		traymenu.HiddenIf(noSecret),
-		traymenu.OnClick(s.handleRotateAPISecret),
-	)
 }
 
 // setupDeviceMenu builds the reader picker.
@@ -460,7 +390,6 @@ func (s *App) startServerRestartListener() {
 	go func() {
 		for range s.agent.ServerRestarts() {
 			log.Printf("[systray] Server restart detected, updating the menu")
-			s.updateURLs()
 
 			// CAInstalled is a look at the filesystem, not a decision taken
 			// once: a config directory that loses its CA needs the offer to
@@ -493,7 +422,6 @@ func (s *App) StopAgent() {
 // mean something, and Stop as the control that can be clicked.
 func (s *App) showRunning() {
 	s.updateStatus("Running")
-	s.updateURLs()
 	s.mStart.Disable()
 	s.mStop.Enable()
 }
@@ -502,22 +430,8 @@ func (s *App) showRunning() {
 // with the status line saying why.
 func (s *App) showStopped(status string) {
 	s.updateStatus(status)
-	s.clearURLs()
 	s.mStart.Enable()
 	s.mStop.Disable()
-}
-
-// handleRotateAPISecret issues a fresh API secret; every phone must handshake
-// again with it.
-func (s *App) handleRotateAPISecret() {
-	fresh, err := s.agent.RotateAPISecret()
-	if err != nil {
-		log.Printf("[systray] Failed to rotate API secret: %v", err)
-		return
-	}
-
-	log.Printf("[systray] API secret rotated; servers restarted")
-	s.updateAPISecretLabel(fresh)
 }
 
 // handleModeSwitch applies a mode picked from the menu. The mode belongs to the
@@ -656,81 +570,4 @@ func (s *App) updateCardType(cardType string) {
 	} else {
 		s.mCardType.SetTitle("Card Type: " + cardType)
 	}
-}
-
-// agentURLs are the addresses the menu shows and copies. They are built
-// together so that what an entry copies is what the entry above it reads.
-type agentURLs struct {
-	device string
-	client string
-}
-
-// urls builds the addresses from the agent's current configuration.
-func (s *App) urls() agentURLs {
-	ip := "localhost"
-	if ips := getLocalIPs(); len(ips) > 0 {
-		ip = ips[0]
-	}
-
-	scheme := "ws"
-	if s.agent.CertFile() != "" && s.agent.KeyFile() != "" {
-		scheme = "wss"
-	}
-	// The port being served, not the one configured. These URLs are copied and
-	// pasted into a device, so one naming an unbound port is worse than none.
-	port := s.agent.ServingPort()
-	if port == 0 {
-		port = agent.DefaultDevicePort
-	}
-
-	// Devices and clients share the single agent port. Devices connect with
-	// ?mode=device; clients use plain /ws.
-	client := fmt.Sprintf("%s://%s/ws", scheme, hostPort(ip, port))
-	return agentURLs{device: client + "?mode=device", client: client}
-}
-
-// updateURLs updates all server URL displays
-func (s *App) updateURLs() {
-	urls := s.urls()
-
-	s.mDeviceURL.SetTitle("Device: " + urls.device)
-	s.mClientURL.SetTitle("Client: " + urls.client)
-
-	s.updateAPISecretLabel(s.agent.APISecret())
-}
-
-// updateAPISecretLabel updates the systray label with a redacted view
-// of the API secret. The full secret is available via Copy.
-func (s *App) updateAPISecretLabel(secret string) {
-	if secret == "" {
-		s.mAPISecret.SetTitle("API Secret: not set")
-		return
-	}
-	// Show first/last 4 chars only — operators can confirm the secret
-	// changed after rotation without leaking it on the screen.
-	preview := secret
-	if len(secret) > 12 {
-		preview = secret[:4] + "…" + secret[len(secret)-4:]
-	}
-	s.mAPISecret.SetTitle("API Secret: " + preview)
-}
-
-// clearURLs resets all URL displays to "Not running"
-func (s *App) clearURLs() {
-	s.mDeviceURL.SetTitle("Device: Not running")
-	s.mClientURL.SetTitle("Client: Not running")
-}
-
-// copyValue puts a value on the clipboard and logs what happened, which is the
-// only feedback a tray menu has for a copy.
-func (s *App) copyValue(what, value string) {
-	if value == "" {
-		return
-	}
-
-	if err := clipboard.Copy(value); err != nil {
-		log.Printf("[systray] Failed to copy %s: %v", what, err)
-		return
-	}
-	log.Printf("[systray] Copied %s to clipboard", what)
 }

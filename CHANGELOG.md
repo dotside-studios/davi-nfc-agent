@@ -120,14 +120,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent happened to hold. The pairing plugin is that handle now, and an argument
   to `console.New`; `tray.New` takes the runtime and nothing else
 
-- **`console.NewPlugin` serves the control center.** Mounting its two routes,
-  following the three stores that redraw it, and declaring the tray entry that
-  opens it were spread across `main.go` and `agent/tray`. They are the console's
-  now: registering the plugin is all a build does, and `-tags nowebui` returns
-  one that registers nothing, so no program needs a build tag of its own. The
-  tray keeps `AttachConsole`, which a plugin cannot do: the console needs the
-  tray itself, and an activating plugin is handed a menu rather than whatever
-  draws it
+- **The server plugin owns the tray's Server URLs submenu.** What is served from
+  a port is what the thing holding the port knows, so the device and client
+  addresses, the API secret a client presents to them, and their copy and
+  regenerate actions moved out of `agent/tray` and into `agent.ServerPlugin`.
+  `Endpoint.Menu` takes the endpoint's URL alongside the submenu, so an endpoint
+  is listed there with the rest; it is listed only if it asks, since a route
+  nobody opens by hand is noise beside an address worth copying.
+
+  `console.Endpoints` is what serves the control center, so it appears there as
+  `Control Center: https://…/` with entries that copy and open it. `console.New`
+  now follows the stores that redraw an open page itself, and `-tags nowebui`
+  returns no endpoints, so a program needs no build tag of its own
 
 - **`Agent.RebindListener` serves a reissued certificate; `RestartServers`
   rebuilds what captured configuration.** One method did both, so installing a

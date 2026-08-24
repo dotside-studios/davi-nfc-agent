@@ -80,19 +80,20 @@ func main() {
 	// built and where it is handed to the console.
 	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
 
-	// The control center, which mounts its own routes on the listener above
-	// and adds the tray entry that opens it. Registering it is all there is to
-	// attaching one; a -tags nowebui build gets a plugin that serves nothing.
-	c := console.NewPlugin(rt.Agent, rt.Settings, rt.Logs, pairing)
+	// The control center, served from the same listener and listed with the
+	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
+	// so this program needs no build tag of its own.
+	c := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
+	servers.Add(c.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,
 	// and plugins are activated in the order they were added.
-	if err := rt.Agent.Plugins.Add(servers, pairing, c); err != nil {
+	if err := rt.Agent.Plugins.Add(servers, pairing); err != nil {
 		log.Fatal(err)
 	}
 
 	app := tray.New(rt)
-	app.AttachConsole(c.Server())
+	app.AttachConsole(c)
 	app.Run()
 }
 ```
@@ -230,9 +231,27 @@ servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks}
 rt.Agent.Plugins.Add(servers)
 ```
 
-An endpoint is for a handler you already hold. A plugin with an `Activate` of
-its own mounts itself instead, with `ctx.Mount`, which is what the console does:
-it wants the agent as well as the route, and only a plugin is given one.
+The plugin also owns the tray's **Server URLs** submenu, since what is served
+from a port is what the thing holding the port knows: the device and client
+addresses, the API secret a client presents to them, and a line per endpoint
+that asks for one.
+
+```go
+{
+	Name:    "control center",
+	Pattern: "/",
+	Handler: assets,
+	Menu: func(menu traymenu.Container, url string) {
+		menu.Add("Control Center: "+url, traymenu.Disabled())
+		menu.Add("  Copy Control Center URL", traymenu.OnClick(func() { copy(url) }))
+	},
+}
+```
+
+An endpoint is listed only if it sets `Menu`: a route nobody opens by hand is
+noise beside the addresses worth copying. A plugin with an `Activate` of its own
+can mount a route with `ctx.Mount` instead, which is what something wanting the
+agent as well as the route does.
 
 Registered with no `Config`, it serves on the port, certificate and name the
 agent was set up with. Set `Config` for a listener that differs from them, or
@@ -246,26 +265,23 @@ The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
 health checks; two endpoints on one path fail the start rather than leaving the
 mux to decide.
 
-### The console plugin
+### The control center
 
-`console.NewPlugin` builds the control center and the plugin that serves it. It
-mounts `/control/` and `/` on the listener a plugin registered before it
-published, follows the origin, device and client changes that redraw it, and
-adds the tray entry that opens it.
+The console is two endpoints of the server plugin, so it is served from the
+agent's port and listed with the other addresses:
 
 ```go
-c := console.NewPlugin(rt.Agent, rt.Settings, rt.Logs, pairing)
-rt.Agent.Plugins.Add(servers, c)
+c := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
+servers.Add(c.Endpoints()...)
 ```
 
-`c.Server()` is the console itself, which a tray is given so that an action
-taken in either moves the other: see `tray.App.AttachConsole`. That half stays
-with the program, because the console needs the tray, and an activating plugin
-is handed a menu rather than whatever draws it.
+`console.New` also follows what redraws an open page: an origin allowed, a
+device revoked, a client connecting. Under `-tags nowebui` there is no console
+compiled in and `Endpoints` is empty, so a program needs no build tag of its own.
 
-Under `-tags nowebui` there is no console compiled in, so `NewPlugin` returns a
-plugin that registers nothing and `Server()` is nil. A program needs no build
-tag of its own either way.
+`tray.App.AttachConsole` is the one thing left to the program. It runs both
+ways: the tray acts through the console, and the console acts through the tray,
+so a device switched in the browser moves the tray's menu too.
 
 ### The pairing plugin
 

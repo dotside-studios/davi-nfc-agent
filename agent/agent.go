@@ -452,10 +452,6 @@ func (a *Agent) stopLocked() {
 
 	a.logger.Println("Stopping agent...")
 
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
-	}
-
 	a.ClientServer = nil
 	a.Router = nil
 
@@ -492,46 +488,12 @@ func (a *Agent) Shutdown() {
 	}
 }
 
-// RebindListener stops the listener and starts it again, so a certificate
-// reissued on disk is the one served. Installing a certificate authority,
-// reissuing a certificate and a change of address all end here.
-//
-// The listener only: the reader, the router and the client server carry on, and
-// the connections they hold are dropped by the listener's own shutdown. Nothing
-// that captured configuration at start is rebuilt, which is what separates this
-// from RestartServers.
-func (a *Agent) RebindListener() error {
-	a.lifecycleMu.Lock()
-	srv := a.UnifiedServer
-	if srv == nil {
-		a.lifecycleMu.Unlock()
-		return errors.New("agent: no listener to rebind")
-	}
-
-	a.logger.Println("Rebinding the listener...")
-	srv.Stop()
-
-	// Brief pause to allow the port to be released
-	time.Sleep(100 * time.Millisecond)
-
-	err := srv.Start()
-	a.lifecycleMu.Unlock()
-
-	if err != nil {
-		return err
-	}
-
-	a.logger.Println("Listener rebound successfully")
-	a.notifyServerRestart()
-	return nil
-}
-
-// RestartServers rebuilds everything the agent serves from and binds the
-// listener again. The NFC reader continues running.
+// RestartServers rebuilds what the agent serves: the router, the client server
+// and the tag sources feeding them. The reader and the listener carry on.
 //
 // For a change the serving state captured when it was built, such as the API
-// secret the client server holds. A certificate reissued on disk needs only
-// RebindListener, which leaves the connections' backing state alone.
+// secret the client server holds. A certificate reissued on disk is not one of
+// those: the listener binds again on its own, and nothing here is rebuilt.
 func (a *Agent) RestartServers() error {
 	a.lifecycleMu.Lock()
 
@@ -576,10 +538,6 @@ func (a *Agent) stopServers() {
 	if a.pumpCancel != nil {
 		a.pumpCancel()
 		a.pumpCtx, a.pumpCancel = nil, nil
-	}
-
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
 	}
 
 	a.ClientServer = nil
@@ -629,21 +587,10 @@ func (a *Agent) startServers() error {
 		device: a.deviceEndpoint,
 	})
 
-	// The listener is the caller's, mounted before the agent starts. A nil one
-	// is an agent with no HTTP surface at all, which is what a program driving
-	// the reader directly wants.
-	if a.UnifiedServer == nil {
-		a.logger.Println("No server mounted; serving no HTTP")
-		return nil
-	}
-
-	// Binds before returning, so a port already in use fails the start rather
-	// than leaving the agent reporting itself running with nothing listening.
-	if err := a.UnifiedServer.Start(); err != nil {
-		return err
-	}
-
-	a.logger.Printf("Server started on port %d (NFC devices + web clients)", a.devicePort)
+	// Nothing is bound here. The listener is a component of whoever serves it,
+	// so it comes up once this has, and goes down before it; an agent with none
+	// registered serves no HTTP at all, which is what a program driving the
+	// reader directly wants.
 	return nil
 }
 

@@ -133,18 +133,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now follows the stores that redraw an open page itself, and `-tags nowebui`
   returns no endpoints, so a program needs no build tag of its own
 
-- **`Agent.RebindListener` serves a reissued certificate; `RestartServers`
-  rebuilds what captured configuration.** One method did both, so installing a
-  certificate authority or reissuing a certificate tore down the router, the
-  client server and the pumps to change a file the listener reads at bind time.
-  Certificate work rebinds now and leaves the connections' backing state alone;
-  `RestartServers` is for a change the serving state captured, such as the API
-  secret rotated into the client server. `webui.Host` gains `RebindListener`.
+- **Reissuing a certificate is the event; binding again is what the listener
+  does about it.** `tls.Manager` reports every reissue on
+  `CertificateWatcher.WatchReissues`, whether it made one itself for a change of
+  address or was asked through `InstallCA` or `RegenerateCertificates`.
+  `ServerPlugin` watches and rebinds, so installing a certificate authority from
+  the tray or the console is now just that call: the three places that had to
+  remember to restart the servers afterwards no longer mention it, and
+  `webui.Host` needs no method for it.
 
-  The network watch moves with it: the certificate is the server plugin's
-  configuration, so `ServerPlugin.Certificates` watches for a reissue and
-  rebinds, rather than the agent watching networks on behalf of a listener it
-  does not configure. It ends with the agent, which nothing used to do
+  The listener's lifetime is the plugin's too, as an ordinary component, so the
+  agent neither binds it nor rebinds it. `Agent.RestartServers` keeps its own
+  half, rebuilding what the serving state captured, such as the API secret in
+  the client server; it no longer tears down the port to do it
 
 - **Two narrower contracts, so certificate material can move off the agent.**
   `PairingConfig.CA` is `tls.CertificateAuthority`, the two methods the pairing

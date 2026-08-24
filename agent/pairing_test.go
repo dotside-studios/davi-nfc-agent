@@ -132,8 +132,7 @@ func TestPairingRegistersAsAnEndpointComponent(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	comps := rt.Agent.Components()
-	if len(comps) != 1 || comps[0].Name() != "pairing" {
-		t.Fatalf("Components() = %v, want one named pairing", comps)
+	if !runs(rt.Agent, "pairing") {
+		t.Fatalf("Components() = %v, want the pairing server among them", names(rt.Agent))
 	}
 }

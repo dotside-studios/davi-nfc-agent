@@ -166,18 +166,13 @@ func (c *Server) dispatch(req action) (any, error) {
 		return map[string]any{"pin": pin}, nil
 
 	case "security.installCA":
-		if err := c.host.InstallCA(); err != nil {
-			return nil, err
-		}
-		// The new certificate only reaches a browser on a fresh listener.
-		return nil, c.host.RebindListener()
+		// Installing reissues the certificate, and whatever serves it binds
+		// again on its own.
+		return nil, c.host.InstallCA()
 
 	case "security.regenerateCertificate":
-		if err := c.host.RegenerateCertificate(); err != nil {
-			return nil, err
-		}
-		// Takes effect only on a fresh listener.
-		return nil, c.host.RebindListener()
+		// As above: the reissue is the event, and the listener follows it.
+		return nil, c.host.RegenerateCertificate()
 
 	case "security.revokeControlSessions":
 		// Includes the caller's own session, which is the point.

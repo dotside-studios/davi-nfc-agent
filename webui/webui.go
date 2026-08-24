@@ -25,9 +25,6 @@ type Host interface {
 	StopAgent()
 	QuitAgent()
 	RestartServers() error
-	// RebindListener serves a reissued certificate, leaving the connections'
-	// backing state alone.
-	RebindListener() error
 
 	// ---- reader ----
 

@@ -265,6 +265,13 @@ The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
 health checks; two endpoints on one path fail the start rather than leaving the
 mux to decide.
 
+The listener is bound by a component the plugin registers, so it comes up once
+the agent is serving and goes down before it. `Certificates` watches for a
+reissued certificate and calls `Rebind`, which stops and starts the listener so
+the new one is served. Nothing else has to: installing a certificate authority
+or reissuing a certificate reports itself, and the listener follows. `Rebind` is
+there for a program that has some other reason to bind again.
+
 ### The control center
 
 The console is two endpoints of the server plugin, so it is served from the

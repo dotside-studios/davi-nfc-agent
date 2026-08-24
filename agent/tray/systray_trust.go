@@ -46,11 +46,8 @@ func (s *App) handleTrustBrowsers() {
 			log.Printf("[systray] Could not trust this agent in browsers: %v", err)
 			return
 		}
-		if err := s.agent.RebindListener(); err != nil {
-			log.Printf("[systray] Certificate authority installed, but the listener did not rebind: %v", err)
-			return
-		}
-
+		// Installing reissues the certificate, and whatever serves it binds
+		// again on its own: see tls.CertificateWatcher.
 		log.Printf("[systray] Browsers on this machine now trust this agent; reload any page that uses the reader")
 		s.RefreshTrustMenu()
 		if s.console != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
@@ -106,6 +107,7 @@ type ServerPlugin struct {
 	client *traymenu.Item
 	secret *traymenu.Item
 	logger *log.Logger
+	agent  *Agent
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -140,6 +142,7 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 		return err
 	}
 	p.logger = ctx.Logger()
+	p.agent = ctx.Agent
 
 	for _, endpoint := range p.Endpoints {
 		if err := p.register(ctx, endpoint); err != nil {
@@ -147,7 +150,60 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 		}
 	}
 
-	return p.serverURLs(ctx)
+	if err := p.serverURLs(ctx); err != nil {
+		return err
+	}
+
+	// Last, so it is the first thing to come down: nothing new arrives while
+	// what answers it is being torn down. Components stop in reverse.
+	return ctx.Use(&listener{server: p.Server, agent: ctx.Agent})
+}
+
+// Rebind stops the listener and starts it again, so a certificate reissued on
+// disk is the one served. The reader, the router and the client server carry
+// on; the connections they hold are dropped by the listener's own shutdown.
+//
+// Whoever reissues a certificate does not call this. The manager reports the
+// reissue and the watch below binds again; see [tlspkg.CertificateWatcher].
+func (p *ServerPlugin) Rebind() error {
+	if p.Server == nil {
+		return fmt.Errorf("agent: no listener to rebind")
+	}
+
+	p.logf("Rebinding the listener...")
+	p.Server.Stop()
+
+	// Brief pause to allow the port to be released.
+	time.Sleep(100 * time.Millisecond)
+
+	if err := p.Server.Start(); err != nil {
+		return err
+	}
+
+	p.logf("Listener rebound successfully")
+	if p.agent != nil {
+		p.agent.notifyServerRestart()
+	}
+	return nil
+}
+
+// listener binds the port for as long as the agent is running. It goes on as a
+// component so that starting and stopping it is the agent's ordinary lifecycle
+// rather than something the agent does about servers specifically.
+type listener struct {
+	server *unifiedserver.Server
+	agent  *Agent
+}
+
+func (l *listener) Name() string { return "listener" }
+
+// Start binds before returning, so a port already in use fails the agent's
+// start rather than leaving it reporting itself running with nothing listening.
+func (l *listener) Start(context.Context) error { return l.server.Start() }
+
+func (l *listener) Stop() error {
+	l.server.Stop()
+	return nil
 }
 
 // serverURLs builds the submenu of addresses this listener answers on, and the
@@ -310,13 +366,13 @@ func (p *ServerPlugin) watchCertificates(ctx AgentContext) error {
 
 	return ctx.Use(&certificateWatch{
 		certificates: p.Certificates,
-		rebind:       ctx.Agent.RebindListener,
+		rebind:       p.Rebind,
 		logf:         ctx.Logger().Printf,
 	})
 }
 
 // certificateWatch rebinds the listener whenever the certificate behind it is
-// reissued.
+// reissued, whoever asked for the reissue.
 type certificateWatch struct {
 	certificates tlspkg.CertificateWatcher
 	rebind       func() error
@@ -326,7 +382,7 @@ type certificateWatch struct {
 func (w *certificateWatch) Name() string { return "certificate watch" }
 
 func (w *certificateWatch) Start(ctx context.Context) error {
-	changes := w.certificates.WatchNetworkChanges()
+	changes := w.certificates.WatchReissues()
 
 	go func() {
 		for {
@@ -337,7 +393,7 @@ func (w *certificateWatch) Start(ctx context.Context) error {
 				if !ok {
 					return
 				}
-				w.logf("Certificate reissued for a change of address; rebinding the listener")
+				w.logf("Certificate reissued; rebinding the listener")
 				if err := w.rebind(); err != nil {
 					w.logf("Failed to rebind the listener: %v", err)
 				}

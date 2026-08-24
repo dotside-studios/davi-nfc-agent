@@ -46,13 +46,13 @@ type fakeHost struct {
 	explicit settings.Explicit
 
 	// Recorded calls, so a test can assert an action reached the agent.
-	started, stopped, quit, restarted, rebound int
-	disconnected                               []string
-	revoked                                    []string
-	rotatedSecret, rotatedPIN                  int
-	regeneratedCert                            int
-	installedCA                                int
-	failInstallCA                              bool
+	started, stopped, quit, restarted int
+	disconnected                      []string
+	revoked                           []string
+	rotatedSecret, rotatedPIN         int
+	regeneratedCert                   int
+	installedCA                       int
+	failInstallCA                     bool
 
 	failDisconnect bool
 }
@@ -98,13 +98,6 @@ func (h *fakeHost) RestartServers() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.restarted++
-	return nil
-}
-
-func (h *fakeHost) RebindListener() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.rebound++
 	return nil
 }
 

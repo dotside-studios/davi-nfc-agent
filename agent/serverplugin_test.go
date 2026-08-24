@@ -91,8 +91,12 @@ func TestServerPluginRegistersItsEndpoints(t *testing.T) {
 	if code := get(t, p.Listener(), "/control/"); code != http.StatusTeapot {
 		t.Errorf("GET /control/ = %d, want the endpoint's handler", code)
 	}
-	if comps := a.Components(); len(comps) != 1 || comps[0].Name() != "pairing" {
-		t.Errorf("Components() = %v, want the endpoint's component", comps)
+	if !runs(a, "pairing") {
+		t.Errorf("Components() = %v, want the endpoint's component among them", names(a))
+	}
+	// The listener is one too: its lifetime is the plugin's.
+	if !runs(a, "listener") {
+		t.Errorf("Components() = %v, want the listener among them", names(a))
 	}
 	if item := fake.Find("Server URLs", "Extras: http://"+serviceAddress(serviceHost(), p.Listener().Port())+"/extras/"); item == nil {
 		t.Errorf("the endpoint's menu entry is missing, or does not carry its address:\n%s", fake.Render())
@@ -261,7 +265,7 @@ func newFakeCertificates() *fakeCertificates {
 	return &fakeCertificates{changes: make(chan struct{}, 1), stopped: make(chan struct{})}
 }
 
-func (f *fakeCertificates) WatchNetworkChanges() <-chan struct{} { return f.changes }
+func (f *fakeCertificates) WatchReissues() <-chan struct{} { return f.changes }
 
 func (f *fakeCertificates) StopWatching() {
 	select {
@@ -271,8 +275,8 @@ func (f *fakeCertificates) StopWatching() {
 	}
 }
 
-// A certificate reissued for a change of address reaches a browser only on a
-// fresh listener, so the plugin binds again when its watcher reports one.
+// A reissued certificate reaches a browser only on a fresh listener, so the
+// plugin binds again when its watcher reports one, whoever asked for it.
 func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
 	certificates := newFakeCertificates()
 
@@ -327,7 +331,8 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(&ServerPlugin{}); err != nil {
+	servers := &ServerPlugin{}
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 	if err := rt.Agent.Start(""); err != nil {
@@ -340,8 +345,8 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 		t.Fatal("no client server after Start")
 	}
 
-	if err := rt.Agent.RebindListener(); err != nil {
-		t.Fatalf("RebindListener: %v", err)
+	if err := servers.Rebind(); err != nil {
+		t.Fatalf("Rebind: %v", err)
 	}
 	if rt.Agent.ClientServer != before {
 		t.Error("rebinding rebuilt the client server; only the listener should have moved")
@@ -357,14 +362,10 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	}
 }
 
-// An agent with no listener says so rather than reporting a rebind that did not
+// A plugin with no listener says so rather than reporting a rebind that did not
 // happen.
 func TestRebindingWithNoListener(t *testing.T) {
-	a := quietAgent(t)
-	if err := a.Activate(nil); err != nil {
-		t.Fatalf("Activate: %v", err)
-	}
-	if err := a.RebindListener(); err == nil {
+	if err := (&ServerPlugin{}).Rebind(); err == nil {
 		t.Error("rebinding succeeded with no listener to rebind")
 	}
 }
@@ -403,7 +404,8 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(&ServerPlugin{}); err != nil {
+	servers := &ServerPlugin{}
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 	if err := rt.Agent.Start(""); err != nil {
@@ -419,8 +421,8 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 	if err := rt.Agent.RestartServers(); err != nil {
 		t.Fatalf("RestartServers: %v", err)
 	}
-	if err := rt.Agent.RebindListener(); err != nil {
-		t.Fatalf("RebindListener: %v", err)
+	if err := servers.Rebind(); err != nil {
+		t.Fatalf("Rebind: %v", err)
 	}
 
 	if rt.Agent.Reader() != reader {
@@ -507,4 +509,24 @@ func TestTheAPISecretIsListedRedacted(t *testing.T) {
 	if item := plainFake.Find("Server URLs", "API Secret: hidden"); item != nil {
 		t.Errorf("the API secret is listed with none configured:\n%s", plainFake.Render())
 	}
+}
+
+// runs reports whether a component of that name is registered, and names lists
+// them for a failure message. The plugin registers a listener of its own, so a
+// count is no longer the thing to assert.
+func runs(a *Agent, name string) bool {
+	for _, c := range a.Components() {
+		if c.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+func names(a *Agent) []string {
+	var out []string
+	for _, c := range a.Components() {
+		out = append(out, c.Name())
+	}
+	return out
 }

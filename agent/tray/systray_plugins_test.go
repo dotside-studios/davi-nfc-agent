@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"strings"
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
@@ -12,38 +13,43 @@ type pluginFunc func(nfcagent.AgentContext) error
 
 func (f pluginFunc) Activate(ctx nfcagent.AgentContext) error { return f(ctx) }
 
-// The section the plugins add to is declared with the rest of the menu, so
-// their entries land where this build wants them rather than after Quit. It
-// stays hidden until something is in it: an empty submenu says nothing.
-func TestExtensionsSectionAppearsOnlyWhenAPluginFillsIt(t *testing.T) {
-	quiet := newTestAgent()
-	app, fake := newTestTray(t, quiet)
-	app.activatePlugins()
-
-	if item := fake.Find("Extensions"); item == nil {
-		t.Fatal("the Extensions submenu was not declared")
-	} else if item.Visible() {
-		t.Error("an empty Extensions submenu is shown")
-	}
-
-	filled := newTestAgent()
-	if err := filled.Plugins.Add(pluginFunc(func(ctx nfcagent.AgentContext) error {
+// A plugin's entry goes on the top level, indistinguishable from one the tray
+// declared itself, and lands where the tray activated the plugins rather than
+// after Quit, which is where anything added later would go.
+func TestAPluginsEntryIsATopLevelEntry(t *testing.T) {
+	a := newTestAgent()
+	if err := a.Plugins.Add(pluginFunc(func(ctx nfcagent.AgentContext) error {
 		ctx.Systray.Add("Back Up Now", traymenu.Tooltip("runs a backup"))
 		return nil
 	})); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	app, fake = newTestTray(t, filled)
-	app.activatePlugins()
+	_, fake := newTestTray(t, a)
 
-	entry := fake.Find("Extensions", "Back Up Now")
+	entry := fake.Find("Back Up Now")
 	if entry == nil {
 		t.Fatalf("the plugin's entry is not on the menu:\n%s", fake.Render())
 	}
-	if section := fake.Find("Extensions"); !section.Visible() {
-		t.Error("the Extensions submenu is hidden with an entry in it")
+	if !entry.Visible() {
+		t.Error("the plugin's entry is hidden")
 	}
+
+	got := titles(fake)
+	backup, quit := indexOf(got, "Back Up Now"), indexOf(got, "Quit")
+	if backup < 0 || quit < 0 || backup > quit {
+		t.Errorf("menu reads:\n%s\n\nthe plugin's entry should come before Quit", strings.Join(got, "\n"))
+	}
+}
+
+// indexOf reports where a title appears in the menu, or -1.
+func indexOf(titles []string, want string) int {
+	for i, title := range titles {
+		if title == want {
+			return i
+		}
+	}
+	return -1
 }
 
 // The pairing entries belong to the pairing plugin now, so they appear in the
@@ -55,18 +61,14 @@ func TestPairingEntriesComeFromThePlugin(t *testing.T) {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
-	app, fake := newTestTray(t, a)
-	app.activatePlugins()
+	_, fake := newTestTray(t, a)
 
-	pin := fake.Find("Extensions", "Pairing", "Pairing PIN: "+pairing.PIN())
+	pin := fake.Find("Pairing", "Pairing PIN: "+pairing.PIN())
 	if pin == nil {
 		t.Fatalf("the plugin's PIN entry is not on the menu:\n%s", fake.Render())
 	}
 	if fake.Find("Server URLs", "Pairing PIN: --") != nil {
 		t.Error("the tray still declares a pairing entry of its own")
-	}
-	if section := fake.Find("Extensions"); !section.Visible() {
-		t.Error("the Extensions submenu is hidden with the plugin's entries in it")
 	}
 
 	// Rotating relabels the entry, wherever the rotation came from: the menu
@@ -83,10 +85,9 @@ func TestPairingEntriesComeFromThePlugin(t *testing.T) {
 
 // A build that registers no pairing plugin has no pairing entries at all.
 func TestNoPairingPluginNoPairingEntries(t *testing.T) {
-	app, fake := newTestTray(t, newTestAgent())
-	app.activatePlugins()
+	_, fake := newTestTray(t, newTestAgent())
 
-	if item := fake.Find("Extensions", "Pairing"); item != nil {
+	if item := fake.Find("Pairing"); item != nil {
 		t.Errorf("a pairing submenu appeared with no plugin behind it:\n%s", fake.Render())
 	}
 }

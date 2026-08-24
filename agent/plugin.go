@@ -142,12 +142,14 @@ type AgentContext struct {
 	// starting it to whoever owns it.
 	Agent *Agent
 
-	// Systray is where the plugin's menu entries go. It is never nil: an agent
-	// with no tray hands over a menu that draws nothing, so a plugin can add
-	// its entries without asking whether anyone is looking.
+	// Systray is where the plugin's menu entries go, which for the shipped
+	// tray is the top level of its menu: a plugin's entry is not marked out
+	// from one the tray declared itself. It is never nil, since an agent with
+	// no tray hands over a menu that draws nothing, so a plugin can add its
+	// entries without asking whether anyone is looking.
 	//
-	// Entries land wherever the host put the plugin section. A plugin with
-	// more than one entry should group them: ctx.Systray.Section("Backups").
+	// A plugin with more than one entry should group them under a submenu of
+	// its own: ctx.Systray.Section("Backups").
 	Systray traymenu.Container
 }
 
@@ -210,8 +212,9 @@ func (ctx AgentContext) Logs() *logbuf.Ring { return ctx.Agent.Logs() }
 // systray. A nil systray means there is no tray: the entries go to a menu that
 // draws nothing.
 //
-// A host with a tray calls this itself, once the tray can take items, which is
-// what puts the entries on the real menu. Start calls it if nothing else has.
+// A host with a tray calls this itself, from inside the menu it is declaring:
+// an item always goes to the end of its parent, so where the host activates the
+// plugins is where their entries land. Start calls it if nothing else has.
 //
 // It happens once. Later calls report what the first decided, error included: a
 // plugin that failed is not tried again over the ones already registered.

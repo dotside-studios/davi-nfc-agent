@@ -189,6 +189,13 @@ The context carries what a plugin needs to wire itself in:
 | `ctx.Mount(pattern, h)` | Adds a route to it |
 | `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Settings()`, `ctx.Logs()` | The agent's log, identity, config directory, preference store and log ring |
 
+`ctx.Systray` is the top level of the tray's own menu, so a plugin's entry is
+not marked out from one the tray declared itself: the shipped tray is one
+composition of a menu, and a custom build composes its own. Entries land where
+the tray activated the plugins, since a menu item always goes to the end of its
+parent. A plugin with more than one entry groups them under a submenu of its
+own, with `ctx.Systray.Section("Backups")`.
+
 `ctx.Systray` is never nil. A headless agent hands over a menu that draws
 nothing, so a plugin adds its entries without asking whether anyone is looking.
 
@@ -255,9 +262,9 @@ pairing := agent.NewPairingPlugin(rt.Agent, 9472)
 rt.Agent.Plugins.Add(pairing)
 ```
 
-Its entries land in the section the tray hands the plugins, under a `Pairing`
-submenu of their own, and the labels follow the server: rotating the PIN from
-the menu or from the control center relabels both. `Port`, `PIN` and `RotatePIN`
+Its entries go under a `Pairing` submenu of their own, beside the tray's own
+top-level entries, and the labels follow the server: rotating the PIN from the
+menu or from the control center relabels both. `Port`, `PIN` and `RotatePIN`
 tolerate a nil plugin, so a build that registers none hands `nil` to the console
 and everything reports pairing as disabled.
 

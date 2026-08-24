@@ -202,27 +202,30 @@ func TestSystrayIsNeverNil(t *testing.T) {
 	a.Shutdown()
 }
 
-// The entries land on the menu the host handed over, which is what puts a
-// plugin's items in the tray rather than in a menu nobody draws.
+// The entries land on the menu the host handed over, wherever that points: the
+// shipped tray hands over its top level, so a plugin's entry sits beside the
+// ones the tray declared itself.
 func TestSystrayEntriesLandOnTheHostsMenu(t *testing.T) {
 	fake := traymenu.NewFake()
 	menu := traymenu.New(fake)
 	t.Cleanup(menu.Close)
 
-	section := traymenu.NewSection(menu, "Extensions")
+	menu.Add("Start Agent")
 	a := quietAgent(t, pluginFunc(func(ctx AgentContext) error {
 		ctx.Systray.Add("Back Up Now")
 		return nil
 	}))
 
-	if err := a.Activate(section); err != nil {
+	if err := a.Activate(menu); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
-	if item := fake.Find("Extensions", "Back Up Now"); item == nil {
-		t.Fatalf("the plugin's entry is not on the menu:\n%s", fake.Render())
+
+	var titles []string
+	for _, item := range fake.Items() {
+		titles = append(titles, item.Title())
 	}
-	if n := len(section.Item().Children()); n != 1 {
-		t.Errorf("the section holds %d entries, want the plugin's one", n)
+	if got := strings.Join(titles, ","); got != "Start Agent,Back Up Now" {
+		t.Errorf("menu reads %q, want the plugin's entry beside the host's", got)
 	}
 }
 

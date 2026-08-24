@@ -200,23 +200,6 @@ func (i *Item) Show() { i.SetVisible(true) }
 // Hide takes the item off the menu, keeping its place for when it comes back.
 func (i *Item) Hide() { i.SetVisible(false) }
 
-// Children returns the items added under this one that are still on the menu,
-// in the order they were added. It is how a caller that handed its submenu to
-// a plugin finds out whether anything landed there.
-func (i *Item) Children() []*Item {
-	i.mu.RLock()
-	children := append([]*Item(nil), i.children...)
-	i.mu.RUnlock()
-
-	live := children[:0]
-	for _, child := range children {
-		if !child.Removed() {
-			live = append(live, child)
-		}
-	}
-	return live
-}
-
 // Removed reports whether the item has been taken off the menu for good.
 func (i *Item) Removed() bool {
 	i.mu.RLock()

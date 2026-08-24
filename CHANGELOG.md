@@ -24,18 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has is decided by what it imports, which is what lets one be left out with its
   dependencies. Plugins are registered through `Agent.Plugins.Add`, activated in
   order, and refused afterwards rather than accepted and never activated.
-  `ctx.Systray` is never nil: an agent with no tray hands over a menu that draws
-  nothing, so a plugin adds its entries without asking whether anyone is looking
+  `ctx.Systray` is the top level of the tray's own menu, so a plugin's entry is
+  not marked out from one the tray declared itself: the shipped tray is one
+  composition of a menu, and a custom build composes its own. Entries land where
+  the tray activated the plugins, since a menu item always goes to the end of
+  its parent. It is never nil either: an agent with no tray hands over a menu
+  that draws nothing, so a plugin adds its entries without asking whether anyone
+  is looking
 
 - **`agent.PairingPlugin`, the pairing server and its tray entries.** The
   second implementation, and the smaller one: it wraps the pairing server,
   registers it as a component, and owns the entries that hand out its address
   and PIN. Those used to be declared by the tray, in its Server URLs submenu,
   which is why the tray had to be told whether this build pairs devices at all.
-  They live with the pairing code now, in a section of their own, and follow the
-  server: rotating the PIN from the menu or from the control center relabels
-  both. The tray knows nothing about pairing, so `tray.New` takes the runtime
-  and nothing else again
+  They live with the pairing code now, under a `Pairing` submenu of their own on
+  the tray's top level, and follow the server: rotating the PIN from the menu or
+  from the control center relabels both. The tray knows nothing about pairing,
+  so `tray.New` takes the runtime and nothing else again
 
 - **`agent.ServerPlugin`, the listener and everything served from it.** The
   first implementation of the above. It owns the `*unifiedserver.Server`,
@@ -54,8 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`traymenu.Discard`, a driver that draws nothing**, and `traymenu.Section` is
   now a `Container`, so it can be handed to a plugin, a `List`, a `Radio` or a
-  `Checklist` like any other menu. `Item.Children` reports what landed in a
-  submenu, which is how the tray leaves an empty one hidden
+  `Checklist` like any other menu
 
 - **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary

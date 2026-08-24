@@ -65,11 +65,6 @@ type App struct {
 	// are added, so there is no central event loop to keep in step with them.
 	menu *traymenu.Menu
 
-	// plugins is the submenu the agent's plugins add their entries to. It is
-	// declared with the rest of the menu and shown only if something lands in
-	// it, so a build with no plugin entries has no empty submenu.
-	plugins *traymenu.Section
-
 	// Status section
 	mStatus   *traymenu.Item
 	mCardUID  *traymenu.Item
@@ -223,7 +218,6 @@ func (s *App) Run() {
 // onReady is called when the systray is ready
 func (s *App) onReady() {
 	s.setupUI()
-	s.activatePlugins()
 	s.autoStartAgent()
 	s.startCardInfoUpdater()
 	s.startServerRestartListener()
@@ -276,13 +270,15 @@ func (s *App) setupUI() {
 
 	s.setupConsoleMenu()
 
-	// Where the plugins put their entries. Declared here so they land in the
-	// menu where this build wants them rather than after Quit, which is where
-	// anything registered later would otherwise go.
-	s.plugins = traymenu.NewSection(s.menu, "Extensions",
-		traymenu.Tooltip("Added by this build's plugins"),
-		traymenu.Hidden(),
-	)
+	// The plugins add theirs here, between the entries this build declares
+	// itself and the ones that start and stop the agent. They go on the top
+	// level like any other, which is what makes a plugin's entry
+	// indistinguishable from one the tray declared.
+	//
+	// Done from inside the menu rather than after it, because a menu item
+	// always goes to the end of its parent: activated once Quit was on, every
+	// plugin entry would land under it.
+	s.activatePlugins()
 
 	// The menus open on what the agent is set to, which is not always the
 	// default: a mode restored from settings, or one the launcher set, was
@@ -388,22 +384,15 @@ func (s *App) setupCardFilterMenu() {
 	s.cardTypes.OnChange(s.applyCardTypes)
 }
 
-// activatePlugins wires the agent's plugins in, with the tray's own menu for
-// their entries. It runs between declaring the menu, which is the first moment
-// the platform will take an item, and starting the agent, which a plugin's
-// registrations have to precede.
+// activatePlugins wires the agent's plugins in, handing them the tray's menu
+// for their entries. It runs while the menu is being declared, and before the
+// agent is started, which a plugin's registrations have to precede.
 //
 // A failure is logged and left there: the same one comes back from Start, where
 // the tray already shows a start that did not happen.
 func (s *App) activatePlugins() {
-	if err := s.agent.Activate(s.plugins); err != nil {
+	if err := s.agent.Activate(s.menu); err != nil {
 		log.Printf("[systray] %v", err)
-	}
-
-	// An empty section is a submenu that says nothing, so it stays hidden
-	// until a plugin has put something in it.
-	if len(s.plugins.Item().Children()) > 0 {
-		s.plugins.Item().Show()
 	}
 }
 

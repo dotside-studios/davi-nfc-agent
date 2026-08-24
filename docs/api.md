@@ -9,6 +9,10 @@ The NFC Agent serves both roles from a single server on one port:
 
 The agent server port is configurable via `-device-port` (default 9470).
 
+Both listeners are plugins the program registers, so what an agent serves is
+decided by the build rather than fixed here: this page describes the shipped
+binary. See [Custom Builds](custom-builds.md#plugins) for the Go API behind it.
+
 ---
 
 ## Device API
@@ -1020,7 +1024,10 @@ Response:
 ```
 
 Both `/health` and `/api/v1/health` are served on the agent server port and
-report `"type": "agent"`.
+report `"type": "agent"`. They are the agent's own routes, mounted on whatever
+listener the build registers, so they are there whatever else is. A build puts
+its own paths on the same port as endpoints of the server plugin, which is how
+the Control Center is served from it.
 
 ---
 
@@ -1134,3 +1141,13 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
 | `NO_CARD` | yes | Nothing is holding the tag the request named |
+
+---
+
+## Related documentation
+
+- [Custom Builds](custom-builds.md) — the Go API: embedding the agent, and the plugins a build is assembled from
+- [JavaScript client](javascript-client.md) — the browser and Node.js client library
+- [Device setup](device-setup.md) — pairing a phone or a reader
+- [Control Center](control-center.md) — the built-in web console
+- [Device bridge protocols](device-bridge-protocols.md) — what a phone or browser implements

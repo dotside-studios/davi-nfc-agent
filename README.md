@@ -30,6 +30,9 @@ in real time, and provides the NFC functionality used by the
   writing, device revocation and settings that survive a restart
 - **Buildable as a library**: Import the agent and write your own `main.go`, in
   any shape from the full tray application to a headless service
+- **Assembled from plugins**: One method registers a background component, a
+  route and a tray entry. The listener and the pairing server are plugins
+  themselves, so a build is what it registers
 - **Cross-platform**: Linux, macOS and Windows
 
 ## Supported Devices
@@ -194,7 +197,8 @@ across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
 
 ## Ports
 
-The agent listens on two ports, both configurable:
+The shipped agent listens on two ports, both configurable. Each is a plugin the
+program registers, so a build can move either, or leave one out:
 
 - **9470 — agent server** (`-device-port`): One listener for both roles. NFC
   devices connect to `/ws?mode=device`, client applications to `/ws`, and the
@@ -302,6 +306,42 @@ no hardware backend at all, is a matter of which packages you import. See
 ```bash
 go get github.com/dotside-studios/davi-nfc-agent
 ```
+
+### Plugins
+
+What an agent is made of is what its program registers. A plugin is a value with
+one method, handed everything it needs once, before the agent starts:
+
+```go
+type BackupPlugin struct {
+	Every time.Duration
+}
+
+func (p *BackupPlugin) Activate(ctx agent.AgentContext) error {
+	backups := &backupWorker{every: p.Every, dir: ctx.ConfigDir()}
+
+	ctx.Systray.Add("Back Up Now", traymenu.OnClick(backups.Run))
+	return ctx.Use(backups)
+}
+```
+
+```go
+rt.Agent.Plugins.Add(&BackupPlugin{Every: time.Hour})
+```
+
+`ctx.Use` registers something to start and stop with the agent, `ctx.Mount` adds
+a route to the listener, and `ctx.Systray` is the tray's own menu, so a plugin's
+entry sits beside the ones the tray declared itself. Nothing is loaded at run
+time: which plugins a build has is decided by what it imports, so one left out
+takes its dependencies with it.
+
+The listener and the pairing server are plugins too. `agent.ServerPlugin` owns
+the port and everything served from it, `agent.PairingPlugin` the pairing
+listener and the entries that hand out its PIN. Register neither and the agent
+drives the reader and serves no HTTP at all. See
+[Plugins](docs/custom-builds.md#plugins).
+
+### NFC backends
 
 The agent's modular NFC layer supports adding custom readers and tag types beyond the built-in PC/SC and smartphone support. See [Extending NFC Support](docs/extending-nfc-support.md) to integrate your own hardware or protocols.
 

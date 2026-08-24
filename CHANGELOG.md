@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`README.md` and `docs/api.md` say what a build is assembled from.** The
+  README's Extending section carries the plugin API and a plugin worth reading,
+  and its Ports section no longer states two listeners as facts of the agent,
+  since both are plugins a build registers. `docs/api.md` says the same at the
+  top, notes that the health checks are the agent's own routes on whatever
+  listener the build registers, and gained a related-documentation footer, since
+  someone looking for "the API" lands there and the Go one is a page away
+
 - **A plugin API.** The agent could be embedded but not extended: a program
   wanting to add anything of its own had to wire it into a `main.go` that knew
   about every part it touched, and the parts it forgot were the ones that never

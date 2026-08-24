@@ -18,7 +18,11 @@ type PairingConfig struct {
 	// CA hands out the local certificate authority, to a request carrying the
 	// PIN. Nil is normal: an agent using an externally provisioned certificate
 	// has no CA to give out, and pairing works regardless.
-	CA *tlspkg.Manager
+	//
+	// Two methods rather than the whole TLS manager, since that is all the
+	// pairing server reads: certificate material it does not serve is not its
+	// to hold.
+	CA tlspkg.CertificateAuthority
 
 	// Devices is the registry a paired device's credential is issued into.
 	Devices *DeviceRegistry

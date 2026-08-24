@@ -32,6 +32,30 @@ func TestDeviceEndpointOptionsCarryTheAgentsPolicies(t *testing.T) {
 	if got.AllowTagModification == nil {
 		t.Error("no mode gate reached the endpoint: read-only would not reach a device")
 	}
+	if got.PublicKeyPin == nil {
+		t.Fatal("no key pin reached the endpoint: a device could not recognise this agent later")
+	}
+}
+
+// The pin is asked for when a device registers rather than captured when the
+// endpoint is built, so certificate material need not be settled by then.
+func TestDeviceEndpointReadsTheKeyPinWhenAsked(t *testing.T) {
+	opts := testOptions(t)
+
+	var got DeviceEndpointOptions
+	opts.DeviceEndpoint = func(o DeviceEndpointOptions) http.Handler {
+		got = o
+		return http.NotFoundHandler()
+	}
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	if want := rt.Agent.PublicKeyPin(); got.PublicKeyPin() != want {
+		t.Errorf("PublicKeyPin() = %q, want the agent's %q", got.PublicKeyPin(), want)
+	}
 }
 
 // The mode gate is read per operation, so a mode change while running takes

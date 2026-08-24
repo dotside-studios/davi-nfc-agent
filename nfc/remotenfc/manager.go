@@ -29,7 +29,7 @@ type Manager struct {
 	deviceChangeChan  chan struct{}      // Signals registration and unregistration
 
 	// Policy supplied by the agent through Handler.
-	publicKeyPin         string
+	publicKeyPin         func() string
 	allowTagModification func() bool
 
 	sessions    map[string]*wsconn.SafeConn // deviceID -> connection

@@ -23,8 +23,11 @@ type ServerOptions struct {
 	AllowTagModification func() bool
 
 	// PublicKeyPin is reported at registration so a device can recognise this
-	// agent on later connections. Empty omits it.
-	PublicKeyPin string
+	// agent on later connections. Nil, or one returning empty, omits it.
+	//
+	// A function because it is read per registration: the pin follows the
+	// certificate, which can be reissued while the endpoint stays up.
+	PublicKeyPin func() string
 
 	// Authenticate admits or rejects a device before the upgrade, writing its
 	// own response when it rejects. This driver speaks the device protocol and
@@ -290,8 +293,14 @@ func (m *Manager) registerSession(conn *wsconn.SafeConn, reqID string, regReq De
 	m.addSession(device.DeviceID(), conn)
 
 	m.mu.RLock()
-	pin := m.publicKeyPin
+	publicKeyPin := m.publicKeyPin
 	m.mu.RUnlock()
+
+	// Called outside the lock: it reaches back into whoever supplied it.
+	var pin string
+	if publicKeyPin != nil {
+		pin = publicKeyPin()
+	}
 
 	return device, DeviceRegistrationResponse{
 		DeviceID: device.DeviceID(),

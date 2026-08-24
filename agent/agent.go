@@ -305,7 +305,7 @@ func New(cfg Config) *Agent {
 			Authenticate:         a.DeviceAuth.Check,
 			CheckOrigin:          a.checkOrigin(),
 			AllowTagModification: a.TagModificationAllowed,
-			PublicKeyPin:         a.publicKeyPin,
+			PublicKeyPin:         a.PublicKeyPin,
 		})
 	}
 

@@ -25,12 +25,14 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 )
 
-// caReader is the subset of *Manager that BootstrapServer needs. Carved
-// out so tests can supply a fake without spinning up truststore.
+// CertificateAuthority is the subset of *Manager that BootstrapServer needs:
+// the certificate to hand out and the fingerprint that identifies it. Named so
+// that whoever passes one along need not carry the whole manager, and so tests
+// can supply a fake without spinning up truststore.
 //
 // It may be nil: an agent using an externally provisioned certificate has no CA
 // to hand out, but still needs this server to pair devices.
-type caReader interface {
+type CertificateAuthority interface {
 	ReadCACert() ([]byte, error)
 	GetCAFingerprint() (string, error)
 }
@@ -51,7 +53,7 @@ const bootstrapMaxFailures = 5
 // network during the pairing window — pair on a trusted network for
 // high-stakes installs.
 type BootstrapServer struct {
-	manager    caReader
+	manager    CertificateAuthority
 	port       int
 	httpServer *http.Server
 	logger     *log.Logger
@@ -70,10 +72,10 @@ type BootstrapServer struct {
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
 //
-// manager may be nil (see caReader). A nil *Manager boxed into an interface
-// is not a nil interface, so it is unboxed here and the guards on s.manager
-// can stay simple.
-func NewBootstrapServer(manager caReader, port int) *BootstrapServer {
+// manager may be nil (see CertificateAuthority). A nil *Manager boxed into an
+// interface is not a nil interface, so it is unboxed here and the guards on
+// s.manager can stay simple.
+func NewBootstrapServer(manager CertificateAuthority, port int) *BootstrapServer {
 	if m, ok := manager.(*Manager); ok && m == nil {
 		manager = nil
 	}

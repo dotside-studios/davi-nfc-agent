@@ -120,6 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent happened to hold. The pairing plugin is that handle now, and an argument
   to `console.New`; `tray.New` takes the runtime and nothing else
 
+- **Two narrower contracts, so certificate material can move off the agent.**
+  `PairingConfig.CA` is `tls.CertificateAuthority`, the two methods the pairing
+  server reads, rather than the whole `*tls.Manager`; the interface was already
+  there, unexported, as `BootstrapServer`'s own parameter type.
+  `DeviceEndpointOptions.PublicKeyPin` and `remotenfc.ServerOptions.PublicKeyPin`
+  are `func() string`, read when a device registers rather than captured when
+  the endpoint is built, so the pin no longer has to be settled before
+  `agent.New`
+
 - **`traymenu` has no toolkit, and the clipboard has a package of its own.**
   `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.
   With the agent handing plugins a menu, the Fyne driver moved to

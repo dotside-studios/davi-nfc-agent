@@ -87,7 +87,11 @@ type DeviceEndpointOptions struct {
 
 	// PublicKeyPin is reported at registration so a device can recognise this
 	// agent later without a certificate authority.
-	PublicKeyPin string
+	//
+	// Asked for when a device registers rather than when the endpoint is
+	// built, like the three above: the pin comes from certificate material,
+	// which need not be settled by the time the endpoint exists.
+	PublicKeyPin func() string
 }
 
 // TagModificationAllowed reports whether the agent's mode currently permits

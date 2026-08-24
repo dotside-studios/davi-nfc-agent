@@ -88,7 +88,7 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		endpoint = remote.Handler(remotenfc.ServerOptions{
 			Authenticate:         auth.Check,
 			AllowTagModification: tagModificationPolicy(cfg.Reader),
-			PublicKeyPin:         cfg.PublicKeyPin,
+			PublicKeyPin:         func() string { return cfg.PublicKeyPin },
 		})
 	}
 

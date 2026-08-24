@@ -119,14 +119,6 @@ func (a *Agent) useLocked(c Component) error {
 		}
 	}
 	a.components = append(a.components, c)
-
-	// The tray and the console ask the agent for the pairing PIN and the
-	// pairing URLs, so it has to know which of its components answers for
-	// them. Noticed here rather than asked for separately, so a pairing server
-	// registered by a plugin is as reachable as one named in Config.
-	if pairing, ok := c.(*PairingServer); ok {
-		a.pairing.Store(pairing)
-	}
 	return nil
 }
 

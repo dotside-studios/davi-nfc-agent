@@ -57,21 +57,23 @@ func (e Endpoint) name() string {
 // It owns the [unifiedserver.Server]. It builds one from Config or serves the
 // one it is given, publishes it to the agent, which mounts its own routes on
 // it, then mounts the endpoints registered here. A build decides what the agent
-// serves by what it lists:
+// serves by registering one and listing what goes on it:
 //
-//	a.Plugins.Add(&agent.ServerPlugin{
-//		Config: unifiedserver.Config{Port: 9470, CertFile: cert, KeyFile: key},
-//		Endpoints: []agent.Endpoint{
-//			{Name: "pairing", Component: pairing},
-//			{Name: "control center", Pattern: "/control/", Handler: console.Routes()},
-//			{Name: "console", Pattern: "/", Handler: console.Assets()},
-//		},
-//	})
+//	a.Plugins.Add(&agent.ServerPlugin{Endpoints: []agent.Endpoint{
+//		{Name: "control API", Pattern: "/control/", Handler: console.Routes()},
+//		{Name: "control center", Pattern: "/", Handler: console.Assets()},
+//	}})
+//
+// An agent with none of these registered serves no HTTP at all, which is what a
+// program driving the reader directly wants.
 //
 // There is one of these per agent. A second has no listener to publish and says
 // so rather than quietly serving nothing.
 type ServerPlugin struct {
-	// Config builds the listener, and is read only when Server is nil.
+	// Config is the listener to build, read only when Server is nil. The port,
+	// the certificate and the advertised name fall back to the agent's own, so
+	// a plugin registered with no configuration serves what the agent was set
+	// up with.
 	Config unifiedserver.Config
 
 	// Server is a listener built elsewhere, for a program that mounts on it
@@ -109,7 +111,7 @@ func (p *ServerPlugin) Listener() *unifiedserver.Server { return p.Server }
 // A control center missing its API is worse than one that is not there.
 func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if p.Server == nil {
-		p.Server = unifiedserver.New(p.Config)
+		p.Server = unifiedserver.New(p.config(ctx.Agent))
 	}
 	if err := ctx.Serve(p.Server); err != nil {
 		return err
@@ -154,6 +156,23 @@ func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint, menu func()
 		endpoint.Menu(menu())
 	}
 	return nil
+}
+
+// config fills what Config left blank from the agent.
+func (p *ServerPlugin) config(a *Agent) unifiedserver.Config {
+	cfg := p.Config
+	if cfg.Port == 0 {
+		cfg.Port = a.DevicePort()
+	}
+	// As a pair: half a certificate is not something to complete from
+	// somewhere else.
+	if cfg.CertFile == "" && cfg.KeyFile == "" {
+		cfg.CertFile, cfg.KeyFile = a.CertFile(), a.KeyFile()
+	}
+	if cfg.MDNSServiceName == "" {
+		cfg.MDNSServiceName = a.Info().DisplayName + " Device"
+	}
+	return cfg
 }
 
 func (p *ServerPlugin) menuTitle() string {

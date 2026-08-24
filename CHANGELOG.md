@@ -28,13 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing, so a plugin adds its entries without asking whether anyone is looking
 
 - **`agent.ServerPlugin`, the listener and everything served from it.** The
-  first implementation of the above, and the one `Setup` now builds. It owns the
-  `*unifiedserver.Server`, publishes it to the agent, which mounts its own
-  routes on it, and then mounts the `agent.Endpoint`s listed with it. An
-  endpoint is a route, something with a lifetime, a menu entry, or any
-  combination: the pairing server is one with no route and a listener of its
-  own, the control center is two routes with no lifetime. Two endpoints on one
-  path fail the start, naming the second, rather than leaving the mux to decide
+  first implementation of the above. It owns the `*unifiedserver.Server`,
+  publishes it to the agent, which mounts its own routes on it, and then mounts
+  the `agent.Endpoint`s listed with it. An endpoint is a route, something with a
+  lifetime, a menu entry, or any combination: the control center is two routes
+  with no lifetime, a pairing server would be one with no route and a listener
+  of its own. Two endpoints on one path fail the start, naming the second,
+  rather than leaving the mux to decide
 
 - **`traymenu.Discard`, a driver that draws nothing**, and `traymenu.Section` is
   now a `Container`, so it can be handed to a plugin, a `List`, a `Radio` or a
@@ -132,23 +132,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `traymenu.New(nil)` now draws nothing rather than meaning the real tray.
   `agent` depends on no GUI toolkit, as before
 
-- **`Runtime.Server` is now `Runtime.Servers`,** the server plugin rather than
-  the listener. A program adds its routes as endpoints instead of mounting them:
+- **`Setup` no longer builds the listener, and `Runtime.Server` is gone.** What
+  an agent serves is the program's decision, so the listener is a plugin the
+  program registers, and its routes are listed with it:
 
   ```go
-  rt.Servers.Add(agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()})
+  servers := &agent.ServerPlugin{}
+  servers.Add(agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()})
+  rt.Agent.Plugins.Add(servers)
   ```
 
-  Nothing binds until the agent starts, so a route can be declared before the
-  port it will be served from is bound
-
-- **The pairing server is an endpoint of the server plugin.** `Setup` no longer
-  sets `Config.Pairing`; it lists the pairing server among the endpoints, which
-  registers it as a component the same way. `Config.Pairing` still works for an
-  agent built by hand. What follows is that `Agent.Pairing`, `Bootstrap` and
-  `BootstrapPort` answer only once the plugins have been activated, and the
-  tray's PIN entries are shown then rather than being decided when its menu was
-  declared
+  Registered with no configuration it serves on the port, certificate and name
+  the agent was set up with. An agent with none registered drives the reader and
+  serves no HTTP, which is what a program using it as a library wants and what
+  the `Config.Server` path already allowed. Nothing binds until the agent
+  starts, so a route is declared before the port it will be served from is bound
 
 - **What a tag cannot support is declared, not branched around.** A write to a
   tag on the reader was confirmed by reading it back; a write to a tag a phone

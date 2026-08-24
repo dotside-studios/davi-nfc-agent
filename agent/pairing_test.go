@@ -83,8 +83,7 @@ func TestPairingDisabled(t *testing.T) {
 }
 
 // TestPairingRegisteredAsComponent checks it goes through the same path as
-// anything else the agent runs. It is an endpoint of the server plugin, so it
-// is registered when the plugins are activated rather than when Setup returns.
+// anything else the agent runs.
 func TestPairingRegisteredAsComponent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9493
@@ -95,14 +94,6 @@ func TestPairingRegisteredAsComponent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if n := len(rt.Agent.Components()); n != 0 {
-		t.Errorf("Components() = %d before activation, want none", n)
-	}
-
-	if err := rt.Agent.Activate(nil); err != nil {
-		t.Fatalf("Activate: %v", err)
-	}
-
 	comps := rt.Agent.Components()
 	if len(comps) != 1 || comps[0].Name() != "pairing" {
 		t.Fatalf("Components() = %v, want one named pairing", comps)

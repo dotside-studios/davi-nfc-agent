@@ -71,17 +71,25 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// The listener and everything on it. Setup does not build one: what this
+	// agent serves is the program's decision.
+	servers := &agent.ServerPlugin{}
+
 	// Nil in a -tags nowebui build. Listing it as an endpoint is all there is
 	// to attaching a control center, so a build that wants none lists none.
 	c := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if c != nil {
-		rt.Servers.Add(
+		servers.Add(
 			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
 			agent.Endpoint{Name: "control center", Pattern: "/", Handler: c.Assets()},
 		)
 		rt.Agent.Origins().OnChange(c.NotifyChange)
 		rt.Agent.Devices().OnChange(c.NotifyChange)
 		rt.Agent.OnClientsChange(c.NotifyChange)
+	}
+
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
+		log.Fatal(err)
 	}
 
 	app := tray.New(rt)
@@ -93,11 +101,14 @@ func main() {
 `agent.Setup` performs the work the flags imply: it resolves the config
 directory, loads or generates the TLS certificate and the API secret, reads the
 paired devices and the origin allowlist, builds the pairing server, and applies
-stored settings. It returns an `*agent.Runtime` holding the configured agent,
-the stores a front end needs, and `Servers`: the plugin that owns the listener
-and everything served from it. Nothing binds until the agent starts, so a route
-can be declared before the port it will be served from is decided. See
-[Plugins](#plugins).
+stored settings. It returns an `*agent.Runtime` holding the configured agent
+alongside the stores a front end needs.
+
+It does not build the listener. That is `agent.ServerPlugin`, registered above,
+and what goes on it is listed with it. An agent with none registered drives the
+reader and serves no HTTP, which is a build rather than a broken one. Nothing
+binds until the agent starts, so a route is declared before the port it will be
+served from is bound. See [Plugins](#plugins).
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
@@ -175,9 +186,8 @@ opened or bound. The tray does it as it draws its menu, which is what puts the
 entries on the real one; `Agent.Start` does it if nothing else has. Adding a
 plugin after that is refused rather than accepted and never activated.
 
-Activation is also where a plugin publishes things the agent then answers for,
-the listener and the pairing server among them, so `rt.Agent.BootstrapPort()`
-and `rt.Agent.UnifiedServer` are worth reading only once it has happened.
+Activation is also where a plugin publishes what the agent then serves from, so
+`rt.Agent.UnifiedServer` is worth reading only once it has happened.
 
 ```go
 // A headless build with no tray to draw their entries on.
@@ -191,26 +201,31 @@ the same failure is reported by every start afterwards.
 
 ### The server plugin
 
-`agent.ServerPlugin` is the one `Setup` builds. It owns the
-`*unifiedserver.Server`, publishes it to the agent, and mounts what is listed
-with it. An endpoint is a route, something with a lifetime, a menu entry, or any
-combination:
+`agent.ServerPlugin` owns the `*unifiedserver.Server`, publishes it to the
+agent, and mounts what is listed with it. An endpoint is a route, something with
+a lifetime, a menu entry, or any combination:
 
 ```go
-a.Plugins.Add(&agent.ServerPlugin{
-	Config: unifiedserver.Config{Port: 9470, CertFile: cert, KeyFile: key},
-	Endpoints: []agent.Endpoint{
-		{Name: "pairing", Component: agent.NewPairingServer(pairingConfig)},
-		{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
-		{Name: "control center", Pattern: "/", Handler: c.Assets()},
-	},
-})
+servers := &agent.ServerPlugin{Endpoints: []agent.Endpoint{
+	{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
+	{Name: "control center", Pattern: "/", Handler: c.Assets()},
+}}
+servers.Add(agent.Endpoint{Name: "metrics", Pattern: "/metrics", Handler: metrics})
+
+rt.Agent.Plugins.Add(servers)
+```
+
+Registered with no `Config`, it serves on the port, certificate and name the
+agent was set up with. Set `Config` for a listener that differs from them, or
+`Server` to hand over one built elsewhere:
+
+```go
+&agent.ServerPlugin{Config: unifiedserver.Config{Port: 9480, CertFile: cert, KeyFile: key}}
 ```
 
 The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
 health checks; two endpoints on one path fail the start rather than leaving the
-mux to decide. `rt.Servers.Add` appends to the same list, which is how a program
-puts its own routes on the port `Setup` resolved.
+mux to decide.
 
 ## Naming your build
 
@@ -303,6 +318,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// The listener, with nothing on it but the agent's own routes. Leave it
+	// out for a service that reads cards and serves no HTTP.
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{}); err != nil {
+		log.Fatal(err)
+	}
+
 	// An empty device path selects the first reader, and waits if none is
 	// attached yet.
 	if err := rt.Agent.Start(rt.DevicePath); err != nil {
@@ -318,9 +339,9 @@ func main() {
 }
 ```
 
-Listing no console endpoints leaves the agent serving its own: `/ws` and the two
-health checks, with the root falling back to a plain-text banner. `-tags nowebui`
-additionally removes the console from the binary.
+A server plugin with no endpoints serves the agent's own routes: `/ws` and the
+two health checks, with the root falling back to a plain-text banner.
+`-tags nowebui` additionally removes the console from the binary.
 
 ## Building without a hardware backend
 
@@ -332,6 +353,10 @@ target.
 manager := remotenfc.NewManager(remotenfc.DeviceTimeout)
 
 rt, err := agent.Setup(agent.DefaultOptions(), manager)
+if err != nil {
+	log.Fatal(err)
+}
+rt.Agent.Plugins.Add(&agent.ServerPlugin{})
 ```
 
 ```bash

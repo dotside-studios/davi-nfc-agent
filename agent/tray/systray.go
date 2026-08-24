@@ -65,7 +65,9 @@ func hostPort(host string, port int) string {
 type App struct {
 	agent         *agent.Agent
 	initialDevice string
-	console       *console.Server // nil if the control center is not built in
+	bootstrapPort int
+	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
+	console       *console.Server      // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
 	// are added, so there is no central event loop to keep in step with them.
@@ -75,11 +77,6 @@ type App struct {
 	// declared with the rest of the menu and shown only if something lands in
 	// it, so a build with no plugin entries has no empty submenu.
 	plugins *traymenu.Section
-
-	// pairingItems are the entries that only mean anything with a pairing
-	// server. They are declared hidden, because which plugins bring one is not
-	// settled until they have been activated.
-	pairingItems []*traymenu.Item
 
 	// Status section
 	mStatus   *traymenu.Item
@@ -139,17 +136,11 @@ func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
 		agent:         rt.Agent,
 		settings:      rt.Settings,
 		initialDevice: rt.DevicePath,
+		bootstrapPort: rt.Agent.BootstrapPort(),
+		bootstrap:     rt.Agent.Bootstrap(),
 		menu:          traymenu.New(driver),
 	}
 }
-
-// bootstrap is the pairing server, or nil when this build has none. Asked of
-// the agent each time rather than held: a pairing server brought by a plugin
-// does not exist until the plugins have been activated.
-func (s *App) bootstrap() *tls.BootstrapServer { return s.agent.Bootstrap() }
-
-// bootstrapPort is the port it listens on, 0 when there is none.
-func (s *App) bootstrapPort() int { return s.agent.BootstrapPort() }
 
 // persist writes what the agent holds to the settings file.
 //
@@ -354,30 +345,27 @@ func (s *App) setupURLsMenu() {
 		traymenu.OnClick(func() { s.copyValue("phone-pairing URL", s.urls().bootstrap) }),
 	)
 
-	// The PIN entries only mean anything with a pairing server, and whether
-	// there is one is not settled until the plugins have been activated, which
-	// happens after the menu is declared. They start hidden and are shown by
-	// showPairingEntries once the answer is known.
+	// The PIN entries only mean anything while the pairing server is running.
+	noPairing := s.bootstrap == nil
 	s.mPairingPIN = urls.Add("Pairing PIN: --",
 		traymenu.Tooltip("PIN required when pairing a phone"),
 		traymenu.Disabled(),
-		traymenu.Hidden(),
+		traymenu.HiddenIf(noPairing),
 	)
-	copyPIN := urls.Add("  Copy Pairing PIN",
+	urls.Add("  Copy Pairing PIN",
 		traymenu.Tooltip("Copy 6-digit pairing PIN to clipboard"),
-		traymenu.Hidden(),
+		traymenu.HiddenIf(noPairing),
 		traymenu.OnClick(func() {
-			if pairing := s.bootstrap(); pairing != nil {
-				s.copyValue("pairing PIN", pairing.PIN())
+			if s.bootstrap != nil {
+				s.copyValue("pairing PIN", s.bootstrap.PIN())
 			}
 		}),
 	)
-	rotatePIN := urls.Add("  Regenerate Pairing PIN",
+	urls.Add("  Regenerate Pairing PIN",
 		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
-		traymenu.Hidden(),
+		traymenu.HiddenIf(noPairing),
 		traymenu.OnClick(s.handleRotatePIN),
 	)
-	s.pairingItems = []*traymenu.Item{s.mPairingPIN, copyPIN, rotatePIN}
 
 	// API secret entries, only shown if a secret is configured.
 	noSecret := s.agent.APISecret() == ""
@@ -453,23 +441,10 @@ func (s *App) activatePlugins() {
 		log.Printf("[systray] %v", err)
 	}
 
-	s.showPairingEntries()
-
 	// An empty section is a submenu that says nothing, so it stays hidden
 	// until a plugin has put something in it.
 	if len(s.plugins.Item().Children()) > 0 {
 		s.plugins.Item().Show()
-	}
-}
-
-// showPairingEntries reveals the PIN entries, now that whether this build has a
-// pairing server is settled.
-func (s *App) showPairingEntries() {
-	if s.bootstrap() == nil {
-		return
-	}
-	for _, item := range s.pairingItems {
-		item.Show()
 	}
 }
 
@@ -589,12 +564,11 @@ func (s *App) showStopped(status string) {
 // handleRotatePIN issues a fresh pairing PIN, which invalidates the URLs that
 // carried the old one.
 func (s *App) handleRotatePIN() {
-	pairing := s.bootstrap()
-	if pairing == nil {
+	if s.bootstrap == nil {
 		return
 	}
 
-	fresh := pairing.RotatePIN()
+	fresh := s.bootstrap.RotatePIN()
 	log.Printf("[systray] Pairing PIN rotated to %s", fresh)
 	s.updateURLs()
 }
@@ -783,10 +757,10 @@ func (s *App) urls() agentURLs {
 
 	// The pairing page is always HTTP, and carries the PIN so a link clicked
 	// from chat goes straight through.
-	if port := s.bootstrapPort(); port > 0 {
-		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, port))
-		if pairing := s.bootstrap(); pairing != nil {
-			urls.bootstrap += "?pin=" + url.QueryEscape(pairing.PIN())
+	if s.bootstrapPort > 0 {
+		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
+		if s.bootstrap != nil {
+			urls.bootstrap += "?pin=" + url.QueryEscape(s.bootstrap.PIN())
 		}
 	}
 	return urls
@@ -804,8 +778,8 @@ func (s *App) updateURLs() {
 	} else {
 		s.mBootstrapURL.SetTitle("Pair Phone: " + urls.bootstrap)
 	}
-	if pairing := s.bootstrap(); pairing != nil {
-		s.mPairingPIN.SetTitle("Pairing PIN: " + pairing.PIN())
+	if s.bootstrap != nil {
+		s.mPairingPIN.SetTitle("Pairing PIN: " + s.bootstrap.PIN())
 	}
 
 	s.updateAPISecretLabel(s.agent.APISecret())

@@ -73,6 +73,11 @@ func main() {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
+	// The listener and everything on it. Setup does not build one: what this
+	// agent serves is this program's decision, and registering no server
+	// plugin at all leaves an agent that drives the reader and serves nothing.
+	servers := &agent.ServerPlugin{}
+
 	// Nil in a -tags nowebui build, where the control center is not compiled
 	// in. Listing it as an endpoint is all there is to attaching one: a build
 	// that wants none lists none, and the agent is no wiser either way.
@@ -81,11 +86,7 @@ func main() {
 		// The control API and the console page are deliberately not wrapped in
 		// CORS: one administers the agent and the other is a page, so no other
 		// origin has business calling them.
-		//
-		// Nothing is mounted yet. The server plugin puts these on the listener
-		// when the agent activates it, which is what lets a route be declared
-		// before the port it will be served from is bound.
-		rt.Servers.Add(
+		servers.Add(
 			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: consoleServer.Routes()},
 			agent.Endpoint{Name: "control center", Pattern: "/", Handler: consoleServer.Assets()},
 		)
@@ -94,6 +95,10 @@ func main() {
 		rt.Agent.Origins().OnChange(consoleServer.NotifyChange)
 		rt.Agent.Devices().OnChange(consoleServer.NotifyChange)
 		rt.Agent.OnClientsChange(consoleServer.NotifyChange)
+	}
+
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
+		log.Fatalf("Failed to register the server: %v", err)
 	}
 
 	app := tray.New(rt)

@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
@@ -49,11 +48,6 @@ type Options struct {
 	RemoteOps      server.DeviceOps
 	RemoteScans    <-chan nfc.NFCData
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
-
-	// Plugins are activated with the agent, after the server plugin Setup
-	// builds. A program that only wants to add endpoints to that server should
-	// use Runtime.Servers instead; this is for plugins of its own.
-	Plugins []Plugin
 
 	// Explicit marks the fields this launcher set deliberately rather than left
 	// at a default. A field marked here belongs to the launcher for the whole
@@ -98,15 +92,6 @@ type Runtime struct {
 	// DevicePath is the reader to open at startup, once the caller's choice
 	// and the stored preference have been reconciled.
 	DevicePath string
-
-	// Servers is the plugin that owns the listener and everything served from
-	// it. Add endpoints to it before the agent starts, whether a control
-	// center or whatever else belongs on the same port:
-	//
-	//	rt.Servers.Add(agent.Endpoint{Name: "control center", Pattern: "/control/", Handler: c.Routes()})
-	//
-	// The listener itself does not exist until the plugins are activated.
-	Servers *ServerPlugin
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -255,25 +240,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	// The listener and what it serves are a plugin, so a caller can add its own
-	// endpoints to the same port before anything binds, and a build that wants
-	// a different server can register a different plugin. Pairing rides along
-	// as an endpoint of its own: no route, since it binds a port of its own,
-	// but a lifetime the agent manages like any other.
-	servers := &ServerPlugin{
-		Config: unifiedserver.Config{
-			Port:            devicePort,
-			CertFile:        certFile,
-			KeyFile:         keyFile,
-			MDNSServiceName: info.DisplayName + " Device",
-		},
-	}
-	if pairing != nil {
-		servers.Add(Endpoint{Name: "pairing", Component: pairing})
-	}
-
 	// Everything the agent runs on is settled by this point, which is why it
 	// can be handed over in one piece.
+	//
+	// Not the listener: that is a plugin the caller registers, which is what
+	// lets a build decide what it serves. See [ServerPlugin].
 	a := New(Config{
 		RemoteOps:           opts.RemoteOps,
 		RemoteScans:         opts.RemoteScans,
@@ -286,6 +257,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Origins:             origins,
 		Devices:             devices,
 		PublicKeyPin:        agentPublicKeyPin,
+		Pairing:             pairing,
 		Settings:            settingsStore,
 		Logs:                opts.Logs,
 		RequirePairedDevice: requirePaired,
@@ -297,21 +269,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	a.ApplySettings(stored)
 
-	// The server plugin goes on first: it publishes the listener the rest
-	// mount on, and plugins are activated in the order they were added.
-	if err := a.Plugins.Add(servers); err != nil {
-		return nil, err
-	}
-	if err := a.Plugins.Add(opts.Plugins...); err != nil {
-		return nil, err
-	}
-
 	return &Runtime{
 		Agent:      a,
 		Settings:   settingsStore,
 		Logs:       opts.Logs,
 		DevicePath: devicePath,
-		Servers:    servers,
 	}, nil
 }
 

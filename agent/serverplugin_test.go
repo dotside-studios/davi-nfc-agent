@@ -194,25 +194,52 @@ func TestAPluginMountsOnTheListenerPublishedBeforeIt(t *testing.T) {
 	}
 }
 
-// What Setup builds is a server plugin, so a program adds its own endpoints to
-// the same listener without knowing how the port was decided.
-func TestSetupBuildsAServerPluginToAddEndpointsTo(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+// A plugin registered with no configuration serves what the agent was set up
+// with, so a program need not repeat what it already told Setup.
+func TestServerPluginFallsBackToTheAgentsConfiguration(t *testing.T) {
+	opts := testOptions(t)
+	opts.DevicePort = 9496
+	opts.Explicit.Port = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	rt.Servers.Add(Endpoint{Name: "control center", Pattern: "/control/", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	servers := &ServerPlugin{}
+	servers.Add(Endpoint{Name: "control center", Pattern: "/control/", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	})})
-
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
 	if err := rt.Agent.Activate(nil); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
-	if code := get(t, rt.Servers.Listener(), "/control/"); code != http.StatusTeapot {
-		t.Errorf("GET /control/ = %d, want the endpoint added after Setup", code)
+
+	if got := servers.Listener().Port(); got != 9496 {
+		t.Errorf("Port() = %d, want the port the agent was set up with", got)
 	}
-	if code := get(t, rt.Servers.Listener(), "/health"); code != http.StatusOK {
+	if code := get(t, servers.Listener(), "/control/"); code != http.StatusTeapot {
+		t.Errorf("GET /control/ = %d, want the endpoint the program added", code)
+	}
+	if code := get(t, servers.Listener(), "/health"); code != http.StatusOK {
 		t.Errorf("GET /health = %d, want the agent's own route still there", code)
+	}
+}
+
+// An agent with no server plugin registered serves no HTTP, which is what a
+// program driving the reader directly wants.
+func TestAnAgentWithNoServerPluginServesNothing(t *testing.T) {
+	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := rt.Agent.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	if rt.Agent.UnifiedServer != nil {
+		t.Error("a listener appeared with no server plugin registered")
 	}
 }

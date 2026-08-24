@@ -10,8 +10,8 @@ import (
 )
 
 // served returns the routes a set-up agent answers on, without binding a
-// listener. The plugins are activated first, since the listener and the routes
-// on it are what they bring.
+// listener. The server plugin is registered as a program would register it, and
+// the listener exists once the plugins have been activated.
 func served(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -19,10 +19,15 @@ func served(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
+
+	servers := &ServerPlugin{}
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
 	if err := rt.Agent.Activate(nil); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
-	return rt.Servers.Listener().Handler()
+	return servers.Listener().Handler()
 }
 
 // The health check is what a client library polls to find the agent, so its

@@ -92,16 +92,12 @@ type Config struct {
 	// Pairing is the pairing server, registered as a component so it starts and
 	// stops with the agent. Nil disables pairing entirely. Everything it needs
 	// lives on PairingConfig rather than here.
-	//
-	// A build that assembles itself from plugins registers one through
-	// [AgentContext.Use] instead, and leaves this nil; the agent answers for
-	// the PIN and the pairing URLs either way.
 	Pairing *PairingServer
 
 	// Plugins are activated once, in order, before the agent first starts.
 	// They are what mount the routes and register the components a build is
-	// made of; see [Plugin]. More can be added afterwards through
-	// [Agent.Plugins], up until the agent activates them.
+	// made of; see [Plugin]. More can be added through [Agent.Plugins], up
+	// until the agent activates them.
 	Plugins []Plugin
 
 	// Settings is the persisted preference store, and Logs the ring the
@@ -217,12 +213,7 @@ type Agent struct {
 	readerFeedback      bool
 	settingsStore       *settings.Store
 	logs                *logbuf.Ring
-
-	// pairing is whichever component answers for the PIN and the pairing URLs,
-	// named in Config or registered by a plugin. Atomic because it is recorded
-	// during activation, on the goroutine starting the agent, while the tray
-	// reads it from its own.
-	pairing atomic.Pointer[PairingServer]
+	pairing             *PairingServer
 
 	// Settings state. Held on the agent as well as on the reader, because the
 	// reader is built in Start, after the stored settings have been applied: a
@@ -292,6 +283,7 @@ func New(cfg Config) *Agent {
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
+		pairing:             cfg.Pairing,
 		certFile:            cfg.CertFile,
 		keyFile:             cfg.KeyFile,
 		tlsManager:          cfg.TLSManager,
@@ -385,28 +377,23 @@ func (a *Agent) DevicePort() int {
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
 // Pairing returns the pairing component, or nil when pairing is disabled.
-//
-// A pairing server brought by a plugin is not there to be asked about until the
-// plugins have been activated; see [Agent.Activate].
-func (a *Agent) Pairing() *PairingServer { return a.pairing.Load() }
+func (a *Agent) Pairing() *PairingServer { return a.pairing }
 
 // Bootstrap returns the pairing server itself, for the PIN and the URLs the
 // tray and console show. Nil when pairing is disabled.
 func (a *Agent) Bootstrap() *tls.BootstrapServer {
-	pairing := a.pairing.Load()
-	if pairing == nil {
+	if a.pairing == nil {
 		return nil
 	}
-	return pairing.Server()
+	return a.pairing.Server()
 }
 
 // BootstrapPort reports the pairing server's port, 0 when disabled.
 func (a *Agent) BootstrapPort() int {
-	pairing := a.pairing.Load()
-	if pairing == nil {
+	if a.pairing == nil {
 		return 0
 	}
-	return pairing.Port()
+	return a.pairing.Port()
 }
 func (a *Agent) CertFile() string         { return a.certFile }
 func (a *Agent) KeyFile() string          { return a.keyFile }

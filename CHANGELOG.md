@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ctx.Systray` is never nil: an agent with no tray hands over a menu that draws
   nothing, so a plugin adds its entries without asking whether anyone is looking
 
+- **`agent.PairingPlugin`, the pairing server and its tray entries.** The
+  second implementation, and the smaller one: it wraps the pairing server,
+  registers it as a component, and owns the entries that hand out its address
+  and PIN. Those used to be declared by the tray, in its Server URLs submenu,
+  which is why the tray had to be told whether this build pairs devices at all.
+  They live with the pairing code now, in a section of their own, and follow the
+  server: rotating the PIN from the menu or from the control center relabels
+  both. The tray knows nothing about pairing, so `tray.New` takes the runtime
+  and nothing else again
+
 - **`agent.ServerPlugin`, the listener and everything served from it.** The
   first implementation of the above. It owns the `*unifiedserver.Server`,
   publishes it to the agent, which mounts its own routes on it, and then mounts
@@ -35,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no lifetime, a pairing server would be one with no route and a listener
   of its own. Two endpoints on one path fail the start, naming the second,
   rather than leaving the mux to decide
+
+- **`Agent.OnServerRestart`** registers an observer of a completed restart, for
+  a menu or a page whose addresses can have changed. `ServerRestarts` has a
+  single consumer, so a second reader would take the signal from the first; the
+  tray keeps the channel and the plugins use the hook. Restart observers run
+  outside the lifecycle lock, as the state hooks already did
 
 - **`traymenu.Discard`, a driver that draws nothing**, and `traymenu.Section` is
   now a `Container`, so it can be handed to a plugin, a `List`, a `Radio` or a
@@ -124,6 +140,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered per connection, and a reader that answers on neither is left alone
 
 ### Changed
+
+- **The clipboard moved to a package of its own.** `copyToClipboard` and its
+  per-platform candidate list lived in `agent/tray`, which is no use to a plugin
+  offering to copy something. `clipboard.Copy` is the same code, and the tray
+  and the pairing plugin both call it
 
 - **The agent has no opinion about pairing.** `Agent.Pairing`, `Bootstrap` and
   `BootstrapPort` existed because the tray and the console both needed a handle

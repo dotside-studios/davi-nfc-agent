@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
+	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -43,7 +44,7 @@ func (s *App) handleOpenConsole() {
 		// Falling back to the clipboard keeps this usable on a machine with no
 		// registered browser handler, which is common on minimal Linux desktops.
 		log.Printf("Failed to open a browser: %v", err)
-		if copyErr := copyToClipboard(url); copyErr != nil {
+		if copyErr := clipboard.Copy(url); copyErr != nil {
 			log.Printf("Control center URL (expires shortly): %s", url)
 			return
 		}

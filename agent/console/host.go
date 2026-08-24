@@ -19,7 +19,7 @@ import (
 type host struct {
 	agent    *agent.Agent
 	settings *settings.Store
-	pairing  *agent.PairingServer
+	pairing  *agent.PairingPlugin
 	app      Tray
 }
 
@@ -159,6 +159,8 @@ func (h *host) RotateAPISecret() (string, error) { return h.agent.RotateAPISecre
 
 func (h *host) PairingPIN() string { return h.pairing.PIN() }
 
+// RotatePairingPIN goes through the plugin rather than the server, so the tray
+// entries showing the PIN follow a rotation done in the console.
 func (h *host) RotatePairingPIN() (string, error) {
 	if h.pairing == nil {
 		return "", errors.New("pairing server is disabled")

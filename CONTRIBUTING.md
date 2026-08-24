@@ -132,6 +132,7 @@ davi-nfc-agent/
 ├── wsconn/              # Write-safe WebSocket wrapper shared by the above
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
 │   └── fynetray/        # The real tray, on fyne.io/systray
+├── clipboard/           # Copying text to the system clipboard
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
 ├── client/              # JavaScript client library

@@ -29,19 +29,12 @@ func newTestAgentWith(cfg nfcagent.Config) *nfcagent.Agent {
 }
 
 // newTestTray builds the real tray menu on a fake driver, so it can be read and
-// clicked with no desktop involved. This build pairs no devices; see
-// newTestTrayWithPairing.
+// clicked with no desktop involved.
 func newTestTray(t *testing.T, a *nfcagent.Agent) (*App, *traymenu.Fake) {
-	t.Helper()
-	return newTestTrayWithPairing(t, a, nil)
-}
-
-// newTestTrayWithPairing builds one that has a pairing server behind it.
-func newTestTrayWithPairing(t *testing.T, a *nfcagent.Agent, pairing *nfcagent.PairingServer) (*App, *traymenu.Fake) {
 	t.Helper()
 
 	fake := traymenu.NewFake()
-	app := newApp(&nfcagent.Runtime{Agent: a}, fake, pairing)
+	app := newApp(&nfcagent.Runtime{Agent: a}, fake)
 	t.Cleanup(app.menu.Close)
 	app.setupUI()
 	return app, fake
@@ -119,11 +112,10 @@ func TestStatusAndCardLabelsAreNotClickable(t *testing.T) {
 	}
 }
 
-func TestPairingAndSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
+func TestSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
 	_, fake := newTestTray(t, newTestAgent())
 
-	for _, title := range []string{"Pairing PIN: --", "  Copy Pairing PIN", "  Regenerate Pairing PIN",
-		"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
+	for _, title := range []string{"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
 		item := fake.Find("Server URLs", title)
 		if item == nil {
 			t.Fatalf("%q is missing from the URLs submenu", title)
@@ -459,12 +451,6 @@ func TestCopiedURLsAreTheOnesOnDisplay(t *testing.T) {
 	if got, want := app.mClientURL.Title(), "Client: "+urls.client; got != want {
 		t.Errorf("client label = %q, want %q", got, want)
 	}
-	if urls.bootstrap != "" {
-		t.Errorf("pairing URL = %q, want none with the pairing server off", urls.bootstrap)
-	}
-	if got := app.mBootstrapURL.Title(); got != "Pair Phone: Disabled" {
-		t.Errorf("pairing label = %q", got)
-	}
 }
 
 func TestAgentStateDrivesTheControls(t *testing.T) {
@@ -481,7 +467,7 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 		t.Fatalf("stopped: status %q, start enabled %v, stop enabled %v",
 			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
 	}
-	for _, item := range []*traymenu.Item{app.mDeviceURL, app.mClientURL, app.mBootstrapURL} {
+	for _, item := range []*traymenu.Item{app.mDeviceURL, app.mClientURL} {
 		if !strings.HasSuffix(item.Title(), "Not running") {
 			t.Errorf("a stopped agent still shows %q", item.Title())
 		}

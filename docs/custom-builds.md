@@ -75,11 +75,10 @@ func main() {
 	// agent serves is the program's decision.
 	servers := &agent.ServerPlugin{}
 
-	// The pairing server, on a listener of its own. The agent does not hold
-	// one, so this is where it is built and where it is handed to the two
-	// things that show its PIN.
-	pairing := agent.PairingFor(rt.Agent, opts.BootstrapPort)
-	servers.Add(agent.Endpoint{Name: "pairing", Component: pairing})
+	// Pairing: a listener of its own, and the tray entries that hand out its
+	// address and PIN. The agent does not hold one, so this is where it is
+	// built and where it is handed to the console.
+	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
 
 	// Nil in a -tags nowebui build. Listing it as an endpoint is all there is
 	// to attaching a control center, so a build that wants none lists none.
@@ -94,11 +93,13 @@ func main() {
 		rt.Agent.OnClientsChange(c.NotifyChange)
 	}
 
-	if err := rt.Agent.Plugins.Add(servers); err != nil {
+	// The server goes on first: it publishes the listener the rest mount on,
+	// and plugins are activated in the order they were added.
+	if err := rt.Agent.Plugins.Add(servers, pairing); err != nil {
 		log.Fatal(err)
 	}
 
-	app := tray.New(rt, pairing)
+	app := tray.New(rt)
 	app.AttachConsole(c)
 	app.Run()
 }
@@ -117,12 +118,14 @@ build rather than a broken one. Nothing binds until the agent starts, so a route
 is declared before the port it will be served from is bound. See
 [Plugins](#plugins).
 
-The pairing server is a component the program builds. `agent.PairingFor` takes
-what it needs from the agent: the certificate authority, the device registry,
-the key pin, the name and the port, so nothing already given to `Setup` is
-repeated. The agent does not hold the result: whoever builds one hands it to
-whatever shows the PIN, which is why it is passed to both `console.New` and
-`tray.New`. Pass `nil` to either for a build that pairs no devices.
+Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
+menu entries that hand out its address and PIN.
+`agent.NewPairingPlugin(a, port)` takes the rest from the agent: the certificate
+authority, the device registry, the key pin and the name, so nothing already
+given to `Setup` is repeated. Register none and the build pairs no devices; the
+console is handed `nil` and reports pairing as disabled. A build wanting the
+listener without the menu registers the component on its own instead, with
+`agent.PairingFor(a, port)` and `ctx.Use` or an `agent.Endpoint`.
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
@@ -241,6 +244,23 @@ The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
 health checks; two endpoints on one path fail the start rather than leaving the
 mux to decide.
 
+### The pairing plugin
+
+`agent.PairingPlugin` is the other one the shipped build registers, and the
+smaller example: it wraps the pairing server, registers it as a component, and
+owns the entries that show its address and PIN.
+
+```go
+pairing := agent.NewPairingPlugin(rt.Agent, 9472)
+rt.Agent.Plugins.Add(pairing)
+```
+
+Its entries land in the section the tray hands the plugins, under a `Pairing`
+submenu of their own, and the labels follow the server: rotating the PIN from
+the menu or from the control center relabels both. `Port`, `PIN` and `RotatePIN`
+tolerate a nil plugin, so a build that registers none hands `nil` to the console
+and everything reports pairing as disabled.
+
 ## Naming your build
 
 A build that keeps the agent's identity also keeps its configuration directory,
@@ -281,6 +301,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server/unifiedserver` | One listener fronting all of the above |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
 | `traymenu` | Declarative tray menus, with no toolkit behind them |
+| `clipboard` | Copying text to the system clipboard |
 | `traymenu/fynetray` | The real tray, on `fyne.io/systray` |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
 | `e2e` | Tests only: an agent wired as on this page, driven over its protocols |

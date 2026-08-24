@@ -43,9 +43,9 @@ type harness struct {
 	Runtime *agent.Runtime
 
 	// Devices is the phone driver the test built and handed over, and Pairing
-	// the pairing server, when the test asked for one.
+	// the pairing plugin, when the test asked for one.
 	Devices *remotenfc.Manager
-	Pairing *agent.PairingServer
+	Pairing *agent.PairingPlugin
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
@@ -97,18 +97,19 @@ func start(t *testing.T, opts options) *harness {
 	}
 
 	// The listener is a plugin, as it is in docs/custom-builds.md. With none
-	// registered the agent drives the reader and serves nothing. The pairing
-	// server rides along as an endpoint of it, on a listener of its own.
-	servers := &agent.ServerPlugin{}
-
-	var pairing *agent.PairingServer
-	if opts.Pairing {
-		pairing = agent.PairingFor(rt.Agent, freePort(t))
-		servers.Add(agent.Endpoint{Name: "pairing", Component: pairing})
+	// registered the agent drives the reader and serves nothing. Pairing is a
+	// plugin of its own, on a listener of its own; with no tray here its menu
+	// entries go to a menu that draws nothing.
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{}); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
 	}
 
-	if err := rt.Agent.Plugins.Add(servers); err != nil {
-		t.Fatalf("Plugins.Add: %v", err)
+	var pairing *agent.PairingPlugin
+	if opts.Pairing {
+		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t))
+		if err := rt.Agent.Plugins.Add(pairing); err != nil {
+			t.Fatalf("Plugins.Add: %v", err)
+		}
 	}
 
 	h := &harness{

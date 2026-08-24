@@ -238,6 +238,7 @@ type Agent struct {
 	pumpCancel        context.CancelFunc
 	onTag             []func(nfc.NFCData)
 	clientHooks       []func()
+	restartHooks      []func()
 	serverRestartChan chan struct{} // Signals when servers are restarted
 
 	// devicePath is the reader Start resolved to, kept so a restart reopens the
@@ -508,7 +509,6 @@ func (a *Agent) watchNetworkChanges() {
 // The NFC reader continues running during the restart.
 func (a *Agent) RestartServers() error {
 	a.lifecycleMu.Lock()
-	defer a.lifecycleMu.Unlock()
 
 	a.logger.Println("Restarting servers...")
 
@@ -519,7 +519,14 @@ func (a *Agent) RestartServers() error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Restart servers
-	if err := a.startServers(); err != nil {
+	err := a.startServers()
+
+	// Released before the listeners are told, as the state hooks are: a hook
+	// that touched the agent would otherwise wait for a lock its own caller
+	// holds.
+	a.lifecycleMu.Unlock()
+
+	if err != nil {
 		return err
 	}
 
@@ -531,6 +538,7 @@ func (a *Agent) RestartServers() error {
 	default:
 		// Channel full, skip
 	}
+	a.fireServerRestart()
 
 	return nil
 }

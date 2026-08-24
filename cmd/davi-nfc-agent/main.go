@@ -78,13 +78,12 @@ func main() {
 	// plugin at all leaves an agent that drives the reader and serves nothing.
 	servers := &agent.ServerPlugin{}
 
-	// The pairing server, on a listener of its own. The agent does not hold
-	// one, so this is where it is built and where it is handed to the two
-	// things that show its PIN.
-	var pairing *agent.PairingServer
+	// The pairing server, on a listener of its own, with the menu entries that
+	// hand out its address and PIN. The agent does not hold one, so this is
+	// where it is built and where it is handed to the console.
+	var pairing *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
-		pairing = agent.PairingFor(rt.Agent, opts.BootstrapPort)
-		servers.Add(agent.Endpoint{Name: "pairing", Component: pairing})
+		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
 	}
 
 	// Nil in a -tags nowebui build, where the control center is not compiled
@@ -106,11 +105,18 @@ func main() {
 		rt.Agent.OnClientsChange(consoleServer.NotifyChange)
 	}
 
+	// The server goes on first: it publishes the listener the rest mount on,
+	// and plugins are activated in the order they were added.
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		log.Fatalf("Failed to register the server: %v", err)
 	}
+	if pairing != nil {
+		if err := rt.Agent.Plugins.Add(pairing); err != nil {
+			log.Fatalf("Failed to register pairing: %v", err)
+		}
+	}
 
-	app := tray.New(rt, pairing)
+	app := tray.New(rt)
 	app.AttachConsole(consoleServer)
 
 	// Set up signal handling for graceful shutdown
@@ -118,8 +124,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		// The pairing server is a component of the agent, so the tray's quit
-		// path takes it down with everything else.
+		// The pairing server is a component the plugin registered, so the
+		// tray's quit path takes it down with everything else.
 		app.Quit()
 	}()
 

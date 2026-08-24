@@ -1,11 +1,11 @@
-package tray
+package clipboard
 
 import (
 	"reflect"
 	"testing"
 )
 
-func TestClipboardCandidates(t *testing.T) {
+func TestCandidates(t *testing.T) {
 	tests := []struct {
 		name     string
 		goos     string
@@ -56,7 +56,7 @@ func TestClipboardCandidates(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			getenv := func(key string) string { return tt.env[key] }
-			got, err := clipboardCandidates(tt.goos, getenv)
+			got, err := candidates(tt.goos, getenv)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
 			}

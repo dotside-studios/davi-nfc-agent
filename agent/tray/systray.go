@@ -2,20 +2,15 @@ package tray
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"net/url"
-	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -64,8 +59,7 @@ func hostPort(host string, port int) string {
 type App struct {
 	agent         *agent.Agent
 	initialDevice string
-	pairing       *agent.PairingServer // nil if this build pairs no devices
-	console       *console.Server      // nil if the control center is not built in
+	console       *console.Server // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
 	// are added, so there is no central event loop to keep in step with them.
@@ -84,11 +78,9 @@ type App struct {
 	mStop     *traymenu.Item
 
 	// URL menu items. Only the ones relabelled later are held.
-	mDeviceURL    *traymenu.Item
-	mClientURL    *traymenu.Item
-	mBootstrapURL *traymenu.Item
-	mPairingPIN   *traymenu.Item
-	mAPISecret    *traymenu.Item
+	mDeviceURL *traymenu.Item
+	mClientURL *traymenu.Item
+	mAPISecret *traymenu.Item
 
 	// Reader selection
 	readers *traymenu.List[string]
@@ -122,22 +114,17 @@ type App struct {
 }
 
 // New creates the tray on the real system tray.
-//
-// pairing is the pairing server this build runs, or nil for a build that pairs
-// no devices, in which case the PIN entries are hidden. The agent does not hold
-// one, so whoever built it hands it over here.
-func New(rt *agent.Runtime, pairing *agent.PairingServer) *App {
-	return newApp(rt, fynetray.New(), pairing)
+func New(rt *agent.Runtime) *App {
+	return newApp(rt, fynetray.New())
 }
 
 // newApp builds the tray on a given menu driver, so a test can drive the menu
 // without a desktop.
-func newApp(rt *agent.Runtime, driver traymenu.Driver, pairing *agent.PairingServer) *App {
+func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
 	return &App{
 		agent:         rt.Agent,
 		settings:      rt.Settings,
 		initialDevice: rt.DevicePath,
-		pairing:       pairing,
 		menu:          traymenu.New(driver),
 	}
 }
@@ -339,30 +326,6 @@ func (s *App) setupURLsMenu() {
 		traymenu.OnClick(func() { s.copyValue("ClientServer URL", s.urls().client) }),
 	)
 
-	s.mBootstrapURL = urls.Add("Pair Phone: Not running", traymenu.Tooltip("Phone-pairing page URL"), traymenu.Disabled())
-	urls.Add("  Copy Pairing URL",
-		traymenu.Tooltip("Copy phone-pairing URL to clipboard"),
-		traymenu.OnClick(func() { s.copyValue("phone-pairing URL", s.urls().bootstrap) }),
-	)
-
-	// The PIN entries only mean anything while the pairing server is running.
-	noPairing := s.pairing == nil
-	s.mPairingPIN = urls.Add("Pairing PIN: --",
-		traymenu.Tooltip("PIN required when pairing a phone"),
-		traymenu.Disabled(),
-		traymenu.HiddenIf(noPairing),
-	)
-	urls.Add("  Copy Pairing PIN",
-		traymenu.Tooltip("Copy 6-digit pairing PIN to clipboard"),
-		traymenu.HiddenIf(noPairing),
-		traymenu.OnClick(func() { s.copyValue("pairing PIN", s.pairing.PIN()) }),
-	)
-	urls.Add("  Regenerate Pairing PIN",
-		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
-		traymenu.HiddenIf(noPairing),
-		traymenu.OnClick(s.handleRotatePIN),
-	)
-
 	// API secret entries, only shown if a secret is configured.
 	noSecret := s.agent.APISecret() == ""
 	s.mAPISecret = urls.Add("API Secret: hidden",
@@ -557,18 +520,6 @@ func (s *App) showStopped(status string) {
 	s.mStop.Disable()
 }
 
-// handleRotatePIN issues a fresh pairing PIN, which invalidates the URLs that
-// carried the old one.
-func (s *App) handleRotatePIN() {
-	if s.pairing == nil {
-		return
-	}
-
-	fresh := s.pairing.RotatePIN()
-	log.Printf("[systray] Pairing PIN rotated to %s", fresh)
-	s.updateURLs()
-}
-
 // handleRotateAPISecret issues a fresh API secret; every phone must handshake
 // again with it.
 func (s *App) handleRotateAPISecret() {
@@ -723,9 +674,8 @@ func (s *App) updateCardType(cardType string) {
 // agentURLs are the addresses the menu shows and copies. They are built
 // together so that what an entry copies is what the entry above it reads.
 type agentURLs struct {
-	device    string
-	client    string
-	bootstrap string // empty when the pairing server is disabled
+	device string
+	client string
 }
 
 // urls builds the addresses from the agent's current configuration.
@@ -749,15 +699,7 @@ func (s *App) urls() agentURLs {
 	// Devices and clients share the single agent port. Devices connect with
 	// ?mode=device; clients use plain /ws.
 	client := fmt.Sprintf("%s://%s/ws", scheme, hostPort(ip, port))
-	urls := agentURLs{device: client + "?mode=device", client: client}
-
-	// The pairing page is always HTTP, and carries the PIN so a link clicked
-	// from chat goes straight through.
-	if port := s.pairing.Port(); port > 0 {
-		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, port))
-		urls.bootstrap += "?pin=" + url.QueryEscape(s.pairing.PIN())
-	}
-	return urls
+	return agentURLs{device: client + "?mode=device", client: client}
 }
 
 // updateURLs updates all server URL displays
@@ -766,15 +708,6 @@ func (s *App) updateURLs() {
 
 	s.mDeviceURL.SetTitle("Device: " + urls.device)
 	s.mClientURL.SetTitle("Client: " + urls.client)
-
-	if urls.bootstrap == "" {
-		s.mBootstrapURL.SetTitle("Pair Phone: Disabled")
-	} else {
-		s.mBootstrapURL.SetTitle("Pair Phone: " + urls.bootstrap)
-	}
-	if s.pairing != nil {
-		s.mPairingPIN.SetTitle("Pairing PIN: " + s.pairing.PIN())
-	}
 
 	s.updateAPISecretLabel(s.agent.APISecret())
 }
@@ -799,7 +732,6 @@ func (s *App) updateAPISecretLabel(secret string) {
 func (s *App) clearURLs() {
 	s.mDeviceURL.SetTitle("Device: Not running")
 	s.mClientURL.SetTitle("Client: Not running")
-	s.mBootstrapURL.SetTitle("Pair Phone: Not running")
 }
 
 // copyValue puts a value on the clipboard and logs what happened, which is the
@@ -809,108 +741,9 @@ func (s *App) copyValue(what, value string) {
 		return
 	}
 
-	if err := copyToClipboard(value); err != nil {
+	if err := clipboard.Copy(value); err != nil {
 		log.Printf("[systray] Failed to copy %s: %v", what, err)
 		return
 	}
 	log.Printf("[systray] Copied %s to clipboard", what)
-}
-
-// clipboardCmd describes one candidate clipboard utility.
-type clipboardCmd struct {
-	name string
-	args []string
-}
-
-// copyToClipboard copies text to the system clipboard. On Linux it picks the
-// tool matching the active display server (wl-copy under Wayland, xclip/xsel
-// under X11), falling back to whichever utility is installed if env vars are
-// unset (e.g. headless / virtual sessions).
-func copyToClipboard(text string) error {
-	candidates, err := clipboardCandidates(runtime.GOOS, os.Getenv)
-	if err != nil {
-		return err
-	}
-
-	var lastErr error
-	var tried []string
-	for _, c := range candidates {
-		path, err := exec.LookPath(c.name)
-		if err != nil {
-			continue
-		}
-		tried = append(tried, c.name)
-		if err := pipeStringToCommand(path, c.args, text); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-
-	if lastErr != nil {
-		return fmt.Errorf("clipboard write failed (tried %s): %w", strings.Join(tried, ", "), lastErr)
-	}
-	return clipboardUnavailableError()
-}
-
-// clipboardCandidates returns the ordered list of clipboard utilities to try
-// for the given OS, using getenv to inspect the current display environment.
-// Pure and testable; pass os.Getenv in production.
-func clipboardCandidates(goos string, getenv func(string) string) ([]clipboardCmd, error) {
-	switch goos {
-	case "darwin":
-		return []clipboardCmd{{name: "pbcopy"}}, nil
-	case "windows":
-		return []clipboardCmd{{name: "clip"}}, nil
-	case "linux":
-		var cands []clipboardCmd
-		if getenv("WAYLAND_DISPLAY") != "" {
-			cands = append(cands, clipboardCmd{name: "wl-copy"})
-		}
-		if getenv("DISPLAY") != "" {
-			cands = append(cands,
-				clipboardCmd{name: "xclip", args: []string{"-selection", "clipboard"}},
-				clipboardCmd{name: "xsel", args: []string{"--clipboard", "--input"}},
-			)
-		}
-		// Env didn't tell us the session type — try everything in preference order.
-		if len(cands) == 0 {
-			cands = []clipboardCmd{
-				{name: "wl-copy"},
-				{name: "xclip", args: []string{"-selection", "clipboard"}},
-				{name: "xsel", args: []string{"--clipboard", "--input"}},
-			}
-		}
-		return cands, nil
-	default:
-		return nil, fmt.Errorf("unsupported platform: %s", goos)
-	}
-}
-
-func clipboardUnavailableError() error {
-	if runtime.GOOS == "linux" {
-		return fmt.Errorf("no clipboard utility found; install one of: wl-clipboard (Wayland), xclip, or xsel")
-	}
-	return fmt.Errorf("no clipboard utility found")
-}
-
-func pipeStringToCommand(path string, args []string, text string) error {
-	cmd := exec.Command(path, args...)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(stdin, text); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-		return err
-	}
-	if err := stdin.Close(); err != nil {
-		_ = cmd.Wait()
-		return err
-	}
-	return cmd.Wait()
 }

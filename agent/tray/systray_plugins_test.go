@@ -46,27 +46,47 @@ func TestExtensionsSectionAppearsOnlyWhenAPluginFillsIt(t *testing.T) {
 	}
 }
 
-// The agent holds no pairing server, so the tray is handed one by whoever built
-// it. Without one the PIN entries stay off the menu.
-func TestPairingEntriesFollowTheServerTheTrayWasGiven(t *testing.T) {
-	if _, fake := newTestTray(t, newTestAgent()); fake.Find("Server URLs", "Pairing PIN: --").Visible() {
-		t.Error("the PIN entry is shown with no pairing server behind it")
-	}
-
+// The pairing entries belong to the pairing plugin now, so they appear in the
+// section the tray hands the plugins rather than in its own URLs submenu.
+func TestPairingEntriesComeFromThePlugin(t *testing.T) {
 	a := newTestAgent()
-	pairing := nfcagent.PairingFor(a, 9498)
-	app, fake := newTestTrayWithPairing(t, a, pairing)
+	pairing := nfcagent.NewPairingPlugin(a, 9498)
+	if err := a.Plugins.Add(pairing); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
 
-	pin := fake.Find("Server URLs", "Pairing PIN: --")
+	app, fake := newTestTray(t, a)
+	app.activatePlugins()
+
+	pin := fake.Find("Extensions", "Pairing", "Pairing PIN: "+pairing.PIN())
 	if pin == nil {
-		t.Fatalf("the pairing PIN entry was not declared:\n%s", fake.Render())
+		t.Fatalf("the plugin's PIN entry is not on the menu:\n%s", fake.Render())
 	}
-	if !pin.Visible() {
-		t.Error("the PIN entry is hidden with a pairing server behind it")
+	if fake.Find("Server URLs", "Pairing PIN: --") != nil {
+		t.Error("the tray still declares a pairing entry of its own")
+	}
+	if section := fake.Find("Extensions"); !section.Visible() {
+		t.Error("the Extensions submenu is hidden with the plugin's entries in it")
 	}
 
-	app.updateURLs()
-	if got := pin.Title(); got != "Pairing PIN: "+pairing.PIN() {
-		t.Errorf("PIN entry reads %q, want the server's PIN", got)
+	// Rotating relabels the entry, wherever the rotation came from: the menu
+	// item, or the control center through the same method.
+	before := pairing.PIN()
+	fresh := pairing.RotatePIN()
+	if fresh == before {
+		t.Fatal("RotatePIN returned the PIN it replaced")
+	}
+	if got := pin.Title(); got != "Pairing PIN: "+fresh {
+		t.Errorf("PIN entry reads %q, want the fresh PIN", got)
+	}
+}
+
+// A build that registers no pairing plugin has no pairing entries at all.
+func TestNoPairingPluginNoPairingEntries(t *testing.T) {
+	app, fake := newTestTray(t, newTestAgent())
+	app.activatePlugins()
+
+	if item := fake.Find("Extensions", "Pairing"); item != nil {
+		t.Errorf("a pairing submenu appeared with no plugin behind it:\n%s", fake.Render())
 	}
 }

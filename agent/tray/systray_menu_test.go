@@ -79,6 +79,7 @@ func TestMenuLayout(t *testing.T) {
 		"Allowed Origins",
 		"Trust This Agent in Browsers",
 		"----",
+		"Extensions",
 		"----",
 		"Start Agent",
 		"Stop Agent",

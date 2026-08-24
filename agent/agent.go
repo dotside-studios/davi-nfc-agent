@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -18,6 +19,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // GetAllCardTypeFilterNames returns all card type filter names from nfc package constants
@@ -90,7 +92,24 @@ type Config struct {
 	// Pairing is the pairing server, registered as a component so it starts and
 	// stops with the agent. Nil disables pairing entirely. Everything it needs
 	// lives on PairingConfig rather than here.
+	//
+	// A build that assembles itself from plugins registers one through
+	// [AgentContext.Use] instead, and leaves this nil; the agent answers for
+	// the PIN and the pairing URLs either way.
 	Pairing *PairingServer
+
+	// Plugins are activated once, in order, before the agent first starts.
+	// They are what mount the routes and register the components a build is
+	// made of; see [Plugin]. More can be added afterwards through
+	// [Agent.Plugins], up until the agent activates them.
+	Plugins []Plugin
+
+	// Settings is the persisted preference store, and Logs the ring the
+	// agent's log is captured in. Neither is used by the agent itself. They
+	// are carried so a plugin can reach them through its [AgentContext]
+	// rather than being handed them separately by whoever built it.
+	Settings *settings.Store
+	Logs     *logbuf.Ring
 
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
@@ -167,6 +186,16 @@ type Agent struct {
 	Router     *tagrouter.Router
 	DeviceAuth *server.DeviceAuth
 
+	// Plugins is the plugin list, added to before the agent starts and
+	// activated once, on the first Start or by a host that activates them
+	// itself to give them a real tray menu.
+	Plugins *PluginSet
+
+	// trayMenu is the menu a plugin's entries go on when no host supplied one:
+	// built on a driver that draws nothing, so a plugin need not ask whether
+	// there is a tray. Nil until a plugin asks for a menu.
+	trayMenu *traymenu.Menu
+
 	// Settled at construction.
 	info                buildinfo.Info
 	logger              *log.Logger
@@ -181,12 +210,19 @@ type Agent struct {
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
-	pairing             *PairingServer
 	certFile            string
 	keyFile             string
 	tlsManager          *tls.Manager
 	requirePairedDevice bool
 	readerFeedback      bool
+	settingsStore       *settings.Store
+	logs                *logbuf.Ring
+
+	// pairing is whichever component answers for the PIN and the pairing URLs,
+	// named in Config or registered by a plugin. Atomic because it is recorded
+	// during activation, on the goroutine starting the agent, while the tray
+	// reads it from its own.
+	pairing atomic.Pointer[PairingServer]
 
 	// Settings state. Held on the agent as well as on the reader, because the
 	// reader is built in Start, after the stored settings have been applied: a
@@ -256,7 +292,6 @@ func New(cfg Config) *Agent {
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
-		pairing:             cfg.Pairing,
 		certFile:            cfg.CertFile,
 		keyFile:             cfg.KeyFile,
 		tlsManager:          cfg.TLSManager,
@@ -266,6 +301,14 @@ func New(cfg Config) *Agent {
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
+		settingsStore:       cfg.Settings,
+		logs:                cfg.Logs,
+		Plugins:             &PluginSet{},
+	}
+
+	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
+		// Only a nil entry can fail here: the set is new, so nothing is sealed.
+		logger.Printf("Ignoring a plugin: %v", err)
 	}
 
 	// Built here rather than at start, so a caller can put its device endpoint
@@ -284,7 +327,9 @@ func New(cfg Config) *Agent {
 	// lifetime is the agent's, and forgetting to wire it is exactly the class
 	// of mistake this component list exists to remove.
 	if cfg.Pairing != nil {
-		a.components = append(a.components, cfg.Pairing)
+		if err := a.useLocked(cfg.Pairing); err != nil {
+			logger.Printf("Failed to register the pairing server: %v", err)
+		}
 	}
 
 	// The agent's own routes go on before the caller's, so a mount cannot
@@ -312,6 +357,14 @@ func (a *Agent) ConfigDir() string        { return a.configDir }
 func (a *Agent) Origins() *OriginStore    { return a.origins }
 func (a *Agent) Devices() *DeviceRegistry { return a.devices }
 
+// SettingsStore is the persisted preference store, or nil when the agent has
+// none. Settings, without the suffix, reports the preferences in force.
+func (a *Agent) SettingsStore() *settings.Store { return a.settingsStore }
+
+// Logs is the ring the agent's log is captured in, or nil when the program
+// installed none.
+func (a *Agent) Logs() *logbuf.Ring { return a.logs }
+
 // ServingPort is the port actually being served, which is what a client should
 // be told to connect to. It differs from DevicePort after a port is saved and
 // before the listener is rebound.
@@ -332,23 +385,28 @@ func (a *Agent) DevicePort() int {
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
 // Pairing returns the pairing component, or nil when pairing is disabled.
-func (a *Agent) Pairing() *PairingServer { return a.pairing }
+//
+// A pairing server brought by a plugin is not there to be asked about until the
+// plugins have been activated; see [Agent.Activate].
+func (a *Agent) Pairing() *PairingServer { return a.pairing.Load() }
 
 // Bootstrap returns the pairing server itself, for the PIN and the URLs the
 // tray and console show. Nil when pairing is disabled.
 func (a *Agent) Bootstrap() *tls.BootstrapServer {
-	if a.pairing == nil {
+	pairing := a.pairing.Load()
+	if pairing == nil {
 		return nil
 	}
-	return a.pairing.Server()
+	return pairing.Server()
 }
 
 // BootstrapPort reports the pairing server's port, 0 when disabled.
 func (a *Agent) BootstrapPort() int {
-	if a.pairing == nil {
+	pairing := a.pairing.Load()
+	if pairing == nil {
 		return 0
 	}
-	return a.pairing.Port()
+	return pairing.Port()
 }
 func (a *Agent) CertFile() string         { return a.certFile }
 func (a *Agent) KeyFile() string          { return a.keyFile }
@@ -466,6 +524,16 @@ func (a *Agent) Shutdown() {
 
 	if closer, ok := a.manager.(interface{ Close() }); ok {
 		closer.Close()
+	}
+
+	// The menu a plugin's entries went on when there was no tray. A host with
+	// a real tray closes its own; this is only the stand-in.
+	a.lifecycleMu.Lock()
+	menu := a.trayMenu
+	a.trayMenu = nil
+	a.lifecycleMu.Unlock()
+	if menu != nil {
+		menu.Close()
 	}
 }
 

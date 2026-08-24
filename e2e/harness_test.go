@@ -106,9 +106,6 @@ func start(t *testing.T, opts options) *harness {
 		Origin:   "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
 		scans:    make(chan nfc.NFCData, 32),
 	}
-	if opts.Pairing {
-		h.Pair = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.BootstrapPort()))
-	}
 
 	// Before Start, the only point at which an observer is promised every scan.
 	rt.Agent.OnTag(func(data nfc.NFCData) {
@@ -122,6 +119,13 @@ func start(t *testing.T, opts options) *harness {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(rt.Agent.Shutdown)
+
+	// Asked for after Start: the pairing server is an endpoint of the server
+	// plugin, so it is the agent's to report only once the plugins have been
+	// activated.
+	if opts.Pairing {
+		h.Pair = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.BootstrapPort()))
+	}
 
 	if h.Pair != "" {
 		// The pairing server serves on a goroutine and does not bind before

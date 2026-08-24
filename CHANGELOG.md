@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A plugin API.** The agent could be embedded but not extended: a program
+  wanting to add anything of its own had to wire it into a `main.go` that knew
+  about every part it touched, and the parts it forgot were the ones that never
+  ran. `agent.Plugin` is one method, `Activate(agent.AgentContext) error`, run
+  once before the agent starts. What a plugin wants to happen afterwards it
+  registers there: a `Component` through `ctx.Use` for anything with a lifetime,
+  an entry on `ctx.Systray` for anything with a menu, a route through
+  `ctx.Mount`. `ctx` also carries the agent, its log, its identity, its config
+  directory, its preference store and its log ring, so a plugin is constructed
+  from its own configuration and gets the rest when it is activated.
+
+  Nothing is loaded at run time and nothing is discovered. Which plugins a build
+  has is decided by what it imports, which is what lets one be left out with its
+  dependencies. Plugins are registered through `Agent.Plugins.Add`, activated in
+  order, and refused afterwards rather than accepted and never activated.
+  `ctx.Systray` is never nil: an agent with no tray hands over a menu that draws
+  nothing, so a plugin adds its entries without asking whether anyone is looking
+
+- **`agent.ServerPlugin`, the listener and everything served from it.** The
+  first implementation of the above, and the one `Setup` now builds. It owns the
+  `*unifiedserver.Server`, publishes it to the agent, which mounts its own
+  routes on it, and then mounts the `agent.Endpoint`s listed with it. An
+  endpoint is a route, something with a lifetime, a menu entry, or any
+  combination: the pairing server is one with no route and a listener of its
+  own, the control center is two routes with no lifetime. Two endpoints on one
+  path fail the start, naming the second, rather than leaving the mux to decide
+
+- **`traymenu.Discard`, a driver that draws nothing**, and `traymenu.Section` is
+  now a `Container`, so it can be handed to a plugin, a `List`, a `Radio` or a
+  `Checklist` like any other menu. `Item.Children` reports what landed in a
+  submenu, which is how the tray leaves an empty one hidden
+
 - **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary
   does was still to fork it. The new page is the counterpart to the refactor —
@@ -92,6 +124,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered per connection, and a reader that answers on neither is left alone
 
 ### Changed
+
+- **The tray lives on `traymenu/fynetray`, and `traymenu` has no toolkit.**
+  `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.
+  With the agent handing plugins a menu, `traymenu` had to stop being the place
+  the toolkit arrived: the Fyne driver moved into `traymenu/fynetray` and
+  `traymenu.New(nil)` now draws nothing rather than meaning the real tray.
+  `agent` depends on no GUI toolkit, as before
+
+- **`Runtime.Server` is now `Runtime.Servers`,** the server plugin rather than
+  the listener. A program adds its routes as endpoints instead of mounting them:
+
+  ```go
+  rt.Servers.Add(agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()})
+  ```
+
+  Nothing binds until the agent starts, so a route can be declared before the
+  port it will be served from is bound
+
+- **The pairing server is an endpoint of the server plugin.** `Setup` no longer
+  sets `Config.Pairing`; it lists the pairing server among the endpoints, which
+  registers it as a component the same way. `Config.Pairing` still works for an
+  agent built by hand. What follows is that `Agent.Pairing`, `Bootstrap` and
+  `BootstrapPort` answer only once the plugins have been activated, and the
+  tray's PIN entries are shown then rather than being decided when its menu was
+  declared
 
 - **What a tag cannot support is declared, not branched around.** A write to a
   tag on the reader was confirmed by reading it back; a write to a tag a phone

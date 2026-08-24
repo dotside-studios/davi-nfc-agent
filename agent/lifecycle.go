@@ -97,12 +97,18 @@ func (a *Agent) OnStateChange(fn func(State)) {
 // error rather than silently never starting, which is the trap the console's
 // old attach mechanism fell into.
 func (a *Agent) Use(c Component) error {
+	a.lifecycleMu.Lock()
+	defer a.lifecycleMu.Unlock()
+	return a.useLocked(c)
+}
+
+// useLocked is Use with the lifecycle already held, which is how a plugin
+// registers a component: activation runs under the same lock, so the public
+// method would deadlock against itself.
+func (a *Agent) useLocked(c Component) error {
 	if c == nil {
 		return fmt.Errorf("agent: nil component")
 	}
-
-	a.lifecycleMu.Lock()
-	defer a.lifecycleMu.Unlock()
 
 	if State(a.state.Load()) != StateStopped {
 		return fmt.Errorf("agent: cannot register component %q while %s", c.Name(), a.State())
@@ -113,6 +119,14 @@ func (a *Agent) Use(c Component) error {
 		}
 	}
 	a.components = append(a.components, c)
+
+	// The tray and the console ask the agent for the pairing PIN and the
+	// pairing URLs, so it has to know which of its components answers for
+	// them. Noticed here rather than asked for separately, so a pairing server
+	// registered by a plugin is as reachable as one named in Config.
+	if pairing, ok := c.(*PairingServer); ok {
+		a.pairing.Store(pairing)
+	}
 	return nil
 }
 
@@ -176,6 +190,15 @@ func (a *Agent) Start(devicePath string) error {
 			return nil
 		}
 		return fmt.Errorf("agent: cannot start while %s", a.State())
+	}
+
+	// The plugins go on before anything opens or binds: they are what mount
+	// the routes and register the components this start brings up. A host with
+	// a tray has already done this, with a menu to hang their entries on; this
+	// is the fallback for one that has not, and for a headless run.
+	if err := a.activateLocked(nil); err != nil {
+		a.lifecycleMu.Unlock()
+		return err
 	}
 
 	a.state.Store(int32(StateStarting))
@@ -247,4 +270,10 @@ type lifecycle struct {
 	components []Component
 	runCtx     context.Context
 	runCancel  context.CancelFunc
+
+	// activateErr is what activation decided, kept because it is decided once:
+	// a start that follows a failed activation reports the same failure rather
+	// than running the plugins again over the ones already registered. Guarded
+	// by lifecycleMu, like everything else here.
+	activateErr error
 }

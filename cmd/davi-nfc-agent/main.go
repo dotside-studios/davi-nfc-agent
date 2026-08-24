@@ -74,19 +74,21 @@ func main() {
 	}
 
 	// Nil in a -tags nowebui build, where the control center is not compiled
-	// in. Mounting is all there is to attaching one: a build that wants none
-	// mounts none, and the agent is no wiser either way.
+	// in. Listing it as an endpoint is all there is to attaching one: a build
+	// that wants none lists none, and the agent is no wiser either way.
 	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if consoleServer != nil {
 		// The control API and the console page are deliberately not wrapped in
 		// CORS: one administers the agent and the other is a page, so no other
 		// origin has business calling them.
-		if err := rt.Server.Mount("/control/", consoleServer.Routes()); err != nil {
-			log.Fatalf("Failed to mount the control API: %v", err)
-		}
-		if err := rt.Server.Mount("/", consoleServer.Assets()); err != nil {
-			log.Fatalf("Failed to mount the console: %v", err)
-		}
+		//
+		// Nothing is mounted yet. The server plugin puts these on the listener
+		// when the agent activates it, which is what lets a route be declared
+		// before the port it will be served from is bound.
+		rt.Servers.Add(
+			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: consoleServer.Routes()},
+			agent.Endpoint{Name: "control center", Pattern: "/", Handler: consoleServer.Assets()},
+		)
 
 		// Redraw the console whenever something changes it from elsewhere.
 		rt.Agent.Origins().OnChange(consoleServer.NotifyChange)

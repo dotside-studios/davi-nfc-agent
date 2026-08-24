@@ -71,12 +71,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Nil in a -tags nowebui build. Mounting is all there is to attaching a
-	// control center, so a build that wants none mounts none.
+	// Nil in a -tags nowebui build. Listing it as an endpoint is all there is
+	// to attaching a control center, so a build that wants none lists none.
 	c := console.New(rt.Agent, rt.Settings, rt.Logs)
 	if c != nil {
-		_ = rt.Server.Mount("/control/", c.Routes())
-		_ = rt.Server.Mount("/", c.Assets())
+		rt.Servers.Add(
+			agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
+			agent.Endpoint{Name: "control center", Pattern: "/", Handler: c.Assets()},
+		)
 		rt.Agent.Origins().OnChange(c.NotifyChange)
 		rt.Agent.Devices().OnChange(c.NotifyChange)
 		rt.Agent.OnClientsChange(c.NotifyChange)
@@ -90,9 +92,12 @@ func main() {
 
 `agent.Setup` performs the work the flags imply: it resolves the config
 directory, loads or generates the TLS certificate and the API secret, reads the
-paired devices and the origin allowlist, starts the pairing server, and applies
-stored settings. It returns an `*agent.Runtime` holding the configured agent
-alongside the stores a front end needs.
+paired devices and the origin allowlist, builds the pairing server, and applies
+stored settings. It returns an `*agent.Runtime` holding the configured agent,
+the stores a front end needs, and `Servers`: the plugin that owns the listener
+and everything served from it. Nothing binds until the agent starts, so a route
+can be declared before the port it will be served from is decided. See
+[Plugins](#plugins).
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
@@ -118,6 +123,94 @@ configuration is fixed once the agent exists: it is read back through methods,
 so nothing can rebind the port or withdraw the pairing requirement behind the
 running servers. The settings that may legitimately change while running have
 methods of their own: `SetRequirePairedDevice` and `SetAllowCardType`.
+
+## Plugins
+
+A plugin is a value with one method. It is handed an `agent.AgentContext` once,
+before the agent starts, and registers whatever it wants the agent to run.
+
+```go
+type BackupPlugin struct {
+	Every time.Duration
+}
+
+func (p *BackupPlugin) Activate(ctx agent.AgentContext) error {
+	backups := &backupWorker{every: p.Every, dir: ctx.ConfigDir()}
+
+	ctx.Systray.Add("Back Up Now", traymenu.OnClick(backups.Run))
+	return ctx.Use(backups)
+}
+```
+
+```go
+rt.Agent.Plugins.Add(&BackupPlugin{Every: time.Hour})
+```
+
+Nothing is loaded at run time and nothing is discovered. Which plugins a build
+has is decided by what it imports, so one left out takes its dependencies with
+it, the same way `nfc/pcsc` and the tray do.
+
+The context carries what a plugin needs to wire itself in:
+
+| | |
+|---|---|
+| `ctx.Agent` | The agent, for its configuration and for hooks such as `OnTag` and `OnStateChange` |
+| `ctx.Use(c)` | Registers an `agent.Component`, started and stopped with the agent |
+| `ctx.Systray` | The menu the plugin's entries go on |
+| `ctx.Serve(srv)` | Publishes the listener the agent serves from |
+| `ctx.Mount(pattern, h)` | Adds a route to it |
+| `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Settings()`, `ctx.Logs()` | The agent's log, identity, config directory, preference store and log ring |
+
+`ctx.Systray` is never nil. A headless agent hands over a menu that draws
+nothing, so a plugin adds its entries without asking whether anyone is looking.
+
+A plugin has no `Deactivate`. Anything with a lifetime is a `Component`, which
+the agent starts once the reader and the servers are up and stops before taking
+them down again.
+
+### Activation
+
+Plugins are activated once, in the order they were added, before anything is
+opened or bound. The tray does it as it draws its menu, which is what puts the
+entries on the real one; `Agent.Start` does it if nothing else has. Adding a
+plugin after that is refused rather than accepted and never activated.
+
+Activation is also where a plugin publishes things the agent then answers for,
+the listener and the pairing server among them, so `rt.Agent.BootstrapPort()`
+and `rt.Agent.UnifiedServer` are worth reading only once it has happened.
+
+```go
+// A headless build with no tray to draw their entries on.
+if err := rt.Agent.Activate(nil); err != nil {
+	log.Fatal(err)
+}
+```
+
+A plugin that returns an error fails the agent's start, naming the plugin, and
+the same failure is reported by every start afterwards.
+
+### The server plugin
+
+`agent.ServerPlugin` is the one `Setup` builds. It owns the
+`*unifiedserver.Server`, publishes it to the agent, and mounts what is listed
+with it. An endpoint is a route, something with a lifetime, a menu entry, or any
+combination:
+
+```go
+a.Plugins.Add(&agent.ServerPlugin{
+	Config: unifiedserver.Config{Port: 9470, CertFile: cert, KeyFile: key},
+	Endpoints: []agent.Endpoint{
+		{Name: "pairing", Component: agent.NewPairingServer(pairingConfig)},
+		{Name: "control API", Pattern: "/control/", Handler: c.Routes()},
+		{Name: "control center", Pattern: "/", Handler: c.Assets()},
+	},
+})
+```
+
+The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
+health checks; two endpoints on one path fail the start rather than leaving the
+mux to decide. `rt.Servers.Add` appends to the same list, which is how a program
+puts its own routes on the port `Setup` resolved.
 
 ## Naming your build
 
@@ -158,6 +251,8 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server/tagrouter` | Picks the reader or a device for each client request |
 | `server/unifiedserver` | One listener fronting all of the above |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
+| `traymenu` | Declarative tray menus, with no toolkit behind them |
+| `traymenu/fynetray` | The real tray, on `fyne.io/systray` |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
 | `e2e` | Tests only: an agent wired as on this page, driven over its protocols |
 
@@ -198,10 +293,10 @@ func main() {
 	opts.BootstrapPort = 0 // no pairing server
 	opts.AllowedOrigins = "console.example.com"
 
-	// DevicePortSet marks the port as a decision, so a port persisted in
+	// Explicit.Port marks the port as a decision, so a port persisted in
 	// settings does not quietly replace it.
 	opts.DevicePort = 9470
-	opts.DevicePortSet = true
+	opts.Explicit.Port = true
 
 	rt, err := agent.Setup(opts, pcsc.NewManager())
 	if err != nil {
@@ -223,7 +318,7 @@ func main() {
 }
 ```
 
-Mounting no console routes leaves the agent serving its own: `/ws` and the two
+Listing no console endpoints leaves the agent serving its own: `/ws` and the two
 health checks, with the root falling back to a plain-text banner. `-tags nowebui`
 additionally removes the console from the binary.
 

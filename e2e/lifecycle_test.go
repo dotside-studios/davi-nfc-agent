@@ -74,12 +74,18 @@ func TestRoutesAnswerBeforeTheAgentHasStarted(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
+	// The listener and its routes are what the server plugin brings, so they
+	// exist from activation rather than from Start.
+	if err := rt.Agent.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
 	recorder := &statusRecorder{header: http.Header{}}
 	request, err := http.NewRequest(http.MethodGet, "/ws", nil)
 	if err != nil {
 		t.Fatalf("build the request: %v", err)
 	}
-	rt.Server.Handler().ServeHTTP(recorder, request)
+	rt.Servers.Listener().Handler().ServeHTTP(recorder, request)
 
 	if recorder.status != http.StatusServiceUnavailable {
 		t.Errorf("status = %d before Start, want 503", recorder.status)

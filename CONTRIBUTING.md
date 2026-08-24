@@ -130,7 +130,8 @@ davi-nfc-agent/
 │   ├── deviceserver/    # Auth, and routing between reader and device
 │   └── clientserver/    # Client connection handling logic
 ├── wsconn/              # Write-safe WebSocket wrapper shared by the above
-├── traymenu/            # Declarative tray menus over fyne.io/systray
+├── traymenu/            # Declarative tray menus, with no toolkit behind them
+│   └── fynetray/        # The real tray, on fyne.io/systray
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
 ├── client/              # JavaScript client library
@@ -155,9 +156,11 @@ davi-nfc-agent/
 - Bridge component connects the device and client handlers in-process
 
 **Tray Menu** (`traymenu/`)
-- Declarative menu building on top of `fyne.io/systray`, with clicks delivered
-  as signals rather than channels the caller has to poll
-- A fake driver makes the tray testable with no desktop involved
+- Declarative menu building, with clicks delivered as signals rather than
+  channels the caller has to poll
+- Runs on a driver: `traymenu/fynetray` for the real tray, `NewFake` in tests,
+  `Discard` where there is none. The toolkit, and the cgo it needs on macOS,
+  arrives only with `fynetray`
 - Depends on nothing else in this repository
 - See [traymenu/README.md](traymenu/README.md) for the pattern
 

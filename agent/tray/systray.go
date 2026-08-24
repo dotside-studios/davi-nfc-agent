@@ -20,6 +20,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu/fynetray"
 )
 
 // readerSlotCount bounds the NFC readers offered in the Device submenu, which
@@ -64,13 +65,21 @@ func hostPort(host string, port int) string {
 type App struct {
 	agent         *agent.Agent
 	initialDevice string
-	bootstrapPort int
-	bootstrap     *tls.BootstrapServer // nil if pairing server is disabled
-	console       *console.Server      // nil if the control center is not built in
+	console       *console.Server // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
 	// are added, so there is no central event loop to keep in step with them.
 	menu *traymenu.Menu
+
+	// plugins is the submenu the agent's plugins add their entries to. It is
+	// declared with the rest of the menu and shown only if something lands in
+	// it, so a build with no plugin entries has no empty submenu.
+	plugins *traymenu.Section
+
+	// pairingItems are the entries that only mean anything with a pairing
+	// server. They are declared hidden, because which plugins bring one is not
+	// settled until they have been activated.
+	pairingItems []*traymenu.Item
 
 	// Status section
 	mStatus   *traymenu.Item
@@ -120,7 +129,7 @@ type App struct {
 // New creates the tray on the real system tray. The pairing entries are hidden
 // when the runtime has no pairing server.
 func New(rt *agent.Runtime) *App {
-	return newApp(rt, traymenu.Fyne())
+	return newApp(rt, fynetray.New())
 }
 
 // newApp builds the tray on a given menu driver, so a test can drive the menu
@@ -130,11 +139,17 @@ func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
 		agent:         rt.Agent,
 		settings:      rt.Settings,
 		initialDevice: rt.DevicePath,
-		bootstrapPort: rt.Agent.BootstrapPort(),
-		bootstrap:     rt.Agent.Bootstrap(),
 		menu:          traymenu.New(driver),
 	}
 }
+
+// bootstrap is the pairing server, or nil when this build has none. Asked of
+// the agent each time rather than held: a pairing server brought by a plugin
+// does not exist until the plugins have been activated.
+func (s *App) bootstrap() *tls.BootstrapServer { return s.agent.Bootstrap() }
+
+// bootstrapPort is the port it listens on, 0 when there is none.
+func (s *App) bootstrapPort() int { return s.agent.BootstrapPort() }
 
 // persist writes what the agent holds to the settings file.
 //
@@ -230,6 +245,7 @@ func (s *App) Run() {
 // onReady is called when the systray is ready
 func (s *App) onReady() {
 	s.setupUI()
+	s.activatePlugins()
 	s.autoStartAgent()
 	s.startCardInfoUpdater()
 	s.startServerRestartListener()
@@ -282,6 +298,14 @@ func (s *App) setupUI() {
 
 	s.setupConsoleMenu()
 
+	// Where the plugins put their entries. Declared here so they land in the
+	// menu where this build wants them rather than after Quit, which is where
+	// anything registered later would otherwise go.
+	s.plugins = traymenu.NewSection(s.menu, "Extensions",
+		traymenu.Tooltip("Added by this build's plugins"),
+		traymenu.Hidden(),
+	)
+
 	// The menus open on what the agent is set to, which is not always the
 	// default: a mode restored from settings, or one the launcher set, was
 	// decided before the tray existed. The ones the launcher holds are shown
@@ -330,27 +354,30 @@ func (s *App) setupURLsMenu() {
 		traymenu.OnClick(func() { s.copyValue("phone-pairing URL", s.urls().bootstrap) }),
 	)
 
-	// The PIN entries only mean anything while the pairing server is running.
-	noPairing := s.bootstrap == nil
+	// The PIN entries only mean anything with a pairing server, and whether
+	// there is one is not settled until the plugins have been activated, which
+	// happens after the menu is declared. They start hidden and are shown by
+	// showPairingEntries once the answer is known.
 	s.mPairingPIN = urls.Add("Pairing PIN: --",
 		traymenu.Tooltip("PIN required when pairing a phone"),
 		traymenu.Disabled(),
-		traymenu.HiddenIf(noPairing),
+		traymenu.Hidden(),
 	)
-	urls.Add("  Copy Pairing PIN",
+	copyPIN := urls.Add("  Copy Pairing PIN",
 		traymenu.Tooltip("Copy 6-digit pairing PIN to clipboard"),
-		traymenu.HiddenIf(noPairing),
+		traymenu.Hidden(),
 		traymenu.OnClick(func() {
-			if s.bootstrap != nil {
-				s.copyValue("pairing PIN", s.bootstrap.PIN())
+			if pairing := s.bootstrap(); pairing != nil {
+				s.copyValue("pairing PIN", pairing.PIN())
 			}
 		}),
 	)
-	urls.Add("  Regenerate Pairing PIN",
+	rotatePIN := urls.Add("  Regenerate Pairing PIN",
 		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
-		traymenu.HiddenIf(noPairing),
+		traymenu.Hidden(),
 		traymenu.OnClick(s.handleRotatePIN),
 	)
+	s.pairingItems = []*traymenu.Item{s.mPairingPIN, copyPIN, rotatePIN}
 
 	// API secret entries, only shown if a secret is configured.
 	noSecret := s.agent.APISecret() == ""
@@ -412,6 +439,38 @@ func (s *App) setupCardFilterMenu() {
 	}
 
 	s.cardTypes.OnChange(s.applyCardTypes)
+}
+
+// activatePlugins wires the agent's plugins in, with the tray's own menu for
+// their entries. It runs between declaring the menu, which is the first moment
+// the platform will take an item, and starting the agent, which a plugin's
+// registrations have to precede.
+//
+// A failure is logged and left there: the same one comes back from Start, where
+// the tray already shows a start that did not happen.
+func (s *App) activatePlugins() {
+	if err := s.agent.Activate(s.plugins); err != nil {
+		log.Printf("[systray] %v", err)
+	}
+
+	s.showPairingEntries()
+
+	// An empty section is a submenu that says nothing, so it stays hidden
+	// until a plugin has put something in it.
+	if len(s.plugins.Item().Children()) > 0 {
+		s.plugins.Item().Show()
+	}
+}
+
+// showPairingEntries reveals the PIN entries, now that whether this build has a
+// pairing server is settled.
+func (s *App) showPairingEntries() {
+	if s.bootstrap() == nil {
+		return
+	}
+	for _, item := range s.pairingItems {
+		item.Show()
+	}
 }
 
 // autoStartAgent starts the agent automatically
@@ -530,11 +589,12 @@ func (s *App) showStopped(status string) {
 // handleRotatePIN issues a fresh pairing PIN, which invalidates the URLs that
 // carried the old one.
 func (s *App) handleRotatePIN() {
-	if s.bootstrap == nil {
+	pairing := s.bootstrap()
+	if pairing == nil {
 		return
 	}
 
-	fresh := s.bootstrap.RotatePIN()
+	fresh := pairing.RotatePIN()
 	log.Printf("[systray] Pairing PIN rotated to %s", fresh)
 	s.updateURLs()
 }
@@ -723,10 +783,10 @@ func (s *App) urls() agentURLs {
 
 	// The pairing page is always HTTP, and carries the PIN so a link clicked
 	// from chat goes straight through.
-	if s.bootstrapPort > 0 {
-		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, s.bootstrapPort))
-		if s.bootstrap != nil {
-			urls.bootstrap += "?pin=" + url.QueryEscape(s.bootstrap.PIN())
+	if port := s.bootstrapPort(); port > 0 {
+		urls.bootstrap = fmt.Sprintf("http://%s/", hostPort(ip, port))
+		if pairing := s.bootstrap(); pairing != nil {
+			urls.bootstrap += "?pin=" + url.QueryEscape(pairing.PIN())
 		}
 	}
 	return urls
@@ -744,8 +804,8 @@ func (s *App) updateURLs() {
 	} else {
 		s.mBootstrapURL.SetTitle("Pair Phone: " + urls.bootstrap)
 	}
-	if s.bootstrap != nil {
-		s.mPairingPIN.SetTitle("Pairing PIN: " + s.bootstrap.PIN())
+	if pairing := s.bootstrap(); pairing != nil {
+		s.mPairingPIN.SetTitle("Pairing PIN: " + pairing.PIN())
 	}
 
 	s.updateAPISecretLabel(s.agent.APISecret())

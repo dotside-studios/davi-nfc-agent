@@ -89,7 +89,13 @@ func main() {
 	// The control center, served from the same listener. Nil in a -tags nowebui
 	// build, where there is none compiled in and Endpoints is empty, so this
 	// program needs no build tag of its own.
-	controlCenter := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
+	controlCenter := console.New(console.Config{
+		Agent:    rt.Agent,
+		Settings: rt.Settings,
+		Logs:     rt.Logs,
+		Servers:  servers,
+		Pairing:  pairing,
+	})
 	servers.Add(controlCenter.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,

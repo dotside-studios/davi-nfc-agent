@@ -24,20 +24,37 @@ type Server struct {
 	host *host
 }
 
-// New builds the console for a, and follows what changes it: an origin allowed,
-// a device revoked or a client connecting all redraw an open page. The caller
-// serves it with Endpoints; a build that wants no control center serves none.
-//
-// pairing is the pairing plugin this build runs, or nil for a build that pairs
-// no devices. The agent does not hold one, so whoever built it hands it to
-// whatever displays the PIN.
-func New(a *agent.Agent, store *settings.Store, logs *logbuf.Ring, pairing *agent.PairingPlugin) *Server {
-	h := &host{agent: a, settings: store, pairing: pairing}
+// Config is what the console reports on. The agent is required; the rest are
+// what this build happens to run, and a nil one is reported as absent rather
+// than being an error.
+type Config struct {
+	// Agent is the agent the console administers.
+	Agent *agent.Agent
+
+	// Settings is the preference store a change is written to, and Logs the
+	// ring the log view reads.
+	Settings *settings.Store
+	Logs     *logbuf.Ring
+
+	// Servers is what the agent is served from, for the port and address the
+	// console hands out. Pairing is what issues pairing PINs. The agent holds
+	// neither, so whoever built them passes them here.
+	Servers *agent.ServerPlugin
+	Pairing *agent.PairingPlugin
+}
+
+// New builds the console from cfg, and follows what changes it: an origin
+// allowed, a device revoked or a client connecting all redraw an open page. The
+// caller serves it with Endpoints; a build that wants no control center serves
+// none.
+func New(cfg Config) *Server {
+	a := cfg.Agent
+	h := &host{agent: a, settings: cfg.Settings, servers: cfg.Servers, pairing: cfg.Pairing}
 	info := a.Info()
 	s := &Server{
 		Server: webui.New(webui.Config{
 			Host:    h,
-			Logs:    logs,
+			Logs:    cfg.Logs,
 			Name:    info.Name,
 			Version: info.FullVersion(),
 			Dev:     info.IsDev(),

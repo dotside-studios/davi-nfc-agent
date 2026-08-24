@@ -126,6 +126,16 @@ func (p *ServerPlugin) Add(endpoints ...Endpoint) {
 // the one it built at activation. Nil before activation when neither.
 func (p *ServerPlugin) Listener() *unifiedserver.Server { return p.Server }
 
+// Port is the port being served, which is what a client should be told to
+// connect to. It differs from the agent's configured port after one is saved
+// and before the listener is rebuilt, and is 0 before activation.
+func (p *ServerPlugin) Port() int {
+	if p == nil || p.Server == nil {
+		return 0
+	}
+	return p.Server.Port()
+}
+
 // Activate publishes the listener and puts the endpoints on it.
 //
 // It stops at the first endpoint it cannot register, failing the agent's start.
@@ -133,6 +143,13 @@ func (p *ServerPlugin) Listener() *unifiedserver.Server { return p.Server }
 func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if p.Server == nil {
 		p.Server = unifiedserver.New(p.config(ctx.Agent))
+	}
+	// The agent's own routes go on first, so an endpoint cannot displace /ws
+	// or the health checks.
+	for _, route := range ctx.Agent.Routes() {
+		if err := p.Server.Mount(route.Pattern, route.Handler); err != nil {
+			return fmt.Errorf("the agent's own route %q: %w", route.Pattern, err)
+		}
 	}
 	if err := ctx.Serve(p.Server); err != nil {
 		return err
@@ -292,7 +309,7 @@ func (p *ServerPlugin) clientURL() string {
 	if p.Config.TLSEnabled() {
 		scheme = "wss"
 	}
-	return scheme + "://" + serviceAddress(serviceHost(), p.Server.Port()) + "/ws"
+	return scheme + "://" + serviceAddress(serviceHost(), p.Port()) + "/ws"
 }
 
 func (p *ServerPlugin) deviceURL() string { return p.clientURL() + "?mode=device" }
@@ -307,7 +324,7 @@ func (p *ServerPlugin) endpointURL(endpoint Endpoint) string {
 	if p.Config.TLSEnabled() {
 		scheme = "https"
 	}
-	return scheme + "://" + serviceAddress(serviceHost(), p.Server.Port()) + endpoint.Pattern
+	return scheme + "://" + serviceAddress(serviceHost(), p.Port()) + endpoint.Pattern
 }
 
 // redact shows enough of a secret to tell it apart from the one it replaced,

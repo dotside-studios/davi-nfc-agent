@@ -9,7 +9,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -164,32 +163,36 @@ func (ctx AgentContext) Use(components ...Component) error {
 	return nil
 }
 
-// Serve publishes the listener the agent serves from and mounts the agent's own
-// routes on it: the WebSocket endpoint devices and clients share, and the two
-// health checks.
+// Mounter is whatever the agent is served from: a listener, or anything else a
+// route can be put on. Narrow on purpose, so that publishing one says nothing
+// about what kind of server it is.
+type Mounter interface {
+	Mount(pattern string, handler http.Handler) error
+}
+
+// Serve publishes what the agent is served from, so a plugin registered after
+// this one can add a route with Mount.
 //
-// One plugin does this, before any other mounts a route. A second call, or any
-// call on an agent built with Config.Server, is an error: the listener a route
-// was mounted on is not something to swap underneath it.
-func (ctx AgentContext) Serve(srv *unifiedserver.Server) error {
-	return ctx.Agent.serveLocked(srv)
+// It mounts nothing itself. The agent's own routes are [Agent.Routes], and
+// whoever serves them mounts them, ahead of anything of its own.
+//
+// One plugin publishes, before any other mounts a route. A second call is an
+// error rather than a quiet replacement: what a route was mounted on is not
+// something to swap underneath it.
+func (ctx AgentContext) Serve(m Mounter) error {
+	return ctx.Agent.serveLocked(m)
 }
 
-// Mount adds a route to the listener, as [unifiedserver.Server.Mount] would.
-// Whoever mounts a route decides what stands in front of it: CORS and
-// authentication are the mounter's, since the answer differs per route.
+// Mount adds a route to whatever the agent is served from. Whoever mounts a
+// route decides what stands in front of it: CORS and authentication are the
+// mounter's, since the answer differs per route.
 func (ctx AgentContext) Mount(pattern string, handler http.Handler) error {
-	srv := ctx.Agent.UnifiedServer
-	if srv == nil {
-		return fmt.Errorf("agent: cannot mount %q: no listener has been published; register the plugin that serves one first", pattern)
+	m := ctx.Agent.mounter
+	if m == nil {
+		return fmt.Errorf("agent: cannot mount %q: nothing has been published to serve it; register the plugin that serves one first", pattern)
 	}
-	return srv.Mount(pattern, handler)
+	return m.Mount(pattern, handler)
 }
-
-// Server is the listener published so far, or nil when none has been. A plugin
-// that only wants to mount a route should use Mount, which reports when there
-// is nothing to mount on.
-func (ctx AgentContext) Server() *unifiedserver.Server { return ctx.Agent.UnifiedServer }
 
 // Logger is the agent's log, which is what the control center displays.
 func (ctx AgentContext) Logger() *log.Logger { return ctx.Agent.Logger() }
@@ -263,18 +266,18 @@ func (a *Agent) discardMenu() traymenu.Container {
 	return a.trayMenu
 }
 
-// serveLocked publishes the listener and mounts the agent's own routes on it.
-func (a *Agent) serveLocked(srv *unifiedserver.Server) error {
-	if srv == nil {
-		return fmt.Errorf("agent: nil server")
+// serveLocked records what the agent is served from.
+func (a *Agent) serveLocked(m Mounter) error {
+	if m == nil {
+		return fmt.Errorf("agent: nil mounter")
 	}
-	if a.UnifiedServer != nil {
-		if a.UnifiedServer == srv {
+	if a.mounter != nil {
+		if a.mounter == m {
 			return nil
 		}
-		return fmt.Errorf("agent: a listener is already being served on port %d", a.UnifiedServer.Port())
+		return fmt.Errorf("agent: the agent is already being served")
 	}
 
-	a.UnifiedServer = srv
-	return a.MountOn(srv)
+	a.mounter = m
+	return nil
 }

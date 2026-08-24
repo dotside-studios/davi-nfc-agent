@@ -55,8 +55,8 @@ func TestServerPluginPublishesTheListenerWithTheAgentsRoutes(t *testing.T) {
 	if srv == nil {
 		t.Fatal("no listener after activation")
 	}
-	if a.UnifiedServer != srv {
-		t.Error("the agent is not serving from the plugin's listener")
+	if code := get(t, srv, "/api/v1/health"); code != http.StatusOK {
+		t.Errorf("GET /api/v1/health = %d, want 200", code)
 	}
 	if code := get(t, srv, "/health"); code != http.StatusOK {
 		t.Errorf("GET /health = %d, want 200", code)
@@ -250,8 +250,9 @@ func TestAnAgentWithNoServerPluginServesNothing(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	if rt.Agent.UnifiedServer != nil {
-		t.Error("a listener appeared with no server plugin registered")
+	// Nothing was published to serve them, so a plugin adding a route says so.
+	if err := (AgentContext{Agent: rt.Agent}).Mount("/late", http.NotFoundHandler()); err == nil {
+		t.Error("a route was mounted with nothing published to serve it")
 	}
 }
 
@@ -529,4 +530,31 @@ func names(a *Agent) []string {
 		out = append(out, c.Name())
 	}
 	return out
+}
+
+// The agent's own routes are data it hands over, and whatever serves it mounts
+// them ahead of its own, so nothing can displace them.
+func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
+	patterns := map[string]bool{}
+	for _, route := range quietAgent(t).Routes() {
+		patterns[route.Pattern] = true
+	}
+	for _, want := range []string{"/ws", "/health", "/api/v1/health"} {
+		if !patterns[want] {
+			t.Errorf("Routes() does not carry %q", want)
+		}
+	}
+
+	// An endpoint on one of them fails the start rather than taking it over.
+	a := serverAgent(t, &ServerPlugin{Endpoints: []Endpoint{
+		{Name: "impostor", Pattern: "/health", Handler: http.NotFoundHandler()},
+	}})
+
+	err := a.Activate(nil)
+	if err == nil {
+		t.Fatal("an endpoint displaced one of the agent's own routes")
+	}
+	if !strings.Contains(err.Error(), "impostor") {
+		t.Errorf("error = %q, want it to name the endpoint", err)
+	}
 }

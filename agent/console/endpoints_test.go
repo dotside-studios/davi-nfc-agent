@@ -31,8 +31,8 @@ func quietAgent(t *testing.T) *agent.Agent {
 func TestTheEndpointsServeTheConsoleAndListIt(t *testing.T) {
 	a := quietAgent(t)
 
-	c := New(a, nil, nil, nil)
 	servers := &agent.ServerPlugin{}
+	c := New(Config{Agent: a, Servers: servers})
 	servers.Add(c.Endpoints()...)
 	if err := a.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)

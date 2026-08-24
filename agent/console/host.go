@@ -19,6 +19,7 @@ import (
 type host struct {
 	agent    *agent.Agent
 	settings *settings.Store
+	servers  *agent.ServerPlugin
 	pairing  *agent.PairingPlugin
 	app      Tray
 }
@@ -107,7 +108,7 @@ func (h *host) SelectDevice(devicePath string) error {
 // Port is the port being served, not the one configured. A port saved in the
 // console is bound only once the listener has been restarted, and until then
 // the console must not hand out a URL nothing is listening on.
-func (h *host) Port() int          { return h.agent.ServingPort() }
+func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.agent.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.agent.CertFile() != "" && h.agent.KeyFile() != "" }

@@ -16,7 +16,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -131,14 +130,6 @@ type Config struct {
 	// handler, so neither names the other's types. Nil serves clients only.
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
-	// Server is the listener the agent serves from. The caller builds it and
-	// mounts whatever else it wants served from the same port, which is how a
-	// control center is attached: mount it, or do not and there is none.
-	//
-	// Nil is an agent with no HTTP surface, for a program driving the reader
-	// directly. New mounts the agent's own routes on a non-nil one.
-	Server *unifiedserver.Server
-
 	// Explicit marks what the launcher set deliberately, on the command line,
 	// in the environment, or here. A field marked there belongs to the launcher
 	// for the whole run: no stored preference and no operator may change it.
@@ -155,16 +146,10 @@ type Config struct {
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// UnifiedServer is the listener the device and client endpoints are served
-	// from, routing each /ws connection to the device driver or the client
-	// server. It is the one the caller supplied, held for the agent's whole
-	// life: a stop leaves it stopped rather than dropping it, so a restart
-	// serves from the same listener with the same routes mounted on it.
-	//
-	// Router decides which tag source a client request applies to, and
-	// DeviceAuth gates the device endpoint. Both are nil until Start.
-	UnifiedServer *unifiedserver.Server
-	ClientServer  *clientserver.Server
+	// ClientServer fans a scan out to every connected client. Router decides
+	// which tag source a client request applies to, and DeviceAuth gates the
+	// device endpoint. All three are nil until Start.
+	ClientServer *clientserver.Server
 
 	// serving is what the mounted routes dispatch to, replaced on every start
 	// and cleared on stop.
@@ -241,6 +226,10 @@ type Agent struct {
 	restartHooks      []func()
 	serverRestartChan chan struct{} // Signals when servers are restarted
 
+	// mounter is what the agent's routes are served from, published by
+	// whichever plugin serves them. Nil is an agent serving no HTTP at all.
+	mounter Mounter
+
 	// devicePath is the reader Start resolved to, kept so a restart reopens the
 	// same one. Atomic for the same reason as reader: the console and the tray
 	// ask for it through CurrentDevicePath from their own goroutines while a
@@ -309,15 +298,6 @@ func New(cfg Config) *Agent {
 		})
 	}
 
-	// The agent's own routes go on before the caller's, so a mount cannot
-	// displace /ws or the health checks.
-	if cfg.Server != nil {
-		a.UnifiedServer = cfg.Server
-		if err := a.MountOn(cfg.Server); err != nil {
-			logger.Printf("Failed to mount the agent's routes: %v", err)
-		}
-	}
-
 	return a
 }
 
@@ -341,16 +321,6 @@ func (a *Agent) SettingsStore() *settings.Store { return a.settingsStore }
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none.
 func (a *Agent) Logs() *logbuf.Ring { return a.logs }
-
-// ServingPort is the port actually being served, which is what a client should
-// be told to connect to. It differs from DevicePort after a port is saved and
-// before the listener is rebound.
-func (a *Agent) ServingPort() int {
-	if a.UnifiedServer != nil {
-		return a.UnifiedServer.Port()
-	}
-	return a.DevicePort()
-}
 
 // DevicePort is the port the agent serves on, which a saved preference can
 // change; the listener keeps the port it is bound on until it is rebound.

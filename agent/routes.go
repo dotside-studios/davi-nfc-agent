@@ -5,14 +5,18 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 )
 
-// MountOn registers the agent's own routes on a server: the WebSocket endpoint
-// both devices and clients connect to, and the two health checks.
-//
-// Called for you when Config.Server is set. Call it yourself when building the
-// server by hand, before starting either.
+// Route is one of the agent's own routes, for whatever serves it to mount.
+type Route struct {
+	Pattern string
+	Handler http.Handler
+}
+
+// Routes are the agent's own: the WebSocket endpoint both devices and clients
+// connect to, and the two health checks. Whatever serves the agent mounts
+// these, and should mount them before anything of its own, so that nothing can
+// displace them.
 //
 // The handlers resolve what they need per request rather than capturing it, so
 // they can be mounted before the agent starts and keep working across a restart
@@ -21,14 +25,12 @@ import (
 // CORS is applied here rather than by the listener, because the answer differs
 // per route: these are called cross-origin by web apps, while a control API or
 // a console page mounted alongside them should not be.
-func (a *Agent) MountOn(srv *unifiedserver.Server) error {
-	if err := srv.Mount("/ws", server.CORS(a.wsHandler())); err != nil {
-		return err
+func (a *Agent) Routes() []Route {
+	return []Route{
+		{Pattern: "/ws", Handler: server.CORS(a.wsHandler())},
+		{Pattern: "/health", Handler: server.CORS(a.healthHandler())},
+		{Pattern: "/api/v1/health", Handler: server.CORS(a.healthHandler())},
 	}
-	if err := srv.Mount("/health", server.CORS(a.healthHandler())); err != nil {
-		return err
-	}
-	return srv.Mount("/api/v1/health", server.CORS(a.healthHandler()))
 }
 
 // wsHandler routes a connection to the device driver or the client server by

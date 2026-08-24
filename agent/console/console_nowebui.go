@@ -19,8 +19,17 @@ import (
 // Server is the absent control center.
 type Server struct{}
 
+// Config is what a console would report on; this build has none.
+type Config struct {
+	Agent    *agent.Agent
+	Settings *settings.Store
+	Logs     *logbuf.Ring
+	Servers  *agent.ServerPlugin
+	Pairing  *agent.PairingPlugin
+}
+
 // New reports that there is no console in this build.
-func New(*agent.Agent, *settings.Store, *logbuf.Ring, *agent.PairingPlugin) *Server { return nil }
+func New(Config) *Server { return nil }
 
 func (s *Server) Routes() http.Handler { return nil }
 

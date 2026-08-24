@@ -83,7 +83,13 @@ func main() {
 	// The control center, served from the same listener and listed with the
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
 	// so this program needs no build tag of its own.
-	c := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
+	c := console.New(console.Config{
+		Agent:    rt.Agent,
+		Settings: rt.Settings,
+		Logs:     rt.Logs,
+		Servers:  servers,
+		Pairing:  pairing,
+	})
 	servers.Add(c.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,
@@ -217,9 +223,9 @@ the same failure is reported by every start afterwards.
 
 ### The server plugin
 
-`agent.ServerPlugin` owns the `*unifiedserver.Server`, publishes it to the
-agent, and mounts what is listed with it. An endpoint is a route, something with
-a lifetime, a menu entry, or any combination:
+`agent.ServerPlugin` owns the `*unifiedserver.Server` and mounts everything on
+it: the agent's own routes first, then what is listed here. An endpoint is a
+route, something with a lifetime, a menu entry, or any combination:
 
 ```go
 servers := &agent.ServerPlugin{Endpoints: []agent.Endpoint{
@@ -261,9 +267,16 @@ agent was set up with. Set `Config` for a listener that differs from them, or
 &agent.ServerPlugin{Config: unifiedserver.Config{Port: 9480, CertFile: cert, KeyFile: key}}
 ```
 
-The agent's own routes go on first, so an endpoint cannot displace `/ws` or the
-health checks; two endpoints on one path fail the start rather than leaving the
-mux to decide.
+`agent.Routes` is what the agent serves of its own: `/ws`, where devices and
+clients both connect, and `/health` with `/api/v1/health` beside it. The agent
+holds no listener and mounts nothing itself; it hands those over and whatever
+serves it puts them on, ahead of anything of its own. An endpoint on one of
+their paths fails the start, as two endpoints on one path do, rather than
+leaving the mux to decide.
+
+`ctx.Serve` is how a plugin says it is what the agent is served from, which is
+what backs `ctx.Mount` for the plugins registered after it. It takes an
+`agent.Mounter`, one method wide, so the agent never names a server type.
 
 The listener is bound by a component the plugin registers, so it comes up once
 the agent is serving and goes down before it. `Certificates` watches for a
@@ -278,7 +291,7 @@ The console is two endpoints of the server plugin, so it is served from the
 agent's port and listed with the other addresses:
 
 ```go
-c := console.New(rt.Agent, rt.Settings, rt.Logs, pairing)
+c := console.New(console.Config{Agent: rt.Agent, Settings: rt.Settings, Logs: rt.Logs, Servers: servers, Pairing: pairing})
 servers.Add(c.Endpoints()...)
 ```
 

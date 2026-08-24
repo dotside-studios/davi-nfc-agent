@@ -133,6 +133,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now follows the stores that redraw an open page itself, and `-tags nowebui`
   returns no endpoints, so a program needs no build tag of its own
 
+- **The agent holds no listener.** `Agent.Routes` is what it serves of its own,
+  `/ws` and the two health checks, as data for whatever serves it to mount;
+  `ServerPlugin` mounts them ahead of its endpoints. Gone with the inversion:
+  `Config.Server`, `Agent.UnifiedServer`, `Agent.MountOn` and
+  `Agent.ServingPort`, which is `ServerPlugin.Port` now. `AgentContext.Serve`
+  takes an `agent.Mounter`, one method wide, so the agent names no server type
+  at all, and `console.New` takes a `console.Config` carrying the server and
+  pairing plugins it reports on
+
 - **Reissuing a certificate is the event; binding again is what the listener
   does about it.** `tls.Manager` reports every reissue on
   `CertificateWatcher.WatchReissues`, whether it made one itself for a change of

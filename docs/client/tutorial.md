@@ -178,7 +178,5 @@ what stops a write meant for one tag from landing on another. See
 You have a page that reads tags, writes to them, and won't write to the wrong
 one. From here:
 
-- [How-to guides](how-to.md) — recipes for specific tasks: other record kinds,
-  locking, raw APDU exchanges, React
-- [Reference](reference.md) — every method, event and type
+- [The library docs](README.md) — recipes and the full API
 - [api.md](../api.md) — the protocol underneath the library

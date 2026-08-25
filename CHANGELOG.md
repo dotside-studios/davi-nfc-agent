@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Events().Tag` carries every scan the agent broadcasts, so a program embedding
   the agent acts on cards without connecting to its own WebSocket. The broadcast
   to clients is unaffected
+- `Events().Reader` carries the reader's status and `Events().Readers` the
+  readers that can be picked, which used to reach the WebSocket clients and
+  nothing else. `Agent.Readers` is the matching read, filtered so a phone is
+  never offered as a reader to pin
 - `event.Signal`, the fan-out primitive behind all of it, extracted from
   `traymenu`, which now aliases it
 - Explicit agent lifecycle: `Agent.State` reports `stopped`, `starting`,
@@ -152,6 +156,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The tray follows the agent rather than only its own clicks. A mode, filter or
+  feedback setting changed from the console left the tray's menu showing the old
+  value, a device paired elsewhere did not appear, and an agent that stopped on
+  its own left the tray offering Stop
+- The tray no longer offers a phone as a reader to pin. It listed the manager's
+  devices raw, where the console filtered them through `nfc.ListReaders`;
+  choosing one pinned the reader to a device that is never opened
 - More than one subscriber can follow devices and origins. `DeviceRegistry.OnChange`,
   `OriginStore.OnChange` and `OriginStore.OnBlocked` stored a single callback, so
   the last registration replaced the previous one: with the console and the tray
@@ -231,6 +242,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The tray's 500ms card poll and its direct subscription to the NFC manager's
+  device-change channel. Both are `Agent.Events()` subscriptions now
 - The settings file and everything that arbitrated with it. Preferences were
   persisted to `settings.json` and read back at startup, which is what made three
   shapes necessary for six values. The agent holds them now and nothing writes

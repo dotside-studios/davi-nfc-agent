@@ -526,11 +526,13 @@ it runs on every emission; the connection it returns removes it again.
 | `Preferences` | The preferences after a change, whoever made it |
 | `Clients` | The number of connected clients |
 | `Servers` | The port the listeners are bound on, after a restart |
+| `Reader` | The reader's status: connected, and whether a card is on it |
+| `Readers` | The readers that can be picked, when the set changes |
 | `Devices` | The paired devices, after a pairing or a revocation |
 | `Origins` | The allowlist, after an edit |
 | `Blocked` | Each origin refused a connection |
 | `Tag` | Every scan the agent broadcasts |
-| `Any` | The kind of every change above, except scans |
+| `Any` | The kind of every change above, except scans and reader status |
 
 ```go
 conn := rt.Agent.Events().Preferences.Connect(func(p agent.Preferences) {
@@ -540,9 +542,10 @@ defer conn.Disconnect()
 ```
 
 `Any` is for a surface that redraws rather than acts on the value, so it carries
-an `agent.Change` naming what moved instead of the value itself. Scans are left
-out of it: a page redrawing per card is not what a subscriber to "something
-changed" is asking for.
+an `agent.Change` naming what moved instead of the value itself. Scans and
+reader status are left out of it: a page redrawing per card is not what a
+subscriber to "something changed" is asking for. Subscribe to `Tag` and `Reader`
+by name for those.
 
 Handlers run on the goroutine that made the change, in the order they connected,
 so they must not block. Work that may take time belongs on a channel of your

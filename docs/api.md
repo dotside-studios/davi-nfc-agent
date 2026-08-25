@@ -44,8 +44,8 @@ Store all three. `deviceToken` is presented on every later connection, as
 `?secret=` or `Authorization: Bearer`. `publicKeyPin` is how the device
 recognizes this agent again. See [TLS & Certificates](#tls--certificates).
 
-**The token is shown once.** The agent keeps only its hash, so a lost token
-means pairing again rather than looking it up.
+The token is shown once. The agent keeps only its hash, so a lost token means
+pairing again.
 
 Each device holds its own credential, so one can be revoked from the tray under
 **Paired Devices** without disturbing the others. The shared API secret still
@@ -65,8 +65,8 @@ upgrading strands nothing.
 pairing admits a device. Turn it on once the devices you care about have
 paired. With none paired, every device connection is refused.
 
-**Browser consoles are unaffected.** A browser has no way to pair, and is gated
-by the origin allowlist instead. This setting governs the device endpoint only.
+Browser consoles are unaffected: a browser has no way to pair and is gated by
+the origin allowlist instead. This setting governs the device endpoint only.
 
 The tray toggle takes effect immediately, so the policy can be tried against a
 real device without restarting.
@@ -152,8 +152,8 @@ for the tag they describe. See [Tag Capabilities](#tag-capabilities).
 A reader holding a tag in its field can act on it until it leaves, so it omits
 `maxHoldMs` and the agent may take as long as it likes. A phone need not be so
 lucky: CoreNFC connects a tag for roughly twenty seconds and cannot renew that,
-so an iOS device declares `"maxHoldMs": 20000` and everything the agent wants
-done must fit inside it.
+so an iOS device declares `"maxHoldMs": 20000`, and everything the agent does
+with the tag must fit inside it.
 
 The deadline for a particular tag is the arrival of its `tagScanned` plus
 `maxHoldMs`. That sum is optimistic, since the tag was already connected when
@@ -161,9 +161,8 @@ the message was sent, so leave margin rather than treating it as exact. A hold
 that ends early, because the tag was pulled or the session was invalidated,
 arrives as `tagRemoved` like any other departure.
 
-**It is advice, not permission.** A device that declares nothing is open-ended,
-which is how every device behaved before this field existed. Use it to decide
-what is worth attempting; never to refuse a device that stayed silent.
+The field is advisory. A device that declares nothing places no bound. Use it
+to decide what to attempt; do not refuse a device that omitted it.
 
 Capability is a set rather than a level: a PN532 reader can declare
 `canTransceive` and MIFARE Classic support that an iPhone cannot, while the
@@ -890,12 +889,11 @@ The agent finds whichever source is holding that tag, its own reader or a
 paired device, and refuses the request if none is. It does not matter which
 scanned most recently, or whether anything has been scanned since.
 
-That refusal is the point. The agent used to route by preference rather than by
-name: its own reader while it reported a card, otherwise the most recent remote
-scan. Preference is re-evaluated when the request arrives, not when the tag was
-scanned, so lifting a card in between moved the request to a phone's tag. A
-payload encoded for one tag was written to another, irreversibly so when the
-request also locked, and there was no field with which to say otherwise.
+Naming the tag is what makes the target deterministic. Resolving instead by
+whichever source scanned most recently is evaluated when the request arrives,
+not when the tag was scanned, so a card lifted in between moves the write to a
+different tag: a payload encoded for one tag lands on another, irreversibly so
+when the request also locks.
 
 A request whose tag is not present fails with `NO_CARD` and is never applied
 somewhere else. It is retryable: present the tag again and the same request
@@ -1089,9 +1087,8 @@ string, and a structured payload:
 `code` has always been present and its strings are stable. `retryable`, `op`,
 and `tagUID` are additive: a client reading only `code` is unaffected.
 
-**`retryable` is the field worth acting on.** It answers whether repeating the
-identical request could plausibly succeed. Combined with `code` it gives three
-distinct outcomes:
+`retryable` answers whether repeating the identical request could plausibly
+succeed. Combined with `code` it gives three distinct outcomes:
 
 | Condition | Meaning | What a client should do |
 |-----------|---------|-------------------------|

@@ -18,5 +18,5 @@ func (s *App) setupFeedbackMenu() {
 // on disk.
 func (s *App) handleReaderFeedback() {
 	s.agent.SetReaderFeedback(!s.mReaderFeedback.Checked())
-	s.SyncPreferencesToMenu(trayPreferences(s.agent))
+	s.SyncPreferencesToMenu(s.agent.Preferences())
 }

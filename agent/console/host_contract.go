@@ -3,6 +3,7 @@
 package console
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
@@ -60,11 +61,11 @@ type Host interface {
 
 	// Preferences is what the agent is set to, and the console's only source
 	// for one, so the console cannot show a preference the agent is not using.
-	Preferences() Preferences
+	Preferences() agent.Preferences
 
 	// ApplyPreferences changes the agent and answers with what it holds
 	// afterwards, which is not necessarily what was asked for.
-	ApplyPreferences(mutate func(*Preferences)) Preferences
+	ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferences
 }
 
 // PairedDevice is the console's view of a stored device credential.

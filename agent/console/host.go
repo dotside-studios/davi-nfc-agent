@@ -272,43 +272,31 @@ func (h *host) SetOriginCheckDisabled(on bool) {
 	}
 }
 
-// Preferences comes from the agent, so the console shows what is in force,
+// agent.Preferences comes from the agent, so the console shows what is in force,
 // such as a mode switched from the tray.
-func (h *host) Preferences() Preferences {
-	return asWebUIPreferences(h.agent.Preferences())
+func (h *host) Preferences() agent.Preferences {
+	return h.agent.Preferences()
 }
 
 // ApplyPreferences changes the agent and answers with what it holds afterwards,
 // which is not necessarily what was asked for. Nothing is persisted: a change
 // lasts as long as the agent runs.
-func (h *host) ApplyPreferences(mutate func(*Preferences)) Preferences {
-	next := asWebUIPreferences(h.agent.Preferences())
+func (h *host) ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferences {
+	next := h.agent.Preferences()
 	mutate(&next)
 
-	h.agent.SetReaderMode(nfc.ParseReaderMode(next.Mode))
+	h.agent.SetReaderMode(next.Mode)
 	h.agent.SetCardTypeFilter(next.CardTypes)
 	h.agent.SetPinnedDevice(next.DevicePath)
 	h.agent.SetDevicePort(next.Port)
 	h.agent.SetRequirePairedDevice(next.RequirePairedDevice)
 	h.agent.SetReaderFeedback(next.ReaderFeedback)
 
-	applied := asWebUIPreferences(h.agent.Preferences())
+	applied := h.agent.Preferences()
 	if h.app != nil {
 		h.app.SyncPreferencesToMenu(applied)
 	}
 	return applied
-}
-
-// asWebUIPreferences is the console's view of what the agent holds.
-func asWebUIPreferences(p agent.Preferences) Preferences {
-	return Preferences{
-		Mode:                p.ModeName,
-		CardTypes:           p.CardTypes,
-		DevicePath:          p.DevicePath,
-		Port:                p.Port,
-		RequirePairedDevice: p.RequirePairedDevice,
-		ReaderFeedback:      p.ReaderFeedback,
-	}
 }
 
 // remoteManager returns the remote device manager, held either directly or

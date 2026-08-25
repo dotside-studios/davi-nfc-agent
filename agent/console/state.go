@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"net"
 	"os"
 	"runtime"
@@ -24,15 +25,15 @@ import (
 // a console showing read-only while the reader writes misleads the operator
 // about what the reader will do to a card.
 type State struct {
-	Agent    AgentInfo    `json:"agent"`
-	Reader   ReaderInfo   `json:"reader"`
-	Server   ServerInfo   `json:"server"`
-	Security SecurityInfo `json:"security"`
-	Settings Preferences  `json:"settings"`
-	Devices  []DeviceInfo `json:"devices"`
-	Clients  []ClientInfo `json:"clients"`
-	Origins  OriginsInfo  `json:"origins"`
-	Capture  CaptureInfo  `json:"capture"`
+	Agent    AgentInfo         `json:"agent"`
+	Reader   ReaderInfo        `json:"reader"`
+	Server   ServerInfo        `json:"server"`
+	Security SecurityInfo      `json:"security"`
+	Settings agent.Preferences `json:"settings"`
+	Devices  []DeviceInfo      `json:"devices"`
+	Clients  []ClientInfo      `json:"clients"`
+	Origins  OriginsInfo       `json:"origins"`
+	Capture  CaptureInfo       `json:"capture"`
 }
 
 // AgentInfo covers identity and lifecycle.

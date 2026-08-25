@@ -5,6 +5,7 @@ package console
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"log"
 )
@@ -39,7 +40,7 @@ func (c *Server) dispatch(req action) (any, error) {
 		if err := c.host.SelectDevice(params.DevicePath); err != nil {
 			return nil, err
 		}
-		c.host.ApplyPreferences(func(s *Preferences) { s.DevicePath = params.DevicePath })
+		c.host.ApplyPreferences(func(s *agent.Preferences) { s.DevicePath = params.DevicePath })
 		return nil, nil
 
 	case "reader.setMode":
@@ -54,7 +55,7 @@ func (c *Server) dispatch(req action) (any, error) {
 		default:
 			return nil, fmt.Errorf("unknown mode %q", params.Mode)
 		}
-		return nil, c.applyPreferences(func(s *Preferences) { s.Mode = params.Mode })
+		return nil, c.applyPreferences(func(s *agent.Preferences) { s.Mode = nfc.ParseReaderMode(params.Mode) })
 
 	case "reader.setCardTypes":
 		var params struct {
@@ -63,17 +64,17 @@ func (c *Server) dispatch(req action) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.applyPreferences(func(s *Preferences) { s.CardTypes = params.CardTypes })
+		return nil, c.applyPreferences(func(s *agent.Preferences) { s.CardTypes = params.CardTypes })
 
 	case "settings.save":
 		// The whole snapshot, as the console received it from the agent and
 		// edited one field of. Replacing rather than merging is what makes an
 		// unticked card type stick.
-		var params Preferences
+		var params agent.Preferences
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.applyPreferences(func(s *Preferences) { *s = params })
+		return nil, c.applyPreferences(func(s *agent.Preferences) { *s = params })
 
 	case "clients.disconnect":
 		var params struct {
@@ -106,7 +107,7 @@ func (c *Server) dispatch(req action) (any, error) {
 			return nil, err
 		}
 		// Persisted, unlike the tray's session-only version of this toggle.
-		return nil, c.applyPreferences(func(s *Preferences) { s.RequirePairedDevice = params.Enabled })
+		return nil, c.applyPreferences(func(s *agent.Preferences) { s.RequirePairedDevice = params.Enabled })
 
 	case "origins.allow":
 		var params struct {
@@ -175,7 +176,7 @@ func (c *Server) dispatch(req action) (any, error) {
 
 // applyPreferences changes the agent. What it holds afterwards arrives in the
 // next snapshot, so nothing here reads the answer back.
-func (c *Server) applyPreferences(mutate func(*Preferences)) error {
+func (c *Server) applyPreferences(mutate func(*agent.Preferences)) error {
 	c.host.ApplyPreferences(mutate)
 	return nil
 }

@@ -1,22 +1,80 @@
 package agent
 
 import (
+	"encoding/json"
 	"sort"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// Preferences are what an operator can change while the agent runs. The agent
-// holds them and nothing here writes them anywhere: a program that wants one to
-// outlive the process reads it back and persists it however it likes.
+// Preferences are what an operator can change while the agent runs, and the
+// console's only source for one, so it cannot show something the agent is not
+// doing.
+//
+// The agent holds them and nothing here writes them anywhere: a program that
+// wants one to outlive the process reads it back and persists it however it
+// likes.
 type Preferences struct {
-	Mode                nfc.ReaderMode `json:"-"`
-	ModeName            string         `json:"mode"`
-	CardTypes           []string       `json:"cardTypes"`
-	DevicePath          string         `json:"devicePath"`
-	Port                int            `json:"port"`
-	RequirePairedDevice bool           `json:"requirePairedDevice"`
-	ReaderFeedback      bool           `json:"readerFeedback"`
+	// Mode is the reader access mode.
+	Mode nfc.ReaderMode
+
+	// CardTypes is the card-type allowlist. Empty allows every type, including
+	// one this build has never heard of.
+	CardTypes []string
+
+	// DevicePath pins a reader. Empty is auto-detect.
+	DevicePath string
+
+	// Port is the port the agent is set to serve on. A listener keeps the one
+	// it is bound on until it is restarted.
+	Port int
+
+	RequirePairedDevice bool
+	ReaderFeedback      bool
+}
+
+// preferencesJSON is the wire shape. The mode travels as its name, so a client
+// reads and writes "readwrite" rather than this package's constant, and the
+// name is the only representation on the wire: a second field holding the same
+// value is one that can disagree with it.
+type preferencesJSON struct {
+	Mode                string   `json:"mode"`
+	CardTypes           []string `json:"cardTypes"`
+	DevicePath          string   `json:"devicePath"`
+	Port                int      `json:"port"`
+	RequirePairedDevice bool     `json:"requirePairedDevice"`
+	ReaderFeedback      bool     `json:"readerFeedback"`
+}
+
+func (p Preferences) MarshalJSON() ([]byte, error) {
+	return json.Marshal(preferencesJSON{
+		Mode:                p.Mode.String(),
+		CardTypes:           p.CardTypes,
+		DevicePath:          p.DevicePath,
+		Port:                p.Port,
+		RequirePairedDevice: p.RequirePairedDevice,
+		ReaderFeedback:      p.ReaderFeedback,
+	})
+}
+
+// UnmarshalJSON reads the wire shape. An unrecognised mode name reads as
+// read/write, which is [nfc.ParseReaderMode]'s answer: a client that means a
+// specific mode should use reader.setMode, which refuses a name it does not
+// know.
+func (p *Preferences) UnmarshalJSON(data []byte) error {
+	var w preferencesJSON
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	*p = Preferences{
+		Mode:                nfc.ParseReaderMode(w.Mode),
+		CardTypes:           w.CardTypes,
+		DevicePath:          w.DevicePath,
+		Port:                w.Port,
+		RequirePairedDevice: w.RequirePairedDevice,
+		ReaderFeedback:      w.ReaderFeedback,
+	}
+	return nil
 }
 
 // Preferences reports what the agent is set to. The console draws from this
@@ -27,10 +85,8 @@ func (a *Agent) Preferences() Preferences {
 		return Preferences{}
 	}
 
-	mode := a.CurrentReaderMode()
 	return Preferences{
-		Mode:                mode,
-		ModeName:            mode.String(),
+		Mode:                a.CurrentReaderMode(),
 		CardTypes:           a.CardTypeFilter(),
 		DevicePath:          a.CurrentPinnedDevice(),
 		Port:                a.DevicePort(),

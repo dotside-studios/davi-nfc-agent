@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
+- One `Preferences` type. `agent.Preferences` is what the agent holds and what
+  the console and the tray both take; `console.Preferences` is gone, along with
+  the converter between them. The reader mode is an `nfc.ReaderMode` throughout
+  and travels as its name on the wire, so the `ModeName` field that held the
+  same value a second way is gone too. The JSON shape is unchanged
 - `wsconn` moved to `server/wsconn`. `server.SafeConn` and `server.NewSafeConn`,
   which were aliases onto it, are gone: take `wsconn.SafeConn` directly
 - `ServerPlugin` and `PairingPlugin` no longer take a `*TrustPlugin`. Each takes

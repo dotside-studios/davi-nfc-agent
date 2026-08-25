@@ -74,14 +74,13 @@ func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
 }
 
 // SyncPreferencesToMenu reflects a change made elsewhere.
-func (s *App) SyncPreferencesToMenu(next console.Preferences) {
+func (s *App) SyncPreferencesToMenu(next agent.Preferences) {
 	if s.modes == nil {
 		return
 	}
 
-	mode := nfc.ParseReaderMode(next.Mode)
-	s.modes.Set(mode)
-	s.mModeMenu.SetTitle("Mode: " + modeName(mode))
+	s.modes.Set(next.Mode)
+	s.mModeMenu.SetTitle("Mode: " + modeName(next.Mode))
 
 	s.cardTypes.Set(next.CardTypes)
 
@@ -157,7 +156,7 @@ func (s *App) setupUI() {
 
 	// The menus open on what the agent is set to, which is not always the
 	// default: what the launcher set was decided before the tray existed.
-	s.SyncPreferencesToMenu(trayPreferences(s.agent))
+	s.SyncPreferencesToMenu(s.agent.Preferences())
 
 	s.menu.AddSeparator()
 
@@ -339,7 +338,7 @@ func (s *App) handleModeSwitch(mode nfc.ReaderMode) {
 
 	// From the agent, not from the click: a mode the launcher holds leaves the
 	// tick where it was rather than showing a mode the reader is not in.
-	s.SyncPreferencesToMenu(trayPreferences(s.agent))
+	s.SyncPreferencesToMenu(s.agent.Preferences())
 	log.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
 }
 
@@ -359,7 +358,7 @@ func modeName(mode nfc.ReaderMode) string {
 // up when none of them are.
 func (s *App) applyCardTypes(types []string) {
 	s.agent.SetCardTypeFilter(types)
-	s.SyncPreferencesToMenu(trayPreferences(s.agent))
+	s.SyncPreferencesToMenu(s.agent.Preferences())
 }
 
 // SwitchDevice switches to a different NFC device
@@ -461,19 +460,5 @@ func (s *App) updateCardType(cardType string) {
 		s.mCardType.SetTitle("Card Type: None")
 	} else {
 		s.mCardType.SetTitle("Card Type: " + cardType)
-	}
-}
-
-// trayPreferences is the tray's view of what the agent holds, in the shape the
-// console hands it when a change is made there.
-func trayPreferences(a *agent.Agent) console.Preferences {
-	p := a.Preferences()
-	return console.Preferences{
-		Mode:                p.ModeName,
-		CardTypes:           p.CardTypes,
-		DevicePath:          p.DevicePath,
-		Port:                p.Port,
-		RequirePairedDevice: p.RequirePairedDevice,
-		ReaderFeedback:      p.ReaderFeedback,
 	}
 }

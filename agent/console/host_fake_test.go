@@ -4,6 +4,7 @@ package console
 
 import (
 	"errors"
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"sync"
 	"time"
@@ -43,7 +44,7 @@ type fakeHost struct {
 	// settings stands in for the agent's live configuration, which is what the
 	// real host answers with. The console reads a preference from here and
 	// nowhere else.
-	settings Preferences
+	settings agent.Preferences
 
 	// Recorded calls, so a test can assert an action reached the agent.
 	started, stopped, quit, restarted int
@@ -66,7 +67,7 @@ func newFakeHost() *fakeHost {
 		port:          9470,
 		bootstrapPort: 9472,
 		apiSecret:     "test-secret",
-		settings:      Preferences{Mode: nfc.ModeNameReadWrite},
+		settings:      agent.Preferences{Mode: nfc.ModeReadWrite},
 	}
 }
 
@@ -218,7 +219,7 @@ func (h *fakeHost) RevokeOrigin(origin string) error {
 	return nil
 }
 
-func (h *fakeHost) Preferences() Preferences {
+func (h *fakeHost) Preferences() agent.Preferences {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.settings
@@ -226,7 +227,7 @@ func (h *fakeHost) Preferences() Preferences {
 
 // ApplyPreferences answers with what the agent then holds, as the real host
 // does. Nothing is persisted: a change lasts as long as the agent runs.
-func (h *fakeHost) ApplyPreferences(mutate func(*Preferences)) Preferences {
+func (h *fakeHost) ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferences {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -196,8 +195,8 @@ func TestModeMenuHoldsWithoutAReader(t *testing.T) {
 	if got := agent.CurrentReaderMode(); got != nfc.ModeWriteOnly {
 		t.Errorf("agent mode = %v, want ModeWriteOnly", got)
 	}
-	if got := agent.Preferences().ModeName; got != nfc.ModeNameWriteOnly {
-		t.Errorf("agent settings mode = %q, want %q", got, nfc.ModeNameWriteOnly)
+	if got := agent.Preferences().Mode; got != nfc.ModeWriteOnly {
+		t.Errorf("agent settings mode = %v, want %v", got, nfc.ModeWriteOnly)
 	}
 }
 
@@ -206,8 +205,8 @@ func TestSyncPreferencesToMenu(t *testing.T) {
 	app, _ := newTestTray(t, agent)
 
 	cardType := nfc.GetAllCardTypes()[0]
-	app.SyncPreferencesToMenu(console.Preferences{
-		Mode:           nfc.ModeNameWriteOnly,
+	app.SyncPreferencesToMenu(nfcagent.Preferences{
+		Mode:           nfc.ModeWriteOnly,
 		CardTypes:      []string{cardType},
 		ReaderFeedback: true,
 	})
@@ -229,7 +228,7 @@ func TestSyncPreferencesToMenu(t *testing.T) {
 	}
 
 	// And back to no filter at all.
-	app.SyncPreferencesToMenu(console.Preferences{Mode: nfc.ModeNameReadWrite})
+	app.SyncPreferencesToMenu(nfcagent.Preferences{Mode: nfc.ModeReadWrite})
 	if !app.cardTypes.All().Checked() || app.cardTypes.Item(cardType).Checked() {
 		t.Error("clearing the stored card types did not restore All Types")
 	}

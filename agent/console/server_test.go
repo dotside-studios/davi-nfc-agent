@@ -177,8 +177,8 @@ func TestSettingsActionPersistsAndApplies(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
-	if got := host.Preferences().Mode; got != nfc.ModeNameReadOnly {
-		t.Errorf("stored mode = %q, want %q", got, nfc.ModeNameReadOnly)
+	if got := host.Preferences().Mode; got != nfc.ModeReadOnly {
+		t.Errorf("stored mode = %v, want %v", got, nfc.ModeReadOnly)
 	}
 
 	// And it comes back in the next snapshot.
@@ -189,7 +189,7 @@ func TestSettingsActionPersistsAndApplies(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if state.Settings.Mode != nfc.ModeNameReadOnly {
+	if state.Settings.Mode != nfc.ModeReadOnly {
 		t.Errorf("snapshot mode = %q", state.Settings.Mode)
 	}
 }
@@ -204,7 +204,7 @@ func TestSetModeRejectsUnknownMode(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status %d, want 400", w.Code)
 	}
-	if got := host.Preferences().Mode; got != nfc.ModeNameReadWrite {
+	if got := host.Preferences().Mode; got != nfc.ModeReadWrite {
 		t.Errorf("mode changed to %q despite the error", got)
 	}
 }

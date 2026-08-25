@@ -4,6 +4,7 @@ package console
 
 import (
 	"encoding/json"
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"strings"
 	"testing"
@@ -61,8 +62,8 @@ func TestSnapshotKeysAreLowerCamel(t *testing.T) {
 // and a console showing read-only while the reader writes costs a card.
 func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 	host := newFakeHost()
-	host.settings = Preferences{
-		Mode:                nfc.ModeNameReadOnly,
+	host.settings = agent.Preferences{
+		Mode:                nfc.ModeReadOnly,
 		DevicePath:          "ACS ACR1252U 01 00",
 		RequirePairedDevice: true,
 	}
@@ -70,8 +71,8 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 	console := newServer(serverConfig{Host: host, Name: "davi-nfc-agent", Version: "test"})
 	state := console.buildState()
 
-	if state.Settings.Mode != nfc.ModeNameReadOnly {
-		t.Errorf("snapshot mode = %q, want %q", state.Settings.Mode, nfc.ModeNameReadOnly)
+	if state.Settings.Mode != nfc.ModeReadOnly {
+		t.Errorf("snapshot mode = %v, want %v", state.Settings.Mode, nfc.ModeReadOnly)
 	}
 	if !state.Settings.RequirePairedDevice {
 		t.Error("the snapshot does not report the requirement the agent is enforcing")

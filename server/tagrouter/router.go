@@ -10,7 +10,6 @@ package tagrouter
 
 import (
 	"fmt"
-	"sync/atomic"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -31,9 +30,6 @@ type Config struct {
 type Router struct {
 	config  Config
 	devices server.DeviceOps
-
-	// seq labels each request to a device, which correlates its reply by it.
-	seq atomic.Uint64
 }
 
 // New builds the router. It has no lifetime of its own: every operation is a

@@ -377,7 +377,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("reserve a port: %v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	_, port, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {

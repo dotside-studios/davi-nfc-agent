@@ -254,13 +254,11 @@ func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 }
 
 func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
-	agent := newTestAgent()
-
 	store, err := nfcagent.NewOriginStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewOriginStore: %v", err)
 	}
-	agent = newTestAgentWith(nfcagent.Config{Origins: store})
+	agent := newTestAgentWith(nfcagent.Config{Origins: store})
 
 	app, _ := newTestTray(t, agent)
 	app.startOriginWatcher()
@@ -289,13 +287,11 @@ func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
 }
 
 func TestOriginsAllowAnyToggle(t *testing.T) {
-	agent := newTestAgent()
-
 	store, err := nfcagent.NewOriginStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewOriginStore: %v", err)
 	}
-	agent = newTestAgentWith(nfcagent.Config{Origins: store})
+	agent := newTestAgentWith(nfcagent.Config{Origins: store})
 
 	app, _ := newTestTray(t, agent)
 
@@ -331,13 +327,11 @@ func findOriginRow(t *testing.T, app *App, title string) *traymenu.Item {
 }
 
 func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {
-	agent := newTestAgent()
-
 	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewDeviceRegistry: %v", err)
 	}
-	agent = newTestAgentWith(nfcagent.Config{Devices: registry})
+	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
 
 	app, _ := newTestTray(t, agent)
 
@@ -372,13 +366,11 @@ func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {
 }
 
 func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
-	agent := newTestAgent()
-
 	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewDeviceRegistry: %v", err)
 	}
-	agent = newTestAgentWith(nfcagent.Config{Devices: registry})
+	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
 
 	app, _ := newTestTray(t, agent)
 

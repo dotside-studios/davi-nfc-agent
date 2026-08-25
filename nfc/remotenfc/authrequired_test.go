@@ -41,7 +41,7 @@ func TestHandlerWithoutAuthenticatorRefuses(t *testing.T) {
 
 	conn, status := dialDevice(t, ts.URL)
 	if conn != nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal("an unauthenticated device connection was accepted")
 	}
 	if status != http.StatusServiceUnavailable {
@@ -61,7 +61,7 @@ func TestAllowUnauthenticatedIsHonoured(t *testing.T) {
 	if conn == nil {
 		t.Fatalf("AllowUnauthenticated did not admit the device (status %d)", status)
 	}
-	conn.Close()
+	_ = conn.Close()
 }
 
 // A supplied authenticator decides, and its rejection is what the device sees.
@@ -81,7 +81,7 @@ func TestAuthenticatorDecides(t *testing.T) {
 	defer ts.Close()
 
 	if conn, status := dialDevice(t, ts.URL); conn != nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Errorf("a device with no token was admitted (status %d)", status)
 	} else if status != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", status, http.StatusUnauthorized)
@@ -91,5 +91,5 @@ func TestAuthenticatorDecides(t *testing.T) {
 	if conn == nil {
 		t.Fatalf("a device with the token was refused (status %d)", status)
 	}
-	conn.Close()
+	_ = conn.Close()
 }

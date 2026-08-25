@@ -381,7 +381,7 @@ async function diagnoseAgent(serverUrl) {
     return {
       kind: "origin-blocked",
       title: "The agent refused this page",
-      detail: `The NFC agent answered with ${health.status}. If that is 403, this site is not on its allowed-origins list — allow ${location.host} on the agent.`
+      detail: `The NFC agent answered with ${health.status}. If that is 403, this site is not on its allowed-origins list: allow ${location.host} on the agent.`
     };
   }
   if (base.startsWith("https://")) {
@@ -397,7 +397,7 @@ async function diagnoseAgent(serverUrl) {
   return {
     kind: "unreachable",
     title: "Can't reach the NFC agent",
-    detail: "The agent runs on this computer. Either it isn't running, or this browser doesn't trust its certificate yet — which looks identical from here. Open it directly to find out: a certificate warning means it's running and its certificate needs trusting, and a connection error means it isn't running.",
+    detail: "The agent runs on this computer. Either it isn't running, or this browser doesn't trust its certificate yet, which looks identical from here. Open it directly to find out: a certificate warning means it's running and its certificate needs trusting, and a connection error means it isn't running.",
     openUrl: base
   };
 }

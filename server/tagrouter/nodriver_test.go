@@ -16,7 +16,7 @@ func TestDeviceConnectionRefusedWithoutADriver(t *testing.T) {
 
 	conn, resp, err := (&websocket.Dialer{HandshakeTimeout: 3 * time.Second}).Dial(url, nil)
 	if err == nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal("a device connection was accepted with no driver to serve it")
 	}
 	if resp == nil {

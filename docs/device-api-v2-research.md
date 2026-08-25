@@ -31,6 +31,20 @@ design should be judged against:
 > PC/SC reader — and a client must not be able to tell which one is holding the
 > tag.
 
+**Which of those this document is about.** The agent reaches tags by three
+separate paths, and only one of them is the device API:
+
+| Path | What it serves | In scope here |
+|---|---|---|
+| **Device API** | holders that open a connection to the device server over the network — phones, browsers, ESP32-class boards, a bridge speaking for several readers | **yes** |
+| PC/SC backend | readers attached to the machine the agent runs on | no |
+| Serial | a board on a wire, with its own framing and its own answer to trust | no |
+
+So the test above applies at the **client** boundary, across all three paths.
+This document designs one of them: the network one. A card reader plugged into
+the agent's host is not a device-API question, and neither is a board on a USB
+cable — they are served by paths that already exist or will get their own.
+
 ## 1. What v1 did to v0
 
 v1 is additive almost everywhere: the first frame's type selects the dialect
@@ -321,9 +335,8 @@ typed into a screen.
 Consequences: frames must fit a 2–4 KB max fragment (base64 raw-data dumps are
 hostile), and the device endpoint currently sets **no read limit at all** —
 only the web UI does (`agent/console/server.go:263`, 4 KB). `-auto-tls=false` already
-gives a plain-`ws://` path, which is the honest escape hatch for the
-constrained tier and for USB-attached boards where physical attachment is the
-authentication.
+gives a plain-`ws://` path, which is the honest escape hatch for a constrained
+board on a trusted network.
 
 ### 7.6 Capability is a firmware property here
 
@@ -435,9 +448,10 @@ Checkable rules, each traceable to something above.
 16. Outputs are peers of inputs — LED, buzzer, text/alert, vibrate. This is
     what makes a phone a *good* device rather than a degraded reader, and it is
     available on every tier.
-17. Bind the envelope to more than one transport, and bound it in both
-    directions. An HTTP POST of the same `tagScanned` JSON is ~15 lines on any
-    board and survives deep sleep (§7.5).
+17. Bind the envelope to more than one *network* transport, and bound it in
+    both directions. An HTTP POST of the same `tagScanned` JSON is ~15 lines on
+    any board and survives deep sleep (§7.5). Serial is a separate path with
+    its own framing, not a binding of this API (§0).
 18. Give extensions a sanctioned channel; ignore unknown fields; answer unknown
     message types with a typed error (§7.3).
 
@@ -627,10 +641,11 @@ Pairing today conflates them, which is why it sits awkwardly:
 - **Device authorization** — "may this device connect, and can it be revoked on
   its own?" Answered by a per-device credential.
 
-Three provisioning channels serve the population: an **on-screen QR** for a
-phone, **physical attachment** for a USB or serial board, and an
-**operator-gated window** for a headless network device. Browsers have none of
-the three.
+Two provisioning channels serve the population this API carries: an
+**on-screen QR** for a phone, and an **operator-gated window** for a headless
+network device. Browsers have neither, and are gated by the origin allowlist
+instead. Physical attachment authenticates itself, but that is the serial
+path's answer rather than one of this API's (§0).
 
 ### What gets built
 
@@ -669,11 +684,7 @@ the pinned TLS already closes the hole, and a key sitting in plain flash is no
 better than a token in plain flash. It wins where there is a keystore, which is
 the tiers that matter.
 
-**6. Physical attachment is pre-authorization.** A serial or USB device is
-paired by being plugged in, with a credential bound to that port. No code, no
-window.
-
-**7. Browsers do not pair**, and this is documented rather than left implicit,
+**6. Browsers do not pair**, and this is documented rather than left implicit,
 so nobody builds half of one. The origin allowlist is their gate.
 
 ### What is not being built

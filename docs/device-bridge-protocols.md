@@ -107,8 +107,8 @@ case. Desktop shows a QR containing a CBOR handshake blob with a shared secret;
 phone scans it, BLE advertisement proves physical proximity, then both sides meet
 at a tunnel server over a WebSocket carrying a Noise handshake inside TLS. If we
 ever want "phone anywhere, agent behind NAT", this is the blueprint, especially
-the proximity check, which is the honest answer to "how do I know the phone that
-paired is the one in the room".
+the proximity check, which answers "how do I know the phone that paired is the
+one in the room".
 
 **RFC 8628 (OAuth 2.0 Device Authorization Grant)**: only relevant if pairing
 should be brokered by a Davi account rather than by physical proximity. It gives
@@ -366,9 +366,9 @@ Four of these have since been addressed; the rest are still open.
 - **Capability declaration**: was three booleans on the wire against a much
   richer internal model (§4.2). The device now declares a capability set, with
   undeclared distinguished from declared-false. Done.
-- **A command channel**: the T1 omission, now filled. Note this was a *missing
-  layer*, not a wrong one: an optional sub-channel for devices that can do more,
-  not a replacement for NDEF-level messages.
+- **A command channel**: the T1 omission, now filled. It was a missing layer
+  rather than a wrong one: an optional sub-channel for devices that can do more,
+  alongside the NDEF-level messages.
 - **Device identity**: was a shared bearer secret in a query string, with no
   per-device credential and no revocation. Pairing now issues one per device,
   revocable. Done.
@@ -394,7 +394,7 @@ in the plan so devices too small to afford our protocol still work, and so
 other PC/SC software can consume a davi-bridged reader. That is a compat shim,
 not a migration.
 
-### 5.4 The honest counterargument
+### 5.4 The counterargument
 
 Custom protocols rediscover other people's mistakes, and we already have: no
 versioning, weak auth, no resume are exactly the classics. The mitigation is not

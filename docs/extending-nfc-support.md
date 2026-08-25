@@ -262,7 +262,7 @@ type MyTag struct {
 func (t *MyTag) Capabilities() nfc.TagCapabilities {
     return nfc.TagCapabilities{
         CanRead:       true,
-        CanWrite:      false, // Read-only device — no need to override WriteData
+        CanWrite:      false, // Read-only device; no need to override WriteData
         CanTransceive: false,
         CanLock:       false,
     }
@@ -270,7 +270,8 @@ func (t *MyTag) Capabilities() nfc.TagCapabilities {
 ```
 
 Because the defaults come from `BaseTag`, a read-only tag literally just needs
-`UID`, `Type`, `NumericType`, and `ReadData` — there is no `WriteData` boilerplate
+`UID`, `Type`, `NumericType`, and `ReadData`. There is no `WriteData`
+boilerplate
 to write.
 
 ### Keeping capabilities honest
@@ -433,8 +434,8 @@ this machine, owns that transport itself. `remotenfc` is the worked example: it
 serves the WebSocket endpoint phones connect to.
 
 Expose an `http.Handler` and let the agent mount it. Keep authentication out of
-it, since that is the agent's policy rather than the driver's, and take anything
-else the agent decides as options:
+it, since that is the agent's policy and not the driver's, and take anything
+else the agent configures as options:
 
 ```go
 func (m *MyManager) Handler(opts MyServerOptions) http.Handler {
@@ -514,7 +515,7 @@ func (t *NetworkTag) ReadData() ([]byte, error) {
     return t.data, nil
 }
 
-// No WriteData needed — inherited from nfc.BaseTag as "not supported".
+// No WriteData needed; inherited from nfc.BaseTag as "not supported".
 ```
 
 ### Serial PN532 Reader

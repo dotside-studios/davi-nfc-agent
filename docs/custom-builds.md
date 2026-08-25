@@ -114,11 +114,10 @@ the paired devices and the origin allowlist. It returns an `*agent.Runtime`
 holding the configured agent, the certificate manager, the log ring and the
 reader path to open.
 
-It builds neither the listener nor the pairing server nor the control center.
-Each is a plugin the program registers. An agent with none of them is still a
-valid build: it drives the reader and serves no HTTP. Nothing binds until the
-agent starts, so routes are declared before the port they will be served from is
-bound. See [Plugins](#plugins).
+The listener, the pairing server and the control center are plugins the program
+registers, not part of `Setup`. An agent with none of them drives the reader and
+serves no HTTP, which is a valid build. Binding happens at start, so routes can
+be declared before the port exists. See [Plugins](#plugins).
 
 The certificate is `agent.TrustPlugin`, wrapping the `*tls.Manager` that
 `Setup` returns as `rt.Certificates`. It holds the files a listener serves, the
@@ -126,42 +125,37 @@ authority a pairing device is given, and the tray entry that installs that
 authority so browsers on this machine accept the agent. Whatever needs a
 certificate takes this plugin: `ServerPlugin.Trust`, `NewPairingPlugin` and
 `console.Config.Trust` all read it, so the certificate is configured once. A
-build serving a certificate it does not manage leaves `Manager` nil. Every
-method then reports nothing: no files, no authority, and no entry offering to
-install one.
+Leave `Manager` nil for a build serving a certificate managed elsewhere: every
+method then reports nothing to serve, no authority and no install entry.
 
 Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
 menu entries that hand out its address and PIN.
-`agent.NewPairingPlugin(a, port, trust)` takes the rest from the agent: the
-device registry, the key pin and the name, so nothing already given to `Setup`
-is repeated. Register none and the build pairs no devices; the console is handed
-`nil` and reports pairing as disabled. A build wanting the listener without the
-menu registers the component on its own instead, with
-`agent.PairingFor(a, port, ca)` and `ctx.Use` or an `agent.Endpoint`.
+`agent.NewPairingPlugin(a, port, trust)` takes the device registry, the key pin
+and the name from the agent, so nothing already given to `Setup` is repeated.
+Omit the plugin and the build pairs no devices: the console is handed `nil` and
+reports pairing as disabled. For the listener without the menu entries, register
+the component directly with `agent.PairingFor(a, port, ca)` and `ctx.Use` or an
+`agent.Endpoint`.
 
-It does not choose an NFC backend. That is the second argument, and passing it
-in is why every package beneath `cmd` builds without one.
+The NFC backend is `Setup`'s second argument, which is why every package beneath
+`cmd` builds without one. Serving phones takes three more values from a driver
+the caller built: `RemoteOps` to route operations, `RemoteScans` to receive what
+they scan, and `DeviceEndpoint` to build their handler. Supply none and the
+agent serves its own reader.
 
-Nor does it reach into that backend. Serving phones takes three values the
-caller supplies from a driver it built: `RemoteOps` to route operations,
-`RemoteScans` to receive what they scan, and `DeviceEndpoint` to build their
-handler. Supply none and the agent serves its own reader and nothing else.
+Flags and the standard logger belong to the program. Registering flags writes to
+`flag.CommandLine`, which would collide with the flags of anything embedding the
+agent, so the shipped command adds its own flag set on top of `Options` in
+[`cmd/davi-nfc-agent/flags.go`](../cmd/davi-nfc-agent/flags.go) and installs the
+log ring itself, as above.
 
-Nor does it define flags or redirect the standard logger. Both belong to the
-program: registering flags writes to `flag.CommandLine`, which would collide
-with the flags of anything embedding the agent. The shipped command adds its
-own flag set on top of `Options` in
-[`cmd/davi-nfc-agent/flags.go`](../cmd/davi-nfc-agent/flags.go), and installs
-the log ring itself, as above.
-
-`Setup` is one of two entry points. It reads and writes a config directory,
-which a program with its own configuration may not want; `agent.New` takes an
-`agent.Config` and builds the agent from values you already hold, leaving the
-certificate, secret and store loading to you. Either way the configuration is
-fixed once the agent exists and is read back through methods, so nothing can
-rebind the port or withdraw the pairing requirement behind the running
-servers. The preferences that may legitimately change while running have
-methods of their own: `SetReaderMode`, `SetCardTypeFilter`, `SetPinnedDevice`,
+`agent.New` is the alternative to `Setup`, for a program with its own
+configuration: it takes an `agent.Config` and builds the agent from values you
+already hold, leaving the certificate, secret and store loading to you. Either
+way the configuration is fixed once the agent exists and is read back through
+methods, so nothing can rebind the port or withdraw the pairing requirement
+behind the running servers. The preferences that may legitimately change while
+running have methods of their own: `SetReaderMode`, `SetCardTypeFilter`, `SetPinnedDevice`,
 `SetDevicePort`, `SetRequirePairedDevice` and `SetReaderFeedback`. Nothing
 persists them: a change lasts as long as the agent runs, and what it starts with
 comes from `agent.Config`.
@@ -188,9 +182,8 @@ func (p *BackupPlugin) Activate(ctx agent.AgentContext) error {
 rt.Agent.Plugins.Add(&BackupPlugin{Every: time.Hour})
 ```
 
-Nothing is loaded at run time and nothing is discovered. A build's plugins are
-what it imports, so one left out takes its dependencies with it, the same way
-`nfc/pcsc` and the tray do.
+A build's plugins are what it imports, fixed at compile time, so one left out
+takes its dependencies with it, the same way `nfc/pcsc` and the tray do.
 
 The context carries what a plugin needs to wire itself in:
 
@@ -284,8 +277,8 @@ goes, or `Server` to hand over one built elsewhere:
 
 `agent.Routes` is what the agent serves of its own: `/ws`, where devices and
 clients both connect, and `/health` with `/api/v1/health` beside it. The agent
-holds no listener and mounts nothing itself; whatever serves it mounts these
-first, ahead of anything else. An endpoint on one of their paths fails the
+holds no listener: whatever serves it mounts these first, ahead of anything
+else. An endpoint on one of their paths fails the
 start, as two endpoints on one path do, instead of leaving the mux to decide.
 
 `ctx.Serve` publishes the plugin as what the agent is served from, which is what

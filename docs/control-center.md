@@ -1,8 +1,7 @@
 # Control Center
 
-A web console served by the agent itself, for the things the tray and the
-command-line flags cannot do: reading the log, writing NDEF messages by hand,
-inspecting a tag, and revoking one device.
+A web console served by the agent for managing it and for advanced tag
+operations.
 
 ## Opening it
 
@@ -100,17 +99,17 @@ Overview, because those get turned while working and these do not.
 
 ## Logs
 
-The agent logs through the standard library logger, which writes to stderr and
-nowhere else. Started from a desktop launcher there is no stderr to read, so
-a certificate warning, refused origin or reader failure would be discarded as it
-was produced.
+The agent logs through the standard library logger, which writes to stderr.
+Started from a desktop launcher there is no stderr to read, so a certificate
+warning, refused origin or reader failure would be discarded as it was
+produced.
 
 The agent keeps the last 5000 lines in memory. They are visible under
 **Activity**, streamed live, and downloadable as text for a bug report. Severity
 is inferred from the message text, which is good enough to filter on but not to
 rely on otherwise.
 
-Nothing is written to disk. The buffer is lost when the agent exits.
+The buffer is in memory only, and is lost when the agent exits.
 
 ## Browser origins
 
@@ -158,8 +157,8 @@ console ─┐                          ┌─ agent            (what is in forc
 tray  ───┘                          └─ tray menu        (redrawn from the agent)
 ```
 
-Nothing displays a preference from a file. The console's `settings` block in the
-state snapshot is `Agent.Preferences()`, what the agent is set to right now.
+The console's `settings` block in the state snapshot is `Agent.Preferences()`,
+what the agent is set to right now.
 
 A change lasts as long as the agent runs. What it starts with comes from
 `agent.Config`, which the command fills from its flags, so a preference that
@@ -221,7 +220,7 @@ webui/
     dist/             built and committed
 ```
 
-Nothing in `webui` imports the agent. It declares the ~35 methods it needs as
+`webui` does not import the agent. It declares the ~35 methods it needs as
 `webui.Host`, and `agent/console/host.go` implements them, so the console's
 entire reach into the agent is readable in one file, and its tests run against a
 fake host with no hardware behind them.

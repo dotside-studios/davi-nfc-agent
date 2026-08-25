@@ -5,12 +5,11 @@ protocol itself see the [Device API](api.md#device-api).
 
 ## Do devices need TLS?
 
-**They no longer need a certificate authority.** Installing a CA profile used to
-be the setup step; it is not any more, and native apps should not do it. A CA in
-a trust store can sign for any name, not just this agent, and on iOS granting
-Full Trust is a system-wide decision.
+Devices do not need a certificate authority, and native apps should not install
+one. A CA in a trust store can sign for any name, not just this agent, and on
+iOS granting Full Trust is a system-wide decision.
 
-**TLS itself stays on.** The agent serves `wss://` with a self-signed
+TLS itself stays on. The agent serves `wss://` with a self-signed
 certificate, and your app verifies it by **pinning the agent's public key**
 rather than by chain of trust. The pin is handed to you at pairing and does not
 change when the agent's certificate is reissued.
@@ -19,7 +18,7 @@ So the setup cost moved off the user and onto the app: no profile to install, a
 few lines of trust-evaluation code instead.
 
 You *can* run the agent without TLS (`-auto-tls=false`) and connect over `ws://`,
-but see [Running without TLS](#running-without-tls) — both platforms block
+but see [Running without TLS](#running-without-tls): both platforms block
 cleartext by default, and the traffic carries card UIDs and tag contents across
 whatever network the device is on.
 
@@ -44,9 +43,9 @@ Content-Type: application/json
 }
 ```
 
-Store `deviceToken` and `publicKeyPin` in the keychain / keystore. **The token is
-shown once** — the agent keeps only a hash of it, so losing it means pairing
-again.
+Store `deviceToken` and `publicKeyPin` in the keychain / keystore. **The token
+is shown once**, since the agent keeps only a hash of it, so losing it means
+pairing again.
 
 The PIN is on the kiosk: system tray, agent logs, and the pairing page at
 `http://<agent-host>:9472`. Five wrong attempts lock pairing until the agent
@@ -60,7 +59,8 @@ wss://<agent-host>:9470/ws?mode=device
 
 Present the token as `Authorization: Bearer <deviceToken>`, or `?secret=` if
 your WebSocket client cannot set headers. Offer the `davi-nfc-device.v1`
-subprotocol, then send `hello` — see [Device Registration](api.md#device-registration).
+subprotocol, then send `hello`. See
+[Device Registration](api.md#device-registration).
 
 ## 3. Verify the agent by its pin
 
@@ -72,7 +72,8 @@ of the server certificate's SubjectPublicKeyInfo against the stored
 
 **Do not use OkHttp's `CertificatePinner` for this.** It runs *after* the trust
 manager has validated the chain, so a self-signed certificate is rejected during
-the handshake before pinning is ever consulted — the pin appears to be ignored.
+the handshake before pinning is ever consulted, so the pin appears to be
+ignored.
 This is [documented OkHttp behavior](https://square.github.io/okhttp/5.x/okhttp/okhttp3/-certificate-pinner/index.html),
 not a bug, and it is the most common way this goes wrong.
 
@@ -94,7 +95,7 @@ class PinnedTrustManager(private val expectedPin: String) : X509TrustManager {
 ```
 
 `PublicKey.getEncoded()` returns SPKI DER directly, which the agent
-hashes — no reassembly needed.
+hashes, with no reassembly needed.
 
 Pair it with a hostname verifier appropriate to how you address the agent; a
 self-signed certificate carries the agent's hostnames and LAN IPs as SANs, so
@@ -121,7 +122,7 @@ func urlSession(_ session: URLSession,
 **Watch the key encoding.** `SecKeyCopyExternalRepresentation` returns the *raw*
 key, not SPKI DER, so hashing it directly produces a value that will never match.
 Prepend the ASN.1 SubjectPublicKeyInfo header for the key's algorithm before
-hashing — the agent uses ECDSA P-256, whose header is a fixed 26-byte constant.
+hashing. The agent uses ECDSA P-256, whose header is a fixed 26-byte constant.
 Getting this wrong is the iOS equivalent of the `CertificatePinner` trap: the
 code looks right and every connection fails.
 
@@ -140,9 +141,9 @@ If you discover the agent via mDNS, also declare `NSBonjourServices` with
 `-auto-tls=false` makes the agent serve `ws://`. Both platforms block cleartext
 by default, so this needs a declaration either way:
 
-- **iOS** — App Transport Security blocks it. `NSAllowsLocalNetworking` covers
+- **iOS**: App Transport Security blocks it. `NSAllowsLocalNetworking` covers
   `.local` names and private IP ranges, which is the narrow way to allow it.
-- **Android** — cleartext has been off by default since API 28. Add a
+- **Android**: cleartext has been off by default since API 28. Add a
   `network_security_config.xml` permitting it for the agent's address only,
   never `cleartextTrafficPermitted="true"` globally.
 
@@ -152,7 +153,7 @@ setup, and a poor default for a shop floor on shared WiFi.
 
 ## Requiring pairing
 
-Once your devices pair, the agent can be set to admit nothing else — see
+Once your devices pair, the agent can be set to admit nothing else. See
 [Requiring pairing](api.md#requiring-pairing). Until then the shared API secret
 and the loopback bypass still work, so an unpaired device is not locked out.
 
@@ -164,4 +165,4 @@ and the loopback bypass still work, so an unpaired device is not locked out.
 | Every connection fails despite a correct-looking pin | Raw key hashed instead of SPKI (iOS) |
 | Connection fails only on a real device, works in a simulator | Local network permission not declared or not granted |
 | `401 Unauthorized` on upgrade | Token missing, or revoked from the tray |
-| Worked yesterday, fails after the host moved network | The certificate was reissued — expected, and the pin should still match. If it does not, the agent's key was regenerated, so pair again |
+| Worked yesterday, fails after the host moved network | The certificate was reissued, which is expected, and the pin should still match. If it does not, the agent's key was regenerated, so pair again |

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A plugin API.** `agent.Plugin` is one method, `Activate(agent.AgentContext)
+  error`, run once before the agent starts. A plugin registers what it adds
+  through the context: `ctx.Use` for a `Component`, `ctx.Mount` for a route,
+  `ctx.Systray` for a tray entry. Plugins are Go values the program constructs,
+  registered with `Agent.Plugins.Add` and activated in order; nothing is loaded
+  at run time, and adding one after activation is an error. Three ship:
+  `agent.ServerPlugin`, which owns the listener and the `agent.Endpoint`s served
+  from it, `agent.PairingPlugin`, which runs the pairing server and the tray
+  entries that hand out its PIN, and `agent.TrustPlugin`, which holds the
+  certificate the other two are configured from. Also adds
+  `Agent.OnServerRestart`, `traymenu.Discard`, and `traymenu.Section` as a
+  `Container`
+
 - **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary
   does was still to fork it. The new page is the counterpart to the refactor —
@@ -52,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   embedder calling `Stop` leaked a listener. It now starts and stops with the
   agent like anything else registered through `Use`. `agent.Config` loses
   `Bootstrap` and `BootstrapPort`; what the pairing server needs lives on
-  `PairingConfig` instead, and `Config.Pairing` being nil disables it.
+  `PairingConfig` instead.
 
   One consequence worth knowing: the pairing listener now binds at `Start`
   rather than during `Setup`, so a port already in use is reported when the
@@ -92,6 +105,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered per connection, and a reader that answers on neither is left alone
 
 ### Changed
+
+- **`Setup` builds neither the listener nor the pairing server.** What an agent
+  serves is the program's decision, so both are plugins it registers:
+
+  ```go
+  servers := &agent.ServerPlugin{}
+  servers.Add(agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()})
+  rt.Agent.Plugins.Add(servers, agent.NewPairingPlugin(rt.Agent, 9472, trust))
+  ```
+
+  Registered with no configuration, each serves what the agent was already set
+  up with; an agent with neither drives the reader and serves no HTTP. Gone with
+  them: `Runtime.Server`, and `Agent.Pairing`, `Bootstrap` and `BootstrapPort`,
+  which existed only because the tray and the console both needed a handle the
+  agent happened to hold. The pairing plugin is that handle now, and an argument
+  to `console.New`; `tray.New` takes the runtime and nothing else
+
+- **The server plugin owns the tray's Server URLs submenu.** What is served from
+  a port is what the thing holding the port knows, so the device and client
+  addresses, the API secret a client presents to them, and their copy and
+  regenerate actions moved out of `agent/tray` and into `agent.ServerPlugin`.
+  `Endpoint.Menu` takes the endpoint's URL alongside the submenu, so an endpoint
+  is listed there with the rest; it is listed only if it asks, since a route
+  nobody opens by hand is noise beside an address worth copying.
+
+  `console.Endpoints` is what serves the control center, so it appears there as
+  `Control Center: https://…/` with entries that copy and open it. `console.New`
+  now follows the stores that redraw an open page itself, and `-tags nowebui`
+  returns no endpoints, so a program needs no build tag of its own
+
+- **The agent holds no listener.** `Agent.Routes` is what it serves of its own,
+  `/ws` and the two health checks, as data for whatever serves it to mount;
+  `ServerPlugin` mounts them ahead of its endpoints. Gone with the inversion:
+  `Config.Server`, `Agent.UnifiedServer`, `Agent.MountOn` and
+  `Agent.ServingPort`, which is `ServerPlugin.Port` now. `AgentContext.Serve`
+  takes an `agent.Mounter`, one method wide, so the agent names no server type
+  at all, and `console.New` takes a `console.Config` carrying the server and
+  pairing plugins it reports on
+
+- **Reissuing a certificate is the event; binding again is what the listener
+  does about it.** `tls.Manager` reports every reissue on
+  `CertificateWatcher.WatchReissues`, whether it made one itself for a change of
+  address or was asked through `InstallCA` or `RegenerateCertificates`.
+  `ServerPlugin` watches and rebinds, so installing a certificate authority from
+  the tray or the console is now just that call: the three places that had to
+  remember to restart the servers afterwards no longer mention it, and
+  `webui.Host` needs no method for it.
+
+  The listener's lifetime is the plugin's too, as an ordinary component, so the
+  agent neither binds it nor rebinds it. `Agent.RestartServers` keeps its own
+  half, rebuilding what the serving state captured, such as the API secret in
+  the client server; it no longer tears down the port to do it
+
+- **Two narrower contracts, so certificate material can move off the agent.**
+  `PairingConfig.CA` is `tls.CertificateAuthority`, the two methods the pairing
+  server reads, rather than the whole `*tls.Manager`; the interface was already
+  there, unexported, as `BootstrapServer`'s own parameter type.
+  `DeviceEndpointOptions.PublicKeyPin` and `remotenfc.ServerOptions.PublicKeyPin`
+  are `func() string`, read when a device registers rather than captured when
+  the endpoint is built, so the pin no longer has to be settled before
+  `agent.New`
+
+- **The agent holds no certificate either.** It never read one: a listener
+  serves it, the pairing server hands the authority out, and the console reports
+  on it. `agent.TrustPlugin` wraps the `*tls.Manager` `Setup` returns as
+  `Runtime.Certificates`, and each of the three is given the plugin rather than
+  reaching for a manager:
+
+  ```go
+  trust := &agent.TrustPlugin{Manager: rt.Certificates}
+  rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust)
+  ```
+
+  Gone: `Config.CertFile`, `Config.KeyFile`, `Config.TLSManager` and the
+  accessors over them. `PairingFor` takes the authority as an argument, and a
+  certificate provisioned outside the agent, which is what `-cert` and `-key`
+  are, goes to the listener as `unifiedserver.Config` and is served ahead of the
+  managed one. The tray loses its trust entry to the plugin, and `console.Tray`
+  loses `RefreshTrustMenu` with it: the entry hides itself once there is nothing
+  left to install, whichever place installed it. A build managing no certificate
+  leaves `Manager` nil, and every method answers as such
+
+- **`traymenu` has no toolkit, and the clipboard has a package of its own.**
+  `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.
+  With the agent handing plugins a menu, the Fyne driver moved to
+  `traymenu/fynetray`, and `traymenu.New(nil)` now draws nothing rather than
+  meaning the real tray. `clipboard.Copy` is the tray's per-platform clipboard
+  code, which a plugin offering to copy something could not reach. `agent`
+  depends on no GUI toolkit, as before
 
 - **What a tag cannot support is declared, not branched around.** A write to a
   tag on the reader was confirmed by reading it back; a write to a tag a phone
@@ -158,6 +260,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   let an operation return its refusal rather than report it beside a value.
 
 ### Fixed
+
+- **Restarting the servers no longer doubles the reader.** `startServers` called
+  `NFCReader.Start` every time, and `RestartServers` deliberately leaves the
+  reader running, so each certificate reissue, API secret rotation or change of
+  address left another worker polling the same reader: two goroutines racing on
+  its state and reporting every card twice. The reader's lifetime is the
+  agent's, so it starts where it is opened and a restart of the servers leaves
+  it alone
 
 - **A device is no longer refused for what it calls itself.** Registration
   required `platform` to be `ios`, `android` or `web`, but nothing branches on

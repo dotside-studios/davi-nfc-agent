@@ -3,16 +3,12 @@ package tray
 import (
 	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -40,17 +36,12 @@ func newTestTray(t *testing.T, a *nfcagent.Agent) (*App, *traymenu.Fake) {
 	return app, fake
 }
 
-// titles lists the top level as the user reads it, separators included. The
-// control center entry is left out: a -tags nowebui build has no console, so
-// the entry is not there to read. TestConsoleEntry covers it instead.
+// titles lists the top level as the user reads it, separators included.
 func titles(fake *traymenu.Fake) []string {
 	var out []string
 	for _, item := range fake.Items() {
 		if item.IsSeparator() {
 			out = append(out, "----")
-			continue
-		}
-		if item.Title() == "Open Control Center" {
 			continue
 		}
 		out = append(out, item.Title())
@@ -63,7 +54,6 @@ func TestMenuLayout(t *testing.T) {
 
 	want := []string{
 		"Starting...",
-		"Server URLs",
 		"----",
 		"Card UID: None",
 		"Card Type: None",
@@ -77,8 +67,6 @@ func TestMenuLayout(t *testing.T) {
 		"----",
 		"Paired Devices",
 		"Allowed Origins",
-		"Trust This Agent in Browsers",
-		"----",
 		"----",
 		"Start Agent",
 		"Stop Agent",
@@ -92,12 +80,13 @@ func TestMenuLayout(t *testing.T) {
 	}
 }
 
-func TestConsoleEntry(t *testing.T) {
+// The entry that opens the console belongs to the console plugin, so a tray
+// with no plugin behind it declares none of its own.
+func TestTheTrayDeclaresNoConsoleEntry(t *testing.T) {
 	_, fake := newTestTray(t, newTestAgent())
 
-	// Nothing for the entry to open, so it must not be offered.
-	if item := fake.Find("Open Control Center"); item != nil && item.Visible() {
-		t.Error("the control center entry is offered with no console behind it")
+	if item := fake.Find("Open Control Center"); item != nil {
+		t.Errorf("the tray declares a control center entry with no plugin behind it:\n%s", fake.Render())
 	}
 }
 
@@ -107,21 +96,6 @@ func TestStatusAndCardLabelsAreNotClickable(t *testing.T) {
 	for _, title := range []string{"Starting...", "Card UID: None", "Card Type: None"} {
 		if item := fake.Find(title); item == nil || item.Enabled() {
 			t.Errorf("%q should be a disabled label", title)
-		}
-	}
-}
-
-func TestPairingAndSecretEntriesHiddenWhenUnconfigured(t *testing.T) {
-	_, fake := newTestTray(t, newTestAgent())
-
-	for _, title := range []string{"Pairing PIN: --", "  Copy Pairing PIN", "  Regenerate Pairing PIN",
-		"API Secret: hidden", "  Copy API Secret", "  Regenerate API Secret"} {
-		item := fake.Find("Server URLs", title)
-		if item == nil {
-			t.Fatalf("%q is missing from the URLs submenu", title)
-		}
-		if item.Visible() {
-			t.Errorf("%q is shown even though it has nothing behind it", title)
 		}
 	}
 }
@@ -434,31 +408,6 @@ func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
 	}
 }
 
-func TestCopiedURLsAreTheOnesOnDisplay(t *testing.T) {
-	app, _ := newTestTray(t, newTestAgent())
-	app.updateURLs()
-
-	urls := app.urls()
-
-	// The device entry is what a device connects to, mode and all. Copying
-	// something else would hand out a client URL under a device label.
-	if !strings.HasSuffix(urls.device, "/ws?mode=device") {
-		t.Errorf("device URL = %q, want it to carry the device mode", urls.device)
-	}
-	if got, want := app.mDeviceURL.Title(), "Device: "+urls.device; got != want {
-		t.Errorf("device label = %q, want %q", got, want)
-	}
-	if got, want := app.mClientURL.Title(), "Client: "+urls.client; got != want {
-		t.Errorf("client label = %q, want %q", got, want)
-	}
-	if urls.bootstrap != "" {
-		t.Errorf("pairing URL = %q, want none with the pairing server off", urls.bootstrap)
-	}
-	if got := app.mBootstrapURL.Title(); got != "Pair Phone: Disabled" {
-		t.Errorf("pairing label = %q", got)
-	}
-}
-
 func TestAgentStateDrivesTheControls(t *testing.T) {
 	app, _ := newTestTray(t, newTestAgent())
 
@@ -473,66 +422,6 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 		t.Fatalf("stopped: status %q, start enabled %v, stop enabled %v",
 			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
 	}
-	for _, item := range []*traymenu.Item{app.mDeviceURL, app.mClientURL, app.mBootstrapURL} {
-		if !strings.HasSuffix(item.Title(), "Not running") {
-			t.Errorf("a stopped agent still shows %q", item.Title())
-		}
-	}
-}
-
-// waitFor polls until cond holds, which is how a test waits on the tray's own
-// goroutines without a fixed sleep.
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
-func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
-	dir := t.TempDir()
-
-	agent := newTestAgent()
-	agent = newTestAgentWith(nfcagent.Config{TLSManager: tls.NewManager(dir)})
-
-	app, _ := newTestTray(t, agent)
-
-	if !app.mTrustBrowsers.Visible() {
-		t.Fatal("the trust entry is hidden with no certificate authority installed")
-	}
-
-	// Installing one is the whole job of the entry, so it has nothing left to
-	// offer once there is one.
-	caFile := filepath.Join(dir, "ca", "rootCA.pem")
-	if err := os.MkdirAll(filepath.Dir(caFile), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(caFile, []byte("ca"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	app.RefreshTrustMenu()
-	if app.mTrustBrowsers.Visible() {
-		t.Fatal("the trust entry is still offered with a certificate authority installed")
-	}
-
-	// CAInstalled reads the filesystem every time, so a config directory that
-	// loses its CA needs the offer back. A restart of the listeners is when the
-	// tray looks again.
-	if err := os.Remove(caFile); err != nil {
-		t.Fatal(err)
-	}
-	// The root package's version drove this through the agent's restart
-	// channel. ServerRestarts only hands out the receive side, so from here the
-	// refresh is called directly.
-	app.RefreshTrustMenu()
-
-	waitFor(t, "the trust entry to come back", app.mTrustBrowsers.Visible)
 }
 
 // The tray writes to the same file the console does. A mode picked from a menu

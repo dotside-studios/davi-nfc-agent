@@ -71,15 +71,38 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Nil in a -tags nowebui build. Mounting is all there is to attaching a
-	// control center, so a build that wants none mounts none.
-	c := console.New(rt.Agent, rt.Settings, rt.Logs)
-	if c != nil {
-		_ = rt.Server.Mount("/control/", c.Routes())
-		_ = rt.Server.Mount("/", c.Assets())
-		rt.Agent.Origins().OnChange(c.NotifyChange)
-		rt.Agent.Devices().OnChange(c.NotifyChange)
-		rt.Agent.OnClientsChange(c.NotifyChange)
+	// The certificate, and the tray entry that makes browsers accept it.
+	// Whatever needs a certificate is given this rather than reaching for one:
+	// the agent holds none.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+
+	// The listener and everything on it. Setup does not build one: what this
+	// agent serves is the program's decision.
+	servers := &agent.ServerPlugin{Trust: trust}
+
+	// Pairing: a listener of its own, and the tray entries that hand out its
+	// address and PIN. The agent does not hold one, so this is where it is
+	// built and where it is handed to the console.
+	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, trust)
+
+	// The control center, served from the same listener and listed with the
+	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
+	// so this program needs no build tag of its own.
+	c := console.New(console.Config{
+		Agent:    rt.Agent,
+		Settings: rt.Settings,
+		Logs:     rt.Logs,
+		Servers:  servers,
+		Pairing:  pairing,
+		Trust:    trust,
+	})
+	servers.Add(c.Endpoints()...)
+
+	// The server goes on first: it publishes the listener the rest mount on,
+	// and plugins are activated in the order they were added, which is also the
+	// order their entries appear in the tray.
+	if err := rt.Agent.Plugins.Add(servers, pairing, trust); err != nil {
+		log.Fatal(err)
 	}
 
 	app := tray.New(rt)
@@ -90,9 +113,34 @@ func main() {
 
 `agent.Setup` performs the work the flags imply: it resolves the config
 directory, loads or generates the TLS certificate and the API secret, reads the
-paired devices and the origin allowlist, starts the pairing server, and applies
-stored settings. It returns an `*agent.Runtime` holding the configured agent
-alongside the stores a front end needs.
+paired devices and the origin allowlist, and applies stored settings. It returns
+an `*agent.Runtime` holding the configured agent alongside the stores a front
+end needs.
+
+It builds neither the listener nor the pairing server nor the control center.
+Each is a plugin the program registers, and an agent with none of them drives
+the reader and serves no HTTP, which is a build rather than a broken one.
+Nothing binds until the agent starts, so a route is declared before the port it
+will be served from is bound. See [Plugins](#plugins).
+
+The certificate is `agent.TrustPlugin`, wrapping the `*tls.Manager` that
+`Setup` returns as `rt.Certificates`. It holds the files a listener serves, the
+authority a pairing device is given, and the tray entry that installs that
+authority so browsers on this machine accept the agent. Whatever needs a
+certificate takes this plugin: `ServerPlugin.Trust`, `NewPairingPlugin` and
+`console.Config.Trust` all read it, so the certificate is configured once. A
+build serving a certificate it does not manage leaves `Manager` nil, and every
+method answers as a build with no certificate should: no files, no authority,
+and no entry offering to install one.
+
+Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
+menu entries that hand out its address and PIN.
+`agent.NewPairingPlugin(a, port, trust)` takes the rest from the agent: the
+device registry, the key pin and the name, so nothing already given to `Setup`
+is repeated. Register none and the build pairs no devices; the console is handed
+`nil` and reports pairing as disabled. A build wanting the listener without the
+menu registers the component on its own instead, with
+`agent.PairingFor(a, port, ca)` and `ctx.Use` or an `agent.Endpoint`.
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
@@ -118,6 +166,207 @@ configuration is fixed once the agent exists: it is read back through methods,
 so nothing can rebind the port or withdraw the pairing requirement behind the
 running servers. The settings that may legitimately change while running have
 methods of their own: `SetRequirePairedDevice` and `SetAllowCardType`.
+
+## Plugins
+
+A plugin is a value with one method. It is handed an `agent.AgentContext` once,
+before the agent starts, and registers whatever it wants the agent to run.
+
+```go
+type BackupPlugin struct {
+	Every time.Duration
+}
+
+func (p *BackupPlugin) Activate(ctx agent.AgentContext) error {
+	backups := &backupWorker{every: p.Every, dir: ctx.ConfigDir()}
+
+	ctx.Systray.Add("Back Up Now", traymenu.OnClick(backups.Run))
+	return ctx.Use(backups)
+}
+```
+
+```go
+rt.Agent.Plugins.Add(&BackupPlugin{Every: time.Hour})
+```
+
+Nothing is loaded at run time and nothing is discovered. Which plugins a build
+has is decided by what it imports, so one left out takes its dependencies with
+it, the same way `nfc/pcsc` and the tray do.
+
+The context carries what a plugin needs to wire itself in:
+
+| | |
+|---|---|
+| `ctx.Agent` | The agent, for its configuration and for hooks such as `OnTag` and `OnStateChange` |
+| `ctx.Use(c)` | Registers an `agent.Component`, started and stopped with the agent |
+| `ctx.Systray` | The menu the plugin's entries go on |
+| `ctx.Serve(srv)` | Publishes the listener the agent serves from |
+| `ctx.Mount(pattern, h)` | Adds a route to it |
+| `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Settings()`, `ctx.Logs()` | The agent's log, identity, config directory, preference store and log ring |
+
+`ctx.Systray` is the top level of the tray's own menu, so a plugin's entry is
+not marked out from one the tray declared itself: the shipped tray is one
+composition of a menu, and a custom build composes its own. Entries land where
+the tray activated the plugins, since a menu item always goes to the end of its
+parent. A plugin with more than one entry groups them under a submenu of its
+own, with `ctx.Systray.Section("Backups")`.
+
+`ctx.Systray` is never nil. A headless agent hands over a menu that draws
+nothing, so a plugin adds its entries without asking whether anyone is looking.
+
+A plugin has no `Deactivate`. Anything with a lifetime is a `Component`, which
+the agent starts once the reader and the servers are up and stops before taking
+them down again.
+
+### Activation
+
+Plugins are activated once, in the order they were added, before anything is
+opened or bound. The tray does it as it draws its menu, which is what puts the
+entries on the real one; `Agent.Start` does it if nothing else has. Adding a
+plugin after that is refused rather than accepted and never activated.
+
+Activation is also where a plugin publishes what the agent is served from and
+mounts its routes, so a listener's port and address are worth reading only once
+it has happened.
+
+```go
+// A headless build with no tray to draw their entries on.
+if err := rt.Agent.Activate(nil); err != nil {
+	log.Fatal(err)
+}
+```
+
+A plugin that returns an error fails the agent's start, naming the plugin, and
+the same failure is reported by every start afterwards.
+
+### The server plugin
+
+`agent.ServerPlugin` owns the `*unifiedserver.Server` and mounts everything on
+it: the agent's own routes first, then what is listed here. An endpoint is a
+route, something with a lifetime, a menu entry, or any combination:
+
+```go
+servers := &agent.ServerPlugin{Endpoints: []agent.Endpoint{
+	{Name: "metrics", Pattern: "/metrics", Handler: metrics},
+	{Name: "queue drain", Component: drain},
+}}
+servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
+
+rt.Agent.Plugins.Add(servers)
+```
+
+The plugin also owns the tray's **Server URLs** submenu, since what is served
+from a port is what the thing holding the port knows: the device and client
+addresses, the API secret a client presents to them, and a line per endpoint
+that asks for one.
+
+```go
+{
+	Name:    "control center",
+	Pattern: "/",
+	Handler: assets,
+	Menu: func(menu traymenu.Container, url string) {
+		menu.Add("Control Center: "+url, traymenu.Disabled())
+		menu.Add("  Copy Control Center URL", traymenu.OnClick(func() { copy(url) }))
+	},
+}
+```
+
+An endpoint is listed only if it sets `Menu`: a route nobody opens by hand is
+noise beside the addresses worth copying. A plugin with an `Activate` of its own
+can mount a route with `ctx.Mount` instead, which is what something wanting the
+agent as well as the route does.
+
+Registered with no `Config`, it serves on the port and name the agent was set up
+with, and on the certificate `Trust` holds. Set `Config` for a listener that
+differs from them, which is where a certificate provisioned outside the agent
+goes, or `Server` to hand over one built elsewhere:
+
+```go
+&agent.ServerPlugin{Config: unifiedserver.Config{Port: 9480, CertFile: cert, KeyFile: key}}
+```
+
+`agent.Routes` is what the agent serves of its own: `/ws`, where devices and
+clients both connect, and `/health` with `/api/v1/health` beside it. The agent
+holds no listener and mounts nothing itself; it hands those over and whatever
+serves it puts them on, ahead of anything of its own. An endpoint on one of
+their paths fails the start, as two endpoints on one path do, rather than
+leaving the mux to decide.
+
+`ctx.Serve` is how a plugin says it is what the agent is served from, which is
+what backs `ctx.Mount` for the plugins registered after it. It takes an
+`agent.Mounter`, one method wide, so the agent never names a server type.
+
+The listener is bound by a component the plugin registers, so it comes up once
+the agent is serving and goes down before it. It watches `Trust` for a reissued
+certificate and calls `Rebind`, which stops and starts the listener so the new
+one is served. Nothing else has to: installing a certificate authority or
+reissuing a certificate reports itself, and the listener follows. Set
+`Certificates` to watch something other than `Trust`, and `Rebind` is there for
+a program that has some other reason to bind again.
+
+### The control center
+
+The console is two endpoints of the server plugin, so it is served from the
+agent's port and listed with the other addresses:
+
+```go
+c := console.New(console.Config{
+	Agent:    rt.Agent,
+	Settings: rt.Settings,
+	Logs:     rt.Logs,
+	Servers:  servers,
+	Pairing:  pairing,
+	Trust:    trust,
+})
+servers.Add(c.Endpoints()...)
+```
+
+The three plugins are what the console reports on and acts through: the address
+it hands out is the listener's, the PIN it rotates is the pairing server's, and
+the authority it installs is the trust plugin's, so the tray entry offering the
+same install follows one done from a page. `console.New` also follows what
+redraws an open page: an origin allowed, a device revoked, a client connecting,
+a listener rebound. Under `-tags nowebui` there is no console
+compiled in and `Endpoints` is empty, so a program needs no build tag of its own.
+
+`tray.App.AttachConsole` is the one thing left to the program. It runs both
+ways: the tray acts through the console, and the console acts through the tray,
+so a device switched in the browser moves the tray's menu too.
+
+### The pairing plugin
+
+`agent.PairingPlugin` wraps the pairing server, registers it as a component, and
+owns the entries that show its address and PIN.
+
+```go
+pairing := agent.NewPairingPlugin(rt.Agent, 9472, trust)
+rt.Agent.Plugins.Add(pairing)
+```
+
+Its entries go under a `Pairing` submenu of their own, beside the tray's own
+top-level entries, and the labels follow the server: rotating the PIN from the
+menu or from the control center relabels both. `Port`, `PIN` and `RotatePIN`
+tolerate a nil plugin, so a build that registers none hands `nil` to the console
+and everything reports pairing as disabled.
+
+### The trust plugin
+
+`agent.TrustPlugin` is the smallest of the three: it holds the certificate the
+others are configured from, and adds the entry that installs the local authority
+behind it.
+
+```go
+trust := &agent.TrustPlugin{Manager: rt.Certificates}
+rt.Agent.Plugins.Add(trust)
+```
+
+The entry is offered only while there is something to install and hides itself
+once there is not, whether the install came from the menu or from the control
+center. Installing reissues the certificate, which the listener follows on its
+own. `Install` blocks on the operating system's password prompt; the menu calls
+it off the dispatch goroutine, and a program calling it directly should do the
+same.
 
 ## Naming your build
 
@@ -146,7 +395,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 
 | Package | Contents |
 |---|---|
-| `agent` | The agent: readers, servers, TLS, pairing, flags, configuration |
+| `agent` | The agent, and the plugins the shipped build registers: the listener, pairing and the certificate |
 | `agent/console` | The control center, adapting the agent to `webui.Host` |
 | `agent/tray` | The system tray |
 | `nfc` | Readers, tag drivers, NDEF encoding and decoding |
@@ -156,8 +405,11 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server` | The bridge between tag sources and clients, and the device credential check |
 | `server/clientserver` | The client WebSocket endpoint |
 | `server/tagrouter` | Picks the reader or a device for each client request |
-| `server/unifiedserver` | One listener fronting all of the above |
+| `server/unifiedserver` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
+| `traymenu` | Declarative tray menus, with no toolkit behind them |
+| `clipboard` | Copying text to the system clipboard |
+| `traymenu/fynetray` | The real tray, on `fyne.io/systray` |
 | `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
 | `e2e` | Tests only: an agent wired as on this page, driven over its protocols |
 
@@ -195,16 +447,23 @@ import (
 func main() {
 	opts := agent.DefaultOptions()
 	opts.ConfigDir = "/var/lib/davi-nfc"
-	opts.BootstrapPort = 0 // no pairing server
 	opts.AllowedOrigins = "console.example.com"
 
-	// DevicePortSet marks the port as a decision, so a port persisted in
+	// Explicit.Port marks the port as a decision, so a port persisted in
 	// settings does not quietly replace it.
 	opts.DevicePort = 9470
-	opts.DevicePortSet = true
+	opts.Explicit.Port = true
 
 	rt, err := agent.Setup(opts, pcsc.NewManager())
 	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The listener, with nothing on it but the agent's own routes. Leave it
+	// out for a service that reads cards and serves no HTTP. Trust holds the
+	// certificate Setup generated; without it the listener serves plain HTTP.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust); err != nil {
 		log.Fatal(err)
 	}
 
@@ -223,8 +482,10 @@ func main() {
 }
 ```
 
-Mounting no console routes leaves the agent serving its own: `/ws` and the two
-health checks, with the root falling back to a plain-text banner. `-tags nowebui`
+A server plugin with no endpoints serves the agent's own routes: `/ws` and the
+two health checks, with the root falling back to a plain-text banner. Building
+no pairing server leaves a build that pairs no devices, so a phone reaches it
+through the API secret rather than a credential of its own. `-tags nowebui`
 additionally removes the console from the binary.
 
 ## Building without a hardware backend
@@ -237,6 +498,11 @@ target.
 manager := remotenfc.NewManager(remotenfc.DeviceTimeout)
 
 rt, err := agent.Setup(agent.DefaultOptions(), manager)
+if err != nil {
+	log.Fatal(err)
+}
+trust := &agent.TrustPlugin{Manager: rt.Certificates}
+rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust)
 ```
 
 ```bash
@@ -297,10 +563,6 @@ regardless, and the observer's return value changes nothing.
 
 Observers run on the goroutine that feeds those clients, so they must not block.
 Work that may take time belongs on a channel of your own.
-
-> Do not read `Agent.Bridge.TagData` directly. That channel has a single
-> consumer, so a second reader removes scans from the broadcast rather than
-> copying them.
 
 ## Driving a reader directly
 

@@ -26,6 +26,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 )
 
 func main() {
@@ -73,37 +74,65 @@ func main() {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
-	// Nil in a -tags nowebui build, where the control center is not compiled
-	// in. Mounting is all there is to attaching one: a build that wants none
-	// mounts none, and the agent is no wiser either way.
-	consoleServer := console.New(rt.Agent, rt.Settings, rt.Logs)
-	if consoleServer != nil {
-		// The control API and the console page are deliberately not wrapped in
-		// CORS: one administers the agent and the other is a page, so no other
-		// origin has business calling them.
-		if err := rt.Server.Mount("/control/", consoleServer.Routes()); err != nil {
-			log.Fatalf("Failed to mount the control API: %v", err)
-		}
-		if err := rt.Server.Mount("/", consoleServer.Assets()); err != nil {
-			log.Fatalf("Failed to mount the console: %v", err)
-		}
+	// The certificate this agent serves, and the entry that makes browsers
+	// accept it. Whatever needs a certificate is given this rather than
+	// reaching for one: the agent holds none.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
 
-		// Redraw the console whenever something changes it from elsewhere.
-		rt.Agent.Origins().OnChange(consoleServer.NotifyChange)
-		rt.Agent.Devices().OnChange(consoleServer.NotifyChange)
-		rt.Agent.OnClientsChange(consoleServer.NotifyChange)
+	// The listener and everything on it. Setup does not build one: what this
+	// agent serves is this program's decision, and registering no server
+	// plugin at all leaves an agent that drives the reader and serves nothing.
+	// A certificate named on the command line is served ahead of the managed
+	// one, which -cert and -key turn off.
+	servers := &agent.ServerPlugin{
+		Trust:  trust,
+		Config: unifiedserver.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
+	}
+
+	// The pairing server, on a listener of its own, with the menu entries that
+	// hand out its address and PIN. The agent does not hold one, so this is
+	// where it is built and where it is handed to the console.
+	var pairing *agent.PairingPlugin
+	if opts.BootstrapPort > 0 {
+		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, trust)
+	}
+
+	// The control center, served from the same listener. Nil in a -tags nowebui
+	// build, where there is none compiled in and Endpoints is empty, so this
+	// program needs no build tag of its own.
+	controlCenter := console.New(console.Config{
+		Agent:    rt.Agent,
+		Settings: rt.Settings,
+		Logs:     rt.Logs,
+		Servers:  servers,
+		Pairing:  pairing,
+		Trust:    trust,
+	})
+	servers.Add(controlCenter.Endpoints()...)
+
+	// The server goes on first: it publishes the listener the rest mount on,
+	// and plugins are activated in the order they were added, which is also the
+	// order their entries appear in the tray.
+	plugins := []agent.Plugin{servers}
+	if pairing != nil {
+		plugins = append(plugins, pairing)
+	}
+	plugins = append(plugins, trust)
+
+	if err := rt.Agent.Plugins.Add(plugins...); err != nil {
+		log.Fatalf("Failed to register a plugin: %v", err)
 	}
 
 	app := tray.New(rt)
-	app.AttachConsole(consoleServer)
+	app.AttachConsole(controlCenter)
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		// The pairing server is a component of the agent now, so the tray's
-		// quit path takes it down with everything else.
+		// The pairing server is a component the plugin registered, so the
+		// tray's quit path takes it down with everything else.
 		app.Quit()
 	}()
 

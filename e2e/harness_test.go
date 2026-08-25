@@ -42,8 +42,10 @@ type harness struct {
 	Agent   *agent.Agent
 	Runtime *agent.Runtime
 
-	// Devices is the phone driver the test built and handed over.
+	// Devices is the phone driver the test built and handed over, and Pairing
+	// the pairing plugin, when the test asked for one.
 	Devices *remotenfc.Manager
+	Pairing *agent.PairingPlugin
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
@@ -67,10 +69,6 @@ func start(t *testing.T, opts options) *harness {
 	// running on this machine.
 	o.DevicePort = freePort(t)
 	o.Explicit.Port = true
-	o.BootstrapPort = 0
-	if opts.Pairing {
-		o.BootstrapPort = freePort(t)
-	}
 
 	// The agent receives an interface, a channel and a handler builder rather
 	// than the driver itself, so it names no device protocol.
@@ -98,16 +96,36 @@ func start(t *testing.T, opts options) *harness {
 		t.Fatalf("Setup: %v", err)
 	}
 
+	// The listener is a plugin, as it is in docs/custom-builds.md. With none
+	// registered the agent drives the reader and serves nothing. Pairing is a
+	// plugin of its own, on a listener of its own; with no tray here its menu
+	// entries go to a menu that draws nothing. The certificate the listener
+	// serves and the authority pairing hands out are the trust plugin's, which
+	// is what the agent no longer holds.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+
+	var pairing *agent.PairingPlugin
+	if opts.Pairing {
+		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), trust)
+		if err := rt.Agent.Plugins.Add(pairing); err != nil {
+			t.Fatalf("Plugins.Add: %v", err)
+		}
+	}
+
 	h := &harness{
 		Agent:    rt.Agent,
 		Runtime:  rt,
 		Devices:  devices,
 		Hardware: hardware.MockDevice,
+		Pairing:  pairing,
 		Origin:   "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
 		scans:    make(chan nfc.NFCData, 32),
 	}
-	if opts.Pairing {
-		h.Pair = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.BootstrapPort()))
+	if pairing != nil {
+		h.Pair = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(pairing.Port()))
 	}
 
 	// Before Start, the only point at which an observer is promised every scan.

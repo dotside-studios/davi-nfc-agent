@@ -15,8 +15,6 @@ type Tray interface {
 	Quit()
 	// SwitchDevice moves the tray's device selection.
 	SwitchDevice(devicePath string)
-	// RefreshTrustMenu redraws the certificate-trust entries.
-	RefreshTrustMenu()
 	// SyncSettingsToMenu reflects a settings change made in the console.
 	SyncSettingsToMenu(next settings.Settings)
 }

@@ -25,15 +25,17 @@ func TestPairingFollowsTheAgent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9487
 	opts.Explicit.Port = true
-	opts.BootstrapPort = 9489
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
+	if err := rt.Agent.Use(PairingFor(rt.Agent, 9489, nil)); err != nil {
+		t.Fatalf("Use: %v", err)
+	}
 
 	if reachable("http://localhost:9489/") {
-		t.Error("Setup should build the pairing server, not bind it")
+		t.Error("building the pairing server should not bind it")
 	}
 
 	if err := rt.Agent.Start(""); err != nil {
@@ -56,49 +58,81 @@ func TestPairingFollowsTheAgent(t *testing.T) {
 	}
 }
 
-// TestPairingDisabled keeps the zero-port path working: no component, no
-// listener, and the accessors report the absence rather than panicking.
-func TestPairingDisabled(t *testing.T) {
+// Setup builds no pairing server: whether an agent pairs devices, and what
+// displays the PIN, is the program's decision.
+func TestSetupBuildsNoPairingServer(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9491
 	opts.Explicit.Port = true
-	opts.BootstrapPort = 0
+	opts.BootstrapPort = 9472
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
-	}
-	if rt.Agent.Pairing() != nil {
-		t.Error("Pairing() should be nil when the port is 0")
-	}
-	if rt.Agent.Bootstrap() != nil {
-		t.Error("Bootstrap() should be nil when pairing is disabled")
-	}
-	if got := rt.Agent.BootstrapPort(); got != 0 {
-		t.Errorf("BootstrapPort() = %d, want 0", got)
 	}
 	if n := len(rt.Agent.Components()); n != 0 {
 		t.Errorf("Components() = %d, want none registered", n)
 	}
 }
 
-// TestPairingRegisteredAsComponent checks it goes through the same path as
-// anything else the agent runs.
-func TestPairingRegisteredAsComponent(t *testing.T) {
+// A build without pairing holds a nil *PairingServer, and every caller asking
+// it for the PIN would otherwise have to check first.
+func TestANilPairingServerReportsItsAbsence(t *testing.T) {
+	var pairing *PairingServer
+
+	if got := pairing.Port(); got != 0 {
+		t.Errorf("Port() = %d, want 0", got)
+	}
+	if got := pairing.PIN(); got != "" {
+		t.Errorf("PIN() = %q, want empty", got)
+	}
+	if got := pairing.RotatePIN(); got != "" {
+		t.Errorf("RotatePIN() = %q, want empty", got)
+	}
+	if pairing.Server() != nil {
+		t.Error("Server() should be nil")
+	}
+}
+
+// PairingFor takes what the pairing server needs from the agent, so a program
+// repeats none of what it already told Setup.
+func TestPairingForTakesTheAgentsConfiguration(t *testing.T) {
+	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	pairing := PairingFor(rt.Agent, 9495, nil)
+	if got := pairing.Port(); got != 9495 {
+		t.Errorf("Port() = %d, want 9495", got)
+	}
+	if got := pairing.PIN(); got == "" {
+		t.Error("PIN() is empty; a phone would have nothing to present")
+	}
+}
+
+// Listed as an endpoint of the server plugin, the pairing server goes through
+// the same registration as anything else the agent runs.
+func TestPairingRegistersAsAnEndpointComponent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9493
 	opts.Explicit.Port = true
-	opts.BootstrapPort = 9495
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	comps := rt.Agent.Components()
-	if len(comps) != 1 || comps[0].Name() != "pairing" {
-		t.Fatalf("Components() = %v, want one named pairing", comps)
+
+	pairing := PairingFor(rt.Agent, 9497, nil)
+	servers := &ServerPlugin{Endpoints: []Endpoint{{Name: "pairing", Component: pairing}}}
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
 	}
-	if rt.Agent.BootstrapPort() != 9495 {
-		t.Errorf("BootstrapPort() = %d, want 9495", rt.Agent.BootstrapPort())
+	if err := rt.Agent.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	if !runs(rt.Agent, "pairing") {
+		t.Fatalf("Components() = %v, want the pairing server among them", names(rt.Agent))
 	}
 }

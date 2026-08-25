@@ -276,6 +276,12 @@ func (i *Item) AddSeparator() {
 	i.owner.driver.AddSeparator(i.platform)
 }
 
+// Section appends a keyed group of items to this item's submenu. See
+// [NewSection].
+func (i *Item) Section(title string, opts ...Option) *Section {
+	return NewSection(i, title, opts...)
+}
+
 func (i *Item) menu() *Menu    { return i.owner }
 func (i *Item) native() Native { return i.platform }
 

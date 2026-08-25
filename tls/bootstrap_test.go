@@ -349,7 +349,7 @@ func TestIndexShowsQR(t *testing.T) {
 // TestNewBootstrapServerNormalisesTypedNilManager covers the shape of nil the
 // constructor actually receives. main holds a concrete *Manager, so under
 // -auto-tls=false or an externally provisioned -cert/-key it passes a nil
-// *Manager, which boxes into a non-nil caReader.
+// *Manager, which boxes into a non-nil CertificateAuthority.
 func TestNewBootstrapServerNormalisesTypedNilManager(t *testing.T) {
 	var mgr *Manager // nil, but not a nil interface once passed in
 

@@ -18,7 +18,11 @@ type PairingConfig struct {
 	// CA hands out the local certificate authority, to a request carrying the
 	// PIN. Nil is normal: an agent using an externally provisioned certificate
 	// has no CA to give out, and pairing works regardless.
-	CA *tlspkg.Manager
+	//
+	// Two methods rather than the whole TLS manager, since that is all the
+	// pairing server reads: certificate material it does not serve is not its
+	// to hold.
+	CA tlspkg.CertificateAuthority
 
 	// Devices is the registry a paired device's credential is issued into.
 	Devices *DeviceRegistry
@@ -31,6 +35,27 @@ type PairingConfig struct {
 
 	// AgentPort is the port a paired device is told to connect to afterwards.
 	AgentPort int
+}
+
+// PairingFor builds a pairing server for a, listening on port and handing out
+// ca. Everything else it needs is what the agent was already configured with:
+// its device registry, its key pin, its name and its port.
+//
+// ca may be nil: an agent serving an externally provisioned certificate has no
+// authority to give out, and pairing works regardless.
+//
+// The agent does not hold the result. Whoever builds one registers it, as a
+// component or as an endpoint of the server plugin, and hands it to whatever
+// displays the PIN.
+func PairingFor(a *Agent, port int, ca tlspkg.CertificateAuthority) *PairingServer {
+	return NewPairingServer(PairingConfig{
+		Port:         port,
+		CA:           ca,
+		Devices:      a.Devices(),
+		PublicKeyPin: a.PublicKeyPin(),
+		AppName:      a.Info().DisplayName,
+		AgentPort:    a.DevicePort(),
+	})
 }
 
 // PairingServer runs the pairing and CA-distribution listener as a component of
@@ -71,9 +96,39 @@ func (p *PairingServer) Stop() error {
 	return nil
 }
 
-// Port reports the port it listens on.
-func (p *PairingServer) Port() int { return p.cfg.Port }
+// Port reports the port it listens on, 0 on a nil server.
+func (p *PairingServer) Port() int {
+	if p == nil {
+		return 0
+	}
+	return p.cfg.Port
+}
 
-// Server exposes the underlying bootstrap server, for the PIN and the URLs the
-// tray and the console display.
-func (p *PairingServer) Server() *tlspkg.BootstrapServer { return p.server }
+// PIN is the code a phone must present to pair, empty on a nil server.
+//
+// The nil receiver is deliberate: a build without pairing holds a nil
+// *PairingServer, and every caller asking for the PIN would otherwise check
+// first.
+func (p *PairingServer) PIN() string {
+	if p == nil {
+		return ""
+	}
+	return p.server.PIN()
+}
+
+// RotatePIN issues a fresh PIN and returns it, invalidating the pairing URLs
+// carrying the old one. Empty on a nil server.
+func (p *PairingServer) RotatePIN() string {
+	if p == nil {
+		return ""
+	}
+	return p.server.RotatePIN()
+}
+
+// Server exposes the underlying bootstrap server, nil on a nil one.
+func (p *PairingServer) Server() *tlspkg.BootstrapServer {
+	if p == nil {
+		return nil
+	}
+	return p.server
+}

@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // GetAllCardTypeFilterNames returns all card type filter names from nfc package constants
@@ -87,10 +87,18 @@ type Config struct {
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
 
-	// Pairing is the pairing server, registered as a component so it starts and
-	// stops with the agent. Nil disables pairing entirely. Everything it needs
-	// lives on PairingConfig rather than here.
-	Pairing *PairingServer
+	// Plugins are activated once, in order, before the agent first starts.
+	// They are what mount the routes and register the components a build is
+	// made of; see [Plugin]. More can be added through [Agent.Plugins], up
+	// until the agent activates them.
+	Plugins []Plugin
+
+	// Settings is the persisted preference store, and Logs the ring the
+	// agent's log is captured in. Neither is used by the agent itself. They
+	// are carried so a plugin can reach them through its [AgentContext]
+	// rather than being handed them separately by whoever built it.
+	Settings *settings.Store
+	Logs     *logbuf.Ring
 
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
@@ -121,40 +129,20 @@ type Config struct {
 	// handler, so neither names the other's types. Nil serves clients only.
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
-	// Server is the listener the agent serves from. The caller builds it and
-	// mounts whatever else it wants served from the same port, which is how a
-	// control center is attached: mount it, or do not and there is none.
-	//
-	// Nil is an agent with no HTTP surface, for a program driving the reader
-	// directly. New mounts the agent's own routes on a non-nil one.
-	Server *unifiedserver.Server
-
 	// Explicit marks what the launcher set deliberately, on the command line,
 	// in the environment, or here. A field marked there belongs to the launcher
 	// for the whole run: no stored preference and no operator may change it.
 	Explicit settings.Explicit
-
-	// TLS configuration, used by the unified server. TLSManager also drives
-	// certificate regeneration and network-change watching.
-	CertFile   string
-	KeyFile    string
-	TLSManager *tls.Manager
 }
 
 // Agent runs the NFC reader and the servers in front of it. Build one with New;
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// UnifiedServer is the listener the device and client endpoints are served
-	// from, routing each /ws connection to the device driver or the client
-	// server. It is the one the caller supplied, held for the agent's whole
-	// life: a stop leaves it stopped rather than dropping it, so a restart
-	// serves from the same listener with the same routes mounted on it.
-	//
-	// Router decides which tag source a client request applies to, and
-	// DeviceAuth gates the device endpoint. Both are nil until Start.
-	UnifiedServer *unifiedserver.Server
-	ClientServer  *clientserver.Server
+	// ClientServer fans a scan out to every connected client. Router decides
+	// which tag source a client request applies to, and DeviceAuth gates the
+	// device endpoint. All three are nil until Start.
+	ClientServer *clientserver.Server
 
 	// serving is what the mounted routes dispatch to, replaced on every start
 	// and cleared on stop.
@@ -166,6 +154,16 @@ type Agent struct {
 	reader     atomic.Pointer[nfc.NFCReader]
 	Router     *tagrouter.Router
 	DeviceAuth *server.DeviceAuth
+
+	// Plugins is the plugin list, added to before the agent starts and
+	// activated once, on the first Start or by a host that activates them
+	// itself to give them a real tray menu.
+	Plugins *PluginSet
+
+	// trayMenu is the menu a plugin's entries go on when no host supplied one:
+	// built on a driver that draws nothing, so a plugin need not ask whether
+	// there is a tray. Nil until a plugin asks for a menu.
+	trayMenu *traymenu.Menu
 
 	// Settled at construction.
 	info                buildinfo.Info
@@ -181,12 +179,10 @@ type Agent struct {
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
-	pairing             *PairingServer
-	certFile            string
-	keyFile             string
-	tlsManager          *tls.Manager
 	requirePairedDevice bool
 	readerFeedback      bool
+	settingsStore       *settings.Store
+	logs                *logbuf.Ring
 
 	// Settings state. Held on the agent as well as on the reader, because the
 	// reader is built in Start, after the stored settings have been applied: a
@@ -217,7 +213,12 @@ type Agent struct {
 	pumpCancel        context.CancelFunc
 	onTag             []func(nfc.NFCData)
 	clientHooks       []func()
+	restartHooks      []func()
 	serverRestartChan chan struct{} // Signals when servers are restarted
+
+	// mounter is what the agent's routes are served from, published by
+	// whichever plugin serves them. Nil is an agent serving no HTTP at all.
+	mounter Mounter
 
 	// devicePath is the reader Start resolved to, kept so a restart reopens the
 	// same one. Atomic for the same reason as reader: the console and the tray
@@ -256,16 +257,20 @@ func New(cfg Config) *Agent {
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
-		pairing:             cfg.Pairing,
-		certFile:            cfg.CertFile,
-		keyFile:             cfg.KeyFile,
-		tlsManager:          cfg.TLSManager,
 		requirePairedDevice: cfg.RequirePairedDevice,
 		explicit:            cfg.Explicit,
 		readerMode:          nfc.ModeReadWrite,
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
+		settingsStore:       cfg.Settings,
+		logs:                cfg.Logs,
+		Plugins:             &PluginSet{},
+	}
+
+	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
+		// Only a nil entry can fail here: the set is new, so nothing is sealed.
+		logger.Printf("Ignoring a plugin: %v", err)
 	}
 
 	// Built here rather than at start, so a caller can put its device endpoint
@@ -276,24 +281,8 @@ func New(cfg Config) *Agent {
 			Authenticate:         a.DeviceAuth.Check,
 			CheckOrigin:          a.checkOrigin(),
 			AllowTagModification: a.TagModificationAllowed,
-			PublicKeyPin:         a.publicKeyPin,
+			PublicKeyPin:         a.PublicKeyPin,
 		})
-	}
-
-	// Registered here rather than left to the caller: the pairing server's
-	// lifetime is the agent's, and forgetting to wire it is exactly the class
-	// of mistake this component list exists to remove.
-	if cfg.Pairing != nil {
-		a.components = append(a.components, cfg.Pairing)
-	}
-
-	// The agent's own routes go on before the caller's, so a mount cannot
-	// displace /ws or the health checks.
-	if cfg.Server != nil {
-		a.UnifiedServer = cfg.Server
-		if err := a.MountOn(cfg.Server); err != nil {
-			logger.Printf("Failed to mount the agent's routes: %v", err)
-		}
 	}
 
 	return a
@@ -312,15 +301,13 @@ func (a *Agent) ConfigDir() string        { return a.configDir }
 func (a *Agent) Origins() *OriginStore    { return a.origins }
 func (a *Agent) Devices() *DeviceRegistry { return a.devices }
 
-// ServingPort is the port actually being served, which is what a client should
-// be told to connect to. It differs from DevicePort after a port is saved and
-// before the listener is rebound.
-func (a *Agent) ServingPort() int {
-	if a.UnifiedServer != nil {
-		return a.UnifiedServer.Port()
-	}
-	return a.DevicePort()
-}
+// SettingsStore is the persisted preference store, or nil when the agent has
+// none. Settings, without the suffix, reports the preferences in force.
+func (a *Agent) SettingsStore() *settings.Store { return a.settingsStore }
+
+// Logs is the ring the agent's log is captured in, or nil when the program
+// installed none.
+func (a *Agent) Logs() *logbuf.Ring { return a.logs }
 
 // DevicePort is the port the agent serves on, which a saved preference can
 // change; the listener keeps the port it is bound on until it is rebound.
@@ -331,28 +318,6 @@ func (a *Agent) DevicePort() int {
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
-// Pairing returns the pairing component, or nil when pairing is disabled.
-func (a *Agent) Pairing() *PairingServer { return a.pairing }
-
-// Bootstrap returns the pairing server itself, for the PIN and the URLs the
-// tray and console show. Nil when pairing is disabled.
-func (a *Agent) Bootstrap() *tls.BootstrapServer {
-	if a.pairing == nil {
-		return nil
-	}
-	return a.pairing.Server()
-}
-
-// BootstrapPort reports the pairing server's port, 0 when disabled.
-func (a *Agent) BootstrapPort() int {
-	if a.pairing == nil {
-		return 0
-	}
-	return a.pairing.Port()
-}
-func (a *Agent) CertFile() string         { return a.certFile }
-func (a *Agent) KeyFile() string          { return a.keyFile }
-func (a *Agent) TLSManager() *tls.Manager { return a.tlsManager }
 func (a *Agent) RequirePairedDevice() bool {
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
@@ -420,13 +385,15 @@ func (a *Agent) startLocked(devicePath string) error {
 	a.reader.Store(nfcReader)
 	nfcReader.SetFeedback(a.readerFeedback)
 
-	// Start network watcher if TLS manager is configured
-	if a.tlsManager != nil {
-		go a.watchNetworkChanges()
+	// Start the servers using shared code
+	if err := a.startServers(); err != nil {
+		return err
 	}
 
-	// Start the servers using shared code
-	return a.startServers()
+	// After them, so the pump draining it is already running: a card presented
+	// in between would otherwise wait on a channel nobody is reading.
+	nfcReader.Start()
+	return nil
 }
 
 // stopLocked tears down the servers and the reader. The caller holds the
@@ -438,10 +405,6 @@ func (a *Agent) stopLocked() {
 	}
 
 	a.logger.Println("Stopping agent...")
-
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
-	}
 
 	a.ClientServer = nil
 	a.Router = nil
@@ -467,28 +430,26 @@ func (a *Agent) Shutdown() {
 	if closer, ok := a.manager.(interface{ Close() }); ok {
 		closer.Close()
 	}
-}
 
-// watchNetworkChanges listens for network changes from TLS manager and restarts servers.
-func (a *Agent) watchNetworkChanges() {
-	if a.tlsManager == nil {
-		return
-	}
-
-	ch := a.tlsManager.WatchNetworkChanges()
-	for range ch {
-		a.logger.Println("Network change detected, restarting servers with new certificates...")
-		if err := a.RestartServers(); err != nil {
-			a.logger.Printf("Failed to restart servers: %v", err)
-		}
+	// The menu a plugin's entries went on when there was no tray. A host with
+	// a real tray closes its own; this is only the stand-in.
+	a.lifecycleMu.Lock()
+	menu := a.trayMenu
+	a.trayMenu = nil
+	a.lifecycleMu.Unlock()
+	if menu != nil {
+		menu.Close()
 	}
 }
 
-// RestartServers stops and restarts the HTTP/WebSocket servers with current TLS configuration.
-// The NFC reader continues running during the restart.
+// RestartServers rebuilds what the agent serves: the router, the client server
+// and the tag sources feeding them. The reader and the listener carry on.
+//
+// For a change the serving state captured when it was built, such as the API
+// secret the client server holds. A certificate reissued on disk is not one of
+// those: the listener binds again on its own, and nothing here is rebuilt.
 func (a *Agent) RestartServers() error {
 	a.lifecycleMu.Lock()
-	defer a.lifecycleMu.Unlock()
 
 	a.logger.Println("Restarting servers...")
 
@@ -499,20 +460,31 @@ func (a *Agent) RestartServers() error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Restart servers
-	if err := a.startServers(); err != nil {
+	err := a.startServers()
+
+	// Released before the listeners are told, as the state hooks are: a hook
+	// that touched the agent would otherwise wait for a lock its own caller
+	// holds.
+	a.lifecycleMu.Unlock()
+
+	if err != nil {
 		return err
 	}
 
 	a.logger.Println("Servers restarted successfully")
+	a.notifyServerRestart()
+	return nil
+}
 
-	// Notify listeners of server restart
+// notifyServerRestart tells whatever follows the listeners that they have been
+// rebuilt. Called with the lifecycle released, as the state hooks are.
+func (a *Agent) notifyServerRestart() {
 	select {
 	case a.serverRestartChan <- struct{}{}:
 	default:
 		// Channel full, skip
 	}
-
-	return nil
+	a.fireServerRestart()
 }
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
@@ -520,10 +492,6 @@ func (a *Agent) stopServers() {
 	if a.pumpCancel != nil {
 		a.pumpCancel()
 		a.pumpCtx, a.pumpCancel = nil, nil
-	}
-
-	if a.UnifiedServer != nil {
-		a.UnifiedServer.Stop()
 	}
 
 	a.ClientServer = nil
@@ -555,8 +523,12 @@ func (a *Agent) startServers() error {
 	// The agent's tag sources feed the client server directly. There is no
 	// channel between them any more, so there is nothing to drain and nothing
 	// to remember to start.
+	//
+	// The reader is not started here. Its lifetime is the agent's, not the
+	// servers': starting it on every restart left a second worker polling the
+	// same reader, racing the first and scanning every card twice. See
+	// startLocked, which starts the one it opened.
 	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
-	reader.Start()
 	go a.pumpReader(a.pumpCtx, reader, a.ClientServer)
 	if a.remoteScans != nil {
 		go pumpDevices(a.pumpCtx, a.remoteScans, a.ClientServer)
@@ -569,21 +541,10 @@ func (a *Agent) startServers() error {
 		device: a.deviceEndpoint,
 	})
 
-	// The listener is the caller's, mounted before the agent starts. A nil one
-	// is an agent with no HTTP surface at all, which is what a program driving
-	// the reader directly wants.
-	if a.UnifiedServer == nil {
-		a.logger.Println("No server mounted; serving no HTTP")
-		return nil
-	}
-
-	// Binds before returning, so a port already in use fails the start rather
-	// than leaving the agent reporting itself running with nothing listening.
-	if err := a.UnifiedServer.Start(); err != nil {
-		return err
-	}
-
-	a.logger.Printf("Server started on port %d (NFC devices + web clients)", a.devicePort)
+	// Nothing is bound here. The listener is a component of whoever serves it,
+	// so it comes up once this has, and goes down before it; an agent with none
+	// registered serves no HTTP at all, which is what a program driving the
+	// reader directly wants.
 	return nil
 }
 

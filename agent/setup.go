@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
@@ -29,13 +28,24 @@ const (
 // DefaultOptions rather than the zero value, which would ask for no TLS and
 // port 0.
 type Options struct {
-	Version        bool
-	DevicePath     string
-	DevicePort     int
-	BootstrapPort  int
-	APISecret      string
-	CertFile       string
-	KeyFile        string
+	Version    bool
+	DevicePath string
+	DevicePort int
+
+	// BootstrapPort is the pairing listener the launcher asked for, 0 for
+	// none. Setup does not read it: whether an agent pairs devices, and what
+	// displays the PIN, is the program's decision. See [PairingFor].
+	BootstrapPort int
+
+	APISecret string
+
+	// CertFile and KeyFile are a certificate provisioned outside this agent,
+	// which turns AutoTLS off. Setup does not read them either: what serves a
+	// certificate is the program's decision, so it passes them to whatever
+	// does, as [unifiedserver.Config] on a [ServerPlugin].
+	CertFile string
+	KeyFile  string
+
 	AutoTLS        bool
 	ConfigDir      string
 	AllowedOrigins string
@@ -80,9 +90,8 @@ func DefaultOptions() *Options {
 }
 
 // Runtime is what Setup built. It carries only what is not already reachable
-// through the agent: the origin and device stores, the pairing server and its
-// port all live on Agent, and reads of those go through rt.Agent so there is
-// one copy to keep true.
+// through the agent: the origin and device stores live on Agent, and reads of
+// those go through rt.Agent so there is one copy to keep true.
 type Runtime struct {
 	Agent    *Agent
 	Settings *settings.Store
@@ -94,10 +103,10 @@ type Runtime struct {
 	// and the stored preference have been reconciled.
 	DevicePath string
 
-	// Server is the listener the agent serves from, with the agent's own routes
-	// already mounted. Mount anything else on it before starting the agent: a
-	// control center, or whatever else belongs on the same port.
-	Server *unifiedserver.Server
+	// Certificates is the certificate the agent manages for itself, nil for a
+	// build serving one provisioned elsewhere. Wrap it in a [TrustPlugin] and
+	// hand that to whatever serves it, pairs against it and reports on it.
+	Certificates *tls.Manager
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -118,27 +127,23 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		configDir = DefaultConfigDir(info.DirName)
 	}
 
-	certFile, keyFile := opts.CertFile, opts.KeyFile
-
-	// Initialize auto-TLS if enabled (and no manual cert/key provided)
+	// The certificate this agent manages for itself, unless one was
+	// provisioned outside it. Setup builds it because it is config-directory
+	// state; what serves it, hands out its authority and offers to install it
+	// is the program's business, through [TrustPlugin].
 	var tlsMgr *tls.Manager
 	var agentPublicKeyPin string
-	if opts.AutoTLS && certFile == "" && keyFile == "" {
+	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
 		tlsMgr = tls.NewManager(configDir)
 		tlsMgr.UseCA(opts.InstallCA)
-		cert, key, err := tlsMgr.EnsureCertificates()
-		if err != nil {
+		if _, _, err := tlsMgr.EnsureCertificates(); err != nil {
 			log.Printf("Warning: Auto-TLS failed: %v (running without TLS)", err)
 			tlsMgr = nil
-		} else {
-			certFile, keyFile = cert, key
-
+		} else if pin, err := tlsMgr.PublicKeyPin(); err == nil {
 			// Native devices authenticate the agent by this value rather than
 			// by a trust store, so log it where a first run will show it.
-			if pin, err := tlsMgr.PublicKeyPin(); err == nil {
-				log.Printf("Agent public key pin: %s", pin)
-				agentPublicKeyPin = pin
-			}
+			log.Printf("Agent public key pin: %s", pin)
+			agentPublicKeyPin = pin
 		}
 	}
 
@@ -165,25 +170,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	if err != nil {
 		log.Printf("Warning: failed to load paired devices: %v", err)
 		devices, _ = NewDeviceRegistry("")
-	}
-
-	// Build the pairing server. It is available whenever pairing is possible,
-	// not only under auto-TLS: an agent using an externally provisioned
-	// certificate has no CA to hand out but still has devices to pair, and
-	// coupling the two left that deployment with no way to authenticate one.
-	//
-	// It is not started here. It is a component now, so the agent starts it
-	// with everything else and stops it again on the way down.
-	var pairing *PairingServer
-	if opts.BootstrapPort > 0 {
-		pairing = NewPairingServer(PairingConfig{
-			Port:         opts.BootstrapPort,
-			CA:           tlsMgr,
-			Devices:      devices,
-			PublicKeyPin: agentPublicKeyPin,
-			AppName:      info.DisplayName,
-			AgentPort:    opts.DevicePort,
-		})
 	}
 
 	// The allowlist persists in the config dir and starts with the first-party
@@ -246,19 +232,12 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	// The listener is built here so the caller can mount on it before anything
-	// starts. The agent's own routes go on inside New.
-	srv := unifiedserver.New(unifiedserver.Config{
-		Port:            devicePort,
-		CertFile:        certFile,
-		KeyFile:         keyFile,
-		MDNSServiceName: info.DisplayName + " Device",
-	})
-
 	// Everything the agent runs on is settled by this point, which is why it
 	// can be handed over in one piece.
+	//
+	// Not the listener: that is a plugin the caller registers, which is what
+	// lets a build decide what it serves. See [ServerPlugin].
 	a := New(Config{
-		Server:              srv,
 		RemoteOps:           opts.RemoteOps,
 		RemoteScans:         opts.RemoteScans,
 		DeviceEndpoint:      opts.DeviceEndpoint,
@@ -270,22 +249,20 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Origins:             origins,
 		Devices:             devices,
 		PublicKeyPin:        agentPublicKeyPin,
-		Pairing:             pairing,
+		Settings:            settingsStore,
+		Logs:                opts.Logs,
 		RequirePairedDevice: requirePaired,
 		Explicit:            explicit,
-		CertFile:            certFile,
-		KeyFile:             keyFile,
-		TLSManager:          tlsMgr,
 	})
 
 	a.ApplySettings(stored)
 
 	return &Runtime{
-		Agent:      a,
-		Settings:   settingsStore,
-		Logs:       opts.Logs,
-		DevicePath: devicePath,
-		Server:     srv,
+		Agent:        a,
+		Settings:     settingsStore,
+		Logs:         opts.Logs,
+		DevicePath:   devicePath,
+		Certificates: tlsMgr,
 	}, nil
 }
 

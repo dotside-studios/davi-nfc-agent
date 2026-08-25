@@ -15,6 +15,20 @@ type tagSink interface {
 	BroadcastDeviceStatus(nfc.DeviceStatus)
 }
 
+// readerSelected reports whether a reader's scans are wanted. The pinned device
+// is a filter rather than a lock: a scan from a reader the operator is not
+// asking for is dropped here, wherever it was read.
+//
+// Scans a device reports for itself do not come through here, so a phone is
+// unaffected by which reader is pinned.
+func (a *Agent) readerSelected(device string) bool {
+	pinned := a.CurrentPinnedDevice()
+	if pinned == "" || device == "" {
+		return true
+	}
+	return device == pinned
+}
+
 // pumpReader forwards what the hardware reader scans to the sink. It returns
 // once ctx is done.
 func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagSink) {
@@ -31,8 +45,12 @@ func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagS
 	}
 }
 
-// forwardScan applies the card-type filter and hands the scan on.
+// forwardScan applies the agent's filters and hands the scan on.
 func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
+	if !a.readerSelected(data.Device) {
+		return
+	}
+
 	if data.Err != nil {
 		log.Printf("Error: %v", data.Err)
 		sink.Broadcast(data)

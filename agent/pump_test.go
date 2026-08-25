@@ -312,3 +312,105 @@ func TestARefusedScanKeepsItsDevice(t *testing.T) {
 		t.Errorf("the refusal names device %q, want the one that presented the card", got.Device)
 	}
 }
+
+// The pinned device filters rather than locks. A preference set from the
+// console records the choice without restarting the reader, so until something
+// does, the reader is still on the old device: those scans used to reach every
+// client as though nothing had been asked for.
+func TestScansFromAnUnselectedReaderAreDropped(t *testing.T) {
+	a := newPumpAgent(t)
+	sink := newSink()
+
+	a.SetPinnedDevice("ACS ACR122U 00")
+	a.forwardScan(nfc.NFCData{
+		Device: "mock:usb:001",
+		Card:   nfc.NewCard(nfc.NewMockTag("04A1B2C3")),
+	}, sink)
+
+	select {
+	case got := <-sink.tags:
+		t.Errorf("a scan from %q reached the clients while %q is selected", got.Device, a.CurrentPinnedDevice())
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// The selected reader's own scans pass, and so does every scan when nothing is
+// pinned, which is auto-detect.
+func TestTheSelectedReaderIsForwarded(t *testing.T) {
+	a := newPumpAgent(t)
+	sink := newSink()
+
+	a.SetPinnedDevice("mock:usb:001")
+	a.forwardScan(nfc.NFCData{
+		Device: "mock:usb:001",
+		Card:   nfc.NewCard(nfc.NewMockTag("04A1B2C3")),
+	}, sink)
+	if got := awaitScan(t, sink); got.Card == nil || got.Card.UID != "04A1B2C3" {
+		t.Fatalf("got %+v, want the selected reader's scan", got)
+	}
+
+	a.SetPinnedDevice("")
+	a.forwardScan(nfc.NFCData{
+		Device: "some-other-reader",
+		Card:   nfc.NewCard(nfc.NewMockTag("04FFFFFF")),
+	}, sink)
+	if got := awaitScan(t, sink); got.Card == nil || got.Card.UID != "04FFFFFF" {
+		t.Fatalf("got %+v, want the scan admitted by auto-detect", got)
+	}
+}
+
+// A scan from a source that does not say which device it came from is not
+// something the reader filter can judge, so it passes rather than vanishing.
+func TestAScanWithNoDeviceIsNotFiltered(t *testing.T) {
+	a := newPumpAgent(t)
+	sink := newSink()
+
+	a.SetPinnedDevice("ACS ACR122U 00")
+	a.forwardScan(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))}, sink)
+
+	if got := awaitScan(t, sink); got.Card == nil {
+		t.Fatalf("got %+v, want the scan that named no device", got)
+	}
+}
+
+// A phone reports its own scans and is not a reader, so pinning one has nothing
+// to say about it.
+func TestAPinnedReaderDoesNotFilterDevices(t *testing.T) {
+	m := &reportingManager{Manager: nfc.NewMockManager()}
+	rt, err := Setup(testOptions(t), m)
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	a := rt.Agent
+	a.SetPinnedDevice("ACS ACR122U 00")
+
+	seen := make(chan string, 4)
+	a.Events().Tag.Connect(func(data nfc.NFCData) {
+		if data.Card == nil {
+			return
+		}
+		select {
+		case seen <- data.Card.UID:
+		default:
+		}
+	})
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	m.scans.Emit(nfc.NFCData{
+		Device: "phone-9f2a",
+		Card:   nfc.NewCard(nfc.NewMockTag("04ABCDEF")),
+	})
+
+	select {
+	case uid := <-seen:
+		if uid != "04ABCDEF" {
+			t.Errorf("got %q, want the phone's scan", uid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a phone's scan was filtered by the pinned reader")
+	}
+}

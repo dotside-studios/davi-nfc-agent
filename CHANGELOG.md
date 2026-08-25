@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The pinned device filters rather than locks. A scan from a reader the operator
+  is not asking for is dropped, wherever it was read, so a preference set from
+  the console takes effect without waiting for something to restart the reader.
+  A device that reports its own scans, such as a phone, is unaffected by which
+  reader is pinned
 - `event.Signal.Channel` hands back a channel carrying what a signal emits, and
   the function that stops it, for a consumer that drains on its own terms or is
   watching one while debugging. A full buffer drops rather than blocking, so a

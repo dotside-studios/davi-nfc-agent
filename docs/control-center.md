@@ -2,7 +2,7 @@
 
 A web console served by the agent itself, for the things the tray and the
 command-line flags cannot do: reading the log, writing NDEF messages by hand,
-inspecting a tag, revoking one device, and keeping settings across a restart.
+inspecting a tag, and revoking one device.
 
 ## Opening it
 
@@ -14,7 +14,7 @@ The token is spent on first use and expires after two minutes, so a URL that
 ends up in shell history or browser autocomplete is already useless. Sessions
 last 12 hours.
 
-There is no way in other than the tray. That is deliberate — see
+There is no way in other than the tray. See
 [Who can open it](#who-can-open-it) below.
 
 > **On a self-signed certificate**, the browser shows its usual warning the
@@ -34,10 +34,10 @@ checks must all pass on every control request:
 | `Origin`/`Referer` is the agent itself | A page you happen to be visiting driving the console via your cookie |
 | A tray-minted session cookie | Another local account or process pointing at the port |
 
-The `Origin` check reads `RemoteAddr`, never `X-Forwarded-For` — a forwarding
+The `Origin` check reads `RemoteAddr`, never `X-Forwarded-For`: a forwarding
 header is attacker-controlled and is not evidence of locality.
 
-**The origin allowlist is not consulted.** An entry in `allowed-origins.json`
+The origin allowlist is not consulted. An entry in `allowed-origins.json`
 authorises a console to *read tags*; it never confers the ability to revoke a
 device or rotate the secret. The control routes are also served without the
 permissive CORS headers the client endpoints carry.
@@ -47,7 +47,7 @@ your own.
 
 ## Tabs
 
-**Overview** — the page an operator works from, split a third to two thirds.
+**Overview**: the page an operator works from, split a third to two thirds.
 
 The left third holds state and the knobs that get turned: start/stop, reader
 selection, mode, card-type filter, port, restart and quit, plus the server URLs
@@ -56,16 +56,16 @@ and certificate summary needed to decide whether to turn any of them.
 The right two thirds hold what the reader is doing: the tag on it now with its
 capabilities and record list, the tail of the log, and every distinct tag seen
 this session with a scan count and when it was last presented. That history is
-in the console only — the agent does not persist it.
+in the console only; the agent does not persist it.
 
-**Tag** — inspector and NDEF composer.
+**Tag**: inspector and NDEF composer.
 
 - Reads: UID, type, technology, the record tree, and the capabilities the agent
   determined for that tag (memory, usable capacity, writable, lockable,
   password support).
-- Writes: every record type the agent supports — text, URI, smart poster,
+- Writes: every record type the agent supports (text, URI, smart poster,
   vCard, MIME, geo, tel/sms/mailto, Android Application Records and fully raw
-  records — with a live size estimate against the tag's actual capacity.
+  records), with a live size estimate against the tag's actual capacity.
 - Also erase, and lock (irreversible, and gated behind typing `lock`).
 - A **raw exchange (APDU)** console: hex in, hex and ASCII out, with ISO 7816
   status words decoded, per-exchange timing, presets built from the commands
@@ -76,12 +76,12 @@ in the console only — the agent does not persist it.
 The console writes over the ordinary client endpoint, exactly as an application
 would, so there is one implementation of the write path.
 
-**Activity** — tag events on the left, agent log on the right, both filterable
-and both filling the window. They are read together in practice: a failed write
-and the line explaining it arrive at the same moment. Events export as NDJSON,
+**Activity**: tag events on the left, agent log on the right, both filterable
+and both filling the window. They are read together: a failed write and the line
+explaining it arrive at the same moment. Events export as NDJSON,
 the log downloads as text.
 
-**Security** — who may reach this agent and with what credential. One page with
+**Security**: who may reach this agent and with what credential. One page with
 section links down the side that scroll to each part; everything stays on screen
 so it can be read straight through. Each section is linkable:
 `#/security/origins`, `#/security/certificate` and so on.
@@ -95,20 +95,20 @@ so it can be read straight through. Each section is linkable:
 | Device trust | Public key pin, local CA status and fingerprint, and **Trust this agent in browsers** when no CA is installed |
 | Certificate | Expiry, issuer, fingerprint, the names it covers, and a warning when the agent is reachable on an address it omits |
 
-The reader and server settings are deliberately *not* here — they live on
+The reader and server settings are not here; they live on
 Overview, because those get turned while working and these do not.
 
 ## Logs
 
 The agent logs through the standard library logger, which writes to stderr and
 nowhere else. Started from a desktop launcher there is no stderr to read, so
-every certificate warning, refused origin and reader failure was previously
-discarded as it was produced.
+a certificate warning, refused origin or reader failure would be discarded as it
+was produced.
 
-The agent now also keeps the last 5000 lines in memory. They are visible under
-**Activity**, streamed live, and downloadable as text for a bug report. Severity is
-inferred from the message text — good enough to filter on, not something to rely
-on otherwise.
+The agent keeps the last 5000 lines in memory. They are visible under
+**Activity**, streamed live, and downloadable as text for a bug report. Severity
+is inferred from the message text, which is good enough to filter on but not to
+rely on otherwise.
 
 Nothing is written to disk. The buffer is lost when the agent exits.
 
@@ -192,8 +192,8 @@ The dev server proxies `/control` and `/ws`, so it drives a real agent rather
 than a mock. If `webui/frontend/dist` is missing entirely the agent still starts
 and serves its protocol; the root falls back to the plain-text banner.
 
-To drive the console without a reader — for screenshots, or to check a panel
-that needs paired devices and blocked origins to be interesting — there is a
+To drive the console without a reader, for screenshots or to check a panel that
+needs paired devices and blocked origins to be interesting, there is a
 harness that serves the real control handler over a seeded host and a stubbed
 tag feed. It is skipped unless `SCREENSHOT_ADDR` is set:
 
@@ -205,7 +205,7 @@ SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
 
 ## Leaving it out
 
-The console is its own package. `webui/` holds the whole thing — the gate, the
+The console is its own package. `webui/` holds the whole thing: the gate, the
 routes, the state snapshot, the dispatcher, and the frontend it embeds:
 
 ```
@@ -222,7 +222,7 @@ webui/
 ```
 
 Nothing in `webui` imports the agent. It declares the ~35 methods it needs as
-`webui.Host`, and `agent/console/host.go` implements them — so the console's
+`webui.Host`, and `agent/console/host.go` implements them, so the console's
 entire reach into the agent is readable in one file, and its tests run against a
 fake host with no hardware behind them.
 
@@ -248,15 +248,15 @@ agent/tray/systray_console.go    the tray entry
 the stubs under the opposite tag.
 
 The agent itself needs no tag either way. It knows the console only as
-`agent.Console` — two handlers to mount and a redraw signal — so the dependency
+`agent.Console`, two handlers to mount and a redraw signal, so the dependency
 runs one way: `agent/console` imports `agent`, never the reverse, and `main` is
 the only place that wires the two together. A build without a console leaves
 that interface nil, and every call site already tolerates it.
 
-Dropping the console from a custom build is therefore a tag, not a patch — and
+Dropping the console from a custom build is therefore a tag, not a patch, and
 deleting `webui/` outright leaves only `agent/console/` to remove.
 
-**The agent's protocol is unaffected.** Raw tag exchanges and the log ring stay
+The agent's protocol is unaffected. Raw tag exchanges and the log ring stay
 in either build. Both are reachable without the console, and the transceive
 channel is part of the client API rather than a console feature.
 
@@ -281,5 +281,5 @@ Actions: `agent.start`, `agent.stop`, `agent.restartServers`, `agent.quit`,
 `origins.setAllowAny`, `security.rotateAPISecret`, `security.rotatePairingPIN`,
 `security.installCA`, `security.regenerateCertificate`, `security.revokeControlSessions`.
 
-Tag operations are absent here on purpose — the console does those over the
+Tag operations are absent here on purpose: the console does those over the
 client API described in [api.md](api.md).

@@ -407,10 +407,7 @@ func (a *Agent) stopLocked() {
 
 	a.logger.Println("Stopping agent...")
 
-	a.ClientServer = nil
-	a.Router = nil
-
-	a.serving.Store(nil)
+	a.stopServers()
 
 	if reader := a.reader.Load(); reader != nil {
 		reader.Stop()

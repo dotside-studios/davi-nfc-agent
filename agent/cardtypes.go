@@ -57,7 +57,7 @@ func (f *cardTypeFilter) explicitlyAllowed(cardType string) bool {
 	return f.allowed[cardType]
 }
 
-// replace swaps the whole filter, which is what an operator picking types does.
+// replace swaps the whole filter, as an operator picking types does.
 func (f *cardTypeFilter) replace(cardTypes []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

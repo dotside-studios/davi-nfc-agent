@@ -178,7 +178,7 @@ func (s *Server) Assets() http.Handler {
 
 // AttachTray gives the console a tray to act through, so a change made in the
 // console moves the tray's menu state too. Without one the console drives the
-// agent directly, which is what a headless run wants.
+// agent directly, as a headless run wants.
 func (s *Server) AttachTray(t Tray) {
 	if s == nil || s.host == nil {
 		return

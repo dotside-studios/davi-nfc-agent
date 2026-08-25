@@ -110,7 +110,7 @@ type Runtime struct {
 
 // Setup builds a configured agent from opts, reading and writing the config
 // directory as it goes. manager supplies the readers — the caller chooses it,
-// which is what keeps this package independent of any particular NFC backend.
+// which keeps this package independent of any particular NFC backend.
 //
 // It does not build the console: that lives in agent/console, which imports
 // this package. Wiring the two is the caller's job, and the only thing that

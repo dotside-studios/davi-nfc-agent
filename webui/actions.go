@@ -12,8 +12,6 @@ import (
 func (c *Server) dispatch(req action) (any, error) {
 	switch req.Action {
 
-	// ---- agent lifecycle ----
-
 	case "agent.start":
 		return nil, c.host.StartAgent()
 
@@ -28,8 +26,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		// Deferred so the response reaches the console before the process exits.
 		go c.host.QuitAgent()
 		return nil, nil
-
-	// ---- reader ----
 
 	case "reader.selectDevice":
 		var params struct {
@@ -67,8 +63,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		}
 		return nil, c.applyPreferences(func(s *Preferences) { s.CardTypes = params.CardTypes })
 
-	// ---- settings ----
-
 	case "settings.save":
 		// The whole snapshot, as the console received it from the agent and
 		// edited one field of. Replacing rather than merging is what makes an
@@ -89,8 +83,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		// A client is free to reconnect immediately; this ends the session it
 		// has, it does not bar it. Removing its origin is what bars it.
 		return nil, c.host.DisconnectClient(params.ID)
-
-	// ---- paired devices ----
 
 	case "devices.revoke":
 		var params struct {
@@ -113,8 +105,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		}
 		// Persisted, unlike the tray's session-only version of this toggle.
 		return nil, c.applyPreferences(func(s *Preferences) { s.RequirePairedDevice = params.Enabled })
-
-	// ---- origins ----
 
 	case "origins.allow":
 		var params struct {
@@ -147,8 +137,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		}
 		c.host.SetOriginCheckDisabled(params.Enabled)
 		return nil, nil
-
-	// ---- security ----
 
 	case "security.rotateAPISecret":
 		secret, err := c.host.RotateAPISecret()

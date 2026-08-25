@@ -277,7 +277,7 @@ func readCertInfo(path string) (*CertInfo, error) {
 		return nil, err
 	}
 
-	// A chain file leads with the leaf, which is what governs connection.
+	// A chain file leads with the leaf, which governs the connection.
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, fmt.Errorf("no PEM block in %s", path)

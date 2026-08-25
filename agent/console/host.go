@@ -25,8 +25,6 @@ type host struct {
 
 var _ webui.Host = (*host)(nil)
 
-// ---- identity and lifecycle ----
-
 func (h *host) Running() bool     { return h.agent.Reader() != nil }
 func (h *host) ConfigDir() string { return h.agent.ConfigDir() }
 
@@ -50,8 +48,6 @@ func (h *host) QuitAgent() {
 }
 
 func (h *host) RestartServers() error { return h.agent.RestartServers() }
-
-// ---- reader ----
 
 func (h *host) AvailableDevices() []string {
 	if h.agent.Manager() == nil {
@@ -102,8 +98,6 @@ func (h *host) SelectDevice(devicePath string) error {
 	return nil
 }
 
-// ---- server ----
-
 // Port is the port being served, not the one configured. A port saved in the
 // console is bound only once the listener has been restarted, and until then
 // the console must not hand out a URL nothing is listening on.
@@ -149,8 +143,6 @@ func (h *host) DisconnectClient(id string) error {
 	}
 	return nil
 }
-
-// ---- credentials and trust ----
 
 func (h *host) APISecret() string    { return h.agent.APISecret() }
 func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
@@ -198,8 +190,6 @@ func (h *host) RegenerateCertificate() error {
 // reporting success for work that never happened.
 func (h *host) managesCertificates() bool { return h.trust.Authority() != nil }
 
-// ---- paired devices ----
-
 func (h *host) PairedDevices() []webui.PairedDevice {
 	if h.agent.Devices() == nil {
 		return nil
@@ -245,8 +235,6 @@ func (h *host) RevokeAllDevices() error {
 	return h.agent.Devices().RevokeAll()
 }
 
-// ---- browser origins ----
-
 func (h *host) AllowedOrigins() []string {
 	if h.agent.Origins() == nil {
 		return nil
@@ -284,8 +272,6 @@ func (h *host) SetOriginCheckDisabled(on bool) {
 		h.agent.Origins().SessionAllowAny(on)
 	}
 }
-
-// ---- settings ----
 
 // Preferences comes from the agent, so the console shows what is in force,
 // such as a mode switched from the tray.

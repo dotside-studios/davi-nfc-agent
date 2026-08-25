@@ -16,8 +16,6 @@ import (
 // one interface makes the complete list of what the console can do readable in
 // one place.
 type Host interface {
-	// ---- identity and lifecycle ----
-
 	Running() bool
 	ConfigDir() string
 	StartAgent() error
@@ -25,16 +23,12 @@ type Host interface {
 	QuitAgent()
 	RestartServers() error
 
-	// ---- reader ----
-
 	AvailableDevices() []string
 	AllCardTypes() []string
 	// CurrentCard reports the tag on the reader, if any.
 	CurrentCard() (uid, cardType string, present bool)
 	RemoteDevices() (total, active int)
 	SelectDevice(devicePath string) error
-
-	// ---- server ----
 
 	Port() int
 	BootstrapPort() int
@@ -44,8 +38,6 @@ type Host interface {
 	ClientCount() int
 	Clients() []Client
 	DisconnectClient(id string) error
-
-	// ---- credentials and trust ----
 
 	APISecret() string
 	RotateAPISecret() (string, error)
@@ -59,12 +51,9 @@ type Host interface {
 	InstallCA() error
 	RegenerateCertificate() error
 
-	// ---- paired devices ----
-
 	PairedDevices() []PairedDevice
 	RevokeDevice(id string) error
 	RevokeAllDevices() error
-	// ---- browser origins ----
 
 	AllowedOrigins() []string
 	BlockedOrigins() []string
@@ -72,8 +61,6 @@ type Host interface {
 	AllowOrigin(origin string) error
 	RevokeOrigin(origin string) error
 	SetOriginCheckDisabled(bool)
-
-	// ---- settings ----
 
 	// Preferences is what the agent is set to, and the console's only source
 	// for one, so the console cannot show a preference the agent is not using.

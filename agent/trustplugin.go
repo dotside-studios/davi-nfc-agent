@@ -154,7 +154,7 @@ func (p *TrustPlugin) install() {
 }
 
 // refresh hides the entry once there is nothing left for it to do. Safe from
-// any goroutine, which is what Install needs.
+// any goroutine, as Install needs.
 func (p *TrustPlugin) refresh() {
 	if p.entry != nil {
 		p.entry.SetVisible(!p.Installed())

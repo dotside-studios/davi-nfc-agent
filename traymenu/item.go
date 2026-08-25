@@ -251,8 +251,6 @@ func (i *Item) adopt(child *Item) {
 	i.children = append(i.children, child)
 }
 
-// ---- Container ----
-
 // Add appends a plain item to this item's submenu.
 func (i *Item) Add(title string, opts ...Option) *Item {
 	return i.owner.add(i, build(title, false, false, opts))
@@ -284,8 +282,6 @@ func (i *Item) Section(title string, opts ...Option) *Section {
 
 func (i *Item) menu() *Menu    { return i.owner }
 func (i *Item) native() Native { return i.platform }
-
-// ---- options ----
 
 // options is what the Option functions accumulate before an item exists.
 type options struct {

@@ -68,8 +68,8 @@ func (a *Agent) CurrentReaderMode() nfc.ReaderMode {
 	return a.readerMode
 }
 
-// SetCardTypeFilter replaces the whole filter, which is what an operator
-// picking types is doing. An empty list is no filter at all.
+// SetCardTypeFilter replaces the whole filter, as an operator picking types
+// does. An empty list is no filter at all.
 func (a *Agent) SetCardTypeFilter(cardTypes []string) {
 	next := normalizeCardTypes(cardTypes)
 	if sameCardTypes(a.CardTypeFilter(), next) {

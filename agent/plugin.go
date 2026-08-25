@@ -193,7 +193,7 @@ func (ctx AgentContext) Mount(pattern string, handler http.Handler) error {
 	return m.Mount(pattern, handler)
 }
 
-// Logger is the agent's log, which is what the control center displays.
+// Logger is the agent's log, displayed by the control center.
 func (ctx AgentContext) Logger() *log.Logger { return ctx.Agent.Logger() }
 
 // Info is what this build calls itself, for a plugin that presents a name.

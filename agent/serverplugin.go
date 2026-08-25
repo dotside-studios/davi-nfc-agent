@@ -102,7 +102,7 @@ type ServerPlugin struct {
 	Trust *TrustPlugin
 
 	// Certificates overrides where the reissue signal comes from. Blank takes
-	// Trust's, which is what a build wants.
+	// Trust's.
 	Certificates tlspkg.CertificateWatcher
 
 	// The entries whose labels follow what is being served.
@@ -147,7 +147,7 @@ func (p *ServerPlugin) TLSEnabled() bool {
 	return p.Server.TLSEnabled()
 }
 
-// Port is the port being served, which is what a client should be told to
+// Port is the port being served, which a client should be told to
 // connect to. It differs from the agent's configured port after one is saved
 // and before the listener is rebuilt, and is 0 before activation.
 func (p *ServerPlugin) Port() int {
@@ -307,7 +307,7 @@ func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
 }
 
 // refresh brings the addresses back in step with what is being served. Safe
-// from any goroutine, which is what the hooks calling it need.
+// from any goroutine, as the hooks calling it need.
 func (p *ServerPlugin) refresh(a *Agent) {
 	if !a.Running() {
 		p.device.SetTitle("Device: Not running")

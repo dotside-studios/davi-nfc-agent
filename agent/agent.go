@@ -387,7 +387,7 @@ func (a *Agent) startLocked(devicePath string) error {
 
 // stopLocked tears down the servers and the reader. The caller holds the
 // lifecycle lock and owns the state transition; see Stop. It is safe to call on
-// a partly started agent, which is what makes an aborted Start recoverable.
+// a partly started agent, so an aborted Start is recoverable.
 func (a *Agent) stopLocked() {
 	if a.reader.Load() == nil && a.serving.Load() == nil {
 		return

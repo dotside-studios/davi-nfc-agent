@@ -131,8 +131,6 @@ func (s *Section) dropKeyLocked(key string) {
 	}
 }
 
-// ---- Container ----
-
 // Add appends an unkeyed item to the section. Use Set for an entry that may be
 // registered again later.
 func (s *Section) Add(title string, opts ...Option) *Item {

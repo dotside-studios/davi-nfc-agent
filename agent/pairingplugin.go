@@ -83,7 +83,7 @@ func (p *PairingPlugin) RotatePIN() string {
 
 // URL is the pairing page, carrying the PIN so a link clicked from a chat goes
 // straight through. Always HTTP: a phone reaches this before it trusts the
-// agent's certificate, which is what it comes here to collect.
+// agent's certificate, which it comes here to collect.
 func (p *PairingPlugin) URL() string {
 	port := p.Port()
 	if port == 0 {
@@ -134,7 +134,7 @@ func (p *PairingPlugin) Activate(ctx AgentContext) error {
 }
 
 // refresh brings the labels back in step with the server. Safe from any
-// goroutine, which is what the hooks calling it need.
+// goroutine, as the hooks calling it need.
 func (p *PairingPlugin) refresh() {
 	if p.address != nil {
 		p.address.SetTitle("Pair Phone: " + p.URL())

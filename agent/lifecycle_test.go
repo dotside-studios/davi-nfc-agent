@@ -127,8 +127,6 @@ func TestRepeatStartAndStop(t *testing.T) {
 	}
 }
 
-// --- components ---
-
 type probe struct {
 	name    string
 	failOn  bool

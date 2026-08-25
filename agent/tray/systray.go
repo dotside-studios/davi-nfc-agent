@@ -208,7 +208,7 @@ func (s *App) setupModeMenu() {
 }
 
 // setupCardFilterMenu builds the card type filter. Nothing ticked means no
-// filter, which is what the All Types entry stands for.
+// filter, which the All Types entry stands for.
 func (s *App) setupCardFilterMenu() {
 	filters := s.menu.AddSubmenu("Card Type Filter", traymenu.Tooltip("Filter cards by type"))
 

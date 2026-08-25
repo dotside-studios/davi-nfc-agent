@@ -7,7 +7,7 @@
 // between them by the mode it declared. Both are the agent's own routes now,
 // mounted here like anything else, so what is left is the listener. That is
 // what lets a build decide what it serves; see agent.ServerPlugin, which owns
-// one of these, and agent.Routes, which is what the agent asks it to carry.
+// one of these, and agent.Routes is what the agent asks it to carry.
 package unifiedserver
 
 import (

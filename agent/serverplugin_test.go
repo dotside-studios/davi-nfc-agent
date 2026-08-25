@@ -410,9 +410,9 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 	}
 	defer rt.Agent.Stop()
 
-	reader := rt.Agent.Reader()
-	if reader == nil {
-		t.Fatal("no reader after Start")
+	readers := rt.Agent.Supervisor()
+	if readers == nil {
+		t.Fatal("no readers after Start")
 	}
 
 	if err := rt.Agent.RestartServers(); err != nil {
@@ -422,8 +422,8 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 		t.Fatalf("Rebind: %v", err)
 	}
 
-	if rt.Agent.Reader() != reader {
-		t.Error("the reader was replaced by a restart of the servers")
+	if rt.Agent.Supervisor() != readers {
+		t.Error("the readers were replaced by a restart of the servers")
 	}
 }
 

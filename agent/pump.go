@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"log"
 
@@ -27,22 +26,6 @@ func (a *Agent) readerSelected(device string) bool {
 		return true
 	}
 	return device == pinned
-}
-
-// pumpReader forwards what the hardware reader scans to the sink. It returns
-// once ctx is done.
-func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagSink) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data := <-reader.Data():
-			a.forwardScan(data, sink)
-		case status := <-reader.StatusUpdates():
-			a.fireReaderStatus(status)
-			sink.BroadcastDeviceStatus(status)
-		}
-	}
 }
 
 // forwardScan applies the agent's filters and hands the scan on.

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -34,6 +33,11 @@ func GetCardTypeFilterDisplayName(cardType string) string {
 func GetCardTypeFilterTooltip(cardType string) string {
 	return "Allow " + cardType + " only"
 }
+
+// readerOperationTimeout bounds one tag operation: long enough for a write and
+// its read-back on a slow tag, short enough that a card lifted mid-operation
+// does not hold the reader.
+const readerOperationTimeout = 5 * time.Second
 
 // Config is the agent's settled configuration. New copies it in, and nothing
 // afterwards can change it: the fields below are read through the accessors on
@@ -138,10 +142,10 @@ type Agent struct {
 	// and cleared on stop.
 	serving atomic.Pointer[endpoints]
 
-	// reader is the reader currently open, nil before Start and after Stop.
+	// supervisor operates the readers, nil before Start and after Stop.
 	// Atomic because the handlers read it from their own goroutines, and Stop
 	// holds the lifecycle lock while the server waits for them to finish.
-	reader     atomic.Pointer[nfc.NFCReader]
+	supervisor atomic.Pointer[nfc.Supervisor]
 	Router     *tagrouter.Router
 	DeviceAuth *server.DeviceAuth
 
@@ -188,15 +192,12 @@ type Agent struct {
 	lifecycle
 	cardTypes *cardTypeFilter
 
-	// managerScans is the agent's subscription to what the manager's devices
-	// report, held so a stop ends it.
+	// The agent's subscriptions to what its sources report, held so a stop ends
+	// them. managerScans is what the manager's own devices report; the other
+	// two are what the readers do.
 	managerScans *event.Connection
-
-	// pumpCtx bounds the goroutines draining the reader and the paired devices
-	// onto the bridge. Cancelled by stopServers, so they end with the bridge
-	// they feed.
-	pumpCtx    context.Context
-	pumpCancel context.CancelFunc
+	readerScans  *event.Connection
+	readerStatus *event.Connection
 
 	// events is the subscription surface, published by Events. Signals are
 	// safe from any goroutine, so it needs no lock of its own.
@@ -326,13 +327,13 @@ func (a *Agent) RequirePairedDevice() bool {
 // Reader is the reader currently open, nil before Start and after Stop. Safe
 // to call from any goroutine, though the answer can go stale the moment it is
 // returned: a caller acting on it should hold the value it read.
-func (a *Agent) Reader() *nfc.NFCReader { return a.reader.Load() }
+func (a *Agent) Supervisor() *nfc.Supervisor { return a.supervisor.Load() }
 
 // ReaderFeedback reports whether the reader answers for its own work with its
 // LED and buzzer.
 func (a *Agent) ReaderFeedback() bool {
-	if reader := a.reader.Load(); reader != nil {
-		return reader.FeedbackEnabled()
+	if readers := a.supervisor.Load(); readers != nil {
+		return readers.FeedbackEnabled()
 	}
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
@@ -368,14 +369,20 @@ func (a *Agent) startLocked(devicePath string) error {
 	// Store device path for potential restarts
 	a.devicePath.Store(&devicePath)
 
-	// Create NFC reader with manager (supports both hardware and smartphone devices)
-	nfcReader, err := nfc.NewNFCReader(devicePath, a.manager, 5*time.Second)
+	// A start that names a reader is a choice, so it is what the agent is set
+	// to: the filter and the preferences agree afterwards rather than the
+	// preference reporting one reader while the scans come from another.
+	if devicePath != "" {
+		a.SetPinnedDevice(devicePath)
+	}
+
+	readers, err := nfc.NewSupervisor(a.manager, readerOperationTimeout)
 	if err != nil {
-		a.logger.Printf("Error initializing NFC reader: %v", err)
+		a.logger.Printf("Error initializing the readers: %v", err)
 		return err
 	}
 
-	a.reader.Store(nfcReader)
+	a.supervisor.Store(readers)
 	a.adoptReaderSettings()
 
 	// Start the servers using shared code
@@ -383,9 +390,11 @@ func (a *Agent) startLocked(devicePath string) error {
 		return err
 	}
 
-	// After them, so the pump draining it is already running: a card presented
-	// in between would otherwise wait on a channel nobody is reading.
-	nfcReader.Start()
+	// After them, so what the readers publish already has somewhere to go.
+	if err := readers.Start(); err != nil {
+		a.logger.Printf("Error starting the readers: %v", err)
+		return err
+	}
 	return nil
 }
 
@@ -393,7 +402,7 @@ func (a *Agent) startLocked(devicePath string) error {
 // lifecycle lock and owns the state transition; see Stop. It is safe to call on
 // a partly started agent, so an aborted Start is recoverable.
 func (a *Agent) stopLocked() {
-	if a.reader.Load() == nil && a.serving.Load() == nil {
+	if a.supervisor.Load() == nil && a.serving.Load() == nil {
 		return
 	}
 
@@ -401,9 +410,9 @@ func (a *Agent) stopLocked() {
 
 	a.stopServers()
 
-	if reader := a.reader.Load(); reader != nil {
-		reader.Stop()
-		a.reader.Store(nil)
+	if readers := a.supervisor.Load(); readers != nil {
+		readers.Stop()
+		a.supervisor.Store(nil)
 	}
 
 	a.logger.Println("Agent stopped successfully")
@@ -473,12 +482,10 @@ func (a *Agent) RestartServers() error {
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
 func (a *Agent) stopServers() {
-	if a.pumpCancel != nil {
-		a.pumpCancel()
-		a.pumpCtx, a.pumpCancel = nil, nil
-	}
 	a.managerScans.Disconnect()
-	a.managerScans = nil
+	a.readerScans.Disconnect()
+	a.readerStatus.Disconnect()
+	a.managerScans, a.readerScans, a.readerStatus = nil, nil, nil
 
 	a.ClientServer = nil
 	a.Router = nil
@@ -488,13 +495,13 @@ func (a *Agent) stopServers() {
 
 // startServers starts the HTTP/WebSocket servers.
 func (a *Agent) startServers() error {
-	reader := a.reader.Load()
-	if reader == nil {
-		return errors.New("reader not initialized")
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return errors.New("the readers are not initialized")
 	}
 
 	// Routes each client request to whichever source holds the tag it names.
-	a.Router = tagrouter.New(tagrouter.Config{Reader: reader, Devices: nfc.TagsHeldBy(a.manager)})
+	a.Router = tagrouter.New(tagrouter.Config{Readers: readers, Devices: nfc.TagsHeldBy(a.manager)})
 
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.apiSecret,
@@ -506,16 +513,20 @@ func (a *Agent) startServers() error {
 		OnTag:          a.events.Tag.Emit,
 	})
 
-	// The agent's tag sources feed the client server directly. There is no
-	// channel between them any more, so there is nothing to drain and nothing
-	// to remember to start.
+	// The agent's tag sources feed the client server directly. Connected to the
+	// server being built rather than read from a field, so a restart leaves
+	// nothing feeding the one it replaced.
 	//
-	// The reader is not started here. Its lifetime is the agent's, not the
-	// servers': starting it on every restart left a second worker polling the
+	// The readers are not started here. Their lifetime is the agent's, not the
+	// servers': starting them on every restart left a second worker polling the
 	// same reader, racing the first and scanning every card twice. See
-	// startLocked, which starts the one it opened.
-	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
-	go a.pumpReader(a.pumpCtx, reader, a.ClientServer)
+	// startLocked, which starts the ones it opened.
+	sink := a.ClientServer
+	a.readerScans = readers.Scans().Connect(func(data nfc.NFCData) { a.forwardScan(data, sink) })
+	a.readerStatus = readers.Status().Connect(func(status nfc.DeviceStatus) {
+		a.fireReaderStatus(status)
+		sink.BroadcastDeviceStatus(status)
+	})
 
 	// What the manager's own devices report goes to the same place. Connected
 	// to the server being built rather than read from a field, so a restart
@@ -598,8 +609,13 @@ func (a *Agent) IsCardTypeAllowed(cardType string) bool {
 // CurrentDevicePath returns the current device path from the reader.
 // Returns empty string if no reader is active.
 func (a *Agent) CurrentDevicePath() string {
-	if reader := a.reader.Load(); reader != nil {
-		return reader.DevicePath()
+	if pinned := a.CurrentPinnedDevice(); pinned != "" {
+		return pinned
+	}
+	if readers := a.supervisor.Load(); readers != nil {
+		if devices := readers.Devices(); len(devices) > 0 {
+			return devices[0]
+		}
 	}
 	if stored := a.devicePath.Load(); stored != nil {
 		return *stored // The path a previous start resolved to
@@ -645,8 +661,8 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	a.readerFeedback = on
 	a.settingsMu.Unlock()
 
-	if reader := a.reader.Load(); reader != nil {
-		reader.SetFeedback(on)
+	if readers := a.supervisor.Load(); readers != nil {
+		readers.SetFeedback(on)
 	}
 	a.firePreferencesChanged()
 }

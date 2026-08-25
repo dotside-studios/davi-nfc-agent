@@ -76,12 +76,12 @@ func TestTagModificationFollowsTheReaderMode(t *testing.T) {
 	}
 	defer a.Stop()
 
-	a.Reader().SetMode(nfc.ModeReadOnly)
+	a.Supervisor().SetMode(nfc.ModeReadOnly)
 	if a.TagModificationAllowed() {
 		t.Error("read-only mode did not reach the gate")
 	}
 
-	a.Reader().SetMode(nfc.ModeReadWrite)
+	a.Supervisor().SetMode(nfc.ModeReadWrite)
 	if !a.TagModificationAllowed() {
 		t.Error("returning to read/write did not reach the gate")
 	}

@@ -102,9 +102,9 @@ type DeviceEndpointOptions struct {
 // Read when the operation happens rather than when the endpoint was built: the
 // endpoint outlives any particular reader, and the mode changes while running.
 func (a *Agent) TagModificationAllowed() bool {
-	reader := a.reader.Load()
-	if reader == nil {
+	readers := a.supervisor.Load()
+	if readers == nil {
 		return true
 	}
-	return reader.GetMode() != nfc.ModeReadOnly
+	return readers.Mode() != nfc.ModeReadOnly
 }

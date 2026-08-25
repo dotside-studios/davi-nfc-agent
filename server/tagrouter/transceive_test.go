@@ -18,22 +18,25 @@ func codeOf(err error) protocol.ErrorCode {
 	return protocol.ErrorPayloadFor(err).Code
 }
 
-func readerInMode(t *testing.T, mode nfc.ReaderMode) *nfc.NFCReader {
+func readersInMode(t *testing.T, mode nfc.ReaderMode) *nfc.Supervisor {
 	t.Helper()
 
-	reader, err := nfc.NewNFCReader("", nfc.NewMockManager(), time.Second)
+	readers, err := nfc.NewSupervisor(nfc.NewMockManager(), time.Second)
 	if err != nil {
-		t.Fatalf("NewNFCReader: %v", err)
+		t.Fatalf("NewSupervisor: %v", err)
 	}
-	t.Cleanup(reader.Stop)
-	reader.SetMode(mode)
-	return reader
+	if err := readers.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(readers.Stop)
+	readers.SetMode(mode)
+	return readers
 }
 
 // A raw exchange can write to a config page or burn an OTP bit, and the agent
 // cannot tell that from a SELECT, so read-only mode has to refuse it.
 func TestTransceiveRefusedInReadOnlyMode(t *testing.T) {
-	s := New(Config{Reader: readerInMode(t, nfc.ModeReadOnly)})
+	s := New(Config{Readers: readersInMode(t, nfc.ModeReadOnly)})
 
 	_, err := s.Transceive(context.Background(), server.TransceiveOp{
 		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},
@@ -64,7 +67,7 @@ func TestTransceiveWithoutReaderOrDevice(t *testing.T) {
 // Read/write mode must not refuse on mode grounds; it should get as far as
 // looking for a tag and fail on that instead.
 func TestTransceiveAllowedInReadWriteMode(t *testing.T) {
-	s := New(Config{Reader: readerInMode(t, nfc.ModeReadWrite)})
+	s := New(Config{Readers: readersInMode(t, nfc.ModeReadWrite)})
 
 	_, err := s.Transceive(context.Background(), server.TransceiveOp{
 		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},

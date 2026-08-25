@@ -16,7 +16,7 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 	// The mode gates every route to a tag, not just the hardware one. The
 	// reader enforces it inside prepareCardForWrite, which a write routed to a
 	// device never reaches.
-	if !modeAllowsTagModification(s.config.Reader) {
+	if !modeAllowsTagModification(s.config.Readers) {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly, "%s", readOnlyModeMessage("writes"))
 	}
 
@@ -37,10 +37,10 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 		ExpectUID: req.TagUID,
 	}
 
-	if !rt.reader {
+	if !rt.onReader() {
 		return s.writeViaDevice(req, ndefMsg, rt.device)
 	}
-	return s.config.Reader.WriteMessageWithResult(ndefMsg, opts)
+	return s.config.Readers.WriteMessage(rt.reader, ndefMsg, opts)
 }
 
 // writeViaDevice asks the device holding the tag to perform the write.
@@ -81,7 +81,7 @@ func verifiable(tag nfc.Tag) bool {
 
 // Lock makes the named tag permanently read-only.
 func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, error) {
-	if !modeAllowsTagModification(s.config.Reader) {
+	if !modeAllowsTagModification(s.config.Readers) {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly, "%s", readOnlyModeMessage("locks"))
 	}
 
@@ -90,13 +90,13 @@ func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, 
 		return nil, err
 	}
 
-	if !rt.reader {
+	if !rt.onReader() {
 		return s.lockViaDevice(req, rt.device)
 	}
 
 	// Named, so the reader refuses if the tag present is not that one. A lock
 	// cannot be undone.
-	return s.config.Reader.LockCardExpecting(req.TagUID)
+	return s.config.Readers.Lock(rt.reader, req.TagUID)
 }
 
 func (s *Router) lockViaDevice(req server.LockOp, active deviceTag) (*nfc.LockResult, error) {
@@ -114,7 +114,7 @@ func (s *Router) lockViaDevice(req server.LockOp, active deviceTag) (*nfc.LockRe
 func (s *Router) Transceive(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
 	// A raw exchange cannot be assumed harmless: the same call carries a SELECT
 	// and a write to a configuration page, so the mode treats it as a write.
-	if !modeAllowsTagModification(s.config.Reader) {
+	if !modeAllowsTagModification(s.config.Readers) {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly,
 			"Reader is in read-only mode; raw exchanges are refused because they can write")
 	}
@@ -124,10 +124,10 @@ func (s *Router) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 		return nil, err
 	}
 
-	if !rt.reader {
+	if !rt.onReader() {
 		return s.transceiveViaDevice(req, rt.device)
 	}
-	return s.config.Reader.TransceiveExpecting(req.Data, req.TagUID)
+	return s.config.Readers.Transceive(rt.reader, req.Data, req.TagUID)
 }
 
 func (s *Router) transceiveViaDevice(req server.TransceiveOp, active deviceTag) ([]byte, error) {
@@ -160,13 +160,13 @@ func (s *Router) Capabilities(ctx context.Context, req server.CapabilitiesOp) (*
 		return nil, err
 	}
 
-	if !rt.reader {
+	if !rt.onReader() {
 		// Answered from what the device declared at the scan, with no round
 		// trip, so it costs nothing to ask.
 		caps := nfc.GetTagCapabilities(rt.device.Tag)
 		return &caps, nil
 	}
-	return s.config.Reader.GetCapabilitiesExpecting(req.TagUID)
+	return s.config.Readers.Capabilities(rt.reader, req.TagUID)
 }
 
 // tagType names the tag's type when one is known.

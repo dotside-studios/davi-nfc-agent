@@ -17,13 +17,16 @@ import (
 func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *stack) {
 	t.Helper()
 
-	reader, err := nfc.NewNFCReader("", nfc.NewMockManager(), time.Second)
+	readers, err := nfc.NewSupervisor(nfc.NewMockManager(), time.Second)
 	if err != nil {
-		t.Fatalf("NewNFCReader: %v", err)
+		t.Fatalf("NewSupervisor: %v", err)
 	}
-	reader.SetMode(mode)
+	if err := readers.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	readers.SetMode(mode)
 
-	st := newStack(t, stackConfig{Reader: reader})
+	st := newStack(t, stackConfig{Readers: readers})
 	return st.URL, st
 }
 

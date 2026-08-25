@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The agent operates every reader through `nfc.Supervisor` rather than opening
+  one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
+  Classic keys are set on the supervisor, which applies them to a reader opened
+  later too. `tagrouter` routes to the reader holding the tag rather than to
+  the reader
 - `nfc.Supervisor` operates every reader a manager offers rather than one chosen
   at startup. It opens each, polls it, and publishes what they scan on one
   signal, with each scan naming the reader it came from. A reader plugged in

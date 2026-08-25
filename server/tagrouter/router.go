@@ -17,8 +17,8 @@ import (
 
 // Config names the tag sources to route between.
 type Config struct {
-	// Reader is the agent's own hardware reader. Nil when it has none.
-	Reader *nfc.NFCReader
+	// Readers operates the agent's own readers. Nil when it has none.
+	Readers *nfc.Supervisor
 
 	// Devices is the driver serving paired devices. Nil when none are
 	// configured.
@@ -63,8 +63,8 @@ type deviceTag struct {
 //
 // The mode belongs to the agent rather than to the reader, so it governs tags
 // held by remote devices too. A nil reader has no mode to consult.
-func modeAllowsTagModification(reader *nfc.NFCReader) bool {
-	return reader == nil || reader.GetMode() != nfc.ModeReadOnly
+func modeAllowsTagModification(readers *nfc.Supervisor) bool {
+	return readers == nil || readers.Mode() != nfc.ModeReadOnly
 }
 
 // readOnlyModeMessage explains a mode refusal for the named operation.

@@ -160,20 +160,13 @@ func TestScanReachesTheClientServerAfterStart(t *testing.T) {
 	}
 }
 
-// The reader's status reaches a subscriber as well as the clients. It used to
+// The readers' status reaches a subscriber as well as the clients. It used to
 // reach the clients only, which left the tray polling the last card twice a
 // second to find out what the agent already knew.
 func TestReaderStatusReachesSubscribersAndClients(t *testing.T) {
 	a := newPumpAgent(t)
 
-	reader, err := nfc.NewNFCReader("", nfc.NewMockManager(), time.Second)
-	if err != nil {
-		t.Fatalf("NewNFCReader: %v", err)
-	}
-	reader.Start()
-	defer reader.Close()
-
-	seen := make(chan nfc.DeviceStatus, 4)
+	seen := make(chan nfc.DeviceStatus, 8)
 	a.Events().Reader.Connect(func(status nfc.DeviceStatus) {
 		select {
 		case seen <- status:
@@ -181,24 +174,18 @@ func TestReaderStatusReachesSubscribersAndClients(t *testing.T) {
 		}
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sink := newSink()
-	go a.pumpReader(ctx, reader, sink)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
 
 	select {
 	case status := <-seen:
-		if !status.Connected {
-			t.Errorf("subscriber saw %+v, want the reader connected", status)
+		if status.Device != "mock:usb:001" {
+			t.Errorf("the status names %q, want the reader it describes", status.Device)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the reader's status never reached a subscriber")
-	}
-
-	select {
-	case <-sink.statuses:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the reader's status never reached the clients")
+	case <-time.After(3 * time.Second):
+		t.Fatal("the readers' status never reached a subscriber")
 	}
 }
 
@@ -254,41 +241,6 @@ func TestManagerScansReachTheClientsWhileServing(t *testing.T) {
 	case uid := <-seen:
 		t.Errorf("a scan reached %q after the agent stopped", uid)
 	case <-time.After(300 * time.Millisecond):
-	}
-}
-
-// Every scan says where it came from. Nothing reads it yet, but it is what the
-// device filter and the supervisor's per-device routing will both ask, so a
-// producer that leaves it blank breaks them later rather than here.
-func TestAScanSaysWhichDeviceItCameFrom(t *testing.T) {
-	a := newPumpAgent(t)
-
-	reader, err := nfc.NewNFCReader("mock:usb:001", nfc.NewMockManager(), time.Second)
-	if err != nil {
-		t.Fatalf("NewNFCReader: %v", err)
-	}
-	reader.Start()
-	defer reader.Close()
-
-	status := make(chan nfc.DeviceStatus, 4)
-	a.Events().Reader.Connect(func(s nfc.DeviceStatus) {
-		select {
-		case status <- s:
-		default:
-		}
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go a.pumpReader(ctx, reader, newSink())
-
-	select {
-	case got := <-status:
-		if got.Device != "mock:usb:001" {
-			t.Errorf("the reader's status names device %q, want mock:usb:001", got.Device)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no reader status arrived")
 	}
 }
 

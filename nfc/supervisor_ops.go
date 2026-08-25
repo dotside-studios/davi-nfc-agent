@@ -3,6 +3,7 @@ package nfc
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // The policy every reader runs under. It is the supervisor's rather than each
@@ -74,6 +75,66 @@ func (s *Supervisor) TagOn(device string) (holder string, tag Tag, ok bool) {
 		return "", nil, false
 	}
 	return name, tags[0], true
+}
+
+// Holding reports which reader last scanned a tag with this UID. It is a cached
+// view and only picks the reader: the reader re-checks the tag it is holding
+// when it performs the operation.
+func (s *Supervisor) Holding(uid string) (device string, ok bool) {
+	if uid == "" {
+		return "", false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for name, reader := range s.readers {
+		if strings.EqualFold(reader.GetLastScannedData(), uid) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// Present reports a reader with a card on it, for a request that named no tag.
+func (s *Supervisor) Present() (device string, ok bool) {
+	s.mu.Lock()
+	readers := make(map[string]*NFCReader, len(s.readers))
+	for name, reader := range s.readers {
+		readers[name] = reader
+	}
+	s.mu.Unlock()
+
+	names := make([]string, 0, len(readers))
+	for name := range readers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if readers[name].GetDeviceStatus().CardPresent {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// Any names a reader to fall back on when none is holding a card, so a request
+// that has to go somewhere reaches one rather than being refused for having no
+// route.
+func (s *Supervisor) Any() (device string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	names := make([]string, 0, len(s.readers))
+	for name := range s.readers {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "", false
+	}
+	sort.Strings(names)
+	return names[0], true
 }
 
 // Operations. Each names the reader it applies to, so one reader's operation

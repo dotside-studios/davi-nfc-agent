@@ -62,7 +62,7 @@ func (c *fakeClient) await(t *testing.T) nfc.NFCData {
 }
 
 type stackConfig struct {
-	Reader        *nfc.NFCReader
+	Readers       *nfc.Supervisor
 	APISecret     string
 	TokenVerifier server.TokenVerifier
 	RequirePaired bool
@@ -86,12 +86,12 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		remote = remotenfc.NewManager(30 * time.Second)
 		endpoint = remote.Handler(remotenfc.ServerOptions{
 			Authenticate:         auth.Check,
-			AllowTagModification: tagModificationPolicy(cfg.Reader),
+			AllowTagModification: tagModificationPolicy(cfg.Readers),
 			PublicKeyPin:         func() string { return cfg.PublicKeyPin },
 		})
 	}
 
-	router := tagrouter.New(tagrouter.Config{Reader: cfg.Reader, Devices: remote})
+	router := tagrouter.New(tagrouter.Config{Readers: cfg.Readers, Devices: remote})
 
 	if remote != nil {
 		remote.Scans().Connect(client.Broadcast)
@@ -104,8 +104,8 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		if remote != nil {
 			remote.Close()
 		}
-		if cfg.Reader != nil {
-			cfg.Reader.Stop()
+		if cfg.Readers != nil {
+			cfg.Readers.Stop()
 		}
 	})
 
@@ -118,12 +118,11 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	}
 }
 
-// pumpTo forwards a driver's scans to the sink, which is what the agent does.
-// tagModificationPolicy captures the reader's mode as a predicate, so the
+// tagModificationPolicy captures the readers' mode as a predicate, so the
 // driver can refuse a modifying operation the agent's mode forbids.
-func tagModificationPolicy(reader *nfc.NFCReader) func() bool {
-	if reader == nil {
+func tagModificationPolicy(readers *nfc.Supervisor) func() bool {
+	if readers == nil {
 		return nil
 	}
-	return func() bool { return reader.GetMode() != nfc.ModeReadOnly }
+	return func() bool { return readers.Mode() != nfc.ModeReadOnly }
 }

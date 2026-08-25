@@ -145,6 +145,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `traymenu.Close` now stops clicks. It closed a done channel that the click
+  path and the dispatch loop each selected on alongside the event queue, and Go
+  picks at random when both are ready, so a click racing a close ran about half
+  the time
+- Every method on a nil `*console.Server` tolerates it, as a build without a
+  console has always been documented to expect. `NotifyChange` and `ConsoleURL`
+  did not
 - `Config.CardTypes` reached nothing. New built an empty card-type filter and
   dropped it, so an agent built with a card-type allowlist read every type
 - Choosing a reader from the control center did not announce the change, so a

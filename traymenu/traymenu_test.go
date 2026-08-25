@@ -3,6 +3,7 @@ package traymenu_test
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -299,14 +300,21 @@ func TestRunCallsBackAndQuitReturns(t *testing.T) {
 func TestCloseIsIdempotentAndStopsClicks(t *testing.T) {
 	menu, _ := newMenu(t)
 
-	clicks := 0
-	item := menu.Add("Quit", traymenu.OnClick(func() { clicks++ }))
+	// Counted across goroutines: the handler runs on the dispatch goroutine,
+	// and the assertion reads it here.
+	var clicks atomic.Int64
+	item := menu.Add("Quit", traymenu.OnClick(func() { clicks.Add(1) }))
 
 	menu.Close()
 	menu.Close()
 
-	item.Click() // must return rather than block
-	if clicks != 0 {
-		t.Fatalf("handler ran %d times after Close, want 0", clicks)
+	// Repeated because a click racing a close used to be delivered about half
+	// the time: done and the event queue were selected on together, and Go
+	// picks at random when both are ready.
+	for i := 0; i < 50; i++ {
+		item.Click() // must return rather than block
+	}
+	if got := clicks.Load(); got != 0 {
+		t.Fatalf("handler ran %d times after Close, want 0", got)
 	}
 }

@@ -47,6 +47,14 @@ func (i *Item) Click() {
 		return
 	}
 
+	// A closed menu wins over a free slot in the queue. Selecting on the two
+	// together would pick between them at random whenever both are ready.
+	select {
+	case <-i.owner.done:
+		return
+	default:
+	}
+
 	done := make(chan struct{})
 	select {
 	case i.owner.events <- event{item: i, done: done}:

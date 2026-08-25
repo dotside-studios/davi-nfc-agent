@@ -209,12 +209,31 @@ func (m *Menu) watch(item *Item) {
 }
 
 // dispatch runs every click handler, one at a time and in arrival order.
+//
+// A closed done wins over a queued event. Selecting on the two together would
+// pick between them at random whenever both are ready, so a click enqueued
+// around a Close would run about half the time.
 func (m *Menu) dispatch() {
 	for {
 		select {
 		case <-m.done:
 			return
+		default:
+		}
+
+		select {
+		case <-m.done:
+			return
 		case ev := <-m.events:
+			select {
+			case <-m.done:
+				if ev.done != nil {
+					close(ev.done)
+				}
+				return
+			default:
+			}
+
 			if ev.item != nil {
 				m.deliver(ev.item)
 			}

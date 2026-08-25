@@ -239,12 +239,31 @@ func (h *harness) dial(t *testing.T, path string, subprotocols []string) (*webso
 }
 
 // client connects as an application does: plain /ws, carrying the secret.
+//
+// It returns once the agent has the connection, not once the handshake is
+// answered: registration happens on the agent's own goroutine, and a scan
+// broadcast before it lands reaches nobody.
 func (h *harness) client(t *testing.T) *websocket.Conn {
 	t.Helper()
+
+	registered := make(chan struct{}, 1)
+	sub := h.Agent.Events().Clients.Connect(func(int) {
+		select {
+		case registered <- struct{}{}:
+		default:
+		}
+	})
+	defer sub.Disconnect()
 
 	conn, resp, err := h.dial(t, "/ws?secret="+apiSecret, nil)
 	if err != nil {
 		t.Fatalf("client dial: %v (status %s)", err, status(resp))
+	}
+
+	select {
+	case <-registered:
+	case <-time.After(timeout):
+		t.Fatal("the agent never reported the client connected")
 	}
 	return conn
 }

@@ -24,7 +24,7 @@ const devicesFileName = "paired-devices.json"
 // PairedDevice is one device that completed pairing.
 //
 // The token is stored only as a hash. It is shown once, at pairing, and cannot
-// be recovered afterwards — a registry that can hand back every device's
+// be recovered afterwards: a registry that can hand back every device's
 // credential is a single file worth stealing.
 type PairedDevice struct {
 	ID        string    `json:"id"`

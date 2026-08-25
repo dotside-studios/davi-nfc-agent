@@ -8,7 +8,7 @@ package tls
 // The watcher goroutine exits and the channel is closed when stop is
 // closed. Implementations are per-OS in netwatch_<goos>.go and use native
 // APIs (netlink on Linux, route socket on Darwin, NotifyAddrChange on
-// Windows). On unsupported OSes the channel never emits — callers should
+// Windows). On unsupported OSes the channel never emits, so callers should
 // keep a periodic poll as a safety net.
 func addrChangeNotifier(stop <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
@@ -18,7 +18,7 @@ func addrChangeNotifier(stop <-chan struct{}) <-chan struct{} {
 			select {
 			case out <- struct{}{}:
 			default:
-				// Already pending — coalesce.
+				// Already pending, so coalesce.
 			}
 		})
 	}()

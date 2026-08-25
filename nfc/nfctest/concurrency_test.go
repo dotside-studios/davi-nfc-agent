@@ -50,7 +50,7 @@ func TestConcurrency_InterleavedOperations(t *testing.T) {
 }
 
 // TestConcurrency_TapChurn races card present/remove churn against concurrent
-// writers. Individual writes may fail (no card present at that instant) — the
+// writers. Individual writes may fail (no card present at that instant); the
 // point is that the reader and device handle the churn without data races,
 // panics, or deadlocks (validated under -race).
 func TestConcurrency_TapChurn(t *testing.T) {

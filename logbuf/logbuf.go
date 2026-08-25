@@ -10,8 +10,8 @@ import (
 )
 
 // Level is the severity inferred for a log line. The agent logs without levels,
-// so this is recovered from the text — good enough to drive a filter, not to be
-// relied on for control flow.
+// so this is recovered from the text. It is good enough to drive a filter, but
+// not to be relied on for control flow.
 type Level string
 
 const (
@@ -65,7 +65,7 @@ func New(capacity int) *Ring {
 }
 
 // Write implements io.Writer, recording each complete line as an entry. It
-// never reports an error — that would propagate into the code trying to log.
+// never reports an error, which would propagate into the code trying to log.
 func (r *Ring) Write(p []byte) (int, error) {
 	n := len(p)
 

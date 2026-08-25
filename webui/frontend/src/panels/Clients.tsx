@@ -43,7 +43,7 @@ export function Clients({ state }: { state: ControlState }) {
                     {c.origin ? (
                       c.origin
                     ) : (
-                      <span className="dim" title="No Origin header — not a browser">
+                      <span className="dim" title="No Origin header, not a browser">
                         non-browser
                       </span>
                     )}
@@ -64,7 +64,7 @@ export function Clients({ state }: { state: ControlState }) {
                       danger
                       run={() => act.mutateAsync({ name: 'clients.disconnect', params: { id: c.id } })}
                       confirm={{
-                        prompt: `Disconnect ${c.origin || c.remoteAddr}?\n\nIt is free to reconnect immediately — this ends the session, it does not bar it. Revoke its origin to bar it.`,
+                        prompt: `Disconnect ${c.origin || c.remoteAddr}?\n\nIt is free to reconnect immediately: this ends the session, it does not bar it. Revoke its origin to bar it.`,
                       }}
                     >
                       disconnect

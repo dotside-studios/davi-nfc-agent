@@ -3,7 +3,7 @@
 // It is deliberately thin. The agent itself lives in package agent, the control
 // center in agent/console and the tray in agent/tray; this command is the only
 // place that knows about all three, the one place that picks an NFC backend,
-// and the one place that touches process-wide state — the flag set and the
+// and the one place that touches process-wide state: the flag set and the
 // standard logger. Keeping those here is what lets the agent be embedded in a
 // program with a command line and a logger of its own.
 package main

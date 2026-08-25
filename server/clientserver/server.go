@@ -442,7 +442,7 @@ func (s *Server) sendTagDataToClient(conn *server.SafeConn, data nfc.NFCData) {
 		}
 
 		// Which reader this came from. Absent means the agent's own hardware,
-		// which is the only source deviceStatus describes — so a client showing
+		// which is the only source deviceStatus describes, so a client showing
 		// a tag can tell whether that status has anything to say about it.
 		if source, ok := data.Card.GetUnderlyingTag().(interface{ SourceDevice() string }); ok {
 			if id := source.SourceDevice(); id != "" {

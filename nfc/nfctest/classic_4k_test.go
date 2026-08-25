@@ -42,7 +42,7 @@ func TestClassic4K_LowLevelAddressing(t *testing.T) {
 }
 
 // TestClassic4K_LargeSectorIsolation verifies that the 16-block large sectors are
-// addressed independently — writing one block doesn't bleed into a neighbour in
+// addressed independently: writing one block doesn't bleed into a neighbour in
 // the same large sector or an adjacent large sector.
 func TestClassic4K_LargeSectorIsolation(t *testing.T) {
 	e := newClassic4KEmulator()
@@ -66,7 +66,7 @@ func TestClassic4K_LargeSectorIsolation(t *testing.T) {
 }
 
 // TestClassic4K_HighLevelLargePayload writes an NDEF payload big enough to spill
-// past block 128 into the large sectors, then reads it back — validating the
+// past block 128 into the large sectors, then reads it back, validating the
 // full ReadData/WriteData pipeline over 4K geometry (trailer skipping and
 // per-sector authentication across the 1K/4K boundary).
 func TestClassic4K_HighLevelLargePayload(t *testing.T) {

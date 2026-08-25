@@ -40,7 +40,7 @@ func newMixed(t *testing.T) *MultiManager {
 
 // A phone reports its scans over the device bridge and is never opened as a
 // reader, so offering one as a candidate pins the reader to a device that can
-// never connect — which is what filled the log with failed connection attempts.
+// never connect, which is what filled the log with failed connection attempts.
 func TestListReaders_LeavesOutPhones(t *testing.T) {
 	readers, err := newMixed(t).ListReaders()
 	if err != nil {

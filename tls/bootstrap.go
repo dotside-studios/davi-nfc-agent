@@ -45,12 +45,12 @@ const bootstrapMaxFailures = 5
 // a QR code, a phone scans it, and the phone follows a platform-aware
 // install path (iOS .mobileconfig, Android .crt). All download endpoints
 // require a 6-digit PIN that's printed on the kiosk (logs + systray) and
-// embedded in the QR — so a passive LAN attacker can't fetch the CA
+// embedded in the QR, so a passive LAN attacker can't fetch the CA
 // without seeing the kiosk screen.
 //
 // Trust model: this protects against passive eavesdropping and casual
 // LAN drive-bys. It does NOT defend against an active MITM on a hostile
-// network during the pairing window — pair on a trusted network for
+// network during the pairing window. Pair on a trusted network for
 // high-stakes installs.
 type BootstrapServer struct {
 	manager    CertificateAuthority
@@ -251,7 +251,7 @@ func (s *BootstrapServer) handleInstall(w http.ResponseWriter, r *http.Request) 
 	case strings.Contains(ua, "Android"):
 		http.Redirect(w, r, "/install/android?pin="+pin, http.StatusSeeOther)
 	default:
-		// Desktop / unknown UA — show the install page so the user can
+		// Desktop / unknown UA: show the install page so the user can
 		// either scan the QR with a phone or hand the URL to one.
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
@@ -259,7 +259,7 @@ func (s *BootstrapServer) handleInstall(w http.ResponseWriter, r *http.Request) 
 
 // handleAppleProfile serves a .mobileconfig that bundles the rootCA.
 // Safari recognizes the MIME and walks the user into the Settings
-// install flow. The profile is unsigned — iOS shows an "Unsigned"
+// install flow. The profile is unsigned, so iOS shows an "Unsigned"
 // notice during install but proceeds.
 func (s *BootstrapServer) handleAppleProfile(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePIN(w, r) {
@@ -495,19 +495,19 @@ button[disabled] { background: #ccc; cursor: not-allowed; }
 
 <div class="card">
     <h2>What your phone will show</h2>
-    <p><span class="platform">iPhone</span> A pop-up asks if you want to <strong>download a configuration profile</strong>. Tap <strong>Allow</strong>. Then open <strong>Settings</strong> — at the very top you'll see <strong>Profile Downloaded</strong>. Tap it, then <strong>Install</strong>, and enter your phone passcode.</p>
+    <p><span class="platform">iPhone</span> A pop-up asks if you want to <strong>download a configuration profile</strong>. Tap <strong>Allow</strong>. Then open <strong>Settings</strong>, where the very top shows <strong>Profile Downloaded</strong>. Tap it, then <strong>Install</strong>, and enter your phone passcode.</p>
     <p><span class="platform">Android</span> Chrome will pop up <strong>"Install certificate"</strong>. Confirm, then if asked, name it (e.g. <em>%s</em>) and confirm again with your screen-lock PIN/pattern.</p>
 </div>
 
 <div class="callout">
-    <strong>iPhone — one extra step everyone forgets</strong>
+    <strong>iPhone: one extra step everyone forgets</strong>
     <p style="margin: 6px 0 0;">After installing, go to <strong>Settings → General → About → Certificate Trust Settings</strong> and turn on the toggle next to <strong>%s</strong>. The phone won't actually trust the kiosk until you do this, and there's no warning that you skipped it.</p>
 </div>
 
 <div class="card">
     <h2>If something looks wrong</h2>
     <ul>
-        <li>The certificate name your phone shows should be <strong>%s</strong>. If it's anything else, close the page and tell your IT contact — somebody else may be on the network.</li>
+        <li>The certificate name your phone shows should be <strong>%s</strong>. If it's anything else, close the page and tell your IT contact, since somebody else may be on the network.</li>
         <li>Pair on the same Wi-Fi as the kiosk: ideally the kiosk's own network or your office Wi-Fi. Avoid pairing over public Wi-Fi (cafés, airports, hotels).</li>
         <li>Wrong PIN five times will lock the kiosk's pairing for safety. Restart the kiosk app to unlock.</li>
     </ul>

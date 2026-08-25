@@ -39,7 +39,7 @@ type PasswordResult struct {
 // capability is reported (TagCapabilities.SupportsPassword) and this API
 // contract is fixed, but the destructive configuration-page writes (PWD, PACK,
 // AUTH0, ACCESS) are intentionally gated off pending validation on real
-// hardware — a wrong AUTH0/ACCESS configuration can permanently lock a tag.
+// hardware: a wrong AUTH0/ACCESS configuration can permanently lock a tag.
 // This method currently returns a not-supported error for all tags.
 func (r *NFCReader) SetCardPassword(password []byte, opts PasswordOptions) (*PasswordResult, error) {
 	return r.passwordOperation("SetPassword", func(*Card) error {

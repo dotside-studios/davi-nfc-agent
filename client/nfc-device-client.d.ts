@@ -232,7 +232,7 @@ export interface WriteRequestEvent {
    * NDEF message to write, as records. Provided for APIs like Web NFC that
    * only accept records; prefer `ndefBytes` where the device can write raw.
    *
-   * Absent — along with `ndefBytes` — when `lock` is set on its own: that is a
+   * Absent, along with `ndefBytes`, when `lock` is set on its own: that is a
    * lock-only request, and the tag must be locked as it stands.
    */
   ndefMessage: NDEFMessageProtocol | null;
@@ -250,7 +250,7 @@ export interface WriteRequestEvent {
 
   /**
    * Make the tag permanently read-only after a successful write. Set without
-   * any message, this is a lock-only request — the agent's `lockRequest`
+   * any message, this is a lock-only request: the agent's `lockRequest`
    * travels as a write frame, since the protocol has one tag-modifying frame
    * rather than two.
    */
@@ -258,7 +258,7 @@ export interface WriteRequestEvent {
 
   /**
    * Identifies the logical write. If this key was already applied, report the
-   * previous outcome instead of writing again — the same request can arrive
+   * previous outcome instead of writing again, since the same request can arrive
    * twice when a response is lost to a dropped connection.
    */
   idempotencyKey?: string;
@@ -394,8 +394,8 @@ export interface DeviceErrorEvent {
 
   /**
    * Whether repeating the request could plausibly succeed. False means the
-   * request was refused on its merits — malformed input, an unsupported
-   * operation, a locked tag — and resending it only wastes a round trip.
+   * request was refused on its merits (malformed input, an unsupported
+   * operation, a locked tag) and resending it only wastes a round trip.
    */
   retryable?: boolean;
 

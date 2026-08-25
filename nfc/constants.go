@@ -52,7 +52,7 @@ func GetAllCardTypes() []string {
 
 // RemoteManager is implemented by a manager whose devices are not readers
 // attached to this machine. A phone reports the tags it scans over the device
-// bridge, so it is never opened and polled the way a reader is — offering one
+// bridge, so it is never opened and polled the way a reader is: offering one
 // as the agent's reader only produces a device that can never be connected.
 //
 // Optional: a manager that does not implement it manages local readers.

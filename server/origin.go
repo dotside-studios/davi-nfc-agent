@@ -10,7 +10,7 @@ import (
 //
 // Policy:
 //   - Empty Origin header (typical for native mobile apps and curl)
-//     is allowed — the WebSocket Origin guard exists to stop browsers
+//     is allowed. The WebSocket Origin guard exists to stop browsers
 //     from being weaponized against localhost-bound services, and
 //     non-browser clients don't send it.
 //   - Same-host Origin (Origin host == Host header) is allowed.
@@ -71,7 +71,7 @@ func checkOrigin(allowed func(host string) bool, onReject func(origin string)) f
 	return func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
-			// No Origin header — almost certainly a native client.
+			// No Origin header, almost certainly a native client.
 			// Browser-initiated WebSockets always send Origin.
 			return true
 		}
@@ -102,7 +102,7 @@ func checkOrigin(allowed func(host string) bool, onReject func(origin string)) f
 }
 
 // hostsEqual compares two host:port strings, case-folding the
-// hostname. Both sides are expected to include the port — the agent
+// hostname. Both sides are expected to include the port, since the agent
 // always binds to a non-standard port, so a missing port in either
 // header is unusual and we don't try to default-port it (which would
 // risk false positives on different explicit ports).

@@ -101,7 +101,7 @@ func TestTransceiveCarriesTheRawFlag(t *testing.T) {
 	}
 }
 
-// A raw exchange can write, so it is counted alongside writes — the count is
+// A raw exchange can write, so it is counted alongside writes. The count is
 // there to show which clients can change a tag.
 func TestTransceiveCountsAsAWrite(t *testing.T) {
 	s := New(Config{AllowedOrigins: []string{"*"}, Ops: &echoOps{seen: make(chan server.TransceiveOp, 1)}})

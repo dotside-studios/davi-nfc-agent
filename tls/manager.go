@@ -232,8 +232,8 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 // generate issues certificates by whichever route is configured.
 //
 // The CA route is used only when asked for, or when this install already has a
-// CA — an operator whose browser console works today should not lose it to a
-// changed default.
+// CA, since an operator whose browser console works today should not lose it
+// to a changed default.
 func (m *Manager) generate(hosts []string) error {
 	// Startup reaches here after EnsureCertificates has already made the
 	// directory, but a reissue can be the first thing that runs.

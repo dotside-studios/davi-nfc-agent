@@ -124,7 +124,7 @@ func (h *fakeHost) DisconnectClient(id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.failDisconnect {
-		return errors.New("no such client — it may have already disconnected")
+		return errors.New("no such client: it may have already disconnected")
 	}
 	h.disconnected = append(h.disconnected, id)
 	return nil

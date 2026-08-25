@@ -42,7 +42,7 @@ export interface StatusWord {
 /**
  * Interprets the last two bytes as an ISO 7816 status word.
  *
- * Only meaningful for APDU-level exchanges — a framing-level response has no
+ * Only meaningful for APDU-level exchanges: a framing-level response has no
  * status word, and the caller decides whether to ask. Returns null for a
  * response too short to carry one.
  */
@@ -76,11 +76,11 @@ function describeStatus(sw1: number, sw2: number): string {
     0x6882: 'Secure messaging not supported',
     0x6900: 'Command not allowed',
     0x6981: 'Command incompatible with file structure',
-    0x6982: 'Security status not satisfied — authenticate first',
+    0x6982: 'Security status not satisfied: authenticate first',
     0x6983: 'Authentication method blocked',
     0x6984: 'Referenced data invalidated',
     0x6985: 'Conditions of use not satisfied',
-    0x6986: 'Command not allowed — no current file selected',
+    0x6986: 'Command not allowed: no current file selected',
     0x6987: 'Expected secure messaging object missing',
     0x6a80: 'Incorrect parameters in the data field',
     0x6a81: 'Function not supported',
@@ -97,9 +97,9 @@ function describeStatus(sw1: number, sw2: number): string {
   if (exact[sw]) return exact[sw]
 
   // Two families carry their detail in SW2 rather than the pair.
-  if (sw1 === 0x61) return `Success — ${sw2} more byte(s) available (GET RESPONSE)`
-  if (sw1 === 0x6c) return `Wrong Le — retry with Le = ${sw2}`
-  if (sw1 === 0x63 && (sw2 & 0xf0) === 0xc0) return `Authentication failed — ${sw2 & 0x0f} attempt(s) left`
+  if (sw1 === 0x61) return `Success: ${sw2} more byte(s) available (GET RESPONSE)`
+  if (sw1 === 0x6c) return `Wrong Le: retry with Le = ${sw2}`
+  if (sw1 === 0x63 && (sw2 & 0xf0) === 0xc0) return `Authentication failed: ${sw2 & 0x0f} attempt(s) left`
 
   return 'Unknown status'
 }

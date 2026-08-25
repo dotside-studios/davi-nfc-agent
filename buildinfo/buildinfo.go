@@ -82,7 +82,7 @@ func IsDev() bool {
 // The package-level variables above are this repository's own values, stamped
 // by its release ldflags, and Default returns them. A program built on top of
 // the agent supplies its own Info instead, so it can carry its own name into
-// the tray, the console, the pairing pages and the mDNS record — and, more
+// the tray, the console, the pairing pages and the mDNS record and, more
 // importantly, keep its configuration out of this agent's directory.
 type Info struct {
 	// Name is the technical application name.

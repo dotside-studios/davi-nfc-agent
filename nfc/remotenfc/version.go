@@ -71,7 +71,7 @@ const (
 	// DisconnectClosed means the connection closed cleanly without a goodbye.
 	DisconnectClosed DisconnectReason = "closed"
 	// DisconnectDropped means the connection went away without a close
-	// handshake — the device crashed, lost its radio, or was killed.
+	// handshake: the device crashed, lost its radio, or was killed.
 	DisconnectDropped DisconnectReason = "dropped"
 )
 

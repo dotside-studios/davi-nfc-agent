@@ -81,7 +81,7 @@ function Capabilities({ tags }: { tags: Tags }) {
         </Row>
         <Row label="Writable">
           {caps.isReadOnly ? (
-            <Dot state="err">no — tag is locked read-only</Dot>
+            <Dot state="err">no, tag is locked read-only</Dot>
           ) : caps.canWrite === false ? (
             <Dot state="err">no</Dot>
           ) : (
@@ -106,7 +106,7 @@ function Records({ records, text }: { records?: NDEFRecord[]; text?: string }) {
         {text ? (
           <div className="mono">{text}</div>
         ) : (
-          <Empty>No NDEF records — the tag is empty or unformatted.</Empty>
+          <Empty>No NDEF records: the tag is empty or unformatted.</Empty>
         )}
       </Panel>
     )
@@ -206,7 +206,7 @@ function Composer({ tags, writable }: { tags: Tags; writable: boolean }) {
 
       {!tags.tag ? (
         <Notice>
-          No tag present. Compose the message now — it is written to the next tag you present.
+          No tag present. Compose the message now; it is written to the next tag you present.
         </Notice>
       ) : null}
 
@@ -439,7 +439,7 @@ function RecordEditor({
 
       {kind.payload ? (
         <label className="stack" style={{ marginTop: 4 }}>
-          <span className="dim">Payload (base64) — overrides the text above when set</span>
+          <span className="dim">Payload (base64), overrides the text above when set</span>
           <input
             type="text"
             className="mono"

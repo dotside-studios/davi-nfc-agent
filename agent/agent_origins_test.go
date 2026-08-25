@@ -80,7 +80,7 @@ func TestOriginStoreNormalizes(t *testing.T) {
 }
 
 // A refused origin has to be recoverable, so it is recorded for the tray to
-// offer. Repeats collapse — a console retrying in a loop must not flood it.
+// offer. Repeats collapse, since a console retrying in a loop must not flood it.
 func TestOriginStoreRecordsBlockedOnce(t *testing.T) {
 	store, _ := NewOriginStore("")
 

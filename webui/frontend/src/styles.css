@@ -2,7 +2,7 @@
  * Control center styling: the density of a mid-2000s Google web app. Arial at
  * 12px, pale blue panel bars, blue underlined links in place of buttons, 1px
  * borders, square corners, no motion. Form controls stay close to the browser's
- * own. Full-bleed by design — this is an operator tool on a desktop.
+ * own. Full-bleed by design, since this is an operator tool on a desktop.
  */
 
 :root {
@@ -203,7 +203,7 @@ main {
 
 /* Multi-column rather than grid: panels have very different heights, and a grid
    row is as tall as its tallest cell, which leaves a ragged band of white under
-   the short ones. Columns pack them instead. Capped at two — a third makes each
+   the short ones. Columns pack them instead. Capped at two, since a third makes each
    narrow enough that content wraps more than it packs. */
 .cols {
   columns: 2 480px;

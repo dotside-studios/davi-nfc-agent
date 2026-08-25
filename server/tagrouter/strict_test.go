@@ -40,7 +40,7 @@ func dialStatus(t *testing.T, url string) int {
 	return resp.StatusCode
 }
 
-// Under strict mode a paired token gets in and nothing else does — not the
+// Under strict mode a paired token gets in and nothing else does: not the
 // shared secret, and not the loopback bypass the test dialer would otherwise
 // benefit from, since httptest listens on 127.0.0.1.
 func TestStrictModeAdmitsOnlyPairedDevices(t *testing.T) {

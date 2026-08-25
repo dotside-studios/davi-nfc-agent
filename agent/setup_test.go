@@ -68,8 +68,8 @@ func TestSetupWithoutLogRing(t *testing.T) {
 }
 
 // TestCustomIdentityReachesTheAgent is the point of Config.Info: a program
-// built on the agent carries its own name, and — the part that matters
-// operationally — keeps its configuration out of this agent's directory.
+// built on the agent carries its own name and, the part that matters
+// operationally, keeps its configuration out of this agent's directory.
 func TestCustomIdentityReachesTheAgent(t *testing.T) {
 	opts := testOptions(t)
 	opts.Info = buildinfo.Info{

@@ -29,7 +29,7 @@ export function Live({
   const view = useRef<HTMLDivElement>(null)
 
   // Snapshots on pause so a line being read cannot scroll away. Not dependent
-  // on `events` — re-snapshotting on each event would defeat the pause.
+  // on `events`, since re-snapshotting on each event would defeat the pause.
   useEffect(() => {
     setFrozen(paused ? events : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,7 +86,7 @@ export function Live({
         <div className="body">
           <Notice kind="warn">
             Not connected to the agent's client endpoint
-            {link === 'connecting' ? ' — connecting…' : ' — reconnecting…'}. Tag activity will not
+            {link === 'connecting' ? ', connecting…' : ', reconnecting…'}. Tag activity will not
             appear until it is.
           </Notice>
         </div>

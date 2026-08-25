@@ -13,7 +13,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // The console consumes the agent's client library under the same name
-      // the production apps import it by, from source in this repo — so a
+      // the production apps import it by, from source in this repo, so a
       // protocol change that breaks a consumer breaks this build too.
       '@davi/nfc-agent-client': fileURLToPath(
         new URL('../../client/src/index.ts', import.meta.url),
@@ -43,8 +43,8 @@ export default defineConfig({
       // agent, so the dev server drives actual hardware rather than a mock.
       //
       // The control surface refuses anything that is not loopback and
-      // same-origin, so during development the agent sees the proxy — itself
-      // loopback — and the Origin header is rewritten to match.
+      // same-origin, so during development the agent sees the proxy, itself
+      // loopback, and the Origin header is rewritten to match.
       '/control': {
         target: agent,
         changeOrigin: true,

@@ -159,7 +159,7 @@ func randomToken() (string, error) {
 }
 
 // isLoopbackRequest reports whether the request arrived over loopback. It reads
-// RemoteAddr, never a forwarding header — those are attacker-controlled.
+// RemoteAddr, never a forwarding header, since those are attacker-controlled.
 func isLoopbackRequest(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -170,7 +170,7 @@ func isLoopbackRequest(r *http.Request) bool {
 }
 
 // isSameOriginRequest reports whether the request came from a page this agent
-// served. A request declaring no origin is accepted — that is a direct
+// served. A request declaring no origin is accepted: that is a direct
 // navigation or a non-browser client; what must be rejected is one declaring a
 // different origin.
 func isSameOriginRequest(r *http.Request) bool {

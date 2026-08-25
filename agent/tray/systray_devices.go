@@ -55,7 +55,7 @@ func (s *App) refreshDevicesMenu() {
 		rows = append(rows, traymenu.Row[string]{
 			Value:   device.ID,
 			Title:   label,
-			Tooltip: fmt.Sprintf("Paired %s — click to revoke", device.PairedAt.Local().Format("2006-01-02 15:04")),
+			Tooltip: fmt.Sprintf("Paired %s, click to revoke", device.PairedAt.Local().Format("2006-01-02 15:04")),
 		})
 	}
 

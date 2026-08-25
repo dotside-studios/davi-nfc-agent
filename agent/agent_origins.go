@@ -17,7 +17,7 @@ const originsFileName = "allowed-origins.json"
 
 // defaultAllowedOrigins are the first-party consoles this agent exists to serve.
 // They ship allowed so the shipped console works on a fresh install without
-// configuration — the guard is there to stop arbitrary sites, not our own.
+// configuration: the guard is there to stop arbitrary sites, not our own.
 //
 // Local ports cover a developer running a console from source.
 var defaultAllowedOrigins = []string{

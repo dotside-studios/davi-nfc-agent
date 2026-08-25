@@ -26,7 +26,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 
 /**
  * Tracks which section is in view and scrolls to one on demand. Every section
- * stays rendered — the nav jumps between them rather than filtering, so the
+ * stays rendered: the nav jumps between them rather than filtering, so the
  * whole subject can be read by scrolling.
  */
 function useSectionNav(): [SectionId, (s: SectionId) => void] {
@@ -201,7 +201,7 @@ function CredentialsSection({ state }: { state: ControlState }) {
                 run={() => act.mutateAsync({ name: 'security.revokeControlSessions' })}
                 confirm={{
                   prompt:
-                    'Sign out every control center session?\n\nThis one included — you will need to reopen the console from the tray menu.',
+                    'Sign out every control center session?\n\nThis one included, so you will need to reopen the console from the tray menu.',
                 }}
               >
                 sign out all
@@ -213,7 +213,7 @@ function CredentialsSection({ state }: { state: ControlState }) {
 
       <Notice>
         The API secret is shown here in full. This page already required loopback access, a
-        same-origin request and a token minted from the tray — a higher bar than reading the file it
+        same-origin request and a token minted from the tray, a higher bar than reading the file it
         comes from, so hiding it would protect nothing.
       </Notice>
     </Panel>
@@ -233,8 +233,8 @@ function TrustSection({ state }: { state: ControlState }) {
       </KV>
       <div className="dim" style={{ margin: '4px 0' }}>
         Phones and readers authenticate this agent by pinning that value rather than by trusting a
-        certificate authority. It survives certificate reissues — which happen whenever this
-        machine's addresses change — so a device that pins it keeps working when the machine moves
+        certificate authority. It survives certificate reissues, which happen whenever this
+        machine's addresses change, so a device that pins it keeps working when the machine moves
         network. Pin this, never the certificate.
       </div>
 
@@ -263,7 +263,7 @@ function TrustSection({ state }: { state: ControlState }) {
         <Notice>
           <div>
             Browsers cannot pin, so a web page on this machine cannot open a <code>wss://</code>{' '}
-            connection to this agent until it trusts the certificate — and unlike visiting a page,
+            connection to this agent until it trusts the certificate, and unlike visiting a page,
             there is no warning to click through. A page that needs the reader will simply never
             connect.
           </div>
@@ -279,7 +279,7 @@ function TrustSection({ state }: { state: ControlState }) {
             </ActionLink>
           </div>
           <div className="dim" style={{ marginTop: 4 }}>
-            Not needed for phones or readers — they pin the key above. Listeners restart afterwards,
+            Not needed for phones or readers, which pin the key above. Listeners restart afterwards,
             so connected clients reconnect.
           </div>
         </Notice>
@@ -340,7 +340,7 @@ function CertificateSection({ state }: { state: ControlState }) {
             </Row>
             <Row label="Covers">
               {cert.hosts.length === 0 ? (
-                <span className="err">no names — no client can verify this certificate</span>
+                <span className="err">no names, so no client can verify this certificate</span>
               ) : (
                 <span className="mono">{cert.hosts.join(', ')}</span>
               )}
@@ -350,7 +350,7 @@ function CertificateSection({ state }: { state: ControlState }) {
           {uncovered.length > 0 ? (
             <Notice kind="warn">
               This certificate does not cover <span className="mono">{uncovered.join(', ')}</span>. A
-              client reaching the agent on one of those addresses will fail to verify it — which a
+              client reaching the agent on one of those addresses will fail to verify it, which a
               browser reports as a plain connection failure, indistinguishable from the agent being
               down. Regenerating picks up the machine's current addresses.
             </Notice>
@@ -361,7 +361,7 @@ function CertificateSection({ state }: { state: ControlState }) {
   )
 }
 
-/** Local addresses the certificate does not name — the usual cause of a
+/** Local addresses the certificate does not name, the usual cause of a
  *  connection failure after a machine changes network. */
 function missingAddresses(hosts: string[], localIPs: string[]): string[] {
   const covered = new Set(hosts.map((h) => h.toLowerCase()))

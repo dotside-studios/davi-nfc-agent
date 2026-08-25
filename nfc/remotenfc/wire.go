@@ -35,7 +35,7 @@ type DeviceCapabilities struct {
 
 	// CanTransceive is APDU-level exchange (Android IsoDep.transceive, iOS
 	// sendCommand, PN532 InDataExchange). CanTransceiveRaw is framing-level
-	// exchange (Android NfcA.transceive, PN532 InCommunicateThru) — a strictly
+	// exchange (Android NfcA.transceive, PN532 InCommunicateThru), a strictly
 	// rarer capability, which is why it is a separate bit.
 	CanTransceive    bool `json:"canTransceive,omitempty"`
 	CanTransceiveRaw bool `json:"canTransceiveRaw,omitempty"`
@@ -51,8 +51,8 @@ type DeviceCapabilities struct {
 	// twenty seconds and cannot renew that.
 	//
 	// The deadline for a given tag is the arrival of its tagScanned plus this,
-	// and that sum is optimistic — the tag was connected before the message was
-	// sent, so leave margin rather than treating it as exact.
+	// and that sum is optimistic, since the tag was connected before the message
+	// was sent, so leave margin rather than treating it as exact.
 	//
 	// Advisory. A device declaring nothing is open-ended, which is how every
 	// device behaved before this field existed, so it must not become a gate:
@@ -127,7 +127,7 @@ type DeviceWriteRequest struct {
 
 	// IdempotencyKey identifies the logical write. A device that has already
 	// applied this key must report the previous outcome rather than write
-	// again — the same request can arrive twice if a response is lost to a
+	// again, since the same request can arrive twice if a response is lost to a
 	// dropped connection.
 	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }

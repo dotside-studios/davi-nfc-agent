@@ -210,12 +210,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A smartphone disconnecting no longer floods the log.** `GetTags` reported a
-  closed device as `fmt.Errorf("device is closed")` — its own phrase, matching
+  closed device as `fmt.Errorf("device is closed")`, its own phrase, matching
   no sentinel. `IsDeviceClosedError` looks for the typed `ErrDeviceClosed` or,
   failing that, the string `device closed`, so it declined every one of them:
   two spellings that read identically to a person and not at all to
   `strings.Contains`. Nothing downstream handled a phone disconnecting as a
-  result — the reader still had a device, so it polled straight back into the
+  result: the reader still had a device, so it polled straight back into the
   closed one, a loop with no delay and a log line every turn, and a reconnection
   never once attempted. The three returns are now `nfc.ErrDeviceClosed`, which
   survives the `%w` wrapping `getTags` adds; the string fallback accepts both
@@ -231,14 +231,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line a millisecond
 - **A standing device fault is reported once, not on every poll.** `HandleError`
   is reached from the poll loop, so an error that persisted was logged as often
-  as the device was polled — and the reason a line is worth reading is that the
+  as the device was polled, and the reason a line is worth reading is that the
   condition changed. It now reports a fault the first time, again when the
   reason changes, and again when one returns after the device has worked,
   matching what `ListDevices` was given in 1.1.1 against the same log buffer
 - **The control center no longer discards tags scanned by a phone.** A tag
   tapped on a paired phone reached the frontend and never appeared in the
   console, which reads the same broadcast on the same endpoint. The console
-  cleared its tag whenever a `deviceStatus` reported no card — and that status
+  cleared its tag whenever a `deviceStatus` reported no card, and that status
   describes the agent's own reader, whose `cardPresent` is false for the entire
   life of every phone scan. The tag was received, displayed, and wiped by the
   next status message. No other consumer reads tag presence out of reader
@@ -246,7 +246,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tag the reader itself produced; a tag from a device is cleared by the device
   saying so
 - **A tag leaving a phone's field is recorded as a removal.** A device reports it
-  as a `tagData` with no UID, which the console treated as a scan — rendering a
+  as a `tagData` with no UID, which the console treated as a scan, rendering a
   blank tag over the real one and logging a scan of nothing
 
 ## [1.1.1] - 2026-08-15
@@ -255,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Trust this agent in browsers, without a terminal.** A browser cannot open a
   `wss://` connection to an untrusted certificate, and unlike a page visit there
-  is no warning to click through — the page simply never connects, and nothing
+  is no warning to click through: the page simply never connects, and nothing
   on either side says why. The only remedy was `-install-ca`, a launch flag, so
   a non-technical operator could not get a web page talking to the reader at
   all. The tray gains **Trust This Agent in Browsers** and the Control Center
@@ -272,7 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signs, and that is what `/pair` hands a device. The CA route did not use it:
   truststore's `MakeCert` generates a key of its own, which was then installed
   as the server key. So an agent with a CA advertised a pin its handshake could
-  never present, and a device that paired with one was locked out permanently —
+  never present, and a device that paired with one was locked out permanently.
   re-pairing returned the same unusable pin. The CA route now signs the same
   persistent key, so the pin holds across adopting a CA and devices paired
   before **Trust This Agent in Browsers** keep working after it. An install
@@ -280,15 +280,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reissuing a certificate no longer installs a certificate authority.**
   `RegenerateCertificates` called the CA routine directly instead of going
   through the routing that picks self-signed or CA, so the Control Center's
-  **regenerate** action — labelled as nothing more than reissuing a certificate
-  — created a local CA, installed it in the system trust store and prompted for
+  **regenerate** action, labelled as nothing more than reissuing a certificate,
+  created a local CA, installed it in the system trust store and prompted for
   a password, on an agent that had deliberately never had one. That defeated
   1.1.0's own change to stop installing a CA by default. Reissuing now keeps
   whichever route the install already uses, and putting a CA in the trust store
   happens only when explicitly asked for
 - **A missing reader no longer floods the log.** `ListDevices` is polled
   continuously by the tray, the console and the device watcher, and every failed
-  poll logged. With no reader attached that was 85 of 108 lines — one repeating
+  poll logged. With no reader attached that was 85 of 108 lines, one repeating
   message, drowning anything else that happened, including the certificate
   errors the log was added to surface. A failure is now reported once, again if
   the reason changes, and a recovery gets a line of its own. Same conditions
@@ -300,13 +300,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Control Center.** A web console served by the agent itself at its own root,
   covering what neither the tray nor the flags could do. Four tabs: Overview,
-  Tag, Activity and Security. The reader controls — start/stop, device,
-  mode, card filter, port — sit on Overview rather than behind a settings tab,
+  Tag, Activity and Security. The reader controls (start/stop, device,
+  mode, card filter, port) sit on Overview rather than behind a settings tab,
   so the page an operator lands on is the page they work from. Opened from the
   tray's
   **Open Control Center**, which mints a single-use token and hands it to the
   browser. Being same-origin, it is also the one browser client that works on a
-  fresh install without `-install-ca` — a page visit can be accepted manually,
+  fresh install without `-install-ca`: a page visit can be accepted manually,
   where a bare `wss://` to an untrusted certificate fails outright. Built with
   Vite and React; `webui/frontend/dist` is committed and embedded, so
   `go build .` still needs nothing but Go.
@@ -327,13 +327,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filterable, pausable and exportable as NDJSON. The tray only ever showed the
   card currently on the reader, so a tag presented and taken away left no trace
 - **The control center is a removable module.** Everything it needs lives in
-  `webui/` — the gate, the routes, the state snapshot, the dispatcher and the
-  frontend it embeds — and none of it imports the agent. It declares what it
+  `webui/`: the gate, the routes, the state snapshot, the dispatcher and the
+  frontend it embeds. None of it imports the agent. It declares what it
   needs of the agent as `webui.Host`, implemented by a single adapter in
   `package main`, which both keeps the console's whole reach into the agent
   readable in one file and lets its tests run against a fake host with no
   hardware. `go build -tags nowebui .` then drops it: no `/control` routes, no
-  privileged API, no tray entry and no embedded console — about 820 KB smaller,
+  privileged API, no tray entry and no embedded console, about 820 KB smaller,
   with none of the console's strings present. Only three files in `package main`
   carry the constraint; the call sites tolerate a nil console, so no shared file
   needs a tag of its own. The agent's own protocol is unaffected: raw tag
@@ -343,7 +343,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could already transceive with a tag, but only agent-to-device: no client
   could ask for one, so DESFire, ISO-DEP applets and capability probing meant
   writing a program. `transceiveRequest`/`transceiveResponse` open that channel
-  to clients, routed like a write — to the device holding a tag, otherwise to
+  to clients, routed like a write: to the device holding a tag, otherwise to
   the hardware reader. The console gains an APDU panel with hex in, hex and
   ASCII out, decoded ISO 7816 status words, per-exchange timing, and presets
   built from the commands `nfc/apdu.go` already constructs.
@@ -354,7 +354,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracked its connections but exposed only a count, so "something is writing to
   my tags" had no answer. Each connection now reports its origin, address, user
   agent, how long it has been connected, and how many writes and locks it has
-  issued — counted per connection, so a client that is only listening is
+  issued, counted per connection, so a client that is only listening is
   distinguishable from one changing tags. Any one of them can be disconnected;
   it is free to reconnect, so revoking its origin remains what bars it
 - **Per-device revocation.** Paired devices are listed with platform, pairing
@@ -369,7 +369,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag still wins, and no file is written until something is deliberately saved
 - **Certificate and origin diagnostics.** The console reports certificate
   expiry, issuer and the names it actually covers, and warns when the agent is
-  reachable on an address the certificate omits — previously indistinguishable
+  reachable on an address the certificate omits, previously indistinguishable
   from the agent being down, since a browser reports both as a failed
   connection. Origins refused since startup accumulate with a one-click
   **allow**, where the tray offered a blocked origin only while its menu was open
@@ -402,8 +402,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transceive command channel.** `deviceTransceiveRequest`/`Response` let the
   agent exchange raw data with a tag a device is holding, with separate
   declarations for APDU-level and framing-level exchange. Costs one network
-  round trip per command, so it is for what genuinely needs it — DESFire,
-  ISO-DEP applets, capability probing — not as a general read path
+  round trip per command, so it is for what genuinely needs it (DESFire,
+  ISO-DEP applets, capability probing) and not as a general read path
 - **Origin allowlist with first-party defaults**, persisted to
   `allowed-origins.json` and managed from the tray. A refused origin is offered
   as a one-click *"Allow …"*, which persists without a restart. Preload with
@@ -452,7 +452,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A hosted web console could not connect at all.** The WebSocket origin guard
   rejects any `Origin` that is not the agent's own `host:port`, and
-  `AllowedOrigins` — the escape hatch built alongside it — was never populated:
+  `AllowedOrigins`, the escape hatch built alongside it, was never populated:
   no flag, no environment variable, and `agent.go` left it nil on both servers.
   Every browser console was affected, since a page is by construction served
   from somewhere other than the agent's port. The REST endpoints meanwhile
@@ -460,7 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disagreed about who may call them
 - Pairing required auto-TLS. The endpoint lived on a server that only ran when
   the agent managed its own certificates, so the deployment using an externally
-  provisioned certificate — the one that most needs per-device credentials —
+  provisioned certificate, the one that most needs per-device credentials,
   had no way to pair
 - `ServerBridge.Close` closed channels that producers could still be sending
   on, which panics the losing goroutine. Only the done channel is closed now;
@@ -468,7 +468,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A tag scan was published to clients before the route a write needs was
   registered, so a client reacting to `tagData` with an immediate write could
   be told no device held a tag it had just been told about
-- Tag scans that fail to parse — a malformed UID, an undecodable NDEF message —
+- Tag scans that fail to parse (a malformed UID, an undecodable NDEF message)
   were reported as the transient `TAG_SEND_FAILED`, inviting a device to resend
   a payload that can never be accepted. They are now `INVALID_DATA` and marked
   permanent
@@ -488,7 +488,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoints. Every request must arrive over loopback, declare the agent's own
   origin, and carry a session cookie minted by the tray; the routes are served
   without the permissive CORS headers the client endpoints carry. The origin
-  allowlist is deliberately not consulted — an entry there authorises a console
+  allowlist is deliberately not consulted: an entry there authorises a console
   to read tags and must never confer the ability to revoke a device or rotate
   the secret. Loopback is determined from `RemoteAddr`, never from a forwarding
   header
@@ -548,7 +548,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message. Backed by `NFCReader.GetCapabilities` and `Card.Capabilities`
 - Erase/format support: `NFCReader.EraseCard` and an `empty` write record type
   overwrite a tag with an empty NDEF message (verified like any write, and
-  composable with `lock`). Reversible — the tag can be rewritten afterward
+  composable with `lock`). Reversible: the tag can be rewritten afterward
 - Password-protection capability reporting (`TagCapabilities.SupportsPassword`,
   true for NTAG21x) and the reader API contract (`SetCardPassword`,
   `RemoveCardPassword`, `PasswordOptions`). The destructive NTAG config writes

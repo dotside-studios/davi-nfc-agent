@@ -10,8 +10,8 @@ import (
 
 // These tests close the one gap the access-bit emulator alone can't cover: that
 // a real phone would recognize a formatted MIFARE Classic card as an NDEF tag.
-// They do it by reading the formatted card the way a phone's NFC stack does —
-// independently of the production format/read code — and confirming the NDEF
+// They do it by reading the formatted card the way a phone's NFC stack does,
+// independently of the production format/read code, and confirming the NDEF
 // message round-trips. If this reconstructs what was written, a compliant phone
 // will too. (MAD/AID interpretation is the phone-side logic being emulated here;
 // only the physical RF tap remains for a real-hardware smoke test.)

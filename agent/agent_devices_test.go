@@ -65,7 +65,7 @@ func TestTokenIsNotStoredInTheClear(t *testing.T) {
 	}
 }
 
-// Revoking one device must not disturb any other — the whole reason the
+// Revoking one device must not disturb any other, which is the whole reason the
 // registry exists, since rotating the shared secret logs out everything.
 func TestRevokeIsPerDevice(t *testing.T) {
 	registry, err := NewDeviceRegistry(t.TempDir())

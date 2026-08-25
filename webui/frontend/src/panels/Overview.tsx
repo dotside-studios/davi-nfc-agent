@@ -7,7 +7,7 @@ import { CardFilterControl, DevicePicker, ModeControl, PortEditor } from './cont
 
 /**
  * The landing page. The left third holds state and the knobs that get turned;
- * the right two thirds hold what the reader is actually doing — the tag on it
+ * the right two thirds hold what the reader is actually doing: the tag on it
  * now, the log tail, and the tags it has seen.
  */
 export function Overview({

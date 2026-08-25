@@ -51,7 +51,7 @@ func (s *App) refreshOriginsMenu() {
 		rows = append(rows, traymenu.Row[originRow]{
 			Value:   originRow{origin: origin},
 			Title:   origin,
-			Tooltip: "Allowed — click to revoke",
+			Tooltip: "Allowed, click to revoke",
 			Checked: true,
 		})
 	}
@@ -104,7 +104,7 @@ func (s *App) handleOriginAllowAny() {
 	s.agent.Origins().SessionAllowAny(on)
 
 	if on {
-		log.Printf("[systray] Origin check disabled for this session — any site can drive the reader until restart")
+		log.Printf("[systray] Origin check disabled for this session: any site can drive the reader until restart")
 	} else {
 		log.Printf("[systray] Origin check re-enabled")
 	}
@@ -120,7 +120,7 @@ func (s *App) startOriginWatcher() {
 	}
 
 	s.agent.Origins().OnBlocked(func(origin string) {
-		log.Printf("[systray] Blocked connection from %s — allow it under Allowed Origins to let it use the reader", origin)
+		log.Printf("[systray] Blocked connection from %s: allow it under Allowed Origins to let it use the reader", origin)
 		s.refreshOriginsMenu()
 	})
 }

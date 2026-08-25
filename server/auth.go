@@ -56,7 +56,7 @@ func CheckAuth(w http.ResponseWriter, r *http.Request, wantSecret string, verifi
 	presented := presentedCredential(r)
 
 	// A paired device is admitted on its own credential, whatever the shared
-	// secret is set to — that is what makes per-device revocation meaningful.
+	// secret is set to, which is what makes per-device revocation meaningful.
 	if verifier != nil && presented != "" {
 		if _, ok := verifier.VerifyToken(presented); ok {
 			return true

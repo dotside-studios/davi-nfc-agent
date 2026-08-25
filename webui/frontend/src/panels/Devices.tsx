@@ -90,7 +90,7 @@ export function Devices({ state }: { state: ControlState }) {
               }
             />
             <span>
-              <b>Require paired devices</b> — admit only devices holding their own credential.
+              <b>Require paired devices</b>: admit only devices holding their own credential.
             </span>
           </label>
 

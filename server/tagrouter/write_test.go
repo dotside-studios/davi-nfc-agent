@@ -322,7 +322,7 @@ func TestTransceiveRoundTrip(t *testing.T) {
 		Payload: map[string]any{
 			"requestID": requestID,
 			"success":   true,
-			// 0x9000 — ISO 7816 success.
+			// 0x9000, ISO 7816 success.
 			"data": []byte{0x90, 0x00},
 		},
 	}); err != nil {

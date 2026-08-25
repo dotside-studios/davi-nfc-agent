@@ -4,7 +4,7 @@ import "testing"
 
 // TestMADCRC_AllNDEF is a known-answer test for the MIFARE Application Directory
 // CRC. A MAD1 marking all 15 data sectors as NFC Forum NDEF (info byte 0x01
-// followed by 15 AID entries of 0x03 0xE1) has a well-documented CRC of 0x14 —
+// followed by 15 AID entries of 0x03 0xE1) has a well-documented CRC of 0x14,
 // the value seen in real NDEF-formatted MIFARE Classic 1K dumps (sector 0,
 // block 1, byte 0). This pins the CRC polynomial/preset without hardware.
 func TestMADCRC_AllNDEF(t *testing.T) {

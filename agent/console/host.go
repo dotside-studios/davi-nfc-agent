@@ -139,7 +139,7 @@ func (h *host) DisconnectClient(id string) error {
 		return errors.New("agent is not running")
 	}
 	if !h.agent.ClientServer.Disconnect(id) {
-		return errors.New("no such client — it may have already disconnected")
+		return errors.New("no such client: it may have already disconnected")
 	}
 	return nil
 }

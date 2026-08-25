@@ -86,13 +86,13 @@ export function Apdu({ tags, writable }: { tags: Tags; writable: boolean }) {
     >
       <Notice kind="warn">
         These bytes reach the tag unmodified. A raw command can write to configuration pages, burn
-        one-time-programmable bits or lock a tag permanently — none of which the agent can recognise
+        one-time-programmable bits or lock a tag permanently, none of which the agent can recognise
         or undo. Know what you are sending.
       </Notice>
 
       {!writable ? (
         <Notice kind="err">
-          The reader is in <b>read-only</b> mode, so raw exchanges are refused — the agent cannot
+          The reader is in <b>read-only</b> mode, so raw exchanges are refused: the agent cannot
           tell a SELECT from a write to a config page, so it treats them all as writes.
         </Notice>
       ) : null}

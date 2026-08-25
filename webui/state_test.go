@@ -9,7 +9,7 @@ import (
 )
 
 // The console reads the snapshot by JSON key. A wire type that loses its tags
-// still compiles, still marshals and still passes a status-code test — it just
+// still compiles, still marshals and still passes a status-code test. It just
 // renders every field blank, which is how the clients table shipped empty once.
 func TestSnapshotKeysAreLowerCamel(t *testing.T) {
 	host := newFakeHost()

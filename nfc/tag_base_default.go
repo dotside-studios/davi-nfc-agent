@@ -18,7 +18,7 @@ package nfc
 // Capabilities() (implementing TagCapabilityProvider) and only override the
 // methods backing those capabilities.
 //
-// Example — a read-only tag needs four methods, not eleven:
+// Example: a read-only tag needs four methods, not eleven:
 //
 //	type MyTag struct {
 //	    nfc.BaseTag

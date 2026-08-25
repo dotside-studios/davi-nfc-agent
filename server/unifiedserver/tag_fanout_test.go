@@ -66,7 +66,7 @@ func registerDevice(t *testing.T, conn *websocket.Conn) string {
 	return id
 }
 
-// A tag a phone scans has to reach the applications watching the agent — the
+// A tag a phone scans has to reach the applications watching the agent, the
 // control center among them, which speaks the same client endpoint as any other
 // consumer. This is the whole path: device socket, manager, bridge, fanout.
 func TestPhoneScanReachesAClient(t *testing.T) {

@@ -30,8 +30,8 @@ func agentOver(t *testing.T, m nfc.Manager, port int) *Agent {
 
 // TestStopLeavesTheManagerOpen is the invariant behind Stop and Shutdown being
 // separate calls. The manager is built once for the process, and the tray and
-// the console both stop the agent expecting to start it again — closing it on
-// the way down leaves the restart with a manager that is already shut.
+// the console both stop the agent expecting to start it again, so closing it
+// on the way down leaves the restart with a manager that is already shut.
 func TestStopLeavesTheManagerOpen(t *testing.T) {
 	m := &closableManager{MockManager: nfc.NewMockManager()}
 	a := agentOver(t, m, 9481)

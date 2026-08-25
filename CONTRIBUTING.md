@@ -110,7 +110,7 @@ davi-nfc-agent/
 ├── cmd/
 │   └── davi-nfc-agent/  # The binary: picks the NFC backend and wires the rest
 │                        # (see docs/custom-builds.md to build your own)
-├── agent/               # The agent itself — orchestration, CLI flags, config
+├── agent/               # The agent itself: orchestration, CLI flags, config
 │   ├── agent.go         # Core agent logic
 │   ├── cli.go           # Flag parsing and startup wiring
 │   ├── console.go       # The console as the agent sees it (an interface)

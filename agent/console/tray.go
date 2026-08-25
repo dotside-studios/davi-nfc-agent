@@ -6,8 +6,8 @@ import "github.com/dotside-studios/davi-nfc-agent/webui"
 // take that must also move the tray's menu, so the two never disagree about
 // what the agent is doing.
 //
-// It is declared here, not in agent/tray, so the dependency runs one way —
-// the tray imports the console to open it, and satisfies this in return.
+// It is declared here, not in agent/tray, so the dependency runs one way: the
+// tray imports the console to open it, and satisfies this in return.
 type Tray interface {
 	// StopAgent stops the reader and updates the menu to match.
 	StopAgent()

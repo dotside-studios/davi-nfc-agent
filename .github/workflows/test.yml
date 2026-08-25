@@ -122,8 +122,8 @@ jobs:
 
       - name: Build the macOS packages
         # Only the tray needs cgo on darwin (fyne.io/systray talks to Cocoa),
-        # which an Ubuntu runner cannot do. Everything else — including the
-        # agent and the console, which import no GUI — is type-checked here, so
+        # which an Ubuntu runner cannot do. Everything else, including the
+        # agent and the console, which import no GUI, is type-checked here, so
         # agent/tray and the cmd that embeds it are the only darwin gaps.
         env:
           CGO_ENABLED: '0'

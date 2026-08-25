@@ -37,7 +37,7 @@ export const RECORD_KINDS: RecordKind[] = [
   {
     type: 'smartposter',
     label: 'Smart poster',
-    hint: 'A URI with a display label — "tap to open <title>".',
+    hint: 'A URI with a display label, "tap to open <title>".',
     content: 'URI',
     placeholder: 'https://example.com',
     title: true,

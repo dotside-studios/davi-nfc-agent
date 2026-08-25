@@ -109,7 +109,7 @@ type Runtime struct {
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
-// directory as it goes. manager supplies the readers — the caller chooses it,
+// directory as it goes. manager supplies the readers, chosen by the caller,
 // which keeps this package independent of any particular NFC backend.
 //
 // It does not build the console: that lives in agent/console, which imports
@@ -119,8 +119,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	info := opts.Info.OrDefault()
 	log.Printf("Starting %s %s", info.Name, info.FullVersion())
 
-	// Resolve the config directory once — used by both the TLS manager
-	// and the persistent API secret.
+	// Resolve the config directory once, for both the TLS manager and the
+	// persistent API secret.
 	configDir := opts.ConfigDir
 	if configDir == "" {
 		configDir = DefaultConfigDir(info.DirName)

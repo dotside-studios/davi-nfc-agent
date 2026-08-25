@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- One interface answers for a tag wherever it is. `nfc.TagHolder` names the tag
+  a device holds and performs the write, lock, raw exchange and capability
+  report on it, and `nfc.Supervisor` implements it for the readers the agent
+  opened. The tag router picks a source and calls it, having carried a branch
+  per operation before
 - `nfc.NFCReader` is internal. One reader covers one device, which is machinery
   behind `nfc.Supervisor` rather than something to hold: a program driving
   readers itself builds a supervisor, and `nfctest.EmulatedReader` is one over

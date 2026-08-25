@@ -2,6 +2,7 @@ package tagrouter
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,5 +75,29 @@ func TestTransceiveAllowedInReadWriteMode(t *testing.T) {
 	})
 	if codeOf(err) == protocol.ErrCodeReadOnly {
 		t.Error("read/write mode was refused as read-only")
+	}
+}
+
+// A request that names no tag reaches a reader even when none reports a card on
+// it. What a reader has is known from its last scan, which a tag it could not
+// read never reached, so the reader is asked and answers for the tag actually
+// on it rather than the request being refused for having no route.
+func TestUntargetedExchangeReachesAReaderThatReportsNoTag(t *testing.T) {
+	s := New(Config{Readers: readersInMode(t, nfc.ModeReadWrite)})
+
+	_, err := s.Transceive(context.Background(), server.TransceiveOp{
+		Target: server.Target{AllowUntargeted: true},
+		Data:   []byte{0x30, 0x00},
+	})
+	if err == nil {
+		t.Fatal("an exchange succeeded with no tag on the reader")
+	}
+	// The reader said only that it has no card, so the failure is reported as
+	// the exchange failing rather than as the reader having vanished.
+	if got := codeOf(err); got != protocol.ErrCodeTransceiveFailed {
+		t.Errorf("errorCode = %q, want %q", got, protocol.ErrCodeTransceiveFailed)
+	}
+	if !strings.Contains(err.Error(), "mock:usb:001") {
+		t.Errorf("the refusal is %q, want it to name the reader that was asked", err)
 	}
 }

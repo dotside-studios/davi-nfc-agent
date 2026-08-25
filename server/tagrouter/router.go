@@ -37,27 +37,6 @@ func New(config Config) *Router {
 	return &Router{config: config, devices: config.Devices}
 }
 
-// targetDevice resolves which remote device a request is for. A request naming
-// one is answered by that device or not at all; naming none falls back to the
-// most recent scan.
-func (s *Router) targetDevice(target string) (deviceTag, bool) {
-	if s.devices == nil {
-		return deviceTag{}, false
-	}
-	deviceID, tag, ok := s.devices.TagOn(target)
-	if !ok {
-		return deviceTag{}, false
-	}
-	return deviceTag{DeviceID: deviceID, UID: tag.UID(), Tag: tag}, true
-}
-
-// deviceTag is a tag a remote device is holding.
-type deviceTag struct {
-	DeviceID string
-	UID      string
-	Tag      nfc.Tag
-}
-
 // modeAllowsTagModification reports whether the agent's current mode permits a
 // write, a lock or a raw exchange.
 //

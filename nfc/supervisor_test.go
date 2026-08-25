@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +151,85 @@ func TestASupervisorStartsOnce(t *testing.T) {
 	s.Stop()
 	if err := s.Start(); err == nil {
 		t.Error("a stopped supervisor was started again")
+	}
+}
+
+// What the router asks is answered from what a reader last scanned: the answer
+// picks the reader, which checks the tag it has when the operation runs. A
+// reader that has scanned nothing has no tag to route to.
+func TestASupervisorAnswersForTheTagOnAReader(t *testing.T) {
+	m := NewMockManager()
+	m.DevicesList = []string{"mock:usb:001"}
+	m.MockDevice.SetTags(nil)
+
+	s := startedSupervisor(t, m)
+
+	if device, uid, ok := s.TagOn("mock:usb:001"); ok {
+		t.Errorf("TagOn = %q, %q, %v; want no tag on a reader that has scanned none", device, uid, ok)
+	}
+	if got := s.DevicesHoldingTags(); len(got) != 0 {
+		t.Errorf("DevicesHoldingTags = %v, want none", got)
+	}
+
+	tag := NewMockTag("04A1B2C3")
+	if err := tag.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	m.MockDevice.SetTags([]Tag{tag})
+
+	scanned := make(chan struct{}, 1)
+	conn := s.Scans().Connect(func(NFCData) {
+		select {
+		case scanned <- struct{}{}:
+		default:
+		}
+	})
+	defer conn.Disconnect()
+
+	select {
+	case <-scanned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no scan arrived from the reader")
+	}
+
+	device, uid, ok := s.TagOn("mock:usb:001")
+	if !ok || device != "mock:usb:001" || uid != "04A1B2C3" {
+		t.Errorf("TagOn = %q, %q, %v; want the reader and the tag it scanned", device, uid, ok)
+	}
+	if got := s.DevicesHoldingTags(); len(got) != 1 || got[0] != "mock:usb:001" {
+		t.Errorf("DevicesHoldingTags = %v, want [mock:usb:001]", got)
+	}
+	if _, _, ok := s.TagOn("nothing-here"); ok {
+		t.Error("a reader that is not connected was reported as holding a tag")
+	}
+}
+
+// The router names the tag an operation is for, and the supervisor hands that
+// name to the reader rather than dropping it: the reader has the tag, and is
+// the only thing that can refuse one that was swapped since the request was
+// made.
+func TestASupervisorHoldsAnOperationToTheTagItNamed(t *testing.T) {
+	m := NewMockManager()
+	m.DevicesList = []string{"mock:usb:001"}
+	tag := NewMockClassicTag("04A1B2C3")
+	tag.IsConnected = true
+	m.MockDevice.SetTags([]Tag{tag})
+
+	s := startedSupervisor(t, m)
+
+	if _, err := s.WriteTag("mock:usb:001", "04FFFFFF", textMessage("for another tag"), false, ""); !errors.Is(err, ErrTagUIDMismatch) {
+		t.Errorf("WriteTag err = %v, want ErrTagUIDMismatch", err)
+	}
+	if _, err := s.LockTag("mock:usb:001", "04FFFFFF", ""); !errors.Is(err, ErrTagUIDMismatch) {
+		t.Errorf("LockTag err = %v, want ErrTagUIDMismatch", err)
+	}
+	if tag.IsReadOnly {
+		t.Error("a tag the caller did not name was locked, which cannot be undone")
+	}
+	if _, err := s.TransceiveTag("mock:usb:001", "04FFFFFF", []byte{0x30, 0x00}, true); !errors.Is(err, ErrTagUIDMismatch) {
+		t.Errorf("TransceiveTag err = %v, want ErrTagUIDMismatch", err)
+	}
+	if _, err := s.TagCapabilities("mock:usb:001", "04FFFFFF"); !errors.Is(err, ErrTagUIDMismatch) {
+		t.Errorf("TagCapabilities err = %v, want ErrTagUIDMismatch", err)
 	}
 }

@@ -13,6 +13,7 @@ type holdingManager struct {
 	mockManager
 	holding map[string]string // deviceID -> tag UID
 	wrote   map[string]bool   // deviceID -> was asked to write
+	locked  map[string]bool   // deviceID -> was asked to lock
 }
 
 func newHoldingManager(name string, holding map[string]string) *holdingManager {
@@ -20,21 +21,22 @@ func newHoldingManager(name string, holding map[string]string) *holdingManager {
 		mockManager: mockManager{name: name},
 		holding:     holding,
 		wrote:       map[string]bool{},
+		locked:      map[string]bool{},
 	}
 }
 
-func (m *holdingManager) TagOn(deviceID string) (string, nfc.Tag, bool) {
+func (m *holdingManager) TagOn(deviceID string) (string, string, bool) {
 	if deviceID == "" {
 		for id := range m.holding {
-			return id, nfc.NewMockTag(m.holding[id]), true
+			return id, m.holding[id], true
 		}
-		return "", nil, false
+		return "", "", false
 	}
 	uid, ok := m.holding[deviceID]
 	if !ok {
-		return "", nil, false
+		return "", "", false
 	}
-	return deviceID, nfc.NewMockTag(uid), true
+	return deviceID, uid, true
 }
 
 func (m *holdingManager) DevicesHoldingTags() []string {
@@ -45,12 +47,34 @@ func (m *holdingManager) DevicesHoldingTags() []string {
 	return out
 }
 
-func (m *holdingManager) WriteTag(deviceID, tagUID string, ndef []byte, lock bool, key string) error {
+func (m *holdingManager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, key string) (*nfc.WriteResult, error) {
 	if _, ok := m.holding[deviceID]; !ok {
-		return errors.New("device is not holding a tag")
+		return nil, errors.New("device is not holding a tag")
 	}
 	m.wrote[deviceID] = true
-	return nil
+	return &nfc.WriteResult{UID: tagUID, Locked: lock}, nil
+}
+
+func (m *holdingManager) LockTag(deviceID, tagUID, key string) (*nfc.LockResult, error) {
+	if _, ok := m.holding[deviceID]; !ok {
+		return nil, errors.New("device is not holding a tag")
+	}
+	m.locked[deviceID] = true
+	return &nfc.LockResult{UID: tagUID, Locked: true}, nil
+}
+
+// phoneTagFamily is what this manager answers with, so an answer that did not
+// come from it is recognisable.
+const phoneTagFamily = "held-by-the-phone"
+
+func (m *holdingManager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapabilities, error) {
+	uid, ok := m.holding[deviceID]
+	if !ok {
+		return nil, errors.New("device is not holding a tag")
+	}
+	caps := nfc.GetTagCapabilities(nfc.NewMockTag(uid))
+	caps.TagFamily = phoneTagFamily
+	return &caps, nil
 }
 
 func (m *holdingManager) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
@@ -70,20 +94,35 @@ func TestMultiManagerAnswersForTagsItsChildrenHold(t *testing.T) {
 		t.Fatal("the aggregate reports no held tags with a child that has some")
 	}
 
-	holding, tag, ok := mm.TagOn("phone-1")
-	if !ok || holding != "phone-1" || tag.UID() != "04A1B2C3" {
-		t.Errorf("TagOn = %q, %v, %v; want the phone and its tag", holding, tag, ok)
+	holding, uid, ok := mm.TagOn("phone-1")
+	if !ok || holding != "phone-1" || uid != "04A1B2C3" {
+		t.Errorf("TagOn = %q, %q, %v; want the phone and its tag", holding, uid, ok)
 	}
 
 	if got := mm.DevicesHoldingTags(); len(got) != 1 || got[0] != "phone-1" {
 		t.Errorf("DevicesHoldingTags = %v, want [phone-1]", got)
 	}
 
-	if err := mm.WriteTag("phone-1", "04A1B2C3", []byte{0x03}, false, "key-1"); err != nil {
+	if _, err := mm.WriteTag("phone-1", "04A1B2C3", nfc.NewNDEFMessage(), false, "key-1"); err != nil {
 		t.Fatalf("WriteTag: %v", err)
 	}
 	if !phones.wrote["phone-1"] {
 		t.Error("the write did not reach the manager holding the tag")
+	}
+
+	if _, err := mm.LockTag("phone-1", "04A1B2C3", "key-2"); err != nil {
+		t.Fatalf("LockTag: %v", err)
+	}
+	if !phones.locked["phone-1"] {
+		t.Error("the lock did not reach the manager holding the tag")
+	}
+
+	caps, err := mm.TagCapabilities("phone-1", "04A1B2C3")
+	if err != nil {
+		t.Fatalf("TagCapabilities: %v", err)
+	}
+	if caps == nil || caps.TagFamily != phoneTagFamily {
+		t.Errorf("TagCapabilities = %+v, want what the manager holding the tag answered", caps)
 	}
 }
 
@@ -98,7 +137,7 @@ func TestMultiManagerHoldsNothingWithoutAHoldingChild(t *testing.T) {
 	if got := mm.DevicesHoldingTags(); len(got) != 0 {
 		t.Errorf("DevicesHoldingTags = %v, want none", got)
 	}
-	if err := mm.WriteTag("phone-1", "04A1B2C3", nil, false, "key-1"); err == nil {
+	if _, err := mm.WriteTag("phone-1", "04A1B2C3", nil, false, "key-1"); err == nil {
 		t.Error("a write with no manager holding tags was accepted")
 	}
 }

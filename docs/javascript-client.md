@@ -7,6 +7,7 @@ A framework-agnostic JavaScript client for integrating with the NFC Agent.
 - [NFCClient (client role)](#nfcclient-client-role)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
+  - [Naming the tag](#naming-the-tag)
   - [API Reference](#api-reference)
   - [Examples](#examples)
   - [TypeScript Support](#typescript-support)
@@ -36,11 +37,20 @@ plain `/ws` for clients).
 
 ## Installation
 
-Copy the client files to your project:
+The library is TypeScript, in `client/src`. With a bundler, import it by name:
+
+```ts
+import { NFCClient } from "@davi/nfc-agent-client";
+import { useNFCClient } from "@davi/nfc-agent-client/react";
+```
+
+Without one, copy a built file — `client/dist` is generated from the same
+source and committed:
 
 ```bash
-cp client/nfc-client.js your-project/
-cp client/nfc-client.d.ts your-project/  # For TypeScript
+cp client/dist/nfc-client.js your-project/       # classic script, globals
+cp client/dist/nfc-client.esm.js your-project/   # module build
+cp client/dist/*.d.ts your-project/              # For TypeScript
 ```
 
 Or include directly in HTML:
@@ -48,6 +58,8 @@ Or include directly in HTML:
 ```html
 <script src="nfc-client.js"></script>
 ```
+
+Rebuild `client/dist` with `make client` after changing `client/src`.
 
 ## Quick Start
 
@@ -63,6 +75,11 @@ client.on('tagData', (data) => {
   console.log('Card UID:', data.uid);
   console.log('Card Type:', data.type);
   console.log('Text:', data.text);
+});
+
+// ...and for the tag leaving the field
+client.on('tagRemoved', ({ uid }) => {
+  console.log('Card removed:', uid);
 });
 
 // Listen for device status
@@ -84,6 +101,33 @@ await client.write({
 await client.disconnect();
 ```
 
+## Naming the tag
+
+Every tag operation names the tag it applies to. The agent refuses one that does
+not, with `TAG_NOT_NAMED` — see [Naming the Tag](api.md#naming-the-tag) for why.
+
+`NFCClient` remembers the tag the agent last reported and names it, so the
+common case needs nothing from the caller:
+
+```javascript
+client.on('tagData', async () => {
+  await client.write({ records: [{ type: 'uri', content: 'https://example.com' }] });
+});
+```
+
+Name a different one explicitly, or opt into the agent guessing:
+
+```javascript
+await client.write({ records, uid: '04A1B2C3' });
+await client.write({ records, uid: '04A1B2C3', deviceID: 'phone-7' });
+await client.write({ records, allowUntargeted: true });
+```
+
+Giving both `uid` and `deviceID` holds that device to that tag, so an id
+remembered from an earlier scan cannot act on whatever it is holding now. The
+client forgets its tag when the tag leaves, so a write after removal is refused
+rather than landing on whatever appears next.
+
 ## API Reference
 
 ### Constructor
@@ -97,6 +141,9 @@ new NFCClient(serverUrl, options?)
 | `serverUrl` | string | Base URL of the NFC Agent server |
 | `options.apiSecret` | string | Optional API secret for authentication |
 | `options.autoReconnect` | boolean | Auto-reconnect on disconnect (default: true) |
+| `options.reconnectDelay` | number | Milliseconds before the first retry, doubling per attempt (default: 250) |
+| `options.maxReconnectDelay` | number | Ceiling for that doubling (default: 5000) |
+| `options.maxReconnectAttempts` | number | Attempts before giving up; 0 retries forever (default: 10) |
 
 ### Methods
 
@@ -110,7 +157,8 @@ await client.connect();
 
 #### `disconnect()`
 
-Disconnect from the server. Releases session automatically.
+Disconnect from the server. Releases session automatically. Requests still in
+flight are rejected rather than left to time out.
 
 ```javascript
 await client.disconnect();
@@ -118,16 +166,69 @@ await client.disconnect();
 
 #### `write(request)`
 
-Write NDEF data to a card.
+Write NDEF data to a card, replacing whatever it holds. Every record kind in
+[Messages to Server](api.md#messages-to-server) is accepted.
 
 ```javascript
-await client.write({
+const result = await client.write({
   records: [
     { type: 'text', content: 'Hello!', language: 'en' },
     { type: 'uri', content: 'https://example.com' }
   ]
 });
+
+result.verified;      // the agent read the data back and it matched
+result.bytesWritten;
+result.attempts;      // including retries on transient faults
 ```
+
+Set `lock: true` to make the tag permanently read-only once the write lands, and
+`idempotencyKey` to a stable value if you may retry after a lost response.
+
+#### `lock(target?)`
+
+Make a tag permanently read-only without writing to it. Irreversible — see
+[Locking Tags](api.md#locking-tags-make-read-only).
+
+```javascript
+await client.lock();
+```
+
+#### `transceive(request)`
+
+Exchange raw bytes with a tag. Takes and returns bytes; the base64 the wire uses
+is the library's business.
+
+```javascript
+// PC/SC get-UID pseudo-APDU
+const response = await client.transceive({
+  data: new Uint8Array([0xff, 0xca, 0x00, 0x00, 0x00])
+});
+
+// NTAG GET_VERSION, at the framing level
+await client.transceive({ data: new Uint8Array([0x60]), raw: true });
+```
+
+`raw` exchanges at the framing level instead of wrapping the bytes as an APDU; a
+framing-level response carries no ISO 7816 status word.
+
+#### `getCapabilities(target?)`
+
+Ask the tag what it supports, rather than reading what was captured when it was
+scanned.
+
+```javascript
+const caps = await client.getCapabilities();
+if (caps.canWrite && !caps.isReadOnly) { /* ... */ }
+```
+
+An undefined field means the agent did not say, which is not the same as
+`false`. See [Tag Capabilities](api.md#tag-capabilities).
+
+#### `currentTag()`
+
+The tag the agent last reported, or `null` once it left the field. This is what
+an untargeted request names.
 
 #### `isConnected()`
 
@@ -147,22 +248,70 @@ Perform REST API health check.
 const health = await client.healthCheck();
 ```
 
+#### `diagnoseAgent(serverUrl)`
+
+A standalone export, not a method. A failed WebSocket carries no detail — a
+refused connection, an untrusted certificate and a blocked origin all arrive as
+the same empty `error` event — so this probes the agent over HTTP instead.
+
+```javascript
+const why = await diagnoseAgent('https://localhost:9470');
+show(why.title, why.detail);
+if (why.openUrl) offerLink(why.openUrl);
+```
+
+| `kind` | Cause |
+|--------|-------|
+| `origin-blocked` | The agent answers over HTTP, so it is running and trusted. This page's origin is not allowed |
+| `wrong-scheme` | The page is on `https`, the agent serves plain `http` |
+| `unreachable` | The agent is not running, or its certificate is untrusted. Indistinguishable from here, so `openUrl` is set for the operator to open |
+
+A working health check does not mean the WebSocket will connect.
+
+`encodeBase64(bytes)` and `decodeBase64(value)` are exported alongside it, for
+the byte slices the wire carries as base64.
+
 ### Events
 
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `tagData` | Tag data object | Tag was scanned |
-| `deviceStatus` | Status object | Device status changed |
+| `tagRemoved` | `{ uid }` | The tag left the field |
+| `deviceStatus` | Status object | The agent's own reader changed state |
 | `connected` | - | WebSocket connected |
 | `disconnected` | - | WebSocket disconnected |
 | `error` | Error object | Error occurred |
 
 ```javascript
 client.on('tagData', (data) => { /* ... */ });
+client.on('tagRemoved', ({ uid }) => { /* ... */ });
 client.on('deviceStatus', (status) => { /* ... */ });
 client.on('connected', () => { /* ... */ });
 client.on('disconnected', () => { /* ... */ });
 client.on('error', (err) => { /* ... */ });
+```
+
+`deviceStatus` describes the agent's own reader and nothing else, so its
+`cardPresent` says nothing about a tag a paired phone is holding — and is false
+the whole time one is. `tagRemoved` is the event to act on.
+
+### Errors
+
+A refused operation rejects with an `NFCRequestError` carrying the agent's
+[error code](api.md#error-codes) and whether repeating the request could
+plausibly succeed.
+
+```javascript
+try {
+  await client.write({ records });
+} catch (err) {
+  if (err.retryable) {
+    // TAG_REMOVED, WRITE_FAILED, NO_CARD — present the tag again
+  } else {
+    // READ_ONLY, CAPACITY_EXCEEDED, TAG_MISMATCH — retrying wastes a round trip
+    console.error(err.code, err.message);
+  }
+}
 ```
 
 ## Examples
@@ -249,12 +398,34 @@ try {
 }
 ```
 
+### React
+
+`@davi/nfc-agent-client/react` wraps the client in a hook that owns the
+connection for the lifetime of the component.
+
+```tsx
+const {
+  connectionStatus, lastTag, capabilities, diagnosis, reconnect,
+  write, lock, transceive, refreshCapabilities,
+} = useNFCClient('https://localhost:9470');
+
+if (connectionStatus !== 'connected') return <p>Connecting to the reader…</p>;
+if (!lastTag) return <p>Present a card.</p>;
+
+return <button onClick={() => write({ records })}>Write to {lastTag.uid}</button>;
+```
+
+`serverUrl` and the options are read on mount, so remount the component to point
+it elsewhere. `diagnosis` is `diagnoseAgent`'s answer, run for you when a
+connection attempt fails.
+
 ## TypeScript Support
 
-TypeScript definitions are provided in `nfc-client.d.ts`. Import types:
+The library is written in TypeScript, so importing it from source needs nothing
+extra. Declarations are generated alongside the built files for the copied case:
 
 ```typescript
-import { NFCClient, TagData, DeviceStatus, WriteRequest } from './nfc-client';
+import { NFCClient, type TagData, type WriteRequest } from '@davi/nfc-agent-client';
 
 const client = new NFCClient('http://localhost:9470');
 
@@ -263,7 +434,11 @@ client.on('tagData', (data: TagData) => {
 });
 ```
 
-See `client/nfc-client.d.ts` for full type definitions.
+Exported types: `TagData`, `TagMessage`, `NDEFRecord`, `TagCapabilities`,
+`TagTarget`, `WriteRequest`, `WriteRecord`, `WriteResponse`, `LockResponse`,
+`TransceiveRequest`, `DeviceStatus`, `NFCErrorEvent`, `NFCClientOptions`,
+`HealthCheckResponse`, `AgentDiagnosis`. See `client/src/session/types.ts` for
+the full definitions.
 
 ---
 

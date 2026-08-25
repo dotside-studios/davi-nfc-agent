@@ -133,3 +133,40 @@ jobs:
             GOOS=darwin GOARCH=$arch go build \
               ./agent ./agent/console ./nfc/... ./server/... ./tls/... ./protocol/...
           done
+
+  web:
+    # The client library and the console that consumes it. Both build outputs
+    # are committed, so this also checks the tree holds what the source
+    # produces.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Client library
+        working-directory: client
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Control center
+        working-directory: webui/frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Committed build output is current
+        run: |
+          if ! git diff --quiet -- client/dist webui/frontend/dist; then
+            echo "::error::client/dist or webui/frontend/dist is stale."
+            echo "Run 'make client' and 'make webui', then commit the result."
+            git --no-pager diff --stat -- client/dist webui/frontend/dist
+            exit 1
+          fi

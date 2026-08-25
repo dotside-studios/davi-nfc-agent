@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { APDU_PRESETS, fromBase64, parseHex, readStatusWord, toAscii, toBase64, toHex } from '../apdu'
+import { APDU_PRESETS, parseHex, readStatusWord, toAscii, toHex } from '../apdu'
 import { fmtTime } from '../format'
 import type { Exchange } from '../types'
 import type { Tags } from '../useTags'
@@ -33,8 +33,7 @@ export function Apdu({ tags, writable }: { tags: Tags; writable: boolean }) {
     const started = performance.now()
 
     try {
-      const res = await tags.transceive(toBase64(bytes), raw)
-      const data = typeof res.data === 'string' ? fromBase64(res.data) : new Uint8Array()
+      const data = await tags.transceive(bytes, raw)
       seq.current += 1
       setHistory((prev) => [
         ...prev,

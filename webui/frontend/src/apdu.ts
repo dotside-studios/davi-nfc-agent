@@ -1,4 +1,5 @@
-/** Hex, base64 and ISO 7816 status words for the APDU console. */
+/** Hex and ISO 7816 status words for the APDU console. Base64 is the wire's
+ *  business and lives in the client library. */
 
 /** Parses hex, ignoring the separators people actually paste: spaces, colons,
  *  dashes, newlines and a leading 0x. Returns null on anything unparseable. */
@@ -30,19 +31,6 @@ export function toAscii(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : '.'))
     .join('')
-}
-
-export function toBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
-
-export function fromBase64(value: string): Uint8Array {
-  const binary = atob(value)
-  const out = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
-  return out
 }
 
 export interface StatusWord {

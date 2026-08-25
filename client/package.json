@@ -1,12 +1,17 @@
 {
-  "name": "@davi/nfc-client",
-  "version": "1.1.0",
-  "description": "Framework-agnostic JavaScript client for NFC Agent",
-  "main": "nfc-client.js",
-  "types": "nfc-client.d.ts",
+  "name": "@davi/nfc-agent-client",
+  "version": "2.0.0",
+  "description": "TypeScript client for the Davi NFC Agent",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react/index.ts"
+  },
+  "main": "dist/nfc-client.js",
+  "types": "dist/index.d.ts",
   "files": [
-    "nfc-client.js",
-    "nfc-client.d.ts",
+    "src",
+    "dist",
     "nfc-device-client.js",
     "nfc-device-client.d.ts"
   ],
@@ -27,6 +32,22 @@
     "directory": "client"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "esbuild": "^0.25.0",
+    "happy-dom": "^15.11.0",
+    "typescript": "~6.0.2",
+    "vitest": "^3.0.5"
   }
 }

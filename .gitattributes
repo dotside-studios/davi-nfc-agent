@@ -2,3 +2,8 @@
 # and excluded from language stats — rebuild with `make webui`.
 webui/frontend/dist/** linguist-generated=true -diff
 webui/frontend/package-lock.json linguist-generated=true -diff
+
+# Generated from client/src with `npm run build` in client/. Collapsed in diffs
+# and excluded from language stats, like the console's build output.
+client/dist/** linguist-generated=true -diff
+client/package-lock.json linguist-generated=true -diff

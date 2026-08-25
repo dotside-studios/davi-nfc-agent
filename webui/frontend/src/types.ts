@@ -1,4 +1,4 @@
-/** Mirrors the Go types in webui/state.go. */
+/** Control-surface types, mirroring the Go types in webui/state.go. */
 
 export type Mode = 'readwrite' | 'read' | 'write'
 
@@ -134,62 +134,19 @@ export interface LogEntry {
   message: string
 }
 
-/* ---- tag traffic, over the ordinary client endpoint ---- */
+/* ---- tag traffic ---- */
 
-export interface TagCapabilities {
-  memorySize?: number
-  usableCapacity?: number
-  writable?: boolean
-  lockable?: boolean
-  passwordProtectable?: boolean
-  readOnly?: boolean
-  [k: string]: unknown
-}
-
-export interface NdefRecord {
-  tnf?: number
-  type?: string
-  id?: string
-  payload?: string
-
-  /** The decoded text or URI. The agent names this field for every record type
-   *  it can read, which is why there is one field and not one per type. */
-  content?: string
-
-  language?: string
-  [k: string]: unknown
-}
-
-export interface TagData {
-  uid: string
-  type: string
-  technology: string
-  scannedAt: string
-  text: string
-  message?: {
-    records?: NdefRecord[]
-    [k: string]: unknown
-  }
-  capabilities?: TagCapabilities
-  err?: string | null
-
-  /** The paired device that scanned it. Absent for the agent's own reader. */
-  deviceID?: string
-}
-
-/** A record as the composer submits it. Field use varies by type — see the
- *  Record Fields table in docs/api.md. */
-export interface WriteRecord {
-  type: string
-  content?: string
-  language?: string
-  mimeType?: string
-  title?: string
-  payload?: string
-  tnf?: number
-  typeBytes?: string
-  id?: string
-}
+/**
+ * The wire types belong to the client library. Re-exported so a panel imports
+ * one thing, and so the console is held to the definitions every other
+ * consumer is.
+ */
+export type {
+  NDEFRecord,
+  TagCapabilities,
+  TagData,
+  WriteRecord,
+} from '@davi/nfc-agent-client'
 
 /** A distinct tag seen by the reader, with how often it has come back. */
 export interface ScanRecord {

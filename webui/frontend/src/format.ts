@@ -16,10 +16,10 @@ export function fmtTime(iso: string): string {
   return d.toLocaleTimeString(undefined, { hour12: false })
 }
 
-export function fmtDateTime(iso?: string): string {
+export function fmtDateTime(iso?: string | Date | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
+  if (Number.isNaN(d.getTime())) return String(iso)
   // A zero time from Go marshals as year 1; it means "never", not a date.
   if (d.getUTCFullYear() <= 1) return 'never'
   return d.toLocaleString(undefined, { hour12: false })

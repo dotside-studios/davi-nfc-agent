@@ -90,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `nfc.NFCReader` is internal. One reader covers one device, which is machinery
+  behind `nfc.Supervisor` rather than something to hold: a program driving
+  readers itself builds a supervisor, and `nfctest.EmulatedReader` is one over
+  an emulated device
 - `Config.RemoteOps` and `Config.RemoteScans` are gone, with `Options` matching.
   A driver of paired devices is registered with the manager, which is where the
   agent now asks. `server.DeviceOps` is `nfc.TagHolder`

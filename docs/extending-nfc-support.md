@@ -414,7 +414,7 @@ func (t *MyTag) WriteDataWithOptions(data []byte, opts nfc.TagWriteOptions) erro
 }
 ```
 
-The `NFCReader` automatically uses `WriteDataWithOptions` when available:
+The reader automatically uses `WriteDataWithOptions` when available:
 
 ```go
 // Writing with force initialization

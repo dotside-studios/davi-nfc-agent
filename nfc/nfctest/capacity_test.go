@@ -34,7 +34,7 @@ func TestCapacity_FitsAcceptedOversizedRejected(t *testing.T) {
 
 			// Comfortably-fitting write must verify.
 			fit := textMessage(strings.Repeat("a", maxN/3))
-			res, err := reader.WriteMessageWithResult(fit, nfc.WriteOptions{Overwrite: true, Index: -1})
+			res, err := reader.WriteMessage(fit, nfc.WriteOptions{Overwrite: true, Index: -1})
 			if err != nil {
 				t.Fatalf("fitting write failed: %v", err)
 			}
@@ -44,7 +44,7 @@ func TestCapacity_FitsAcceptedOversizedRejected(t *testing.T) {
 
 			// Over-capacity write must be rejected with a capacity error.
 			over := textMessage(strings.Repeat("b", maxN+64))
-			if _, err := reader.WriteMessageWithResult(over, nfc.WriteOptions{Overwrite: true, Index: -1}); !nfc.IsCapacityExceededError(err) {
+			if _, err := reader.WriteMessage(over, nfc.WriteOptions{Overwrite: true, Index: -1}); !nfc.IsCapacityExceededError(err) {
 				t.Errorf("expected a capacity-exceeded error for an oversized write, got: %v", err)
 			}
 		})

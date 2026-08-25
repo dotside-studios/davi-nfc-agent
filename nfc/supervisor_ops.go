@@ -99,7 +99,7 @@ func (s *Supervisor) Holding(uid string) (device string, ok bool) {
 // Present reports a reader with a card on it, for a request that named no tag.
 func (s *Supervisor) Present() (device string, ok bool) {
 	s.mu.Lock()
-	readers := make(map[string]*NFCReader, len(s.readers))
+	readers := make(map[string]*deviceReader, len(s.readers))
 	for name, reader := range s.readers {
 		readers[name] = reader
 	}
@@ -181,7 +181,7 @@ func (s *Supervisor) Capabilities(device, expectUID string) (*TagCapabilities, e
 // the only reader there is, and is ambiguous once there is more than one: a
 // caller that did not say which reader it meant is refused rather than served
 // by whichever came first.
-func (s *Supervisor) readerFor(device string) (string, *NFCReader, error) {
+func (s *Supervisor) readerFor(device string) (string, *deviceReader, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -211,8 +211,8 @@ func (s *Supervisor) readerFor(device string) (string, *NFCReader, error) {
 }
 
 // readerList is every reader, for applying policy. The caller holds the lock.
-func (s *Supervisor) readerList() []*NFCReader {
-	out := make([]*NFCReader, 0, len(s.readers))
+func (s *Supervisor) readerList() []*deviceReader {
+	out := make([]*deviceReader, 0, len(s.readers))
 	for _, reader := range s.readers {
 		out = append(out, reader)
 	}

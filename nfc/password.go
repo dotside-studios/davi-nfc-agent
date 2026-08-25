@@ -41,7 +41,7 @@ type PasswordResult struct {
 // AUTH0, ACCESS) are intentionally gated off pending validation on real
 // hardware: a wrong AUTH0/ACCESS configuration can permanently lock a tag.
 // This method currently returns a not-supported error for all tags.
-func (r *NFCReader) SetCardPassword(password []byte, opts PasswordOptions) (*PasswordResult, error) {
+func (r *deviceReader) SetCardPassword(password []byte, opts PasswordOptions) (*PasswordResult, error) {
 	return r.passwordOperation("SetPassword", func(*Card) error {
 		// Implementation pending hardware validation.
 		return NewNotSupportedError("password protection (not yet enabled; pending hardware validation)")
@@ -52,7 +52,7 @@ func (r *NFCReader) SetCardPassword(password []byte, opts PasswordOptions) (*Pas
 //
 // Like SetCardPassword, this is gated off pending hardware validation and
 // currently returns a not-supported error.
-func (r *NFCReader) RemoveCardPassword(password []byte) (*PasswordResult, error) {
+func (r *deviceReader) RemoveCardPassword(password []byte) (*PasswordResult, error) {
 	return r.passwordOperation("RemovePassword", func(*Card) error {
 		// Implementation pending hardware validation.
 		return NewNotSupportedError("password protection (not yet enabled; pending hardware validation)")
@@ -62,7 +62,7 @@ func (r *NFCReader) RemoveCardPassword(password []byte) (*PasswordResult, error)
 // passwordOperation acquires the presented tag, verifies the tag type supports
 // password protection, and runs op. It mirrors the write/lock acquisition path
 // so password operations are serialized with other tag operations.
-func (r *NFCReader) passwordOperation(op string, fn func(*Card) error) (*PasswordResult, error) {
+func (r *deviceReader) passwordOperation(op string, fn func(*Card) error) (*PasswordResult, error) {
 	var result *PasswordResult
 	err := r.withTagOperation(func() error {
 		card, err := r.prepareCardForWrite("")

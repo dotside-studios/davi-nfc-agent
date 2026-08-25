@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// newWriteTestReader builds an NFCReader wired to a mock manager/device that
+// newWriteTestReader builds an deviceReader wired to a mock manager/device that
 // presents the given tag, waiting for the initial connection to settle.
-func newWriteTestReader(t *testing.T, tag Tag) *NFCReader {
+func newWriteTestReader(t *testing.T, tag Tag) *deviceReader {
 	t.Helper()
 
 	manager := NewMockManager()
@@ -19,9 +19,9 @@ func newWriteTestReader(t *testing.T, tag Tag) *NFCReader {
 	mockDevice.SetTags([]Tag{tag})
 	manager.MockDevice = mockDevice
 
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	t.Cleanup(reader.Close)
 

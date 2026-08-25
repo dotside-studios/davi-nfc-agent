@@ -25,7 +25,7 @@ type Supervisor struct {
 	timeout time.Duration
 
 	mu      sync.Mutex
-	readers map[string]*NFCReader
+	readers map[string]*deviceReader
 	started bool
 	done    bool
 
@@ -52,7 +52,7 @@ func NewSupervisor(manager Manager, opTimeout time.Duration) (*Supervisor, error
 	return &Supervisor{
 		manager: manager,
 		timeout: opTimeout,
-		readers: make(map[string]*NFCReader),
+		readers: make(map[string]*deviceReader),
 		mode:    ModeReadWrite,
 		stopped: make(chan struct{}),
 	}, nil
@@ -100,7 +100,7 @@ func (s *Supervisor) Stop() {
 	s.started = false
 	s.done = true
 	readers := s.readers
-	s.readers = make(map[string]*NFCReader)
+	s.readers = make(map[string]*deviceReader)
 	s.mu.Unlock()
 
 	close(s.stopped)
@@ -144,7 +144,7 @@ func (s *Supervisor) reconcile() {
 		return
 	}
 
-	var dropped []*NFCReader
+	var dropped []*deviceReader
 	for device, reader := range s.readers {
 		if _, keep := wanted[device]; !keep {
 			dropped = append(dropped, reader)
@@ -167,7 +167,7 @@ func (s *Supervisor) reconcile() {
 	}
 
 	for _, device := range opened {
-		reader, err := NewNFCReader(device, s.manager, s.timeout)
+		reader, err := newDeviceReader(device, s.manager, s.timeout)
 		if err != nil {
 			log.Printf("[supervisor] Cannot open reader %s: %v", device, err)
 			continue
@@ -192,7 +192,7 @@ func (s *Supervisor) reconcile() {
 }
 
 // publish forwards one reader's scans and status until the supervisor stops.
-func (s *Supervisor) publish(reader *NFCReader) {
+func (s *Supervisor) publish(reader *deviceReader) {
 	defer s.wg.Done()
 
 	for {

@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// TestNFCReader_WithMockManager demonstrates testing NFCReader with mock implementations.
-func TestNFCReader_WithMockManager(t *testing.T) {
+// TestReader_WithMockManager demonstrates testing deviceReader with mock implementations.
+func TestReader_WithMockManager(t *testing.T) {
 	// Create mock manager with a mock device
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -17,10 +17,10 @@ func TestNFCReader_WithMockManager(t *testing.T) {
 	mockDevice := NewMockDevice()
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader with mock manager
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader with mock manager
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Stop()
 	defer reader.Close()
@@ -38,8 +38,8 @@ func TestNFCReader_WithMockManager(t *testing.T) {
 	}
 }
 
-// TestNFCReader_TagDetection demonstrates testing tag detection with mock tags.
-func TestNFCReader_TagDetection(t *testing.T) {
+// TestReader_TagDetection demonstrates testing tag detection with mock tags.
+func TestReader_TagDetection(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -58,10 +58,10 @@ func TestNFCReader_TagDetection(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 	defer reader.Stop()
@@ -89,8 +89,8 @@ func TestNFCReader_TagDetection(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteCardData demonstrates testing write operations with mock tags.
-func TestNFCReader_WriteCardData(t *testing.T) {
+// TestReader_WriteCardData demonstrates testing write operations with mock tags.
+func TestReader_WriteCardData(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -104,10 +104,10 @@ func TestNFCReader_WriteCardData(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -127,8 +127,8 @@ func TestNFCReader_WriteCardData(t *testing.T) {
 	}
 }
 
-// TestNFCReader_DeviceReconnection demonstrates testing device reconnection.
-func TestNFCReader_DeviceReconnection(t *testing.T) {
+// TestReader_DeviceReconnection demonstrates testing device reconnection.
+func TestReader_DeviceReconnection(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -138,10 +138,10 @@ func TestNFCReader_DeviceReconnection(t *testing.T) {
 	mockDevice.InitError = nil
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -155,16 +155,16 @@ func TestNFCReader_DeviceReconnection(t *testing.T) {
 	}
 }
 
-// TestNFCReader_NoDeviceFound demonstrates testing when no device is available.
-func TestNFCReader_NoDeviceFound(t *testing.T) {
+// TestReader_NoDeviceFound demonstrates testing when no device is available.
+func TestReader_NoDeviceFound(t *testing.T) {
 	// Create mock manager with no devices
 	manager := NewMockManager()
 	manager.DevicesList = []string{}
 
-	// Create NFCReader
-	reader, err := NewNFCReader("", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -178,16 +178,16 @@ func TestNFCReader_NoDeviceFound(t *testing.T) {
 	}
 }
 
-// TestNFCReader_StatusUpdates demonstrates testing status channel updates.
-func TestNFCReader_StatusUpdates(t *testing.T) {
+// TestReader_StatusUpdates demonstrates testing status channel updates.
+func TestReader_StatusUpdates(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -207,8 +207,8 @@ func TestNFCReader_StatusUpdates(t *testing.T) {
 	_ = statusReceived
 }
 
-// TestNFCReader_MultipleTagsDetection demonstrates handling multiple tags.
-func TestNFCReader_MultipleTagsDetection(t *testing.T) {
+// TestReader_MultipleTagsDetection demonstrates handling multiple tags.
+func TestReader_MultipleTagsDetection(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -229,10 +229,10 @@ func TestNFCReader_MultipleTagsDetection(t *testing.T) {
 	mockDevice.SetTags([]Tag{tag1, tag2})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 	defer reader.Stop()
@@ -280,8 +280,8 @@ collectLoop:
 	}
 }
 
-// TestNFCReader_ModeReadOnly tests read-only mode blocks write operations.
-func TestNFCReader_ModeReadOnly(t *testing.T) {
+// TestReader_ModeReadOnly tests read-only mode blocks write operations.
+func TestReader_ModeReadOnly(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -297,10 +297,10 @@ func TestNFCReader_ModeReadOnly(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -325,8 +325,8 @@ func TestNFCReader_ModeReadOnly(t *testing.T) {
 	}
 }
 
-// TestNFCReader_ModeWriteOnly tests write-only mode allows writes but skips reads.
-func TestNFCReader_ModeWriteOnly(t *testing.T) {
+// TestReader_ModeWriteOnly tests write-only mode allows writes but skips reads.
+func TestReader_ModeWriteOnly(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -342,10 +342,10 @@ func TestNFCReader_ModeWriteOnly(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -377,8 +377,8 @@ func TestNFCReader_ModeWriteOnly(t *testing.T) {
 	}
 }
 
-// TestNFCReader_ModeReadWrite tests default read/write mode allows both operations.
-func TestNFCReader_ModeReadWrite(t *testing.T) {
+// TestReader_ModeReadWrite tests default read/write mode allows both operations.
+func TestReader_ModeReadWrite(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -394,10 +394,10 @@ func TestNFCReader_ModeReadWrite(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader (default mode is ModeReadWrite)
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader (default mode is ModeReadWrite)
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 	defer reader.Stop()
@@ -430,16 +430,16 @@ func TestNFCReader_ModeReadWrite(t *testing.T) {
 	}
 }
 
-// TestNFCReader_SetMode tests changing mode at runtime.
-func TestNFCReader_SetMode(t *testing.T) {
+// TestReader_SetMode tests changing mode at runtime.
+func TestReader_SetMode(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -467,8 +467,8 @@ func TestNFCReader_SetMode(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteErrorPropagation tests that write errors are properly propagated.
-func TestNFCReader_WriteErrorPropagation(t *testing.T) {
+// TestReader_WriteErrorPropagation tests that write errors are properly propagated.
+func TestReader_WriteErrorPropagation(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -485,10 +485,10 @@ func TestNFCReader_WriteErrorPropagation(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -507,8 +507,8 @@ func TestNFCReader_WriteErrorPropagation(t *testing.T) {
 	t.Logf("Write correctly returned error: %v", err)
 }
 
-// TestNFCReader_MultipleCardsGuard tests that writes are blocked when multiple cards are detected.
-func TestNFCReader_MultipleCardsGuard(t *testing.T) {
+// TestReader_MultipleCardsGuard tests that writes are blocked when multiple cards are detected.
+func TestReader_MultipleCardsGuard(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -529,10 +529,10 @@ func TestNFCReader_MultipleCardsGuard(t *testing.T) {
 	mockDevice.SetTags([]Tag{tag1, tag2})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -556,8 +556,8 @@ func TestNFCReader_MultipleCardsGuard(t *testing.T) {
 	t.Logf("Write correctly blocked with error: %v", err)
 }
 
-// TestNFCReader_UIDMismatchGuard tests that writes are blocked when card UID doesn't match cache.
-func TestNFCReader_UIDMismatchGuard(t *testing.T) {
+// TestReader_UIDMismatchGuard tests that writes are blocked when card UID doesn't match cache.
+func TestReader_UIDMismatchGuard(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -573,10 +573,10 @@ func TestNFCReader_UIDMismatchGuard(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -600,8 +600,8 @@ func TestNFCReader_UIDMismatchGuard(t *testing.T) {
 	t.Logf("Write correctly blocked with error: %v", err)
 }
 
-// TestNFCReader_SingleCardWriteSucceeds tests that writes succeed when exactly one card is present and matches cache.
-func TestNFCReader_SingleCardWriteSucceeds(t *testing.T) {
+// TestReader_SingleCardWriteSucceeds tests that writes succeed when exactly one card is present and matches cache.
+func TestReader_SingleCardWriteSucceeds(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -617,10 +617,10 @@ func TestNFCReader_SingleCardWriteSucceeds(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -659,8 +659,8 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-// TestNFCReader_WriteOnlyModeCachePopulation tests that write-only mode populates cache for writes.
-func TestNFCReader_WriteOnlyModeCachePopulation(t *testing.T) {
+// TestReader_WriteOnlyModeCachePopulation tests that write-only mode populates cache for writes.
+func TestReader_WriteOnlyModeCachePopulation(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -676,10 +676,10 @@ func TestNFCReader_WriteOnlyModeCachePopulation(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader in write-only mode
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader in write-only mode
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 	defer reader.Stop()
@@ -707,8 +707,8 @@ func TestNFCReader_WriteOnlyModeCachePopulation(t *testing.T) {
 	t.Log("Write-only mode cache population works correctly")
 }
 
-// TestNFCReader_WriteMessageWithOptions_TextRecord tests writing a text NDEF message.
-func TestNFCReader_WriteMessageWithOptions_TextRecord(t *testing.T) {
+// TestReader_WriteMessageWithOptions_TextRecord tests writing a text NDEF message.
+func TestReader_WriteMessageWithOptions_TextRecord(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -724,10 +724,10 @@ func TestNFCReader_WriteMessageWithOptions_TextRecord(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -774,8 +774,8 @@ func TestNFCReader_WriteMessageWithOptions_TextRecord(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteMessageWithOptions_URIRecord tests writing a URI NDEF message.
-func TestNFCReader_WriteMessageWithOptions_URIRecord(t *testing.T) {
+// TestReader_WriteMessageWithOptions_URIRecord tests writing a URI NDEF message.
+func TestReader_WriteMessageWithOptions_URIRecord(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -791,10 +791,10 @@ func TestNFCReader_WriteMessageWithOptions_URIRecord(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -841,8 +841,8 @@ func TestNFCReader_WriteMessageWithOptions_URIRecord(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteMessageWithOptions_AppendMode tests appending records to existing NDEF.
-func TestNFCReader_WriteMessageWithOptions_AppendMode(t *testing.T) {
+// TestReader_WriteMessageWithOptions_AppendMode tests appending records to existing NDEF.
+func TestReader_WriteMessageWithOptions_AppendMode(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -858,10 +858,10 @@ func TestNFCReader_WriteMessageWithOptions_AppendMode(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -917,8 +917,8 @@ func TestNFCReader_WriteMessageWithOptions_AppendMode(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteMessageWithOptions_ReplaceAtIndex tests replacing a record at specific index.
-func TestNFCReader_WriteMessageWithOptions_ReplaceAtIndex(t *testing.T) {
+// TestReader_WriteMessageWithOptions_ReplaceAtIndex tests replacing a record at specific index.
+func TestReader_WriteMessageWithOptions_ReplaceAtIndex(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -942,10 +942,10 @@ func TestNFCReader_WriteMessageWithOptions_ReplaceAtIndex(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -1001,8 +1001,8 @@ func TestNFCReader_WriteMessageWithOptions_ReplaceAtIndex(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteMessageWithOptions_MultipleCards tests that write fails with multiple cards.
-func TestNFCReader_WriteMessageWithOptions_MultipleCards(t *testing.T) {
+// TestReader_WriteMessageWithOptions_MultipleCards tests that write fails with multiple cards.
+func TestReader_WriteMessageWithOptions_MultipleCards(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -1018,10 +1018,10 @@ func TestNFCReader_WriteMessageWithOptions_MultipleCards(t *testing.T) {
 	mockDevice.SetTags([]Tag{mockTag1, mockTag2})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -1050,8 +1050,8 @@ func TestNFCReader_WriteMessageWithOptions_MultipleCards(t *testing.T) {
 	}
 }
 
-// TestNFCReader_WriteMessageWithOptions_NoCard tests that write fails with no card.
-func TestNFCReader_WriteMessageWithOptions_NoCard(t *testing.T) {
+// TestReader_WriteMessageWithOptions_NoCard tests that write fails with no card.
+func TestReader_WriteMessageWithOptions_NoCard(t *testing.T) {
 	// Create mock manager
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001"}
@@ -1061,10 +1061,10 @@ func TestNFCReader_WriteMessageWithOptions_NoCard(t *testing.T) {
 	mockDevice.SetTags([]Tag{})
 	manager.MockDevice = mockDevice
 
-	// Create NFCReader
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	// Create deviceReader
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	defer reader.Close()
 
@@ -1102,9 +1102,9 @@ func TestHandleDeviceErrors_PacesAnErrorNothingRecognizes(t *testing.T) {
 	manager.MockDevice = NewMockDevice()
 	clock := NewFakeClock(time.Now())
 
-	reader, err := NewNFCReaderWithClock("mock:usb:001", manager, 5*time.Second, clock)
+	reader, err := newDeviceReaderWithClock("mock:usb:001", manager, 5*time.Second, clock)
 	if err != nil {
-		t.Fatalf("NewNFCReaderWithClock: %v", err)
+		t.Fatalf("newDeviceReaderWithClock: %v", err)
 	}
 	defer reader.Close()
 

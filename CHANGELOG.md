@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A manager reports what its devices scan and answers for the tags they hold:
+  `nfc.TagReporter` carries an `event.Signal` of scans, `nfc.TagHolder` is what
+  the tag router asks, and `multimanager` implements both by fanning its
+  children in. The agent subscribes to the manager it was given
 - Plugin API: `agent.Plugin` is one method, `Activate(agent.AgentContext) error`,
   run before the agent starts. A plugin registers a `Component` with `ctx.Use`, a
   route with `ctx.Mount` and a tray entry with `ctx.Systray`. Plugins are Go
@@ -60,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `Config.RemoteOps` and `Config.RemoteScans` are gone, with `Options` matching.
+  A driver of paired devices is registered with the manager, which is where the
+  agent now asks. `server.DeviceOps` is `nfc.TagHolder`
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
@@ -163,6 +170,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The tray no longer offers a phone as a reader to pin. It listed the manager's
   devices raw, where the console filtered them through `nfc.ListReaders`;
   choosing one pinned the reader to a device that is never opened
+- A stop takes the pumps down with the servers. `stopLocked` repeated their
+  teardown inline and left out the cancel, so the goroutine draining the reader
+  survived every stop and a start after it added another
 - More than one subscriber can follow devices and origins. `DeviceRegistry.OnChange`,
   `OriginStore.OnChange` and `OriginStore.OnBlocked` stored a single callback, so
   the last registration replaced the previous one: with the console and the tray

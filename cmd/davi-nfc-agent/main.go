@@ -48,10 +48,10 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
 	// The driver serving phones. Built here, because this is what decides the
-	// agent should serve them at all: it is handed over as an interface, a
-	// channel of scans and a handler, so the agent names no device protocol.
+	// agent should serve them at all. What it scans and what it holds reach the
+	// agent through the manager below; only its endpoint is handed over, so the
+	// agent names no device protocol.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.RemoteOps = devices
 	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
 		return devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         o.Authenticate,

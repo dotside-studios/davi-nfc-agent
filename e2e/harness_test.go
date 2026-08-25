@@ -70,11 +70,10 @@ func start(t *testing.T, opts options) *harness {
 	// running on this machine.
 	o.DevicePort = freePort(t)
 
-	// The agent receives an interface and a handler builder rather than the
-	// driver itself, so it names no device protocol. What the devices scan
-	// reaches it through the manager below.
+	// The agent receives a handler builder rather than the driver itself, so it
+	// names no device protocol. What the devices scan and what they hold reach
+	// it through the manager below.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	o.RemoteOps = devices
 	o.DeviceEndpoint = func(d agent.DeviceEndpointOptions) http.Handler {
 		return devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         d.Authenticate,

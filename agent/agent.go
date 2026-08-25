@@ -116,14 +116,6 @@ type Config struct {
 	CardTypes  []string
 	DevicePath string
 
-	// RemoteOps routes operations to paired devices. It comes from a driver the
-	// caller built, taken as an interface so the agent names no device
-	// protocol. Nil serves the agent's own reader only.
-	//
-	// What those devices scan is not here: a manager reports its own, and the
-	// agent subscribes to the one it was given. See [nfc.TagReporter].
-	RemoteOps server.DeviceOps
-
 	// DeviceEndpoint builds the handler serving device connections on the
 	// shared /ws path.
 	//
@@ -168,7 +160,6 @@ type Agent struct {
 	logger              *log.Logger
 	manager             nfc.Manager
 	deviceEndpoint      http.Handler
-	remoteOps           server.DeviceOps
 	apiSecret           string
 	configDir           string
 	allowedOrigins      []string
@@ -248,7 +239,6 @@ func New(cfg Config) *Agent {
 		info:                cfg.Info.OrDefault(),
 		logger:              logger,
 		manager:             cfg.Manager,
-		remoteOps:           cfg.RemoteOps,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
 		allowedOrigins:      cfg.AllowedOrigins,
@@ -504,7 +494,7 @@ func (a *Agent) startServers() error {
 	}
 
 	// Routes each client request to whichever source holds the tag it names.
-	a.Router = tagrouter.New(tagrouter.Config{Reader: reader, Devices: a.remoteOps})
+	a.Router = tagrouter.New(tagrouter.Config{Reader: reader, Devices: nfc.TagsHeldBy(a.manager)})
 
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.apiSecret,

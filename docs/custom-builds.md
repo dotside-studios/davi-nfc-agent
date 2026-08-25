@@ -45,11 +45,10 @@ func main() {
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
-	// The driver serving phones. The agent takes it as an interface, a channel
-	// of scans and a handler builder, so it names no device protocol itself.
+	// The driver serving phones. What it scans and what its devices hold reach
+	// the agent through the manager below; only its handler is handed over, so
+	// the agent names no device protocol itself.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.RemoteOps = devices
-	opts.RemoteScans = devices.Data()
 	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
 		return devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         o.Authenticate,
@@ -147,9 +146,12 @@ the component directly with `agent.PairingFor(a, port, ca)` and `ctx.Use` or an
 `agent.Endpoint`.
 
 The NFC backend is `Setup`'s second argument, which is why every package beneath
-`cmd` builds without one. Serving phones takes three more values from a driver
-the caller built: `RemoteOps` to route operations, `RemoteScans` to receive what
-they scan, and `DeviceEndpoint` to build their handler. Supply none and the
+`cmd` builds without one. A manager reports what its devices scan through
+`nfc.TagReporter` and answers for the tags they hold through `nfc.TagHolder`,
+both optional, so the agent subscribes to the manager it was given rather than
+being handed the driver. `multimanager` implements both by fanning its children
+in. The one value left is `DeviceEndpoint`, which builds the handler serving
+those devices, since a route is not the manager's business. Supply none and the
 agent serves its own reader.
 
 Flags and the standard logger belong to the program. Registering flags writes to

@@ -112,6 +112,27 @@ func (s *Signal[T]) Emit(v T) {
 	}
 }
 
+// Channel returns a channel carrying what the signal emits, and the function
+// that stops it. For a consumer that wants to drain on its own terms, and for
+// watching a signal while debugging.
+//
+// A full buffer drops rather than blocking, so a slow reader cannot stall the
+// emitter. Connect a handler instead when every value matters.
+func (s *Signal[T]) Channel(buffer int) (<-chan T, func()) {
+	if buffer < 1 {
+		buffer = 1
+	}
+	ch := make(chan T, buffer)
+
+	conn := s.Connect(func(v T) {
+		select {
+		case ch <- v:
+		default:
+		}
+	})
+	return ch, conn.Disconnect
+}
+
 // Len reports how many handlers are connected.
 func (s *Signal[T]) Len() int {
 	s.mu.Lock()

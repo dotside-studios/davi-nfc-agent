@@ -103,3 +103,26 @@ func TestAnOriginAllowedElsewhereRedrawsTheMenu(t *testing.T) {
 		t.Error("the allowed origin is not ticked in the menu")
 	}
 }
+
+// A reader picked in the console restarts the agent on it and tells the tray
+// nothing, so the tick has to follow the transition.
+func TestAReaderPickedElsewhereMovesTheTick(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
+	app.subscribe()
+	app.applyReaders([]string{"mock:usb:001", "ACS ACR122U 00"})
+
+	if err := agent.Start("ACS ACR122U 00"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(agent.Stop)
+
+	for _, row := range app.readers.Rows() {
+		if row.Value == "ACS ACR122U 00" && !row.Checked {
+			t.Error("the reader the agent is on is not ticked in the menu")
+		}
+		if row.Value == "mock:usb:001" && row.Checked {
+			t.Error("the reader the agent left is still ticked")
+		}
+	}
+}

@@ -32,6 +32,9 @@ func (s *App) showState(state agent.State) {
 	switch state {
 	case agent.StateRunning:
 		s.showRunning()
+		// The reader may be a different one: a device picked in the console
+		// restarts the agent rather than telling the tray about it.
+		s.markCurrentReader()
 	case agent.StateStopped:
 		s.showStopped("Stopped")
 		s.showNoCard()

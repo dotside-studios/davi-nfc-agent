@@ -96,6 +96,8 @@ func main() {
 		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
 	}
 
+	app := tray.New(rt)
+
 	// The control center, served from the same listener. Nil in a -tags nowebui
 	// build, where there is none compiled in and Endpoints is empty, so this
 	// program needs no build tag of its own.
@@ -105,6 +107,7 @@ func main() {
 		Servers: servers,
 		Pairing: pairing,
 		Trust:   trust,
+		Quit:    app.Quit,
 	})
 	servers.Add(controlCenter.Endpoints()...)
 
@@ -120,9 +123,6 @@ func main() {
 	if err := rt.Agent.Plugins.Add(plugins...); err != nil {
 		log.Fatalf("Failed to register a plugin: %v", err)
 	}
-
-	app := tray.New(rt)
-	app.AttachConsole(controlCenter)
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

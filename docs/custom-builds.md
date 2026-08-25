@@ -87,6 +87,8 @@ func main() {
 	// and passed to the console. It hands the authority to a device that pairs.
 	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
 
+	app := tray.New(rt)
+
 	// The control center, served from the same listener and listed with the
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
 	// so this program needs no build tag of its own.
@@ -96,6 +98,7 @@ func main() {
 		Servers: servers,
 		Pairing: pairing,
 		Trust:   trust,
+		Quit:    app.Quit,
 	})
 	servers.Add(c.Endpoints()...)
 
@@ -106,8 +109,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	app := tray.New(rt)
-	app.AttachConsole(c)
 	app.Run()
 }
 ```
@@ -318,6 +319,7 @@ c := console.New(console.Config{
 	Servers: servers,
 	Pairing: pairing,
 	Trust:   trust,
+	Quit:    app.Quit,
 })
 servers.Add(c.Endpoints()...)
 ```
@@ -330,8 +332,9 @@ redraws an open page: an origin allowed, a device revoked, a client connecting,
 a listener rebound. Under `-tags nowebui` there is no console compiled in and
 `Endpoints` is empty, so a program needs no build tag of its own.
 
-`tray.App.AttachConsole` is left to the program. The link runs both ways, so a
-device switched in the browser moves the tray's menu too.
+`Quit` is what the console's quit control calls, since ending the program
+belongs to whoever owns it. Everything else the console does goes to the agent,
+and the tray redraws from the agent's events rather than being told.
 
 ### The pairing plugin
 

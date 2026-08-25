@@ -10,16 +10,16 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 )
 
-// host adapts the agent to Host. Every reach the console makes into the
-// agent is a method here. app is the tray, when there is one: actions that
-// must also move the tray's menu go through it rather than straight to the
-// agent.
+// host adapts the agent to Host. Every reach the console makes into the agent
+// is a method here.
 type host struct {
 	agent   *agent.Agent
 	servers *agent.ServerPlugin
 	pairing *agent.PairingPlugin
 	trust   *agent.TrustPlugin
-	app     Tray
+
+	// quit ends the program the agent runs in, supplied by whoever owns it.
+	quit func()
 }
 
 var _ Host = (*host)(nil)
@@ -31,19 +31,16 @@ func (h *host) StartAgent() error {
 	return h.agent.Start(h.agent.CurrentDevicePath())
 }
 
-func (h *host) StopAgent() {
-	if h.app != nil {
-		// Through the tray, so its menu state follows.
-		h.app.StopAgent()
+func (h *host) StopAgent() { h.agent.Stop() }
+
+// QuitAgent ends the program the agent runs in, which is the host's to end. A
+// build that supplied no way out stops the agent instead.
+func (h *host) QuitAgent() {
+	if h.quit == nil {
+		h.agent.Shutdown()
 		return
 	}
-	h.agent.Stop()
-}
-
-func (h *host) QuitAgent() {
-	if h.app != nil {
-		h.app.Quit()
-	}
+	h.quit()
 }
 
 func (h *host) RestartServers() error { return h.agent.RestartServers() }
@@ -83,18 +80,18 @@ func (h *host) RemoteDevices() (total, active int) {
 	return mgr.GetDeviceCount(), mgr.GetActiveDeviceCount()
 }
 
+// SelectDevice restarts the reader on the chosen device. Whatever follows the
+// agent redraws from the transition, so this tells nothing else about it.
 func (h *host) SelectDevice(devicePath string) error {
-	if h.app == nil {
-		return errors.New("device cannot be changed from here")
-	}
 	// Refused rather than accepted and quietly ignored: the picker does not
 	// offer a phone, so one arriving here came from somewhere that should hear
 	// why it cannot be the reader.
 	if nfc.IsRemoteDevice(h.agent.Manager(), devicePath) {
 		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
 	}
-	h.app.SwitchDevice(devicePath)
-	return nil
+
+	h.agent.Stop()
+	return h.agent.Start(devicePath)
 }
 
 // Port is the port being served, not the one configured. A port saved in the
@@ -292,11 +289,7 @@ func (h *host) ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferenc
 	h.agent.SetRequirePairedDevice(next.RequirePairedDevice)
 	h.agent.SetReaderFeedback(next.ReaderFeedback)
 
-	applied := h.agent.Preferences()
-	if h.app != nil {
-		h.app.SyncPreferencesToMenu(applied)
-	}
-	return applied
+	return h.agent.Preferences()
 }
 
 // remoteManager returns the remote device manager, held either directly or

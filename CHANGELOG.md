@@ -77,9 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Config.RequirePairedDevice` and the agent's own methods
 - `Options.Version` is gone. Setup never read it; the shipped command's
   `parseFlags` returns it alongside the options instead
-- `console.Server` holds one reference to its host. `AttachTray` asks whether
-  that host is this package's own adapter instead of a second field caching the
-  concrete pointer
 - One `Preferences` type. `agent.Preferences` is what the agent holds and what
   the console and the tray both take; `console.Preferences` is gone, along with
   the converter between them. The reader mode is an `nfc.ReaderMode` throughout
@@ -252,6 +249,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `tray.App.AttachConsole`, `console.Server.AttachTray` and the `console.Tray`
+  interface. The tray held a console it never read, and the console acted
+  through the tray so its menu would follow; the tray follows the agent's
+  events now. What is left is `console.Config.Quit`, since ending the program
+  is the program's
 - The tray's 500ms card poll and its direct subscription to the NFC manager's
   device-change channel. Both are `Agent.Events()` subscriptions now
 - The settings file and everything that arbitrated with it. Preferences were

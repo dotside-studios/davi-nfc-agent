@@ -4,7 +4,6 @@ import (
 	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -20,7 +19,6 @@ const readerSlotCount = 12
 type App struct {
 	agent         *agent.Agent
 	initialDevice string
-	console       *console.Server // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
 	// are added, so there is no central event loop to keep in step with them.

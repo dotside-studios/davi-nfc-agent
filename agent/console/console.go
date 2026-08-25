@@ -31,6 +31,11 @@ type Config struct {
 	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 	Trust   *agent.TrustPlugin
+
+	// Quit ends the program the agent runs in, for the console's own quit
+	// control. Nil stops the agent and leaves the program running, which is
+	// what a service with no way out of its own wants.
+	Quit func()
 }
 
 // New builds the console from cfg, and follows what changes it: an origin
@@ -44,6 +49,7 @@ func New(cfg Config) *Server {
 		servers: cfg.Servers,
 		pairing: cfg.Pairing,
 		trust:   cfg.Trust,
+		quit:    cfg.Quit,
 	}
 	info := a.Info()
 	s := newServer(serverConfig{
@@ -154,18 +160,4 @@ func (s *Server) Assets() http.Handler {
 		return nil
 	}
 	return frontendHandler()
-}
-
-// AttachTray gives the console a tray to act through, so a change made in the
-// console moves the tray's menu state too. Without one the console drives the
-// agent directly, as a headless run wants.
-func (s *Server) AttachTray(t Tray) {
-	if s == nil {
-		return
-	}
-	// Only this package's own adapter routes through a tray. A Host supplied
-	// from elsewhere decides for itself what an action reaches.
-	if h, ok := s.host.(*host); ok {
-		h.app = t
-	}
 }

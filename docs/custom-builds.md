@@ -559,6 +559,25 @@ func main() {
 A subscriber observes rather than intercepts. The scan reaches every connected
 client regardless, and what the handler returns changes nothing.
 
+### Acting on a tag
+
+The agent answers for every tag it can reach, on a reader it polls or on a
+device that reported one, so a plugin acts on a card without reaching for the
+readers behind it:
+
+```go
+device, uid, ok := rt.Agent.TagOn("")
+if ok {
+	_, err := rt.Agent.WriteTag(device, uid, msg, false, "check-in-42")
+}
+```
+
+`TagOn`, `DevicesHoldingTags`, `WriteTag`, `LockTag`, `TransceiveTag` and
+`TagCapabilities` are `nfc.TagHolder`, the same interface the client server is
+given, so what a plugin can do to a tag is what a client can. An empty device
+means whatever is holding a tag; naming one that is not is refused, as is any
+operation while the agent is not serving.
+
 ## Driving the readers directly
 
 A program that needs no WebSocket API at all can skip the agent and operate the

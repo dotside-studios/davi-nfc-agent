@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The client server asks the agent for the tag a request names rather than the
+  readers the agent happens to hold. `Agent` implements `nfc.TagHolder`, so a
+  plugin acts on a card through the agent too, and an operation before `Start`
+  or after `Stop` is refused rather than reaching for a supervisor that is not
+  there
 - The supervisor answers for every tag the agent can reach, the ones on its
   readers and the ones the manager's own devices hold. A phone's scan already
   arrived on its signal, so what can be done to that tag is now asked in the

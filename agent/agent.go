@@ -321,9 +321,13 @@ func (a *Agent) RequirePairedDevice() bool {
 	return a.requirePairedDevice
 }
 
-// Reader is the reader currently open, nil before Start and after Stop. Safe
-// to call from any goroutine, though the answer can go stale the moment it is
-// returned: a caller acting on it should hold the value it read.
+// Supervisor operates the agent's readers, nil before Start and after Stop.
+// Safe to call from any goroutine, though the answer can go stale the moment it
+// is returned: a caller acting on it should hold the value it read.
+//
+// A caller acting on a tag should ask the agent instead: it answers for every
+// tag, whether a reader or a device is holding it, and outlives any one
+// supervisor.
 func (a *Agent) Supervisor() *nfc.Supervisor { return a.supervisor.Load() }
 
 // ReaderFeedback reports whether the reader answers for its own work with its
@@ -495,15 +499,16 @@ func (a *Agent) startServers() error {
 		return errors.New("the readers are not initialized")
 	}
 
-	// A client request resolves to the tag it names, which the supervisor
-	// answers for wherever it is: on a reader it polls, or on a device that
-	// reported it.
+	// A client request resolves to the tag it names, which the agent answers
+	// for wherever it is: on a reader it polls, or on a device that reported
+	// it. Asked of the agent rather than of the readers it happens to hold, so
+	// what governs a scan governs an operation on that tag too.
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:            a.apiSecret,
 		AllowedOrigins:       a.allowedOrigins,
 		OriginPolicy:         a.originPolicy(),
 		TokenVerifier:        a.tokenVerifier(),
-		Tags:                 readers,
+		Tags:                 a,
 		AllowTagModification: a.TagModificationAllowed,
 		OnChange:             a.fireClientsChanged,
 		OnTag:                a.events.Tag.Emit,

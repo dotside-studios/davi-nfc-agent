@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `nfc.Supervisor` operates every reader a manager offers rather than one chosen
+  at startup. It opens each, polls it, and publishes what they scan on one
+  signal, with each scan naming the reader it came from. A reader plugged in
+  while it runs is picked up and one unplugged is dropped. Operations name the
+  reader they apply to, so two readers do not queue behind each other, and mode,
+  feedback and Classic keys are the supervisor's policy so a reader opened later
+  runs under it too
+
 - The pinned device filters rather than locks. A scan from a reader the operator
   is not asking for is dropped, wherever it was read, so a preference set from
   the console takes effect without waiting for something to restart the reader.

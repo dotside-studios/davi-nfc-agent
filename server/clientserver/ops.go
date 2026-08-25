@@ -8,6 +8,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 )
 
 // ops returns what performs tag operations, or a stand-in that refuses when the
@@ -56,7 +57,7 @@ func decodePayload(payload map[string]any, into any) bool {
 }
 
 // reply sends a successful response to one client.
-func (s *Server) reply(conn *server.SafeConn, requestID, msgType string, payload any) {
+func (s *Server) reply(conn *wsconn.SafeConn, requestID, msgType string, payload any) {
 	err := conn.WriteJSON(protocol.WebSocketResponse{
 		ID:      requestID,
 		Type:    msgType,

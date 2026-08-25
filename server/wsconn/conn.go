@@ -1,5 +1,4 @@
-// Package wsconn provides a write-safe WebSocket connection wrapper shared by
-// the client server, the device server and the remote NFC driver.
+// Package wsconn provides a write-safe wrapper around a WebSocket connection.
 package wsconn
 
 import (

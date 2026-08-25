@@ -52,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
-- `wsconn` moved to `server/wsconn`
+- `wsconn` moved to `server/wsconn`. `server.SafeConn` and `server.NewSafeConn`,
+  which were aliases onto it, are gone: take `wsconn.SafeConn` directly
 - `ServerPlugin` and `PairingPlugin` no longer take a `*TrustPlugin`. Each takes
   what it needs: `ServerPlugin.Config` the certificate files, with `Setup`
   resolving them onto `Runtime.CertFile`/`KeyFile`, `ServerPlugin.Certificates`

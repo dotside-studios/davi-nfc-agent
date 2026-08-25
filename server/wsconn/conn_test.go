@@ -1,4 +1,4 @@
-package server
+package wsconn
 
 import (
 	"net/http"

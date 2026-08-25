@@ -15,6 +15,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -27,7 +28,7 @@ type Server struct {
 	upgrader websocket.Upgrader
 
 	// Client connections (multiple allowed)
-	clients    map[*server.SafeConn]*clientSession
+	clients    map[*wsconn.SafeConn]*clientSession
 	clientsMux sync.RWMutex
 
 	// Last received data for late joiners
@@ -40,7 +41,7 @@ type Server struct {
 func New(config Config) *Server {
 	return &Server{
 		config:  config,
-		clients: make(map[*server.SafeConn]*clientSession),
+		clients: make(map[*wsconn.SafeConn]*clientSession),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: originChecker(config),
 		},
@@ -112,7 +113,7 @@ func (s *Server) Clients() []ClientInfo {
 // this does not touch the map itself.
 func (s *Server) Disconnect(clientID string) bool {
 	s.clientsMux.RLock()
-	var target *server.SafeConn
+	var target *wsconn.SafeConn
 	for conn, c := range s.clients {
 		if c.id == clientID {
 			target = conn
@@ -138,7 +139,7 @@ func (s *Server) notifyChange() {
 }
 
 // countOperation records that a client issued a write or lock.
-func (s *Server) countOperation(conn *server.SafeConn, kind string) {
+func (s *Server) countOperation(conn *wsconn.SafeConn, kind string) {
 	s.clientsMux.Lock()
 	defer s.clientsMux.Unlock()
 	c, ok := s.clients[conn]
@@ -184,7 +185,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn := server.NewSafeConn(wsConn)
+	conn := wsconn.NewSafeConn(wsConn)
 	clientID := uuid.New().String()
 
 	// Add to clients map
@@ -248,7 +249,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWriteRequest encodes a message onto the tag the client names.
-func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleWriteRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	var writeReq server.WriteRequest
 	if !decodePayload(req.Payload, &writeReq) {
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Failed to parse write request")
@@ -283,7 +284,7 @@ func (s *Server) handleWriteRequest(conn *server.SafeConn, clientID string, req 
 }
 
 // handleLockRequest makes the named tag permanently read-only.
-func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleLockRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	target := tagTarget(req.Payload)
 
 	result, err := s.ops().Lock(context.Background(), server.LockOp{
@@ -299,7 +300,7 @@ func (s *Server) handleLockRequest(conn *server.SafeConn, clientID string, req p
 }
 
 // handleTransceiveRequest exchanges raw bytes with the named tag.
-func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleTransceiveRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	var payload struct {
 		Data            string `json:"data"`
 		Raw             bool   `json:"raw"`
@@ -338,7 +339,7 @@ func (s *Server) handleTransceiveRequest(conn *server.SafeConn, clientID string,
 }
 
 // handleCapabilitiesRequest reports what the named tag supports.
-func (s *Server) handleCapabilitiesRequest(conn *server.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleCapabilitiesRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	target := tagTarget(req.Payload)
 
 	caps, err := s.ops().Capabilities(context.Background(), server.CapabilitiesOp{
@@ -422,7 +423,7 @@ func (s *Server) broadcastTagData(data nfc.NFCData) {
 }
 
 // sendTagDataToClient sends tag data to a specific client.
-func (s *Server) sendTagDataToClient(conn *server.SafeConn, data nfc.NFCData) {
+func (s *Server) sendTagDataToClient(conn *wsconn.SafeConn, data nfc.NFCData) {
 	var errStr *string
 	if data.Err != nil {
 		e := data.Err.Error()
@@ -507,7 +508,7 @@ func (s *Server) broadcastDeviceStatus(status nfc.DeviceStatus) {
 }
 
 // sendErrorResponse sends an error response to a WebSocket client.
-func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, errorCode protocol.ErrorCode, message string) {
+func (s *Server) sendErrorResponse(conn *wsconn.SafeConn, requestID string, errorCode protocol.ErrorCode, message string) {
 	response := protocol.WebSocketResponse{
 		ID:      requestID,
 		Type:    server.WSMessageTypeError,
@@ -525,7 +526,7 @@ func (s *Server) sendErrorResponse(conn *server.SafeConn, requestID string, erro
 // underlying NFCError carried rather than flattening every failure to one
 // per-operation label. A client can then tell "present the tag again" from
 // "this tag is locked".
-func (s *Server) sendOperationError(conn *server.SafeConn, requestID string, fallback protocol.ErrorCode, err error) {
+func (s *Server) sendOperationError(conn *wsconn.SafeConn, requestID string, fallback protocol.ErrorCode, err error) {
 	payload := protocol.ErrorPayloadFor(err)
 	if payload.Code == protocol.ErrCodeUnknownError {
 		payload = protocol.NewErrorPayload(fallback)

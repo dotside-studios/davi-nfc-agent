@@ -210,7 +210,6 @@ func TestAPluginMountsOnTheListenerPublishedBeforeIt(t *testing.T) {
 func TestServerPluginFallsBackToTheAgentsConfiguration(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9496
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
@@ -283,7 +282,6 @@ func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
 
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
@@ -326,7 +324,6 @@ func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
 func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
@@ -399,7 +396,6 @@ func freePort(t *testing.T) int {
 func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
@@ -436,7 +432,6 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 func TestTheAddressesFollowTheAgent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
@@ -17,12 +16,11 @@ import (
 // must also move the tray's menu go through it rather than straight to the
 // agent.
 type host struct {
-	agent    *agent.Agent
-	settings *settings.Store
-	servers  *agent.ServerPlugin
-	pairing  *agent.PairingPlugin
-	trust    *agent.TrustPlugin
-	app      Tray
+	agent   *agent.Agent
+	servers *agent.ServerPlugin
+	pairing *agent.PairingPlugin
+	trust   *agent.TrustPlugin
+	app     Tray
 }
 
 var _ webui.Host = (*host)(nil)
@@ -289,32 +287,43 @@ func (h *host) SetOriginCheckDisabled(on bool) {
 
 // ---- settings ----
 
-// Settings comes from the agent rather than from the file, so the console shows
-// what is in force, such as a mode switched from the tray or a pairing
-// requirement the command line will not let a preference withdraw.
-func (h *host) Settings() settings.Settings { return h.agent.Settings() }
+// Preferences comes from the agent, so the console shows what is in force,
+// such as a mode switched from the tray.
+func (h *host) Preferences() webui.Preferences {
+	return asWebUIPreferences(h.agent.Preferences())
+}
 
-// Explicit reports the settings the launcher holds, which the console shows as
-// disabled controls rather than accepting a change it would have to discard.
-func (h *host) Explicit() settings.Explicit { return h.agent.Explicit() }
+// ApplyPreferences changes the agent and answers with what it holds afterwards,
+// which is not necessarily what was asked for. Nothing is persisted: a change
+// lasts as long as the agent runs.
+func (h *host) ApplyPreferences(mutate func(*webui.Preferences)) webui.Preferences {
+	next := asWebUIPreferences(h.agent.Preferences())
+	mutate(&next)
 
-// SaveSettings persists the change and answers with what the agent then holds.
-// It applies nothing itself: the store's change hook is the one path from a
-// saved preference to the running agent, so a save made here and one made from
-// the tray land the same way.
-func (h *host) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
-	explicit := h.agent.Explicit()
-	if _, err := h.settings.Update(func(next *settings.Settings) {
-		prev := *next
-		mutate(next)
-		// A field the launcher holds is left as the file had it. The agent
-		// would refuse the change, and a file saying otherwise is read back as
-		// fact on the next start.
-		explicit.Keep(next, prev)
-	}); err != nil {
-		return h.agent.Settings(), err
+	h.agent.SetReaderMode(nfc.ParseReaderMode(next.Mode))
+	h.agent.SetCardTypeFilter(next.CardTypes)
+	h.agent.SetPinnedDevice(next.DevicePath)
+	h.agent.SetDevicePort(next.Port)
+	h.agent.SetRequirePairedDevice(next.RequirePairedDevice)
+	h.agent.SetReaderFeedback(next.ReaderFeedback)
+
+	applied := asWebUIPreferences(h.agent.Preferences())
+	if h.app != nil {
+		h.app.SyncPreferencesToMenu(applied)
 	}
-	return h.agent.Settings(), nil
+	return applied
+}
+
+// asWebUIPreferences is the console's view of what the agent holds.
+func asWebUIPreferences(p agent.Preferences) webui.Preferences {
+	return webui.Preferences{
+		Mode:                p.ModeName,
+		CardTypes:           p.CardTypes,
+		DevicePath:          p.DevicePath,
+		Port:                p.Port,
+		RequirePairedDevice: p.RequirePairedDevice,
+		ReaderFeedback:      p.ReaderFeedback,
+	}
 }
 
 // remoteManager returns the remote device manager, held either directly or

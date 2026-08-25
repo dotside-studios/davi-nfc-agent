@@ -3,9 +3,8 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"log"
-
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // dispatch routes a console action to the code that performs it. Named actions
@@ -42,8 +41,8 @@ func (c *Server) dispatch(req action) (any, error) {
 		if err := c.host.SelectDevice(params.DevicePath); err != nil {
 			return nil, err
 		}
-		_, err := c.host.SaveSettings(func(s *settings.Settings) { s.DevicePath = params.DevicePath })
-		return nil, err
+		c.host.ApplyPreferences(func(s *Preferences) { s.DevicePath = params.DevicePath })
+		return nil, nil
 
 	case "reader.setMode":
 		var params struct {
@@ -53,11 +52,11 @@ func (c *Server) dispatch(req action) (any, error) {
 			return nil, err
 		}
 		switch params.Mode {
-		case settings.ModeReadWrite, settings.ModeReadOnly, settings.ModeWriteOnly:
+		case nfc.ModeNameReadWrite, nfc.ModeNameReadOnly, nfc.ModeNameWriteOnly:
 		default:
 			return nil, fmt.Errorf("unknown mode %q", params.Mode)
 		}
-		return nil, c.saveSettings(func(s *settings.Settings) { s.Mode = params.Mode })
+		return nil, c.applyPreferences(func(s *Preferences) { s.Mode = params.Mode })
 
 	case "reader.setCardTypes":
 		var params struct {
@@ -66,7 +65,7 @@ func (c *Server) dispatch(req action) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.saveSettings(func(s *settings.Settings) { s.CardTypes = params.CardTypes })
+		return nil, c.applyPreferences(func(s *Preferences) { s.CardTypes = params.CardTypes })
 
 	// ---- settings ----
 
@@ -74,11 +73,11 @@ func (c *Server) dispatch(req action) (any, error) {
 		// The whole snapshot, as the console received it from the agent and
 		// edited one field of. Replacing rather than merging is what makes an
 		// unticked card type stick.
-		var params settings.Settings
+		var params Preferences
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return nil, c.saveSettings(func(s *settings.Settings) { *s = params })
+		return nil, c.applyPreferences(func(s *Preferences) { *s = params })
 
 	case "clients.disconnect":
 		var params struct {
@@ -113,7 +112,7 @@ func (c *Server) dispatch(req action) (any, error) {
 			return nil, err
 		}
 		// Persisted, unlike the tray's session-only version of this toggle.
-		return nil, c.saveSettings(func(s *settings.Settings) { s.RequirePairedDevice = params.Enabled })
+		return nil, c.applyPreferences(func(s *Preferences) { s.RequirePairedDevice = params.Enabled })
 
 	// ---- origins ----
 
@@ -184,11 +183,11 @@ func (c *Server) dispatch(req action) (any, error) {
 	}
 }
 
-// saveSettings persists a change. Applying it is the host's business, and what
-// the agent holds afterwards arrives in the next snapshot.
-func (c *Server) saveSettings(mutate func(*settings.Settings)) error {
-	_, err := c.host.SaveSettings(mutate)
-	return err
+// applyPreferences changes the agent. What it holds afterwards arrives in the
+// next snapshot, so nothing here reads the answer back.
+func (c *Server) applyPreferences(mutate func(*Preferences)) error {
+	c.host.ApplyPreferences(mutate)
+	return nil
 }
 
 // decodeParams unpacks an action's parameters; absent params are not an error.

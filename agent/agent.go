@@ -16,7 +16,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -93,12 +92,7 @@ type Config struct {
 	// until the agent activates them.
 	Plugins []Plugin
 
-	// Settings is the persisted preference store, and Logs the ring the
-	// agent's log is captured in. Neither is used by the agent itself. They
-	// are carried so a plugin can reach them through its [AgentContext]
-	// rather than being handed them separately by whoever built it.
-	Settings *settings.Store
-	Logs     *logbuf.Ring
+	Logs *logbuf.Ring
 
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
@@ -110,6 +104,16 @@ type Config struct {
 	// it reads and writes. Changeable at runtime through SetReaderFeedback,
 	// which also reaches the reader already running.
 	ReaderFeedback bool
+
+	// Mode is the access mode the reader runs in, CardTypes the types a scan
+	// may carry, and DevicePath the reader to open, empty for auto-detect.
+	//
+	// Held on the agent as well as on the reader, because the reader is built
+	// in Start: a preference that only reached the reader would be lost with
+	// every reader the agent starts.
+	Mode       nfc.ReaderMode
+	CardTypes  []string
+	DevicePath string
 
 	// Devices routes operations to paired devices, and DeviceScans carries what
 	// they scan. Both come from a driver the caller built, because the caller
@@ -128,11 +132,6 @@ type Config struct {
 	// driver's: the agent hands over what it decides and the caller builds the
 	// handler, so neither names the other's types. Nil serves clients only.
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
-
-	// Explicit marks what the launcher set deliberately, on the command line,
-	// in the environment, or here. A field marked there belongs to the launcher
-	// for the whole run: no stored preference and no operator may change it.
-	Explicit settings.Explicit
 }
 
 // Agent runs the NFC reader and the servers in front of it. Build one with New;
@@ -181,7 +180,6 @@ type Agent struct {
 	publicKeyPin        string
 	requirePairedDevice bool
 	readerFeedback      bool
-	settingsStore       *settings.Store
 	logs                *logbuf.Ring
 
 	// Settings state. Held on the agent as well as on the reader, because the
@@ -190,10 +188,6 @@ type Agent struct {
 	// the agent starts.
 	readerMode   nfc.ReaderMode
 	pinnedDevice string
-
-	// explicit marks the settings the launcher set, which nothing this run may
-	// change. Assigned through SetExplicit before the agent serves anything.
-	explicit settings.Explicit
 
 	// settingsMu guards the settings state above. The console changes it from
 	// its own goroutines and reads it back for every snapshot it draws, and the
@@ -258,12 +252,11 @@ func New(cfg Config) *Agent {
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
 		requirePairedDevice: cfg.RequirePairedDevice,
-		explicit:            cfg.Explicit,
-		readerMode:          nfc.ModeReadWrite,
+		readerMode:          cfg.Mode,
+		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(),
 		serverRestartChan:   make(chan struct{}, 1),
-		settingsStore:       cfg.Settings,
 		logs:                cfg.Logs,
 		Plugins:             &PluginSet{},
 	}
@@ -300,10 +293,6 @@ func (a *Agent) APISecret() string        { return a.apiSecret }
 func (a *Agent) ConfigDir() string        { return a.configDir }
 func (a *Agent) Origins() *OriginStore    { return a.origins }
 func (a *Agent) Devices() *DeviceRegistry { return a.devices }
-
-// SettingsStore is the persisted preference store, or nil when the agent has
-// none. Settings, without the suffix, reports the preferences in force.
-func (a *Agent) SettingsStore() *settings.Store { return a.settingsStore }
 
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none.
@@ -383,7 +372,7 @@ func (a *Agent) startLocked(devicePath string) error {
 	}
 
 	a.reader.Store(nfcReader)
-	nfcReader.SetFeedback(a.readerFeedback)
+	a.adoptReaderSettings()
 
 	// Start the servers using shared code
 	if err := a.startServers(); err != nil {
@@ -635,9 +624,6 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	if a.RequirePairedDevice() == on {
 		return
 	}
-	if a.launcherHolds("the paired-device requirement", a.Explicit().RequirePairedDevice) {
-		return
-	}
 
 	a.settingsMu.Lock()
 	a.requirePairedDevice = on
@@ -646,16 +632,13 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	if a.DeviceAuth != nil {
 		a.DeviceAuth.SetRequirePaired(on)
 	}
-	a.notifySettingsChanged()
+	a.notifyPreferencesChanged()
 }
 
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
 	if a.ReaderFeedback() == on {
-		return
-	}
-	if a.launcherHolds("reader feedback", a.Explicit().ReaderFeedback) {
 		return
 	}
 
@@ -666,7 +649,7 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	if reader := a.reader.Load(); reader != nil {
 		reader.SetFeedback(on)
 	}
-	a.notifySettingsChanged()
+	a.notifyPreferencesChanged()
 }
 
 // OnTag registers fn to receive every scan the agent broadcasts, so a program

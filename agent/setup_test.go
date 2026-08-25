@@ -9,7 +9,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // testOptions returns options that keep Setup off the network and out of the
@@ -66,54 +65,6 @@ func TestSetupWithoutLogRing(t *testing.T) {
 	if rt.Logs != nil {
 		t.Error("Runtime.Logs should be nil when Options.Logs is")
 	}
-}
-
-// TestAnExplicitPortOutranksStoredPort covers the flag-precedence bit that moved
-// into the API when the flags left this package: a port the caller means must
-// survive a port persisted in settings.
-func TestAnExplicitPortOutranksStoredPort(t *testing.T) {
-	dir := t.TempDir()
-
-	// Persist a port, the way the console would.
-	seed := testOptions(t)
-	seed.ConfigDir = dir
-	rt, err := Setup(seed, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if _, err := rt.Settings.Update(func(s *settings.Settings) { s.Port = 9999 }); err != nil {
-		t.Fatalf("save settings: %v", err)
-	}
-
-	t.Run("unset yields to the stored port", func(t *testing.T) {
-		opts := testOptions(t)
-		opts.ConfigDir = dir
-		opts.DevicePort = DefaultDevicePort
-		opts.Explicit.Port = false
-
-		rt, err := Setup(opts, nfc.NewMockManager())
-		if err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-		if rt.Agent.DevicePort() != 9999 {
-			t.Errorf("DevicePort = %d, want the stored 9999", rt.Agent.DevicePort())
-		}
-	})
-
-	t.Run("set outranks the stored port", func(t *testing.T) {
-		opts := testOptions(t)
-		opts.ConfigDir = dir
-		opts.DevicePort = 9123
-		opts.Explicit.Port = true
-
-		rt, err := Setup(opts, nfc.NewMockManager())
-		if err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-		if rt.Agent.DevicePort() != 9123 {
-			t.Errorf("DevicePort = %d, want the requested 9123", rt.Agent.DevicePort())
-		}
-	})
 }
 
 // TestCustomIdentityReachesTheAgent is the point of Config.Info: a program

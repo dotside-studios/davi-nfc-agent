@@ -2,13 +2,13 @@ package webui
 
 import (
 	"encoding/json"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // contains reports membership, for asserting on a slice the host returns.
@@ -175,8 +175,8 @@ func TestSettingsActionPersistsAndApplies(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
-	if got := host.Settings().Mode; got != settings.ModeReadOnly {
-		t.Errorf("stored mode = %q, want %q", got, settings.ModeReadOnly)
+	if got := host.Preferences().Mode; got != nfc.ModeNameReadOnly {
+		t.Errorf("stored mode = %q, want %q", got, nfc.ModeNameReadOnly)
 	}
 
 	// And it comes back in the next snapshot.
@@ -187,7 +187,7 @@ func TestSettingsActionPersistsAndApplies(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if state.Settings.Mode != settings.ModeReadOnly {
+	if state.Settings.Mode != nfc.ModeNameReadOnly {
 		t.Errorf("snapshot mode = %q", state.Settings.Mode)
 	}
 }
@@ -202,7 +202,7 @@ func TestSetModeRejectsUnknownMode(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status %d, want 400", w.Code)
 	}
-	if got := host.Settings().Mode; got != settings.ModeReadWrite {
+	if got := host.Preferences().Mode; got != nfc.ModeNameReadWrite {
 		t.Errorf("mode changed to %q despite the error", got)
 	}
 }
@@ -357,40 +357,5 @@ func TestConsoleURLIsLoopback(t *testing.T) {
 	}
 	if !strings.HasPrefix(url, "http://localhost:9470/control/session?token=") {
 		t.Errorf("ConsoleURL = %q", url)
-	}
-}
-
-// A save of a field the launcher holds leaves the file alone. The agent would
-// refuse the change, and a file that recorded it anyway would be read back as
-// fact on the next start, when the flag may well be gone.
-func TestSavingAFieldTheLauncherHoldsChangesNothing(t *testing.T) {
-	_, host, handler, cookie := newTestServer(t)
-	host.settings = settings.Settings{Mode: settings.ModeReadOnly, Port: 9480}
-	host.explicit = settings.Explicit{Mode: true}
-
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, authorized(http.MethodPost, "/control/action",
-		`{"action":"reader.setMode","params":{"mode":"write"}}`, cookie))
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", w.Code, w.Body.String())
-	}
-	if got := host.Settings().Mode; got != settings.ModeReadOnly {
-		t.Errorf("stored mode = %q, want the launcher's %q", got, settings.ModeReadOnly)
-	}
-
-	// And the console is told which controls to disable.
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, authorized(http.MethodGet, "/control/state", "", cookie))
-
-	var state State
-	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !state.Explicit.Mode {
-		t.Error("the snapshot does not report the mode as the launcher's")
-	}
-	if state.Explicit.Port {
-		t.Error("the snapshot reports a port the launcher never set")
 	}
 }

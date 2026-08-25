@@ -12,7 +12,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
@@ -31,10 +30,7 @@ type Config struct {
 	// Agent is the agent the console administers.
 	Agent *agent.Agent
 
-	// Settings is the preference store a change is written to, and Logs the
-	// ring the log view reads.
-	Settings *settings.Store
-	Logs     *logbuf.Ring
+	Logs *logbuf.Ring
 
 	// Servers is what the agent is served from, for the port and address the
 	// console hands out. Pairing is what issues pairing PINs, and Trust what
@@ -52,11 +48,10 @@ type Config struct {
 func New(cfg Config) *Server {
 	a := cfg.Agent
 	h := &host{
-		agent:    a,
-		settings: cfg.Settings,
-		servers:  cfg.Servers,
-		pairing:  cfg.Pairing,
-		trust:    cfg.Trust,
+		agent:   a,
+		servers: cfg.Servers,
+		pairing: cfg.Pairing,
+		trust:   cfg.Trust,
 	}
 	info := a.Info()
 	s := &Server{

@@ -2,11 +2,10 @@ package webui
 
 import (
 	"encoding/json"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // The console reads the snapshot by JSON key. A wire type that loses its tags
@@ -60,30 +59,23 @@ func TestSnapshotKeysAreLowerCamel(t *testing.T) {
 // and a console showing read-only while the reader writes costs a card.
 func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 	host := newFakeHost()
-	host.settings = settings.Settings{
-		Mode:                settings.ModeReadOnly,
+	host.settings = Preferences{
+		Mode:                nfc.ModeNameReadOnly,
 		DevicePath:          "ACS ACR1252U 01 00",
 		RequirePairedDevice: true,
 	}
-	host.explicit = settings.Explicit{RequirePairedDevice: true}
 
 	console := New(Config{Host: host, Name: "davi-nfc-agent", Version: "test"})
 	state := console.buildState()
 
-	if state.Settings.Mode != settings.ModeReadOnly {
-		t.Errorf("snapshot mode = %q, want %q", state.Settings.Mode, settings.ModeReadOnly)
+	if state.Settings.Mode != nfc.ModeNameReadOnly {
+		t.Errorf("snapshot mode = %q, want %q", state.Settings.Mode, nfc.ModeNameReadOnly)
 	}
 	if !state.Settings.RequirePairedDevice {
 		t.Error("the snapshot does not report the requirement the agent is enforcing")
 	}
-	if !state.Explicit.RequirePairedDevice {
-		t.Error("the console is not told the requirement cannot be withdrawn from there")
-	}
-
-	// The blocks a preference used to be repeated in. Settings and explicit name
-	// the same fields, once for the value and once for who holds it, so counting
-	// keys across the whole snapshot proves nothing; these two are where a
-	// second copy would come back.
+	// The blocks a preference used to be repeated in, and where a second copy
+	// would come back.
 	for name, block := range map[string]any{"reader": state.Reader, "security": state.Security} {
 		body, err := json.Marshal(block)
 		if err != nil {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -203,9 +202,6 @@ func (ctx AgentContext) Info() buildinfo.Info { return ctx.Agent.Info() }
 // ConfigDir is where the agent persists its state. A plugin with state of its
 // own belongs in a subdirectory of it rather than beside the agent's files.
 func (ctx AgentContext) ConfigDir() string { return ctx.Agent.ConfigDir() }
-
-// Settings is the persisted preference store, or nil when the agent has none.
-func (ctx AgentContext) Settings() *settings.Store { return ctx.Agent.SettingsStore() }
 
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none. It is what a plugin serving a log view reads from.

@@ -8,8 +8,8 @@ import (
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
+	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
 func newTestAgent() *nfcagent.Agent {
@@ -196,18 +196,18 @@ func TestModeMenuHoldsWithoutAReader(t *testing.T) {
 	if got := agent.CurrentReaderMode(); got != nfc.ModeWriteOnly {
 		t.Errorf("agent mode = %v, want ModeWriteOnly", got)
 	}
-	if got := agent.Settings().Mode; got != settings.ModeWriteOnly {
-		t.Errorf("agent settings mode = %q, want %q", got, settings.ModeWriteOnly)
+	if got := agent.Preferences().ModeName; got != nfc.ModeNameWriteOnly {
+		t.Errorf("agent settings mode = %q, want %q", got, nfc.ModeNameWriteOnly)
 	}
 }
 
-func TestSyncSettingsToMenu(t *testing.T) {
+func TestSyncPreferencesToMenu(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
 
 	cardType := nfc.GetAllCardTypes()[0]
-	app.SyncSettingsToMenu(settings.Settings{
-		Mode:           settings.ModeWriteOnly,
+	app.SyncPreferencesToMenu(webui.Preferences{
+		Mode:           nfc.ModeNameWriteOnly,
 		CardTypes:      []string{cardType},
 		ReaderFeedback: true,
 	})
@@ -229,21 +229,15 @@ func TestSyncSettingsToMenu(t *testing.T) {
 	}
 
 	// And back to no filter at all.
-	app.SyncSettingsToMenu(settings.Settings{Mode: settings.ModeReadWrite})
+	app.SyncPreferencesToMenu(webui.Preferences{Mode: nfc.ModeNameReadWrite})
 	if !app.cardTypes.All().Checked() || app.cardTypes.Item(cardType).Checked() {
 		t.Error("clearing the stored card types did not restore All Types")
 	}
 }
 
-func TestReaderFeedbackTogglePersists(t *testing.T) {
+func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-
-	store, err := settings.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("settings.New: %v", err)
-	}
-	app.settings = store
 
 	app.mReaderFeedback.Click()
 
@@ -253,12 +247,9 @@ func TestReaderFeedbackTogglePersists(t *testing.T) {
 	if !agent.ReaderFeedback() {
 		t.Error("the agent was not told about the change")
 	}
-	if !store.Get().ReaderFeedback {
-		t.Error("the preference was not saved")
-	}
 
 	app.mReaderFeedback.Click()
-	if app.mReaderFeedback.Checked() || agent.ReaderFeedback() || store.Get().ReaderFeedback {
+	if app.mReaderFeedback.Checked() || agent.ReaderFeedback() {
 		t.Error("clicking again did not turn the feedback back off")
 	}
 }
@@ -427,72 +418,23 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 // The tray writes to the same file the console does. A mode picked from a menu
 // used to be forgotten at exit, which made where an operator clicked decide
 // whether their choice survived.
-func TestTrayModeAndFilterPersist(t *testing.T) {
+func TestTrayModeAndFilterReachTheAgent(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
 
-	store, err := settings.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("settings.New: %v", err)
-	}
-	app.settings = store
-
 	app.modes.Item(nfc.ModeReadOnly).Click()
-	if got := store.Get().Mode; got != settings.ModeReadOnly {
-		t.Errorf("stored mode = %q, want %q", got, settings.ModeReadOnly)
+	if got := agent.CurrentReaderMode(); got != nfc.ModeReadOnly {
+		t.Errorf("mode = %v, want ModeReadOnly", got)
 	}
 
 	cardType := nfc.GetAllCardTypes()[0]
 	app.cardTypes.Item(cardType).Click()
-	if got := store.Get().CardTypes; len(got) != 1 || got[0] != cardType {
-		t.Errorf("stored card types = %v, want [%s]", got, cardType)
+	if got := agent.CardTypeFilter(); len(got) != 1 || got[0] != cardType {
+		t.Errorf("card types = %v, want [%s]", got, cardType)
 	}
 
 	app.cardTypes.All().Click()
-	if got := store.Get().CardTypes; len(got) != 0 {
-		t.Errorf("stored card types = %v, want none", got)
-	}
-}
-
-// A setting the launcher holds is shown and not offered: the menu says what the
-// agent is set to, greyed out, rather than accepting a click it would drop.
-func TestTrayMenusForHeldSettings(t *testing.T) {
-	agent := newTestAgent()
-	agent.SetReaderMode(nfc.ModeReadOnly)
-	agent.SetExplicit(settings.Explicit{Mode: true, RequirePairedDevice: true})
-
-	app, _ := newTestTray(t, agent)
-
-	store, err := settings.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("settings.New: %v", err)
-	}
-	app.settings = store
-
-	if app.modes.Item(nfc.ModeWriteOnly).Enabled() {
-		t.Error("a mode the launcher holds is still offered")
-	}
-	if app.mRequirePaired.Enabled() {
-		t.Error("a pairing requirement the launcher holds is still offered")
-	}
-
-	// Shown as what it is, rather than as the default the menu used to open on.
-	if got, _ := app.modes.Value(); got != nfc.ModeReadOnly {
-		t.Errorf("the tick is on %v, which the reader is not in", got)
-	}
-
-	// A disabled item ignores a click, and the agent refuses one that reaches
-	// it anyway. Neither leaves a trace in the file.
-	app.modes.Item(nfc.ModeWriteOnly).Click()
-	app.handleModeSwitch(nfc.ModeWriteOnly)
-
-	if got := agent.CurrentReaderMode(); got != nfc.ModeReadOnly {
-		t.Errorf("mode = %v, want ModeReadOnly", got)
-	}
-	if got, _ := app.modes.Value(); got != nfc.ModeReadOnly {
-		t.Errorf("the tick moved to %v, which the reader is not in", got)
-	}
-	if store.Get().Mode == settings.ModeWriteOnly {
-		t.Error("a refused change was written to the settings file")
+	if got := agent.CardTypeFilter(); len(got) != 0 {
+		t.Errorf("card types = %v, want none", got)
 	}
 }

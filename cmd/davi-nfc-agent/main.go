@@ -101,12 +101,11 @@ func main() {
 	// build, where there is none compiled in and Endpoints is empty, so this
 	// program needs no build tag of its own.
 	controlCenter := console.New(console.Config{
-		Agent:    rt.Agent,
-		Settings: rt.Settings,
-		Logs:     rt.Logs,
-		Servers:  servers,
-		Pairing:  pairing,
-		Trust:    trust,
+		Agent:   rt.Agent,
+		Logs:    rt.Logs,
+		Servers: servers,
+		Pairing: pairing,
+		Trust:   trust,
 	})
 	servers.Add(controlCenter.Endpoints()...)
 

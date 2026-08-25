@@ -112,8 +112,8 @@ func main() {
 ```
 
 `agent.Setup` performs the work the flags imply: it resolves the config
-directory, loads or generates the TLS certificate and the API secret, reads the
-paired devices and the origin allowlist, and applies stored settings. It returns
+directory, loads or generates the TLS certificate and the API secret, and reads
+the paired devices and the origin allowlist. It returns
 an `*agent.Runtime` holding the configured agent alongside the stores a front
 end needs.
 
@@ -164,8 +164,11 @@ takes an `agent.Config` and builds the agent from values you already hold,
 leaving the certificate, secret and store loading to you. Either way the
 configuration is fixed once the agent exists: it is read back through methods,
 so nothing can rebind the port or withdraw the pairing requirement behind the
-running servers. The settings that may legitimately change while running have
-methods of their own: `SetRequirePairedDevice` and `SetAllowCardType`.
+running servers. The preferences that may legitimately change while running have
+methods of their own: `SetReaderMode`, `SetCardTypeFilter`, `SetPinnedDevice`,
+`SetDevicePort`, `SetRequirePairedDevice` and `SetReaderFeedback`. Nothing
+persists them: a change lasts as long as the agent runs, and what it starts with
+comes from `agent.Config`.
 
 ## Plugins
 
@@ -410,7 +413,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `traymenu` | Declarative tray menus, with no toolkit behind them |
 | `clipboard` | Copying text to the system clipboard |
 | `traymenu/fynetray` | The real tray, on `fyne.io/systray` |
-| `tls`, `settings`, `logbuf` | Certificates, persisted preferences, the log ring |
+| `tls`, `logbuf` | Certificates, the log ring |
 | `e2e` | Tests only: an agent wired as on this page, driven over its protocols |
 
 Dependencies run in one direction. `agent/console` and `agent/tray` import
@@ -449,10 +452,7 @@ func main() {
 	opts.ConfigDir = "/var/lib/davi-nfc"
 	opts.AllowedOrigins = "console.example.com"
 
-	// Explicit.Port marks the port as a decision, so a port persisted in
-	// settings does not quietly replace it.
 	opts.DevicePort = 9470
-	opts.Explicit.Port = true
 
 	rt, err := agent.Setup(opts, pcsc.NewManager())
 	if err != nil {

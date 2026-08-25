@@ -510,6 +510,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The settings file, and everything that arbitrated with it.** Preferences
+  were persisted to `settings.json` and read back at startup, which is what made
+  three shapes necessary for six values: `agent.Config` carried some of them,
+  `settings.Settings` carried all of them for the file, and `settings.Explicit`
+  said which of them a launcher held so the file could not take them back.
+
+  The agent holds them now and nothing writes them anywhere. One direction: what
+  the agent starts with comes from `agent.Config`, which the command fills from
+  its flags, and a change made from the console or a tray menu lasts as long as
+  the agent runs. With no file to disagree with the launcher, `Explicit` has
+  nothing to arbitrate, so it is gone with the store, `ApplySettings`,
+  `SetExplicit`, `Runtime.Settings` and `AgentContext.Settings`.
+
+  `agent.Config` gains `Mode`, `CardTypes` and `DevicePath`, which it could
+  never carry: a launcher could claim them through `Explicit` while having no
+  field to name a value in, so it held the zero value for the run and no stored
+  preference could correct it. That is also what let `-device` be discarded, the
+  guard refusing the launcher's own reader because the claim was recorded before
+  the value.
+
+  A program that wants an operator's change to outlive the process reads it back
+  from the agent and persists it as it likes, which is the arrangement the origin
+  allowlist and the device registry were already under.
+
+- **`settings`.** `ParseMode` and `FormatMode` become `nfc.ParseReaderMode` and
+  `ReaderMode.String`, beside the type they convert. The console keeps its own
+  `webui.Preferences` for the snapshot, as it already did for every other block.
+
 - **Dead code in `deviceserver`.** `Handle` had no callers, so the message
   registry it fed was permanently empty; the `devices` map was written and
   deleted but never read; and the fallback WebSocket loop behind them ran only

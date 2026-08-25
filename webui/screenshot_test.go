@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"log"
 	"net"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // Screenshot harness. Serves the real control handler and the embedded console
@@ -41,7 +41,7 @@ func TestScreenshotHarness(t *testing.T) {
 	host.localIPs = []string{"192.168.1.44"}
 	host.allowed = []string{"console.davi.social", "davi.social", "localhost:3000", "localhost:3002", "shop.davi.social"}
 	host.blocked = []string{"localhost:5173", "staging.example.com"}
-	host.settings = settings.Settings{Mode: settings.ModeReadWrite}
+	host.settings = Preferences{Mode: nfc.ModeNameReadWrite}
 	host.seedDevices()
 	host.devices = append(host.devices, PairedDevice{
 		ID: "dev-3", Name: "Workshop ACR1252U", Platform: "reader",

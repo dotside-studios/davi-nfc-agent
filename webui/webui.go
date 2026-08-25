@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // Host is what the console needs from the agent it administers. Stating it as
@@ -76,18 +75,13 @@ type Host interface {
 
 	// ---- settings ----
 
-	// Settings is what the agent is set to, and the console's only source for a
-	// preference. Reader mode, the card-type filter, the pinned reader and the
-	// pairing requirement all come from here, so the console cannot show one
-	// thing while the agent does another.
-	Settings() settings.Settings
-	// SaveSettings persists a mutation and returns what the agent holds once it
-	// has been applied, which is not necessarily what was asked for.
-	SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error)
-	// Explicit reports the settings the launcher set, which nothing this run
-	// can change. The console shows those controls disabled with the reason,
-	// rather than accepting a change the agent would refuse.
-	Explicit() settings.Explicit
+	// Preferences is what the agent is set to, and the console's only source
+	// for one, so the console cannot show a preference the agent is not using.
+	Preferences() Preferences
+
+	// ApplyPreferences changes the agent and answers with what it holds
+	// afterwards, which is not necessarily what was asked for.
+	ApplyPreferences(mutate func(*Preferences)) Preferences
 }
 
 // PairedDevice is the console's view of a stored device credential.

@@ -67,7 +67,6 @@ func TestRoutesAnswerBeforeTheAgentHasStarted(t *testing.T) {
 	o.AutoTLS = false
 	o.BootstrapPort = 0
 	o.DevicePort = freePort(t)
-	o.Explicit.Port = true
 
 	rt, err := agent.Setup(o, nfc.NewMockManager())
 	if err != nil {
@@ -114,7 +113,6 @@ func TestAPortAlreadyInUseFailsTheStart(t *testing.T) {
 	o.ConfigDir = t.TempDir()
 	o.BootstrapPort = 0
 	o.DevicePort = h.Agent.DevicePort()
-	o.Explicit.Port = true
 
 	rt, err := agent.Setup(o, nfc.NewMockManager())
 	if err != nil {

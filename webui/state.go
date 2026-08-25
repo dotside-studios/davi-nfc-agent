@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // State is the whole picture the console renders from. Sent as a
@@ -24,16 +22,15 @@ import (
 // a console showing read-only while the reader writes misleads the operator
 // about what the reader will do to a card.
 type State struct {
-	Agent    AgentInfo         `json:"agent"`
-	Reader   ReaderInfo        `json:"reader"`
-	Server   ServerInfo        `json:"server"`
-	Security SecurityInfo      `json:"security"`
-	Settings settings.Settings `json:"settings"`
-	Explicit settings.Explicit `json:"explicit"`
-	Devices  []DeviceInfo      `json:"devices"`
-	Clients  []ClientInfo      `json:"clients"`
-	Origins  OriginsInfo       `json:"origins"`
-	Capture  CaptureInfo       `json:"capture"`
+	Agent    AgentInfo    `json:"agent"`
+	Reader   ReaderInfo   `json:"reader"`
+	Server   ServerInfo   `json:"server"`
+	Security SecurityInfo `json:"security"`
+	Settings Preferences  `json:"settings"`
+	Devices  []DeviceInfo `json:"devices"`
+	Clients  []ClientInfo `json:"clients"`
+	Origins  OriginsInfo  `json:"origins"`
+	Capture  CaptureInfo  `json:"capture"`
 }
 
 // AgentInfo covers identity and lifecycle.
@@ -146,8 +143,7 @@ func (c *Server) buildState() State {
 			ConfigDir: c.host.ConfigDir(),
 			Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 		},
-		Settings: c.host.Settings(),
-		Explicit: c.host.Explicit(),
+		Settings: c.host.Preferences(),
 	}
 
 	state.Reader = c.buildReaderInfo()

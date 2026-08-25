@@ -88,7 +88,6 @@ func (s *App) handleRequirePaired() {
 	}
 
 	s.agent.SetRequirePairedDevice(on)
-	s.persist()
 
 	if s.agent.RequirePairedDevice() {
 		log.Printf("[systray] Requiring paired devices; the shared secret no longer admits one")

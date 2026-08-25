@@ -8,7 +8,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // Stubs for -tags nowebui, which omits the control center: no /control routes,
@@ -21,12 +20,11 @@ type Server struct{}
 
 // Config is what a console would report on; this build has none.
 type Config struct {
-	Agent    *agent.Agent
-	Settings *settings.Store
-	Logs     *logbuf.Ring
-	Servers  *agent.ServerPlugin
-	Pairing  *agent.PairingPlugin
-	Trust    *agent.TrustPlugin
+	Agent   *agent.Agent
+	Logs    *logbuf.Ring
+	Servers *agent.ServerPlugin
+	Pairing *agent.PairingPlugin
+	Trust   *agent.TrustPlugin
 }
 
 // New reports that there is no console in this build.

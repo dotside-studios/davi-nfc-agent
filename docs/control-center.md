@@ -112,88 +112,29 @@ on otherwise.
 
 Nothing is written to disk. The buffer is lost when the agent exits.
 
-## settings.json
+## Where a preference lives
 
-Lives beside the other config files:
-
-```json
-{
-  "mode": "readwrite",
-  "cardTypes": [],
-  "devicePath": "",
-  "port": 0,
-  "requirePairedDevice": false,
-  "readerFeedback": false
-}
-```
-
-| Key | Meaning |
-|---|---|
-| `mode` | `readwrite`, `read` or `write` |
-| `cardTypes` | Card-type allowlist. Empty means all types |
-| `devicePath` | Pinned reader. Empty means auto-detect |
-| `port` | Agent port. `0` means the built-in default. Takes effect when the listener is next bound, at startup or on **Restart servers** |
-| `requirePairedDevice` | Admit only devices holding a paired credential |
-| `readerFeedback` | Flash the reader's LED and sound its buzzer at what it reads and writes |
-
-A flag still wins: passing `-device`, `-device-port` or `-require-paired-devices`
-means it for that run, and the file cannot change what was asked for there. See
-[What the launcher holds](#what-the-launcher-holds). No file is written until
-something is deliberately saved, so its absence keeps meaning "never configured".
-
-Credentials are deliberately not in this file — the API secret, paired devices
-and origin allowlist keep their own.
-
-## Where a setting lives
-
-The file persists a preference; the **agent holds it**. Saving anywhere, from
-the console or from any tray menu, writes to `settings.json`, and the store's
-change hook is the single path from there to the running agent:
+The agent holds every preference and nothing writes them anywhere. A change made
+in the console or from a tray menu reaches the agent, and both surfaces redraw
+from it, so the two cannot disagree about what the agent is doing:
 
 ```
-console ─┐                        ┌─ agent.ApplySettings   (what is in force)
-         ├─ settings.Store.Update ┤
-tray  ───┘                        └─ tray menu             (redrawn from the agent)
+console ─┐                          ┌─ agent            (what is in force)
+         ├─ Agent.SetReaderMode &c ─┤
+tray  ───┘                          └─ tray menu        (redrawn from the agent)
 ```
 
-Nothing displays a preference from the file. The console's `settings` block in
-the state snapshot is `Agent.Settings()`, what the agent is set to right now, so
-a mode switched from the tray shows in the console, a pairing requirement the
-command line locked on shows as on, and a reader mode restored from disk is on
-the reader rather than only in the file.
+Nothing displays a preference from a file. The console's `settings` block in the
+state snapshot is `Agent.Preferences()`, what the agent is set to right now.
 
-The tray and the console no longer differ in reach. Both are the same operator
-at the same machine, so a mode picked from a menu is written to the file exactly
-as one picked in a browser is, and both are redrawn from the agent afterwards.
-Only one thing is deliberately never persisted: **allow any origin**, in either
-surface, because it is a safety-off that should not outlive the session that
-needed it.
+A change lasts as long as the agent runs. What it starts with comes from
+`agent.Config`, which the command fills from its flags, so a preference that
+should survive a restart is set at launch rather than saved.
 
-## What the launcher holds
-
-A flag, an environment variable, or a program embedding the agent settles a
-setting for the whole run. Those fields are recorded as `settings.Explicit`,
-and the rule is one sentence: **what the launcher set, the run keeps.**
-
-The stored file does not change them, and neither does an operator. Both UIs
-show the control disabled with the reason rather than accepting a change that
-would not survive, because a switch that springs back explains nothing:
-
-```
--device-port 9480   →  explicit.Port      →  console: port field disabled, "set at launch"
-                                             tray:    unaffected, it has no port menu
-                                             file:    port preference untouched
-```
-
-The last line matters. A held field is left exactly as the file has it, so a
-preference the operator set earlier is neither overwritten by the launcher's
-value nor by the change the agent refused. Start the agent without the flag and
-their preference applies again.
-
-The flags that hold a setting today are `-device`, `-device-port` and
-`-require-paired-devices` (or `DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`). Mode, the
-card-type filter and reader feedback have no flags, so they are always the
-operator's; a program embedding the agent can hold those too.
+A program embedding the agent that wants an operator's change to outlive the
+process reads it back from the agent and persists it however it likes. That is
+the same arrangement the origin allowlist and the device registry are under,
+each of which keeps its own file.
 
 ## Building
 

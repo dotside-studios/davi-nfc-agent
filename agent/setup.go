@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -60,12 +59,13 @@ type Options struct {
 	RemoteScans    <-chan nfc.NFCData
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
-	// Explicit marks the fields this launcher set deliberately rather than left
-	// at a default. A field marked here belongs to the launcher for the whole
-	// run: the stored file does not change it and an operator cannot either.
-	// The command builds it from which flags were given; a program embedding
-	// the agent sets whichever fields it means.
-	Explicit settings.Explicit
+	// Mode is the access mode the reader runs in, CardTypes the types a scan
+	// may carry, and ReaderFeedback has the reader announce what it does. They
+	// go to the agent as they are: nothing is read back from a file, so what a
+	// launcher sets is what the agent starts with.
+	Mode           nfc.ReaderMode
+	CardTypes      []string
+	ReaderFeedback bool
 
 	// Info is what this build calls itself; see agent.Config.Info. It decides
 	// the default config directory, so a program with its own identity should
@@ -93,8 +93,7 @@ func DefaultOptions() *Options {
 // through the agent: the origin and device stores live on Agent, and reads of
 // those go through rt.Agent so there is one copy to keep true.
 type Runtime struct {
-	Agent    *Agent
-	Settings *settings.Store
+	Agent *Agent
 
 	// Logs is the ring passed in through Options, for the console to display.
 	Logs *logbuf.Ring
@@ -197,18 +196,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	askedForPairing := opts.RequirePaired || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
 
 	// Load persisted preferences. Explicit flags still win: something that
-	// passed -device meant it for this run.
-	settingsStore, err := settings.New(configDir)
-	if err != nil {
-		log.Printf("Warning: failed to load settings: %v", err)
-		settingsStore, _ = settings.New("")
-	}
-	stored := settingsStore.Get()
-
-	devicePath := opts.DevicePath
-	if devicePath == "" {
-		devicePath = stored.DevicePath
-	}
 
 	devicePort := opts.DevicePort
 	if devicePort == 0 {
@@ -216,16 +203,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		// listener on whatever the kernel hands out.
 		devicePort = DefaultDevicePort
 	}
-	if !opts.Explicit.Port && stored.Port > 0 {
-		devicePort = stored.Port
-	}
 
-	// Either source can turn the requirement on; only a launcher can be relied
-	// on to keep it on, which is what Explicit carries.
-	explicit := opts.Explicit
-	explicit.RequirePairedDevice = explicit.RequirePairedDevice || askedForPairing
-	requirePaired := askedForPairing || stored.RequirePairedDevice
-	if requirePaired {
+	if askedForPairing {
 		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
 		if devices.Count() == 0 {
 			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
@@ -249,19 +228,18 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Origins:             origins,
 		Devices:             devices,
 		PublicKeyPin:        agentPublicKeyPin,
-		Settings:            settingsStore,
 		Logs:                opts.Logs,
-		RequirePairedDevice: requirePaired,
-		Explicit:            explicit,
+		RequirePairedDevice: askedForPairing,
+		ReaderFeedback:      opts.ReaderFeedback,
+		Mode:                opts.Mode,
+		CardTypes:           opts.CardTypes,
+		DevicePath:          opts.DevicePath,
 	})
-
-	a.ApplySettings(stored)
 
 	return &Runtime{
 		Agent:        a,
-		Settings:     settingsStore,
 		Logs:         opts.Logs,
-		DevicePath:   devicePath,
+		DevicePath:   opts.DevicePath,
 		Certificates: tlsMgr,
 	}, nil
 }

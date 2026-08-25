@@ -68,7 +68,6 @@ func start(t *testing.T, opts options) *harness {
 	// Not the default port, so these tests can run beside an agent already
 	// running on this machine.
 	o.DevicePort = freePort(t)
-	o.Explicit.Port = true
 
 	// The agent receives an interface, a channel and a handler builder rather
 	// than the driver itself, so it names no device protocol.

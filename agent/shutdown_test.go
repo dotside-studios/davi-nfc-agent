@@ -21,7 +21,6 @@ func agentOver(t *testing.T, m nfc.Manager, port int) *Agent {
 
 	opts := testOptions(t)
 	opts.DevicePort = port
-	opts.Explicit.Port = true
 	rt, err := Setup(opts, m)
 	if err != nil {
 		t.Fatalf("Setup: %v", err)

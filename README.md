@@ -85,8 +85,8 @@ go build -tags nowebui ./cmd/davi-nfc-agent
 
 **Flash and Beep on Scan** in the tray menu has the reader announce its own
 work: one green flash with a short beep when a tag is read or written, two red
-flashes when a write or a lock fails. It is off by default, and the choice is
-saved to `settings.json`.
+flashes when a write or a lock fails. It is off by default, and turning it on
+lasts as long as the agent runs.
 
 The commands come from the ACS ACR122U instruction set, so ACR122 readers
 answer them and other readers report the feature as unsupported and are left

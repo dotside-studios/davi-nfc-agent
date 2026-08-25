@@ -24,7 +24,6 @@ func reachable(url string) bool {
 func TestPairingFollowsTheAgent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9487
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {
@@ -63,7 +62,6 @@ func TestPairingFollowsTheAgent(t *testing.T) {
 func TestSetupBuildsNoPairingServer(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9491
-	opts.Explicit.Port = true
 	opts.BootstrapPort = 9472
 
 	rt, err := Setup(opts, nfc.NewMockManager())
@@ -116,7 +114,6 @@ func TestPairingForTakesTheAgentsConfiguration(t *testing.T) {
 func TestPairingRegistersAsAnEndpointComponent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9493
-	opts.Explicit.Port = true
 
 	rt, err := Setup(opts, nfc.NewMockManager())
 	if err != nil {

@@ -2,10 +2,9 @@ package webui
 
 import (
 	"errors"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"sync"
 	"time"
-
-	"github.com/dotside-studios/davi-nfc-agent/settings"
 )
 
 // fakeHost is a Host with no agent behind it, so the tests drive the real
@@ -41,9 +40,8 @@ type fakeHost struct {
 
 	// settings stands in for the agent's live configuration, which is what the
 	// real host answers with. The console reads a preference from here and
-	// nowhere else, and explicit says which of them the launcher holds.
-	settings settings.Settings
-	explicit settings.Explicit
+	// nowhere else.
+	settings Preferences
 
 	// Recorded calls, so a test can assert an action reached the agent.
 	started, stopped, quit, restarted int
@@ -66,7 +64,7 @@ func newFakeHost() *fakeHost {
 		port:          9470,
 		bootstrapPort: 9472,
 		apiSecret:     "test-secret",
-		settings:      settings.Defaults(),
+		settings:      Preferences{Mode: nfc.ModeNameReadWrite},
 	}
 }
 
@@ -189,8 +187,6 @@ func (h *fakeHost) RevokeAllDevices() error {
 	return nil
 }
 
-func (h *fakeHost) Explicit() settings.Explicit { return h.explicit }
-
 func (h *fakeHost) AllowedOrigins() []string  { return h.allowed }
 func (h *fakeHost) BlockedOrigins() []string  { return h.blocked }
 func (h *fakeHost) OriginCheckDisabled() bool { return h.anyOrig }
@@ -220,21 +216,22 @@ func (h *fakeHost) RevokeOrigin(origin string) error {
 	return nil
 }
 
-func (h *fakeHost) Settings() settings.Settings { return h.settings }
+func (h *fakeHost) Preferences() Preferences {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.settings
+}
 
-// SaveSettings answers with what the agent then holds, as the real host does: a
-// field the launcher holds is left where it was, however it was saved.
-func (h *fakeHost) SaveSettings(mutate func(*settings.Settings)) (settings.Settings, error) {
+// ApplyPreferences answers with what the agent then holds, as the real host
+// does. Nothing is persisted: a change lasts as long as the agent runs.
+func (h *fakeHost) ApplyPreferences(mutate func(*Preferences)) Preferences {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	prev := h.settings
 	next := h.settings
 	mutate(&next)
-	h.explicit.Keep(&next, prev)
-
 	h.settings = next
-	return next, nil
+	return next
 }
 
 // seedDevices gives the host a few paired devices.

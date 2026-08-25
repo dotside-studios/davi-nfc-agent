@@ -68,17 +68,6 @@ export interface Settings {
   readerFeedback: boolean
 }
 
-/** Which settings the launcher set, on the command line or in the environment.
- *  A field marked here is not this run's to change: the control is shown
- *  disabled rather than accepting an edit the agent would refuse. */
-export interface Explicit {
-  mode: boolean
-  cardTypes: boolean
-  devicePath: boolean
-  port: boolean
-  requirePairedDevice: boolean
-  readerFeedback: boolean
-}
 
 export interface DeviceInfo {
   id: string
@@ -117,7 +106,6 @@ export interface ControlState {
   server: ServerInfo
   security: SecurityInfo
   settings: Settings
-  explicit: Explicit
   devices: DeviceInfo[]
   clients: ClientInfo[]
   origins: OriginsInfo

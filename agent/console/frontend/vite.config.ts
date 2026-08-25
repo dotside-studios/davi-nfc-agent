@@ -16,7 +16,7 @@ export default defineConfig({
       // the production apps import it by, from source in this repo, so a
       // protocol change that breaks a consumer breaks this build too.
       '@davi/nfc-agent-client': fileURLToPath(
-        new URL('../../client/src/index.ts', import.meta.url),
+        new URL('../../../client/src/index.ts', import.meta.url),
       ),
     },
   },

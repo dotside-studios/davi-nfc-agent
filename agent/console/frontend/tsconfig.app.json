@@ -24,8 +24,8 @@
 
     /* Matches the vite alias in vite.config.ts. */
     "paths": {
-      "@davi/nfc-agent-client": ["../../client/src/index.ts"]
+      "@davi/nfc-agent-client": ["../../../client/src/index.ts"]
     }
   },
-  "include": ["src", "../../client/src"]
+  "include": ["src", "../../../client/src"]
 }

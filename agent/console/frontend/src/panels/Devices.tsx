@@ -1,13 +1,12 @@
 import type { ControlState } from '../types'
 import { useAction } from '../useControl'
 import { fmtDateTime, fmtRelative } from '../format'
-import { ActionLink, Dot, Empty, HeldAtLaunch, Notice, Panel } from '../ui'
+import { ActionLink, Dot, Empty, Notice, Panel } from '../ui'
 
 /** Paired devices, one row each, revocable individually or all at once. */
 export function Devices({ state }: { state: ControlState }) {
   const act = useAction()
   const { devices, settings } = state
-  const held = state.explicit.requirePairedDevice
 
   return (
     <>
@@ -81,7 +80,6 @@ export function Devices({ state }: { state: ControlState }) {
             <input
               type="checkbox"
               checked={settings.requirePairedDevice}
-              disabled={held}
               onChange={(e) =>
                 act.mutate({
                   name: 'devices.setRequirePaired',
@@ -101,7 +99,6 @@ export function Devices({ state }: { state: ControlState }) {
             allowlist instead, and are unaffected either way.
           </div>
 
-          {held ? <HeldAtLaunch flag="-require-paired-devices" /> : null}
 
           {settings.requirePairedDevice && devices.length === 0 ? (
             <Notice kind="err">

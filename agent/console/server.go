@@ -23,7 +23,6 @@ import (
 // ordinary client endpoint, so there is one implementation of the write path.
 type Server struct {
 	host      Host
-	adapter   *host // set when the Host is this package's own agent adapter
 	auth      *Auth
 	logs      *logbuf.Ring
 	name      string

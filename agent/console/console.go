@@ -53,7 +53,6 @@ func New(cfg Config) *Server {
 		Version: info.FullVersion(),
 		Dev:     info.IsDev(),
 	})
-	s.adapter = h
 
 	// Both stores are optional configuration, so an agent built without them
 	// still gets a console; it just has less to follow.
@@ -170,8 +169,12 @@ func (s *Server) Assets() http.Handler {
 // console moves the tray's menu state too. Without one the console drives the
 // agent directly, as a headless run wants.
 func (s *Server) AttachTray(t Tray) {
-	if s == nil || s.adapter == nil {
+	if s == nil {
 		return
 	}
-	s.adapter.app = t
+	// Only this package's own adapter routes through a tray. A Host supplied
+	// from elsewhere decides for itself what an action reaches.
+	if h, ok := s.host.(*host); ok {
+		h.app = t
+	}
 }

@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
+- `console.Server` holds one reference to its host. `AttachTray` asks whether
+  that host is this package's own adapter instead of a second field caching the
+  concrete pointer
 - One `Preferences` type. `agent.Preferences` is what the agent holds and what
   the console and the tray both take; `console.Preferences` is gone, along with
   the converter between them. The reader mode is an `nfc.ReaderMode` throughout

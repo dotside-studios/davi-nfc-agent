@@ -130,6 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Choosing a reader from the control center did not announce the change, so a
+  second open console page kept showing the previous one until something
+  unrelated redrew it. Every other preference already announced itself
 - A write can no longer land on a tag the client did not mean. Requests were
   routed by preference, evaluated when the request arrived rather than when the
   tag was scanned, so lifting a card between the two moved the write. Requests

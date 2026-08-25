@@ -88,9 +88,15 @@ func (a *Agent) CardTypeFilter() []string { return a.cardTypes.list() }
 // Recording the choice does not start that reader: selecting one restarts it,
 // which is the explicit action's job.
 func (a *Agent) SetPinnedDevice(devicePath string) {
+	if a.CurrentPinnedDevice() == devicePath {
+		return
+	}
+
 	a.settingsMu.Lock()
-	defer a.settingsMu.Unlock()
 	a.pinnedDevice = devicePath
+	a.settingsMu.Unlock()
+
+	a.notifyPreferencesChanged()
 }
 
 // CurrentPinnedDevice is the reader the operator chose, empty for auto-detect.

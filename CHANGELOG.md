@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`lock()`, `transceive()` and `getCapabilities()` on `NFCClient`.**
+  `lockRequest`, `transceiveRequest` and `capabilitiesRequest` had been on the
+  wire for releases without reaching the library.
+
+  Alongside them: `tagRemoved`, so a tag leaving the field is an event rather
+  than a broadcast with an empty UID; `deviceID` on a scan, so a consumer can
+  tell the agent's own reader from a paired phone; and `NFCRequestError`,
+  carrying the agent's error code and whether a retry could succeed.
+
 - **The reader can say what it just did.** Someone holding a card at the reader
   had no way to tell a completed scan from one that never happened: the agent
   said so on a screen they were not looking at. **Flash and Beep on Scan** in
@@ -27,6 +36,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered per connection, and a reader that answers on neither is left alone
 
 ### Changed
+
+- **The control center consumes the client library instead of reimplementing
+  it.** The console had its own WebSocket, reconnect, request correlation and
+  copy of every wire type. `webui/frontend` now imports
+  `@davi/nfc-agent-client`, aliased to `client/src`; what is left in the
+  console is the live event feed and the scan history.
+
+- **`client/` is TypeScript, and `client/dist` is generated from it.** The
+  library was hand-maintained JavaScript that downstream consumers had each
+  ported, and the copies drifted. `client/src` is now the one implementation;
+  `make client` builds `dist/`, which is committed so a `<script>` tag still
+  works without Node. The package is `@davi/nfc-agent-client`, was
+  `@davi/nfc-client`.
+
+  `getStatus()` and `getLastTag()` are gone — they called `/api/v1/status` and
+  `/api/v1/tags/last`, which this agent does not serve. `healthCheck()` is
+  unaffected.
+
+  Reconnection backs off from 250ms to 5s rather than retrying every 3s.
 
 - **What the launcher set, the run keeps.** Three surfaces configure this agent
   and each had invented its own precedence: the port came with a lock flag, the
@@ -95,6 +123,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it under test with no desktop involved
 
 ### Fixed
+
+- **A write through the client library could not succeed.** It named no tag,
+  and the agent refuses that with `TAG_NOT_NAMED`. `NFCClient` now names the
+  tag it last saw on every operation; `uid`, `deviceID` and `allowUntargeted`
+  are there for a caller that means something else.
+
+- **The control center's capability panel was blank on every tag.** It read
+  `usableCapacity`, `writable`, `lockable`, `passwordProtectable` and
+  `readOnly`, none of which the agent sends, so the panel and the composer's
+  capacity meter reported nothing and refused writes to tags that accept them.
+  **re-read** compounded it by reading `capabilitiesResponse` one level too
+  high.
+
+- **A deliberately disconnected client never auto-reconnected again.**
+  `connect()` did not clear the flag `disconnect()` sets.
 
 - **A stored reader mode survives a restart.** The mode was applied to the
   reader and nowhere else, and settings are applied before `Start` builds one,

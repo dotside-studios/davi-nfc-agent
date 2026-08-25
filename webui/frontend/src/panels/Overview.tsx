@@ -221,7 +221,7 @@ function CurrentTagPanel({
         </div>
       ) : (
         <>
-          {tag.err ? <Notice kind="err">Read failed: {tag.err}</Notice> : null}
+          {tag.error ? <Notice kind="err">Read failed: {tag.error}</Notice> : null}
 
           <div className="pair">
             <KV>
@@ -240,23 +240,23 @@ function CurrentTagPanel({
             {caps ? (
               <KV>
                 <Row label="Memory">
-                  {typeof caps.usableCapacity === 'number' ? `${caps.usableCapacity} B usable` : '—'}
+                  {typeof caps.maxNdefSize === 'number' ? `${caps.maxNdefSize} B usable` : '—'}
                   {typeof caps.memorySize === 'number' ? (
                     <span className="dim"> of {caps.memorySize} B</span>
                   ) : null}
                 </Row>
                 <Row label="Writable">
-                  {caps.readOnly ? (
+                  {caps.isReadOnly ? (
                     <Dot state="err">locked read-only</Dot>
-                  ) : caps.writable === false ? (
+                  ) : caps.canWrite === false ? (
                     <Dot state="err">no</Dot>
                   ) : (
                     <Dot state="ok">yes</Dot>
                   )}
                 </Row>
-                <Row label="Lockable">{caps.lockable ? <Dot state="ok">yes</Dot> : <Dot state="off">no</Dot>}</Row>
+                <Row label="Lockable">{caps.canLock ? <Dot state="ok">yes</Dot> : <Dot state="off">no</Dot>}</Row>
                 <Row label="Password">
-                  {caps.passwordProtectable ? <Dot state="ok">supported</Dot> : <Dot state="off">no</Dot>}
+                  {caps.supportsPassword ? <Dot state="ok">supported</Dot> : <Dot state="off">no</Dot>}
                 </Row>
               </KV>
             ) : null}

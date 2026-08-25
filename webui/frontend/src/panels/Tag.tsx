@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RECORD_KINDS, cleanRecord, describeRecord, estimateMessageSize, kindOf } from '../ndef'
-import type { NdefRecord, WriteRecord } from '../types'
+import type { NDEFRecord, WriteRecord } from '../types'
 import type { Tags } from '../useTags'
 import { fmtBytes, fmtDateTime } from '../format'
 import { ActionLink, Copyable, Dot, Empty, KV, Notice, Panel, Row } from '../ui'
@@ -41,7 +41,7 @@ function Inspector({ tags }: { tags: Tags }) {
       title="Tag"
       tools={<ActionLink run={() => tags.refreshCapabilities()}>re-read</ActionLink>}
     >
-      {tag.err ? <Notice kind="err">Read failed: {tag.err}</Notice> : null}
+      {tag.error ? <Notice kind="err">Read failed: {tag.error}</Notice> : null}
       <KV>
         <Row label="UID">
           <Copyable value={tag.uid} />
@@ -69,7 +69,7 @@ function Capabilities({ tags }: { tags: Tags }) {
   if (!caps) return null
 
   const memory = num(caps.memorySize)
-  const usable = num(caps.usableCapacity)
+  const usable = num(caps.maxNdefSize)
 
   return (
     <Panel title="Capabilities">
@@ -80,26 +80,26 @@ function Capabilities({ tags }: { tags: Tags }) {
           {memory && usable ? <span className="dim"> of {fmtBytes(memory)}</span> : null}
         </Row>
         <Row label="Writable">
-          {caps.readOnly ? (
+          {caps.isReadOnly ? (
             <Dot state="err">no — tag is locked read-only</Dot>
-          ) : caps.writable === false ? (
+          ) : caps.canWrite === false ? (
             <Dot state="err">no</Dot>
           ) : (
             <Dot state="ok">yes</Dot>
           )}
         </Row>
         <Row label="Lockable">
-          {caps.lockable ? <Dot state="ok">yes</Dot> : <Dot state="off">no</Dot>}
+          {caps.canLock ? <Dot state="ok">yes</Dot> : <Dot state="off">no</Dot>}
         </Row>
         <Row label="Password">
-          {caps.passwordProtectable ? <Dot state="ok">supported</Dot> : <Dot state="off">not supported</Dot>}
+          {caps.supportsPassword ? <Dot state="ok">supported</Dot> : <Dot state="off">not supported</Dot>}
         </Row>
       </KV>
     </Panel>
   )
 }
 
-function Records({ records, text }: { records?: NdefRecord[]; text?: string }) {
+function Records({ records, text }: { records?: NDEFRecord[]; text?: string }) {
   if (!records || records.length === 0) {
     return (
       <Panel title="NDEF message">
@@ -152,10 +152,10 @@ function Composer({ tags, writable }: { tags: Tags; writable: boolean }) {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   const caps = tags.capabilities
-  const capacity = num(caps?.usableCapacity) ?? num(caps?.memorySize)
+  const capacity = num(caps?.maxNdefSize) ?? num(caps?.memorySize)
   const size = useMemo(() => estimateMessageSize(records.map(cleanRecord)), [records])
   const over = capacity !== undefined && size > capacity
-  const readOnly = caps?.readOnly === true || caps?.writable === false
+  const readOnly = caps?.isReadOnly === true || caps?.canWrite === false
 
   // A result refers to the message that produced it.
   useEffect(() => setResult(null), [records])

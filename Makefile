@@ -1,4 +1,4 @@
-.PHONY: all build build-nowebui webui webui-dev webui-install test test-nowebui lint clean
+.PHONY: all build build-nowebui webui webui-dev webui-install client client-install client-test test test-nowebui lint clean
 
 # The agent binary. webui/frontend/dist is committed, so this needs no Node.
 all: build
@@ -13,6 +13,10 @@ build-nowebui:
 
 test:
 	go test ./...
+
+# The client library's own tests. Not part of `make test`, which needs no Node.
+client-test: client-install
+	cd client && npm test
 
 test-nowebui:
 	go test -tags nowebui ./...
@@ -30,6 +34,14 @@ webui: webui-install
 webui-install:
 	cd webui/frontend && npm install --no-audit --no-fund
 
+# Rebuild the client library's dist. Run this after changing client/src and
+# commit the result — it is what a <script> tag consumes.
+client: client-install
+	cd client && npm run build
+
+client-install:
+	cd client && npm install --no-audit --no-fund
+
 # Vite dev server with hot reload, proxying to an agent already running on
 # :9470. Override with VITE_AGENT=https://localhost:9480 make webui-dev
 webui-dev: webui-install
@@ -37,4 +49,4 @@ webui-dev: webui-install
 
 clean:
 	rm -f davi-nfc-agent
-	rm -rf webui/frontend/node_modules
+	rm -rf webui/frontend/node_modules client/node_modules

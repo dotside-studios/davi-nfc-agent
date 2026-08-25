@@ -20,7 +20,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* Matches the vite alias in vite.config.ts. */
+    "paths": {
+      "@davi/nfc-agent-client": ["../../client/src/index.ts"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../../client/src"]
 }

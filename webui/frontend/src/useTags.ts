@@ -12,9 +12,8 @@ import type { LiveEvent, ScanRecord } from './types'
 
 /**
  * The console's connection to the client endpoint, over the same library every
- * other consumer uses. The protocol belongs to `NFCClient`; what is here is
- * what the console alone wants — a feed of everything that happened, and the
- * tags seen during a run.
+ * other consumer uses. The protocol is `NFCClient`'s; what is here is the
+ * console's own — a feed of everything that happened, and the tags seen.
  */
 
 const EVENT_LIMIT = 2000

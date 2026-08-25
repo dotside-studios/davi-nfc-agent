@@ -123,7 +123,6 @@ var DaviNFC = (() => {
     isConnected() {
       return this.connected;
     }
-    /** The tag in the field, as the agent last reported it. */
     currentTag() {
       return this.tag;
     }
@@ -285,18 +284,17 @@ var DaviNFC = (() => {
         }
       }
     }
-    /** Writes NDEF records to a tag, replacing whatever it holds. */
+    /** Replaces whatever the tag holds. */
     async write(writeRequest) {
       return this.sendRequest(
         "writeRequest",
         this.aimed(writeRequest, writeRequest)
       );
     }
-    /** Makes a tag permanently read-only. Irreversible. */
+    /** Irreversible. */
     async lock(target) {
       return this.sendRequest("lockRequest", this.aimed({}, target));
     }
-    /** Exchanges raw bytes with a tag and resolves with its response. */
     async transceive(request) {
       const { data, raw, ...target } = request;
       if (data.length === 0) {
@@ -308,7 +306,7 @@ var DaviNFC = (() => {
       );
       return response.data ? decodeBase64(response.data) : new Uint8Array();
     }
-    /** Asks the tag what it supports, rather than reading what the scan captured. */
+    /** Asks the tag, rather than reading what the scan captured. */
     async getCapabilities(target) {
       const response = await this.sendRequest(
         "capabilitiesRequest",

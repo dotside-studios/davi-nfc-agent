@@ -37,10 +37,7 @@ const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10;
 const CONNECTION_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 
-/**
- * A request the agent refused, carrying the code it refused with and whether
- * repeating it could plausibly succeed.
- */
+/** A refused request, with the agent's code and whether a retry could work. */
 export class NFCRequestError extends Error {
   readonly code?: string;
   readonly retryable?: boolean;
@@ -66,11 +63,10 @@ export class NFCRequestError extends Error {
 }
 
 /**
- * Framework-agnostic client for the Davi NFC Agent, over its client endpoint
- * (plain `/ws`) on the shared agent port.
+ * Client for the Davi NFC Agent, over its client endpoint (plain `/ws`).
  *
- * Every tag operation names the tag it applies to, taken from the tag the
- * client last saw unless the caller names another.
+ * Every tag operation names the tag it applies to, taken from the tag last
+ * seen unless the caller names another.
  *
  * @example
  * const client = new NFCClient("https://localhost:9470");
@@ -127,7 +123,6 @@ export class NFCClient {
     return this.connected;
   }
 
-  /** The tag in the field, as the agent last reported it. */
   currentTag(): TagData | null {
     return this.tag;
   }
@@ -323,7 +318,7 @@ export class NFCClient {
     }
   }
 
-  /** Writes NDEF records to a tag, replacing whatever it holds. */
+  /** Replaces whatever the tag holds. */
   async write(writeRequest: WriteRequest): Promise<WriteResponse> {
     return this.sendRequest<WriteResponse>(
       "writeRequest",
@@ -331,12 +326,11 @@ export class NFCClient {
     );
   }
 
-  /** Makes a tag permanently read-only. Irreversible. */
+  /** Irreversible. */
   async lock(target?: TagTarget): Promise<LockResponse> {
     return this.sendRequest<LockResponse>("lockRequest", this.aimed({}, target));
   }
 
-  /** Exchanges raw bytes with a tag and resolves with its response. */
   async transceive(request: TransceiveRequest): Promise<Uint8Array> {
     const { data, raw, ...target } = request;
     if (data.length === 0) {
@@ -349,7 +343,7 @@ export class NFCClient {
     return response.data ? decodeBase64(response.data) : new Uint8Array();
   }
 
-  /** Asks the tag what it supports, rather than reading what the scan captured. */
+  /** Asks the tag, rather than reading what the scan captured. */
   async getCapabilities(target?: TagTarget): Promise<TagCapabilities> {
     const response = await this.sendRequest<{ capabilities?: TagCapabilities }>(
       "capabilitiesRequest",

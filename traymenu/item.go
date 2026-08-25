@@ -57,7 +57,7 @@ func (i *Item) Click() {
 
 	done := make(chan struct{})
 	select {
-	case i.owner.events <- event{item: i, done: done}:
+	case i.owner.clicks <- click{item: i, done: done}:
 	case <-i.owner.done:
 		return
 	}

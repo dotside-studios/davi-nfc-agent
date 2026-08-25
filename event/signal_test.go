@@ -1,14 +1,14 @@
-package traymenu_test
+package event_test
 
 import (
 	"sync"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/traymenu"
+	"github.com/dotside-studios/davi-nfc-agent/event"
 )
 
 func TestSignalEmitCallsHandlersInOrder(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	var got []string
 	sig.Connect(func(v int) { got = append(got, "first") })
@@ -22,7 +22,7 @@ func TestSignalEmitCallsHandlersInOrder(t *testing.T) {
 }
 
 func TestSignalEmitPassesValue(t *testing.T) {
-	var sig traymenu.Signal[string]
+	var sig event.Signal[string]
 
 	var got string
 	sig.Connect(func(v string) { got = v })
@@ -34,7 +34,7 @@ func TestSignalEmitPassesValue(t *testing.T) {
 }
 
 func TestZeroSignalEmitsToNobody(t *testing.T) {
-	var sig traymenu.Signal[struct{}]
+	var sig event.Signal[struct{}]
 	sig.Emit(struct{}{}) // must not panic
 	if sig.Len() != 0 {
 		t.Fatalf("Len = %d, want 0", sig.Len())
@@ -42,7 +42,7 @@ func TestZeroSignalEmitsToNobody(t *testing.T) {
 }
 
 func TestSignalDisconnectStopsHandler(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	calls := 0
 	conn := sig.Connect(func(int) { calls++ })
@@ -60,7 +60,7 @@ func TestSignalDisconnectStopsHandler(t *testing.T) {
 }
 
 func TestSignalDisconnectIsIdempotentAndNilSafe(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	conn := sig.Connect(func(int) {})
 	conn.Disconnect()
@@ -73,12 +73,12 @@ func TestSignalDisconnectIsIdempotentAndNilSafe(t *testing.T) {
 	}
 	other.Disconnect()
 
-	var nilConn *traymenu.Connection
+	var nilConn *event.Connection
 	nilConn.Disconnect() // must not panic
 }
 
 func TestSignalConnectNilHandlerConnectsNothing(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	conn := sig.Connect(nil)
 	if sig.Len() != 0 {
@@ -89,7 +89,7 @@ func TestSignalConnectNilHandlerConnectsNothing(t *testing.T) {
 }
 
 func TestSignalConnectOnceRunsOnce(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	calls := 0
 	sig.ConnectOnce(func(int) { calls++ })
@@ -111,7 +111,7 @@ func TestSignalConnectOnceRunsOnce(t *testing.T) {
 }
 
 func TestSignalHandlerMayConnectDuringEmit(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	late := 0
 	sig.ConnectOnce(func(int) {
@@ -130,10 +130,10 @@ func TestSignalHandlerMayConnectDuringEmit(t *testing.T) {
 }
 
 func TestSignalHandlerMayDisconnectItselfDuringEmit(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	calls := 0
-	var conn *traymenu.Connection
+	var conn *event.Connection
 	conn = sig.Connect(func(int) {
 		calls++
 		conn.Disconnect()
@@ -148,7 +148,7 @@ func TestSignalHandlerMayDisconnectItselfDuringEmit(t *testing.T) {
 }
 
 func TestSignalHandlerMayEmitDuringEmit(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	var seen []int
 	sig.Connect(func(v int) {
@@ -166,7 +166,7 @@ func TestSignalHandlerMayEmitDuringEmit(t *testing.T) {
 }
 
 func TestSignalClear(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	sig.Connect(func(int) { t.Error("cleared handler ran") })
 	sig.Clear()
@@ -178,7 +178,7 @@ func TestSignalClear(t *testing.T) {
 }
 
 func TestSignalConcurrentConnectEmitDisconnect(t *testing.T) {
-	var sig traymenu.Signal[int]
+	var sig event.Signal[int]
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

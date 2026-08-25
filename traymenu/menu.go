@@ -30,7 +30,7 @@ type Container interface {
 type Menu struct {
 	driver Driver
 
-	events    chan event
+	clicks    chan click
 	done      chan struct{}
 	closeOnce sync.Once
 
@@ -38,9 +38,9 @@ type Menu struct {
 	logf func(format string, args ...any)
 }
 
-// event is one unit of work for the dispatch goroutine: a click to deliver, an
+// click is one unit of work for the dispatch goroutine: a click to deliver, an
 // acknowledgement to close once it has been, or both.
-type event struct {
+type click struct {
 	item *Item
 	done chan struct{}
 }
@@ -60,7 +60,7 @@ func New(driver Driver) *Menu {
 
 	m := &Menu{
 		driver: driver,
-		events: make(chan event, clickQueue),
+		clicks: make(chan click, clickQueue),
 		done:   make(chan struct{}),
 		logf:   log.Printf,
 	}
@@ -199,7 +199,7 @@ func (m *Menu) watch(item *Item) {
 					return
 				}
 				select {
-				case m.events <- event{item: item}:
+				case m.clicks <- click{item: item}:
 				case <-m.done:
 					return
 				}
@@ -224,7 +224,7 @@ func (m *Menu) dispatch() {
 		select {
 		case <-m.done:
 			return
-		case ev := <-m.events:
+		case ev := <-m.clicks:
 			select {
 			case <-m.done:
 				if ev.done != nil {

@@ -1,4 +1,4 @@
-/** Control-surface types, mirroring the Go types in webui/state.go. */
+/** Control-surface types, mirroring the Go types in agent/console/state.go. */
 
 export type Mode = 'readwrite' | 'read' | 'write'
 

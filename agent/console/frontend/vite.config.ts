@@ -28,7 +28,7 @@ export default defineConfig({
 
   build: {
     // Committed to the repo and embedded with go:embed, so `go build .` works
-    // without Node. See webui/frontend/.gitignore.
+    // without Node. See agent/console/frontend/.gitignore.
     outDir: 'dist',
     // Everything ends up inside the binary, so an extra request costs a memcpy
     // rather than a round trip. Inlining keeps the served page to two files.

@@ -10,7 +10,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu/fynetray"
-	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
 // readerSlotCount bounds the NFC readers offered in the Device submenu, which
@@ -75,7 +74,7 @@ func newApp(rt *agent.Runtime, driver traymenu.Driver) *App {
 }
 
 // SyncPreferencesToMenu reflects a change made elsewhere.
-func (s *App) SyncPreferencesToMenu(next webui.Preferences) {
+func (s *App) SyncPreferencesToMenu(next console.Preferences) {
 	if s.modes == nil {
 		return
 	}
@@ -467,9 +466,9 @@ func (s *App) updateCardType(cardType string) {
 
 // trayPreferences is the tray's view of what the agent holds, in the shape the
 // console hands it when a change is made there.
-func trayPreferences(a *agent.Agent) webui.Preferences {
+func trayPreferences(a *agent.Agent) console.Preferences {
 	p := a.Preferences()
-	return webui.Preferences{
+	return console.Preferences{
 		Mode:                p.ModeName,
 		CardTypes:           p.CardTypes,
 		DevicePath:          p.DevicePath,

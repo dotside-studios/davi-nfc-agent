@@ -171,13 +171,13 @@ each of which keeps its own file.
 
 ## Building
 
-`webui/frontend/dist` is committed and embedded with `go:embed`, so `go build ./cmd/davi-nfc-agent`
+`agent/console/frontend/dist` is committed and embedded with `go:embed`, so `go build ./cmd/davi-nfc-agent`
 works with no Node installed. After changing anything under
-`webui/frontend/src`:
+`agent/console/frontend/src`:
 
 ```bash
 make webui     # npm install && npm run build
-git add webui/frontend/dist
+git add agent/console/frontend/dist
 ```
 
 For hot reload against a running agent:
@@ -188,7 +188,7 @@ VITE_AGENT=https://localhost:9480 make webui-dev
 ```
 
 The dev server proxies `/control` and `/ws`, so it drives a real agent rather
-than a mock. If `webui/frontend/dist` is missing entirely the agent still starts
+than a mock. If `agent/console/frontend/dist` is missing entirely the agent still starts
 and serves its protocol; the root falls back to the plain-text banner.
 
 To drive the console without a reader, for screenshots or to check a panel that
@@ -198,62 +198,62 @@ tag feed. It is skipped unless `SCREENSHOT_ADDR` is set:
 
 ```bash
 SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
-  go test -run TestScreenshotHarness -timeout 20m ./webui/
+  go test -run TestScreenshotHarness -timeout 20m ./agent/console/
 # then open http://127.0.0.1:9911/control/session?token=$(cat /tmp/tok)
 ```
 
 ## Leaving it out
 
-The console is its own package. `webui/` holds the whole thing: the gate, the
-routes, the state snapshot, the dispatcher, and the frontend it embeds:
+The console is one package. `agent/console/` holds the whole thing: the gate,
+the routes, the state snapshot, the dispatcher, the adapter onto the agent, and
+the frontend it embeds:
 
 ```
-webui/
-  webui.go            the Host interface, the package's only view of the agent
+agent/console/
+  doc.go              the package doc
+  console.go          the wiring entry point: New, Endpoints, AttachTray
+  host_contract.go    the Host interface, the console's only view of the agent
+  host.go             the Host implementation over a live agent
   auth.go             the three-check gate
   server.go           routes, the live socket
   state.go            the state snapshot
   actions.go          the action dispatcher
+  preferences.go      the preference DTO, shared with the tray
   embed.go            go:embed of frontend/dist
   frontend/           the Vite + React console
     src/
     dist/             built and committed
 ```
 
-`webui` does not import the agent. It declares the ~35 methods it needs as
-`webui.Host`, and `agent/console/host.go` implements them, so the console's
-entire reach into the agent is readable in one file, and its tests run against a
-fake host with no hardware behind them.
+The serving half reaches the agent only through `Host`, the ~35 methods declared
+in `host_contract.go` and implemented in `host.go`. The console's entire reach
+into the agent is readable in one file, and its tests run against a fake host
+with no hardware behind them.
 
 `go build -tags nowebui ./cmd/davi-nfc-agent` produces an agent without the
-control center: no
-`/control` routes, no privileged API, no tray entry, and no frontend in the
-binary. Roughly 820 KB smaller, and the console's strings are absent entirely.
+control center: no `/control` routes, no privileged API, no tray entry, and no
+frontend in the binary. Roughly 620 KB smaller, and the console's strings are
+absent entirely.
 
 ```bash
 make build-nowebui
 make test-nowebui     # the suite under the same tag
 ```
 
-Only three files carry `//go:build !nowebui`:
-
-```
-agent/console/console.go         the one wiring entry point
-agent/console/host.go            the Host implementation
-agent/tray/systray_console.go    the tray entry
-```
-
+Everything in `agent/console/` carries `//go:build !nowebui` except
+`preferences.go`, which the tray needs in either build, and `doc.go`.
 `agent/console/console_nowebui.go` and `agent/tray/console_nowebui.go` supply
 the stubs under the opposite tag.
 
-The agent itself needs no tag either way. It knows the console only as
-`agent.Console`, two handlers to mount and a redraw signal, so the dependency
-runs one way: `agent/console` imports `agent`, never the reverse, and `main` is
-the only place that wires the two together. A build without a console leaves
-that interface nil, and every call site already tolerates it.
+The agent itself needs no tag either way, and does not know the console at all.
+`Endpoints` returns `[]agent.Endpoint`, which the program hands to the server
+plugin like any other route, so the dependency runs one way: `agent/console`
+imports `agent`, never the reverse, and `main` is the only place that wires the
+two together. Under `nowebui` that call returns nothing and the rest of the
+build is unchanged.
 
 Dropping the console from a custom build is therefore a tag, not a patch, and
-deleting `webui/` outright leaves only `agent/console/` to remove.
+deleting `agent/console/` removes it outright.
 
 The agent's protocol is unaffected. Raw tag exchanges and the log ring stay
 in either build. Both are reachable without the console, and the transceive

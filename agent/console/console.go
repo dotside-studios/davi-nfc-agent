@@ -13,15 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
-	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
-
-// Server is the control center bound to one agent. It embeds the webui server,
-// so NotifyChange and ConsoleURL come through unchanged.
-type Server struct {
-	*webui.Server
-	host *host
-}
 
 // Config is what the console reports on. The agent is required; the rest are
 // what this build happens to run, and a nil one is reported as absent rather
@@ -54,16 +46,14 @@ func New(cfg Config) *Server {
 		trust:   cfg.Trust,
 	}
 	info := a.Info()
-	s := &Server{
-		Server: webui.New(webui.Config{
-			Host:    h,
-			Logs:    cfg.Logs,
-			Name:    info.Name,
-			Version: info.FullVersion(),
-			Dev:     info.IsDev(),
-		}),
-		host: h,
-	}
+	s := newServer(serverConfig{
+		Host:    h,
+		Logs:    cfg.Logs,
+		Name:    info.Name,
+		Version: info.FullVersion(),
+		Dev:     info.IsDev(),
+	})
+	s.adapter = h
 
 	// Both stores are optional configuration, so an agent built without them
 	// still gets a console; it just has less to follow.
@@ -173,15 +163,15 @@ func (s *Server) Assets() http.Handler {
 	if s == nil {
 		return nil
 	}
-	return webui.Console()
+	return frontendHandler()
 }
 
 // AttachTray gives the console a tray to act through, so a change made in the
 // console moves the tray's menu state too. Without one the console drives the
 // agent directly, as a headless run wants.
 func (s *Server) AttachTray(t Tray) {
-	if s == nil || s.host == nil {
+	if s == nil || s.adapter == nil {
 		return
 	}
-	s.host.app = t
+	s.adapter.app = t
 }

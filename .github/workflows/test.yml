@@ -156,7 +156,7 @@ jobs:
           npm run build
 
       - name: Control center
-        working-directory: webui/frontend
+        working-directory: agent/console/frontend
         run: |
           npm ci
           npm run lint
@@ -164,9 +164,9 @@ jobs:
 
       - name: Committed build output is current
         run: |
-          if ! git diff --quiet -- client/dist webui/frontend/dist; then
-            echo "::error::client/dist or webui/frontend/dist is stale."
+          if ! git diff --quiet -- client/dist agent/console/frontend/dist; then
+            echo "::error::client/dist or agent/console/frontend/dist is stale."
             echo "Run 'make client' and 'make webui', then commit the result."
-            git --no-pager diff --stat -- client/dist webui/frontend/dist
+            git --no-pager diff --stat -- client/dist agent/console/frontend/dist
             exit 1
           fi

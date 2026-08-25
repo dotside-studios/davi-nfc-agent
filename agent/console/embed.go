@@ -1,4 +1,6 @@
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"embed"
@@ -15,7 +17,7 @@ import (
 var frontendFS embed.FS
 
 // Console serves the built console, or nil if no build is embedded.
-func Console() http.Handler {
+func frontendHandler() http.Handler {
 	dist, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		return nil

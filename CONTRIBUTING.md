@@ -110,11 +110,13 @@ davi-nfc-agent/
 ├── cmd/
 │   └── davi-nfc-agent/  # The binary: picks the NFC backend and wires the rest
 │                        # (see docs/custom-builds.md to build your own)
-├── agent/               # The agent itself: orchestration, CLI flags, config
+├── agent/               # The agent itself: lifecycle, config, plugins
 │   ├── agent.go         # Core agent logic
-│   ├── cli.go           # Flag parsing and startup wiring
-│   ├── console.go       # The console as the agent sees it (an interface)
-│   ├── console/         # Control center: webui.Host adapter (-tags nowebui drops it)
+│   ├── setup.go         # Options and Setup, what the flags resolve to
+│   ├── plugin.go        # Plugin, AgentContext, activation
+│   ├── serverplugin.go  # The listener and everything served from it
+│   ├── console/         # Control center: API, frontend, agent adapter
+│   │                    #   (-tags nowebui drops it)
 │   └── tray/            # System tray UI (the only fyne.io/systray dependency)
 ├── buildinfo/           # Version and build metadata
 ├── nfc/                 # NFC abstraction layer

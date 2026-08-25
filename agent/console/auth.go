@@ -1,4 +1,6 @@
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"crypto/rand"

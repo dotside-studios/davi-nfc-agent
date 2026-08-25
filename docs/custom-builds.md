@@ -381,7 +381,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | Package | Contents |
 |---|---|
 | `agent` | The agent, and the plugins the shipped build registers: the listener, pairing and the certificate |
-| `agent/console` | The control center, adapting the agent to `webui.Host` |
+| `agent/console` | The control center: the privileged API, the embedded frontend, and the adapter onto the agent |
 | `agent/tray` | The system tray |
 | `nfc` | Readers, tag drivers, NDEF encoding and decoding |
 | `nfc/pcsc` | The PC/SC hardware backend |

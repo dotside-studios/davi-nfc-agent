@@ -1,4 +1,6 @@
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"encoding/json"
@@ -19,7 +21,7 @@ func TestSnapshotKeysAreLowerCamel(t *testing.T) {
 		UserAgent: "Mozilla/5.0", ConnectedAt: time.Now(), Writes: 2, Locks: 1,
 	}}
 
-	console := New(Config{Host: host, Name: "davi-nfc-agent", Version: "test"})
+	console := newServer(serverConfig{Host: host, Name: "davi-nfc-agent", Version: "test"})
 
 	body, err := json.Marshal(console.buildState())
 	if err != nil {
@@ -65,7 +67,7 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 		RequirePairedDevice: true,
 	}
 
-	console := New(Config{Host: host, Name: "davi-nfc-agent", Version: "test"})
+	console := newServer(serverConfig{Host: host, Name: "davi-nfc-agent", Version: "test"})
 	state := console.buildState()
 
 	if state.Settings.Mode != nfc.ModeNameReadOnly {

@@ -1,10 +1,6 @@
-// Package webui serves the agent's control center: a privileged HTTP API under
-// /control and the console that drives it, whose source lives in frontend/ and
-// whose build is embedded by embed.go.
-//
-// It imports no agent internals; everything it needs is declared here as Host
-// and supplied by the caller.
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"time"
@@ -92,8 +88,8 @@ type Client struct {
 	Locks       int
 }
 
-// Config assembles a Server.
-type Config struct {
+// serverConfig assembles a Server.
+type serverConfig struct {
 	// Host is the agent under administration. Required.
 	Host Host
 

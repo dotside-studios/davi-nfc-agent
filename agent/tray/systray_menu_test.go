@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
-	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
 func newTestAgent() *nfcagent.Agent {
@@ -206,7 +206,7 @@ func TestSyncPreferencesToMenu(t *testing.T) {
 	app, _ := newTestTray(t, agent)
 
 	cardType := nfc.GetAllCardTypes()[0]
-	app.SyncPreferencesToMenu(webui.Preferences{
+	app.SyncPreferencesToMenu(console.Preferences{
 		Mode:           nfc.ModeNameWriteOnly,
 		CardTypes:      []string{cardType},
 		ReaderFeedback: true,
@@ -229,7 +229,7 @@ func TestSyncPreferencesToMenu(t *testing.T) {
 	}
 
 	// And back to no filter at all.
-	app.SyncPreferencesToMenu(webui.Preferences{Mode: nfc.ModeNameReadWrite})
+	app.SyncPreferencesToMenu(console.Preferences{Mode: nfc.ModeNameReadWrite})
 	if !app.cardTypes.All().Checked() || app.cardTypes.Item(cardType).Checked() {
 		t.Error("clearing the stored card types did not restore All Types")
 	}

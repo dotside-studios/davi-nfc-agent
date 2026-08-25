@@ -1,4 +1,6 @@
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"encoding/base64"
@@ -22,7 +24,7 @@ import (
 //
 // Not part of the normal suite: it only runs when SCREENSHOT_ADDR is set.
 //
-//	SCREENSHOT_ADDR=127.0.0.1:9911 go test ./webui/ -run TestScreenshotHarness -timeout 20m
+//	SCREENSHOT_ADDR=127.0.0.1:9911 go test ./agent/console/ -run TestScreenshotHarness -timeout 20m
 func TestScreenshotHarness(t *testing.T) {
 	addr := os.Getenv("SCREENSHOT_ADDR")
 	if addr == "" {
@@ -61,7 +63,7 @@ func TestScreenshotHarness(t *testing.T) {
 	ring := logbuf.New(500)
 	seedLog(ring)
 
-	console := New(Config{
+	console := newServer(serverConfig{
 		Host: host, Logs: ring,
 		Name: "davi-nfc-agent", Version: "1.0.3", Dev: true,
 	})
@@ -69,7 +71,7 @@ func TestScreenshotHarness(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("/control/", console.Handler())
 	mux.HandleFunc("/ws", fakeTagFeed)
-	mux.Handle("/", Console())
+	mux.Handle("/", frontendHandler())
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

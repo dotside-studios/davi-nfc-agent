@@ -8,10 +8,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
-	"github.com/dotside-studios/davi-nfc-agent/webui"
 )
 
-// host adapts the agent to webui.Host. Every reach the console makes into the
+// host adapts the agent to Host. Every reach the console makes into the
 // agent is a method here. app is the tray, when there is one: actions that
 // must also move the tray's menu go through it rather than straight to the
 // agent.
@@ -23,7 +22,7 @@ type host struct {
 	app     Tray
 }
 
-var _ webui.Host = (*host)(nil)
+var _ Host = (*host)(nil)
 
 func (h *host) Running() bool     { return h.agent.Reader() != nil }
 func (h *host) ConfigDir() string { return h.agent.ConfigDir() }
@@ -114,14 +113,14 @@ func (h *host) ClientCount() int {
 	return h.agent.ClientServer.ClientCount()
 }
 
-func (h *host) Clients() []webui.Client {
+func (h *host) Clients() []Client {
 	if h.agent.ClientServer == nil {
 		return nil
 	}
 	live := h.agent.ClientServer.Clients()
-	out := make([]webui.Client, 0, len(live))
+	out := make([]Client, 0, len(live))
 	for _, c := range live {
-		out = append(out, webui.Client{
+		out = append(out, Client{
 			ID:          c.ID,
 			Origin:      c.Origin,
 			RemoteAddr:  c.RemoteAddr,
@@ -190,7 +189,7 @@ func (h *host) RegenerateCertificate() error {
 // reporting success for work that never happened.
 func (h *host) managesCertificates() bool { return h.trust.Authority() != nil }
 
-func (h *host) PairedDevices() []webui.PairedDevice {
+func (h *host) PairedDevices() []PairedDevice {
 	if h.agent.Devices() == nil {
 		return nil
 	}
@@ -207,9 +206,9 @@ func (h *host) PairedDevices() []webui.PairedDevice {
 	}
 
 	paired := h.agent.Devices().List()
-	out := make([]webui.PairedDevice, 0, len(paired))
+	out := make([]PairedDevice, 0, len(paired))
 	for _, d := range paired {
-		out = append(out, webui.PairedDevice{
+		out = append(out, PairedDevice{
 			ID:       d.ID,
 			Name:     d.Name,
 			Platform: d.Platform,
@@ -275,14 +274,14 @@ func (h *host) SetOriginCheckDisabled(on bool) {
 
 // Preferences comes from the agent, so the console shows what is in force,
 // such as a mode switched from the tray.
-func (h *host) Preferences() webui.Preferences {
+func (h *host) Preferences() Preferences {
 	return asWebUIPreferences(h.agent.Preferences())
 }
 
 // ApplyPreferences changes the agent and answers with what it holds afterwards,
 // which is not necessarily what was asked for. Nothing is persisted: a change
 // lasts as long as the agent runs.
-func (h *host) ApplyPreferences(mutate func(*webui.Preferences)) webui.Preferences {
+func (h *host) ApplyPreferences(mutate func(*Preferences)) Preferences {
 	next := asWebUIPreferences(h.agent.Preferences())
 	mutate(&next)
 
@@ -301,8 +300,8 @@ func (h *host) ApplyPreferences(mutate func(*webui.Preferences)) webui.Preferenc
 }
 
 // asWebUIPreferences is the console's view of what the agent holds.
-func asWebUIPreferences(p agent.Preferences) webui.Preferences {
-	return webui.Preferences{
+func asWebUIPreferences(p agent.Preferences) Preferences {
+	return Preferences{
 		Mode:                p.ModeName,
 		CardTypes:           p.CardTypes,
 		DevicePath:          p.DevicePath,

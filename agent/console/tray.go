@@ -1,7 +1,5 @@
 package console
 
-import "github.com/dotside-studios/davi-nfc-agent/webui"
-
 // Tray is the console's view of the system tray: the actions the console can
 // take that must also move the tray's menu, so the two never disagree about
 // what the agent is doing.
@@ -16,5 +14,5 @@ type Tray interface {
 	// SwitchDevice moves the tray's device selection.
 	SwitchDevice(devicePath string)
 	// SyncPreferencesToMenu reflects a change made in the console.
-	SyncPreferencesToMenu(next webui.Preferences)
+	SyncPreferencesToMenu(next Preferences)
 }

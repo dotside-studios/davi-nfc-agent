@@ -1,4 +1,6 @@
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"encoding/json"
@@ -21,6 +23,7 @@ import (
 // ordinary client endpoint, so there is one implementation of the write path.
 type Server struct {
 	host      Host
+	adapter   *host // set when the Host is this package's own agent adapter
 	auth      *Auth
 	logs      *logbuf.Ring
 	name      string
@@ -33,8 +36,8 @@ type Server struct {
 	listenerN int
 }
 
-// New builds the console API over a host.
-func New(config Config) *Server {
+// newServer builds the console API over a host.
+func newServer(config serverConfig) *Server {
 	return &Server{
 		host:      config.Host,
 		auth:      NewAuth(),

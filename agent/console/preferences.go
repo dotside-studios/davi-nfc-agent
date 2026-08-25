@@ -1,4 +1,4 @@
-package webui
+package console
 
 // Preferences is what the agent is set to, and the console's only source for a
 // preference: the reader mode, the card-type filter, the pinned reader, the

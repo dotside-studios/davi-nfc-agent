@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
 - `wsconn` moved to `server/wsconn`
+- The `webui` package merged into `agent/console`, which now holds the gate, the
+  routes, the state snapshot, the dispatcher, the `Host` adapter and the
+  embedded frontend. `webui.Host` and `webui.Preferences` are `console.Host` and
+  `console.Preferences`; the two-layer `Config`/`New`/`Server` collapsed into one
 - The agent holds no listener. `Agent.Routes` is what it serves of its own,
   `/ws` and the two health checks, as data for whatever mounts it. `Setup` builds
   no listener and no pairing server: the program registers both as plugins. Gone

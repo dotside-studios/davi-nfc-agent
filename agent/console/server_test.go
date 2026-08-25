@@ -1,4 +1,6 @@
-package webui
+//go:build !nowebui
+
+package console
 
 import (
 	"encoding/json"
@@ -27,7 +29,7 @@ func newTestServer(t *testing.T) (*Server, *fakeHost, http.Handler, *http.Cookie
 	t.Helper()
 
 	host := newFakeHost()
-	console := New(Config{Host: host, Logs: logbuf.New(64), Name: "davi-nfc-agent", Version: "test"})
+	console := newServer(serverConfig{Host: host, Logs: logbuf.New(64), Name: "davi-nfc-agent", Version: "test"})
 
 	token, _ := console.auth.MintHandoff()
 	session, ok := console.auth.RedeemHandoff(token)

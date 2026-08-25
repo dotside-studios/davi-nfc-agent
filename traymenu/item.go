@@ -47,6 +47,14 @@ func (i *Item) Click() {
 		return
 	}
 
+	// A closed menu wins over a free slot in the queue. Selecting on the two
+	// together would pick between them at random whenever both are ready.
+	select {
+	case <-i.owner.done:
+		return
+	default:
+	}
+
 	done := make(chan struct{})
 	select {
 	case i.owner.events <- event{item: i, done: done}:
@@ -251,8 +259,6 @@ func (i *Item) adopt(child *Item) {
 	i.children = append(i.children, child)
 }
 
-// ---- Container ----
-
 // Add appends a plain item to this item's submenu.
 func (i *Item) Add(title string, opts ...Option) *Item {
 	return i.owner.add(i, build(title, false, false, opts))
@@ -276,10 +282,14 @@ func (i *Item) AddSeparator() {
 	i.owner.driver.AddSeparator(i.platform)
 }
 
+// Section appends a keyed group of items to this item's submenu. See
+// [NewSection].
+func (i *Item) Section(title string, opts ...Option) *Section {
+	return NewSection(i, title, opts...)
+}
+
 func (i *Item) menu() *Menu    { return i.owner }
 func (i *Item) native() Native { return i.platform }
-
-// ---- options ----
 
 // options is what the Option functions accumulate before an item exists.
 type options struct {

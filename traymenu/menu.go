@@ -18,6 +18,9 @@ type Container interface {
 	AddSubmenu(title string, opts ...Option) *Item
 	// AddSeparator appends a divider.
 	AddSeparator()
+	// Section appends a submenu that keyed entries are registered into, for
+	// items added after the surrounding menu was built. See [NewSection].
+	Section(title string, opts ...Option) *Section
 
 	menu() *Menu
 	native() Native
@@ -45,13 +48,14 @@ type event struct {
 // clickQueue is the dispatch backlog. It only fills when a handler blocks.
 const clickQueue = 64
 
-// New returns a menu drawn by driver. A nil driver means Fyne, the real tray.
+// New returns a menu drawn by driver. A nil driver draws nothing: see
+// [Discard], and see traymenu/fynetray for the real tray.
 //
 // Nothing is shown until Run is called, and items may only be added once it has
 // called back.
 func New(driver Driver) *Menu {
 	if driver == nil {
-		driver = Fyne()
+		driver = Discard()
 	}
 
 	m := &Menu{
@@ -125,6 +129,11 @@ func (m *Menu) AddSubmenu(title string, opts ...Option) *Item {
 
 // AddSeparator appends a divider to the top level.
 func (m *Menu) AddSeparator() { m.driver.AddSeparator(nil) }
+
+// Section appends a keyed group of items to the top level. See [NewSection].
+func (m *Menu) Section(title string, opts ...Option) *Section {
+	return NewSection(m, title, opts...)
+}
 
 func (m *Menu) menu() *Menu    { return m }
 func (m *Menu) native() Native { return nil }
@@ -200,12 +209,31 @@ func (m *Menu) watch(item *Item) {
 }
 
 // dispatch runs every click handler, one at a time and in arrival order.
+//
+// A closed done wins over a queued event. Selecting on the two together would
+// pick between them at random whenever both are ready, so a click enqueued
+// around a Close would run about half the time.
 func (m *Menu) dispatch() {
 	for {
 		select {
 		case <-m.done:
 			return
+		default:
+		}
+
+		select {
+		case <-m.done:
+			return
 		case ev := <-m.events:
+			select {
+			case <-m.done:
+				if ev.done != nil {
+					close(ev.done)
+				}
+				return
+			default:
+			}
+
 			if ev.item != nil {
 				m.deliver(ev.item)
 			}

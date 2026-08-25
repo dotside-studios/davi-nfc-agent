@@ -191,8 +191,8 @@ func madCRC(data []byte) byte {
 }
 
 // trailerCondRecoverable is the sector-trailer access condition (C1=0, C2=1,
-// C3=1) used by NDEF formatting. It keeps the trailer rewritable with Key B —
-// Key B can rewrite Key A, the access bits, and Key B itself — so a
+// C3=1) used by NDEF formatting. It keeps the trailer rewritable with Key B,
+// which can rewrite Key A, the access bits, and Key B itself, so a
 // misconfiguration can be undone by authenticating with the known Key B.
 const trailerCondRecoverable = 0b011
 

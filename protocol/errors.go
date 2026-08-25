@@ -1,7 +1,7 @@
 package protocol
 
-// ErrorCode identifies a failure on the wire. The values are stable strings —
-// clients switch on them — and split into two families: protocol errors, raised
+// ErrorCode identifies a failure on the wire. The values are stable strings that
+// clients switch on, and split into two families: protocol errors, raised
 // by the bridge itself, and NFC errors, which mirror nfc.ErrorCode and describe
 // something that happened at the tag.
 type ErrorCode string
@@ -68,8 +68,8 @@ type ErrorPayload struct {
 }
 
 // retryableCodes are failures where the same request could succeed if repeated:
-// transient I/O, a tag that moved, a full queue. Everything else is a decision —
-// malformed input, an unsupported operation, a locked tag — and repeating it
+// transient I/O, a tag that moved, a full queue. Everything else is a decision
+// (malformed input, an unsupported operation, a locked tag) and repeating it
 // only wastes a round trip.
 var retryableCodes = map[ErrorCode]bool{
 	ErrCodeTagRemoved:       true,

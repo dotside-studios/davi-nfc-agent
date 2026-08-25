@@ -40,6 +40,12 @@ func InternalErrorCode(wire ErrorCode, fallback nfc.ErrorCode) nfc.ErrorCode {
 // else lands on UNKNOWN_ERROR, which is not retryable, because an error we
 // cannot classify is not one we should encourage a device to repeat.
 func ErrorPayloadFor(err error) ErrorPayload {
+	// An agent-side refusal names its own code and never reached a tag.
+	var coded *CodedError
+	if errors.As(err, &coded) {
+		return NewErrorPayload(coded.Code)
+	}
+
 	var nfcErr *nfc.NFCError
 	if !errors.As(err, &nfcErr) {
 		return NewErrorPayload(ErrCodeUnknownError)

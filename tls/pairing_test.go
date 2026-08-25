@@ -147,7 +147,7 @@ func TestPairLocksAfterRepeatedWrongPIN(t *testing.T) {
 }
 
 // An agent using an externally provisioned certificate has no CA to hand out,
-// but must still be able to pair devices — otherwise the deployment that avoids
+// but must still be able to pair devices, or the deployment that avoids
 // installing a CA has no way to authenticate one.
 func TestPairWorksWithoutCA(t *testing.T) {
 	s := NewBootstrapServer(nil, 0)

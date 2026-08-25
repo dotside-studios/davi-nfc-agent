@@ -102,6 +102,8 @@ func (m *Manager) InstallCA() error {
 		m.useCA = false
 		return fmt.Errorf("failed to install the certificate authority: %w", err)
 	}
+
+	m.notifyReissued()
 	return nil
 }
 
@@ -230,8 +232,8 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 // generate issues certificates by whichever route is configured.
 //
 // The CA route is used only when asked for, or when this install already has a
-// CA — an operator whose browser console works today should not lose it to a
-// changed default.
+// CA, since an operator whose browser console works today should not lose it
+// to a changed default.
 func (m *Manager) generate(hosts []string) error {
 	// Startup reaches here after EnsureCertificates has already made the
 	// directory, but a reissue can be the first thing that runs.
@@ -240,7 +242,11 @@ func (m *Manager) generate(hosts []string) error {
 	}
 
 	if m.usesCA() {
-		return m.generateCertificates(hosts)
+		if err := m.generateCertificates(hosts); err != nil {
+			return err
+		}
+		m.notifyReissued()
+		return nil
 	}
 
 	m.logger.Printf("Generating self-signed certificate for hosts: %v", hosts)
@@ -253,6 +259,8 @@ func (m *Manager) generate(hosts []string) error {
 	if pin, err := m.PublicKeyPin(); err == nil {
 		m.logger.Printf("Agent public key pin: %s", pin)
 	}
+
+	m.notifyReissued()
 	return nil
 }
 
@@ -404,11 +412,29 @@ func (m *Manager) ReadCACert() ([]byte, error) {
 	return os.ReadFile(m.caCertFile)
 }
 
+// CertificateWatcher reports every reissue of the certificate: one the manager
+// makes itself when the machine's addresses change, and one asked for through
+// InstallCA or RegenerateCertificates. A receive means the files on disk are
+// new, so whoever serves them should bind again.
+//
+// That is the whole contract between a certificate and a listener. Nothing has
+// to call back to say "and now rebind": reissuing is the event, and binding
+// again is what the thing serving it does about it.
+//
+// Named so that a listener can be handed the watching without the whole
+// manager, as [CertificateAuthority] is for the pairing server.
+type CertificateWatcher interface {
+	WatchReissues() <-chan struct{}
+	StopWatching()
+}
+
+var _ CertificateWatcher = (*Manager)(nil)
+
 // WatchNetworkChanges starts watching for network changes and returns a channel
 // that signals when certificates have been regenerated due to IP changes.
 // The channel receives a signal after new certificates are ready.
 // Safe to call multiple times; subsequent calls return the existing channel.
-func (m *Manager) WatchNetworkChanges() <-chan struct{} {
+func (m *Manager) WatchReissues() <-chan struct{} {
 	m.mu.Lock()
 	if m.networkChangeChan != nil {
 		ch := m.networkChangeChan
@@ -475,6 +501,7 @@ func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struc
 
 		m.logger.Printf("Network change detected: %v -> %v", prev, currentHosts)
 
+		// The reissue reports itself; see notifyReissued.
 		if err := m.RegenerateCertificates(); err != nil {
 			m.logger.Printf("Failed to regenerate certificates: %v", err)
 			continue
@@ -485,12 +512,24 @@ func (m *Manager) watchNetworkLoop(stopCh <-chan struct{}, notifyCh chan<- struc
 		m.mu.Lock()
 		m.lastHosts = currentHosts
 		m.mu.Unlock()
+	}
+}
 
-		select {
-		case notifyCh <- struct{}{}:
-		default:
-			// Channel full, skip
-		}
+// notifyReissued tells the watcher the certificate files are new. Called after
+// every successful write, whoever asked for it, so that serving the new one is
+// never something a caller has to remember.
+func (m *Manager) notifyReissued() {
+	m.mu.Lock()
+	notifyCh := m.networkChangeChan
+	m.mu.Unlock()
+
+	if notifyCh == nil {
+		return
+	}
+	select {
+	case notifyCh <- struct{}{}:
+	default:
+		// One pending reissue says as much as two.
 	}
 }
 

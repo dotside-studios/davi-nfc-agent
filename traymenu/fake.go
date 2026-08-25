@@ -116,7 +116,7 @@ func (f *Fake) AddItem(parent Native, spec Spec) Native {
 }
 
 // RemoveItem implements Driver. The item and its submenu leave the tree, and
-// its click channel closes, which is what the real driver does.
+// its click channel closes, as the real driver does.
 func (f *Fake) RemoveItem(native Native) {
 	item := native.(*FakeItem)
 

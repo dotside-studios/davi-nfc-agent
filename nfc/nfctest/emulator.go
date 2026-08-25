@@ -5,8 +5,8 @@
 //
 //   - Low-level emulators speak the real PC/SC and DESFire wire protocols and
 //     back the production tag drivers (via nfc.NewEmulatedTag), so real driver
-//     I/O — page/block math, TLV framing, lock bytes, status words, frame
-//     chaining — runs against emulated silicon.
+//     I/O (page/block math, TLV framing, lock bytes, status words, frame
+//     chaining) runs against emulated silicon.
 //
 //   - A façade (EmulatedCard, EmulatedReader) lets a test declare a card with
 //     NDEF entries and "present" it to a reader as if it were real hardware,
@@ -105,7 +105,7 @@ func newUltralightEmulator() *memEmulator {
 }
 
 // newUltralightEV1Emulator builds an MF0UL21: 41 pages, user memory 4-35. Its
-// dynamic lock page is deliberately left unset -- the driver refuses to lock
+// dynamic lock page is deliberately left unset, since the driver refuses to lock
 // this variant rather than set only the static lock bytes, which would leave
 // pages 16-35 writable for good.
 func newUltralightEV1Emulator() *memEmulator {
@@ -389,7 +389,7 @@ func (e *classicEmulator) Transceive(cmd []byte) ([]byte, error) {
 		}
 		copy(e.blocks[block][:], cmd[5:5+lc])
 		// A trailer written with inconsistent access bits invalidates the
-		// sector on real silicon — model that so formatting mistakes are
+		// sector on real silicon, so model that and keep formatting mistakes
 		// observable in software.
 		sector := classicSectorOf(block, e.is4K)
 		if block == classicTrailerBlock(sector, e.is4K) {

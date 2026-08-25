@@ -166,29 +166,29 @@ func TestSameHosts(t *testing.T) {
 	}
 }
 
-// TestWatchNetworkChangesConcurrency exercises the watcher init/teardown paths
+// TestWatchReissuesConcurrency exercises the watcher init/teardown paths
 // under concurrent callers. Run with -race to detect data races on the
 // networkChangeChan / stopWatchChan / lastHosts fields.
-func TestWatchNetworkChangesConcurrency(t *testing.T) {
+func TestWatchReissuesConcurrency(t *testing.T) {
 	mgr := NewManager(t.TempDir())
 
 	const goroutines = 20
 	var wg sync.WaitGroup
 
-	// Concurrent WatchNetworkChanges callers must all return the same channel.
+	// Concurrent WatchReissues callers must all return the same channel.
 	chans := make([]<-chan struct{}, goroutines)
 	wg.Add(goroutines)
 	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
-			chans[idx] = mgr.WatchNetworkChanges()
+			chans[idx] = mgr.WatchReissues()
 		}(i)
 	}
 	wg.Wait()
 
 	first := chans[0]
 	if first == nil {
-		t.Fatal("WatchNetworkChanges returned nil channel")
+		t.Fatal("WatchReissues returned nil channel")
 	}
 	for i, ch := range chans {
 		if ch != first {

@@ -5,10 +5,11 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/wsconn"
+	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/google/uuid"
 )
 
@@ -28,7 +29,7 @@ type Manager struct {
 	deviceChangeChan  chan struct{}      // Signals registration and unregistration
 
 	// Policy supplied by the agent through Handler.
-	publicKeyPin         string
+	publicKeyPin         func() string
 	allowTagModification func() bool
 
 	sessions    map[string]*wsconn.SafeConn // deviceID -> connection
@@ -42,6 +43,9 @@ type Manager struct {
 	// that names none. The tags themselves live on the devices holding them.
 	activeLatest string
 	activeMu     sync.RWMutex
+
+	// reqSeq labels each request to a device.
+	reqSeq atomic.Uint64
 }
 
 // NewManager creates a new smartphone manager.

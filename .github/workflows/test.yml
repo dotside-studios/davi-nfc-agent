@@ -117,17 +117,56 @@ jobs:
         run: |
           for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             echo "== $target"
-            GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null .
+            GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/davi-nfc-agent
           done
 
       - name: Build the macOS packages
-        # The agent itself needs cgo on darwin (fyne.io/systray talks to Cocoa),
-        # which an Ubuntu runner cannot do; everything below the systray can
-        # still be type-checked here.
+        # Only the tray needs cgo on darwin (fyne.io/systray talks to Cocoa),
+        # which an Ubuntu runner cannot do. Everything else, including the
+        # agent and the console, which import no GUI, is type-checked here, so
+        # agent/tray and the cmd that embeds it are the only darwin gaps.
         env:
           CGO_ENABLED: '0'
         run: |
           for arch in amd64 arm64; do
             echo "== darwin/$arch"
-            GOOS=darwin GOARCH=$arch go build ./nfc/... ./server/... ./tls/... ./protocol/...
+            GOOS=darwin GOARCH=$arch go build \
+              ./agent ./agent/console ./nfc/... ./server/... ./tls/... ./protocol/...
           done
+
+  web:
+    # The client library and the console that consumes it. Both build outputs
+    # are committed, so this also checks the tree holds what the source
+    # produces.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Client library
+        working-directory: client
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Control center
+        working-directory: agent/console/frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Committed build output is current
+        run: |
+          if ! git diff --quiet -- client/dist agent/console/frontend/dist; then
+            echo "::error::client/dist or agent/console/frontend/dist is stale."
+            echo "Run 'make client' and 'make webui', then commit the result."
+            git --no-pager diff --stat -- client/dist agent/console/frontend/dist
+            exit 1
+          fi

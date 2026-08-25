@@ -9,7 +9,7 @@ Download pre-built binaries from [releases](https://github.com/dotside-studios/d
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
 cd davi-nfc-agent
-go build .
+go build ./cmd/davi-nfc-agent
 ```
 
 ## Requirements
@@ -60,8 +60,15 @@ Any PC/SC-compatible NFC reader works, including:
 
 ### Reader LED and Buzzer
 
-Reader feedback (**Flash and Beep on Scan**) drives the reader over
-`SCardControl`. Two stacks refuse to carry those commands until told to:
+**Flash and Beep on Scan** in the tray menu makes the reader signal each
+operation: one green flash with a short beep when a tag is read or written, two
+red flashes when a write or a lock fails. It is off by default, and turning it
+on lasts as long as the agent runs.
+
+The commands come from the ACS ACR122U instruction set, so ACR122 readers answer
+them; other readers report the feature as unsupported and are skipped. They are
+sent over `SCardControl`, and two stacks refuse to carry those commands until
+told to:
 
 - **Linux (pcsc-lite):** set bit 0 of `ifdDriverOptions` in the CCID driver's
   `libccid_Info.plist` (usually `/etc/libccid_Info.plist` or under

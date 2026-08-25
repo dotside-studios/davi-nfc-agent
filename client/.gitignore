@@ -1,0 +1,4 @@
+node_modules
+
+# dist/ is deliberately NOT ignored: it is generated from src/ with
+# `npm run build` and committed so consuming this library needs no Node.

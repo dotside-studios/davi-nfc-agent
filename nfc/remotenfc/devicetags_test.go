@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // scanning registers a device and gives it a tag, the way a session does.
@@ -13,7 +12,7 @@ func scanning(t *testing.T, m *Manager, uid string) *Device {
 	t.Helper()
 
 	dev, err := m.RegisterDevice(DeviceRegistrationRequest{
-		DeviceName: "Test Phone", Platform: "android", ProtocolVersion: protocol.DeviceProtocolV1,
+		DeviceName: "Test Phone", Platform: "android", ProtocolVersion: DeviceProtocolV1,
 		Capabilities: &DeviceCapabilities{CanRead: true},
 	})
 	if err != nil {
@@ -56,7 +55,7 @@ func TestDeviceWithoutATagWaitsThenReportsNone(t *testing.T) {
 	defer m.Close()
 
 	dev, err := m.RegisterDevice(DeviceRegistrationRequest{
-		DeviceName: "Empty", Platform: "ios", ProtocolVersion: protocol.DeviceProtocolV1,
+		DeviceName: "Empty", Platform: "ios", ProtocolVersion: DeviceProtocolV1,
 	})
 	if err != nil {
 		t.Fatalf("RegisterDevice: %v", err)

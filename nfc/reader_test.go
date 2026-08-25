@@ -1095,8 +1095,8 @@ func TestNFCReader_WriteMessageWithOptions_NoCard(t *testing.T) {
 
 // An error no branch recognizes leaves the device exactly as it was, so the
 // reader still has one and goes straight back to polling it. That is a loop
-// with no delay in it and a log line every turn — the shape behind hundreds of
-// identical lines a second against a phone that had disconnected.
+// with no delay in it and a log line every turn, which is the shape behind
+// hundreds of identical lines a second against a phone that had disconnected.
 func TestHandleDeviceErrors_PacesAnErrorNothingRecognizes(t *testing.T) {
 	manager := NewMockManager()
 	manager.MockDevice = NewMockDevice()

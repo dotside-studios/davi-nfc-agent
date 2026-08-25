@@ -2,11 +2,7 @@ package remotenfc
 
 import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
-
-// DeviceCapabilities defines the capabilities of a smartphone NFC device.
-type DeviceCapabilities = protocol.DeviceCapabilities
 
 // DeviceRegistrationRequest is sent by mobile app to register as an NFC device.
 type DeviceRegistrationRequest struct {
@@ -29,13 +25,10 @@ type DeviceRegistrationRequest struct {
 // wire shapes field for field and JSON tag for JSON tag, which bought a
 // hand-written translation step in the device server and nothing else: two
 // names for one thing drift, and these had already begun to.
-type TagData = protocol.DeviceTagData
+type TagData = DeviceTagData
 
 // TagRemovedData is what a device reports when a tag leaves its field.
-type TagRemovedData = protocol.DeviceTagRemovedData
-
-// DeviceHeartbeat is what a device sends periodically to stay registered.
-type DeviceHeartbeat = protocol.DeviceHeartbeat
+type TagRemovedData = DeviceTagRemovedData
 
 // ConvertTagData converts a device's tag report to an nfc.Tag. The result is
 // read-only, having no route back to the device that scanned it; a tag the
@@ -59,7 +52,7 @@ func convertTagData(data TagData, route tagRoute) (nfc.Tag, error) {
 	}
 
 	// Normalize UID format
-	uid, err := protocol.ParseUID(data.UID)
+	uid, err := ParseUID(data.UID)
 	if err != nil {
 		return nil, nfc.WrapError(nfc.ErrCodeInvalidData, op, "invalid UID format", err)
 	}
@@ -68,7 +61,7 @@ func convertTagData(data TagData, route tagRoute) (nfc.Tag, error) {
 	var ndefMsg *nfc.NDEFMessage
 	var ndefData []byte
 	if data.NDEFMessage != nil {
-		ndefMsg, err = protocol.ConvertNDEFInput(data.NDEFMessage)
+		ndefMsg, err = ConvertNDEFInput(data.NDEFMessage)
 		if err != nil {
 			return nil, wrapTagDataError(op, uid, "failed to parse NDEF message", err)
 		}

@@ -413,7 +413,7 @@ func TestMultiManagerEmptyDeviceString(t *testing.T) {
 }
 
 // ListDevices is polled continuously. A reader that stays unavailable must not
-// fill the log with the same line — the operator has to be able to see anything
+// fill the log with the same line: the operator has to be able to see anything
 // else that happens while it is broken.
 func TestListDevicesLogsAPersistentFailureOnce(t *testing.T) {
 	mm := &MultiManager{}

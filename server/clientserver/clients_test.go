@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/gorilla/websocket"
 )
 
@@ -49,7 +48,7 @@ func waitFor(t *testing.T, cond func() bool) {
 func newTestServer(onChange func()) *Server {
 	// No origin policy and no secret: the test dials from an ephemeral port, and
 	// what is under test is the session bookkeeping, not admission.
-	return New(Config{AllowedOrigins: []string{"*"}, OnChange: onChange}, server.NewServerBridge())
+	return New(Config{AllowedOrigins: []string{"*"}, OnChange: onChange})
 }
 
 func TestClientsReportsConnectionDetail(t *testing.T) {

@@ -26,7 +26,7 @@ or `-dev` package is involved; `libpcsclite-dev` is only needed to build the
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
 cd davi-nfc-agent
-go build .
+go build ./cmd/davi-nfc-agent
 ```
 
 ### Running Tests
@@ -34,6 +34,11 @@ go build .
 ```bash
 go test ./...
 ```
+
+`e2e/` builds an agent the way `docs/custom-builds.md` does, on a real TLS
+listener, and drives it over the published WebSocket protocols. Run it alone
+with `go test ./e2e/ -v` when changing anything a program embedding the agent
+depends on.
 
 ## Advanced Building
 
@@ -102,9 +107,17 @@ git push origin v1.0.0
 
 ```
 davi-nfc-agent/
-├── main.go              # Entry point, CLI flags
-├── agent.go             # Core agent logic
-├── systray.go           # System tray UI
+├── cmd/
+│   └── davi-nfc-agent/  # The binary: picks the NFC backend and wires the rest
+│                        # (see docs/custom-builds.md to build your own)
+├── agent/               # The agent itself: lifecycle, config, plugins
+│   ├── agent.go         # Core agent logic
+│   ├── setup.go         # Options and Setup, what the flags resolve to
+│   ├── plugin.go        # Plugin, AgentContext, activation
+│   ├── serverplugin.go  # The listener and everything served from it
+│   ├── console/         # Control center: API, frontend, agent adapter
+│   │                    #   (-tags nowebui drops it)
+│   └── tray/            # System tray UI (the only fyne.io/systray dependency)
 ├── buildinfo/           # Version and build metadata
 ├── nfc/                 # NFC abstraction layer
 │   ├── manager.go       # Device manager interface
@@ -114,15 +127,18 @@ davi-nfc-agent/
 │   ├── remotenfc/       # Phones and other networked devices, and the
 │   │                    #   WebSocket endpoint they connect to
 │   └── multimanager/    # Multiple manager aggregation
-├── server/              # WebSocket servers
-│   ├── unifiedserver/   # Single listener (port 9470) fronting both roles
-│   ├── deviceserver/    # Auth, and routing between reader and device
-│   └── clientserver/    # Client connection handling logic
-├── wsconn/              # Write-safe WebSocket wrapper shared by the above
-├── traymenu/            # Declarative tray menus over fyne.io/systray
+├── server/              # The bridge between tag sources and clients, and the
+│   │                    #   device credential check
+│   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
+│   ├── tagrouter/       # Picks the reader or a device for each client request
+│   ├── clientserver/    # Client connection handling logic
+│   └── wsconn/          # Write-safe WebSocket wrapper shared by the above
+├── traymenu/            # Declarative tray menus, with no toolkit behind them
+│   └── fynetray/        # The real tray, on fyne.io/systray
+├── clipboard/           # Copying text to the system clipboard
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
-├── client/              # JavaScript client library
+├── client/              # TypeScript client library (src/), plus its built dist/
 ├── scripts/             # Build scripts
 └── docs/                # Documentation
 ```
@@ -135,18 +151,24 @@ davi-nfc-agent/
 - See [nfc/README.md](nfc/README.md) for details
 
 **Server Layer** (`server/`)
-- Single-server architecture: one listener on port 9470 (configurable via
-  `-device-port`) serves both roles, distinguished by connection path
-  (`/ws?mode=device` for devices, `/ws` for clients):
-  - **UnifiedServer**: Fronts both roles on the single port
-  - **DeviceServer**: Handles NFC devices and hardware readers
-  - **ClientServer**: Handles client applications
-- Bridge component connects the device and client handlers in-process
+- One listener on port 9470 (configurable via `-device-port`) serves both roles
+  on one path, distinguished by the mode a connection declares:
+  `/ws?mode=device` for devices, `/ws` for clients
+  - **UnifiedServer**: the listener itself, and the mux of what was mounted on
+    it. It knows nothing about NFC; `agent.Routes` is what the agent asks it to
+    carry, and `agent.ServerPlugin` is what mounts them
+  - **ClientServer**: fans a scan out to every connected client, and serves
+    their requests
+  - **TagRouter**: picks the reader or a paired device for each client request
+- A client request is a call rather than a message on a channel: there is no
+  bridge between the two halves
 
 **Tray Menu** (`traymenu/`)
-- Declarative menu building on top of `fyne.io/systray`, with clicks delivered
-  as signals rather than channels the caller has to poll
-- A fake driver makes the tray testable with no desktop involved
+- Declarative menu building, with clicks delivered as signals rather than
+  channels the caller has to poll
+- Runs on a driver: `traymenu/fynetray` for the real tray, `NewFake` in tests,
+  `Discard` where there is none. The toolkit, and the cgo it needs on macOS,
+  arrives only with `fynetray`
 - Depends on nothing else in this repository
 - See [traymenu/README.md](traymenu/README.md) for the pattern
 

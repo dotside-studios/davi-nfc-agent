@@ -65,6 +65,18 @@ type Events struct {
 	// rebuilt them.
 	Servers event.Signal[int]
 
+	// Reader carries the reader's status: whether it is connected, and whether
+	// a card is on it. Emitted while the agent runs, which is when there is a
+	// reader to report on.
+	//
+	// Any does not repeat it, for the same reason it leaves out Tag: a card
+	// arriving and leaving would redraw every page twice per tap.
+	Reader event.Signal[nfc.DeviceStatus]
+
+	// Readers carries the readers that can be picked, whenever the set
+	// changes. Silent on a manager that does not report device changes.
+	Readers event.Signal[[]string]
+
 	// Devices carries the paired devices after each pairing and revocation.
 	// Silent on an agent built without a registry.
 	Devices event.Signal[[]PairedDevice]
@@ -106,6 +118,31 @@ func (a *Agent) watchStores() {
 	}
 }
 
+// watchManager republishes the manager's device changes as Events().Readers. It
+// runs for the agent's lifetime rather than for a run: a reader is plugged in
+// whether or not the agent is started.
+func (a *Agent) watchManager() {
+	notifier, ok := a.manager.(nfc.DeviceChangeNotifier)
+	if !ok {
+		return
+	}
+
+	changes := notifier.DeviceChanges()
+	go func() {
+		for {
+			select {
+			case <-a.done:
+				return
+			case _, ok := <-changes:
+				if !ok {
+					return
+				}
+				a.events.Readers.Emit(a.Readers())
+			}
+		}
+	}()
+}
+
 func (a *Agent) fireState(s State) {
 	a.events.State.Emit(s)
 	a.events.Any.Emit(ChangeState)
@@ -134,6 +171,10 @@ func (a *Agent) fireDevicesChanged(devices []PairedDevice) {
 func (a *Agent) fireOriginsChanged(origins []string) {
 	a.events.Origins.Emit(origins)
 	a.events.Any.Emit(ChangeOrigins)
+}
+
+func (a *Agent) fireReaderStatus(status nfc.DeviceStatus) {
+	a.events.Reader.Emit(status)
 }
 
 func (a *Agent) fireOriginBlocked(origin string) {

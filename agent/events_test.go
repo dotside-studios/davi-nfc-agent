@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
@@ -161,5 +163,65 @@ func TestChangeString(t *testing.T) {
 	}
 	if got := Change(42).String(); got != "change(42)" {
 		t.Errorf("an unknown change is %q, want %q", got, "change(42)")
+	}
+}
+
+// fakeManager is a manager whose reader set the test drives.
+type fakeManager struct {
+	devices []string
+	readers []string
+	changes chan struct{}
+}
+
+func (m *fakeManager) OpenDevice(string) (nfc.Device, error) {
+	return nil, errors.New("fakeManager opens nothing")
+}
+func (m *fakeManager) ListDevices() ([]string, error) { return m.devices, nil }
+func (m *fakeManager) ListReaders() ([]string, error) { return m.readers, nil }
+func (m *fakeManager) DeviceChanges() <-chan struct{} { return m.changes }
+
+// A phone is a tag source, not a reader. Offering one in a reader picker pins
+// the reader to a device that is never opened.
+func TestReadersLeaveOutPhones(t *testing.T) {
+	m := &fakeManager{
+		devices: []string{"ACR122U 00 00", "phone-9f2a"},
+		readers: []string{"ACR122U 00 00"},
+	}
+	a := New(Config{Manager: m})
+
+	got := a.Readers()
+	if len(got) != 1 || got[0] != "ACR122U 00 00" {
+		t.Errorf("Readers() = %v, want only the hardware reader", got)
+	}
+}
+
+// A reader plugged in or unplugged reaches a subscriber, so a picker redraws
+// without polling the manager behind the agent's back.
+func TestReaderChangesReachSubscribers(t *testing.T) {
+	m := &fakeManager{
+		devices: []string{"ACR122U 00 00"},
+		readers: []string{"ACR122U 00 00"},
+		changes: make(chan struct{}, 1),
+	}
+	a := New(Config{Manager: m})
+	defer a.Shutdown()
+
+	seen := make(chan []string, 1)
+	a.Events().Readers.Connect(func(readers []string) {
+		select {
+		case seen <- readers:
+		default:
+		}
+	})
+
+	m.changes <- struct{}{}
+
+	select {
+	case got := <-seen:
+		if len(got) != 1 || got[0] != "ACR122U 00 00" {
+			t.Errorf("subscriber saw %v, want the reader list", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a device change never reached a subscriber")
 	}
 }

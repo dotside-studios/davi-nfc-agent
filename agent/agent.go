@@ -208,6 +208,11 @@ type Agent struct {
 	// safe from any goroutine, so it needs no lock of its own.
 	events Events
 
+	// done ends what runs for the agent's lifetime rather than for a run.
+	// Closed by Shutdown.
+	done     chan struct{}
+	doneOnce sync.Once
+
 	// mounter is what the agent's routes are served from, published by
 	// whichever plugin serves them. Nil is an agent serving no HTTP at all.
 	mounter Mounter
@@ -255,10 +260,12 @@ func New(cfg Config) *Agent {
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(cfg.CardTypes),
 		logs:                cfg.Logs,
+		done:                make(chan struct{}),
 		Plugins:             &PluginSet{},
 	}
 
 	a.watchStores()
+	a.watchManager()
 
 	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
 		// Only a nil entry can fail here: the set is new, so nothing is sealed.
@@ -286,7 +293,19 @@ func New(cfg Config) *Agent {
 // Info reports what this build calls itself.
 func (a *Agent) Info() buildinfo.Info { return a.info }
 
-func (a *Agent) Manager() nfc.Manager     { return a.manager }
+func (a *Agent) Manager() nfc.Manager { return a.manager }
+
+// Readers lists the readers that can be picked, which is what a reader picker
+// offers. Phones are left out: pinning the reader to one pins it to a device
+// that is never opened.
+func (a *Agent) Readers() []string {
+	readers, err := nfc.ListReaders(a.manager)
+	if err != nil {
+		a.logger.Printf("Listing readers failed: %v", err)
+		return nil
+	}
+	return readers
+}
 func (a *Agent) Logger() *log.Logger      { return a.logger }
 func (a *Agent) APISecret() string        { return a.apiSecret }
 func (a *Agent) ConfigDir() string        { return a.configDir }
@@ -408,6 +427,7 @@ func (a *Agent) stopLocked() {
 // Closing it belongs here, on the way out.
 func (a *Agent) Shutdown() {
 	a.Stop()
+	a.doneOnce.Do(func() { close(a.done) })
 
 	if closer, ok := a.manager.(interface{ Close() }); ok {
 		closer.Close()

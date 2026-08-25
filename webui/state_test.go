@@ -74,8 +74,7 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 	if !state.Settings.RequirePairedDevice {
 		t.Error("the snapshot does not report the requirement the agent is enforcing")
 	}
-	// The blocks a preference used to be repeated in, and where a second copy
-	// would come back.
+	// The blocks a second copy of a preference would come back in.
 	for name, block := range map[string]any{"reader": state.Reader, "security": state.Security} {
 		body, err := json.Marshal(block)
 		if err != nil {

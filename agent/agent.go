@@ -182,10 +182,9 @@ type Agent struct {
 	readerFeedback      bool
 	logs                *logbuf.Ring
 
-	// Settings state. Held on the agent as well as on the reader, because the
-	// reader is built in Start, after the stored settings have been applied: a
-	// preference that only reached the reader would be lost with every reader
-	// the agent starts.
+	// Preferences. Held on the agent as well as on the reader, because Start
+	// builds a new reader each time: a preference that only reached the reader
+	// would be lost with every restart.
 	readerMode   nfc.ReaderMode
 	pinnedDevice string
 

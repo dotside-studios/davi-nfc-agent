@@ -60,7 +60,7 @@ func (c *Checklist[T]) Add(value T, title string, opts ...Option) *Item {
 }
 
 // Set ticks the entries for values and unticks the rest, without raising
-// Changed. It reflects a selection made elsewhere, such as restored settings.
+// Changed. It reflects a selection made elsewhere, such as one from the console.
 func (c *Checklist[T]) Set(values []T) {
 	picked := make(map[T]bool, len(values))
 	for _, value := range values {

@@ -7,9 +7,7 @@ import (
 )
 
 // PairingConfig is what the pairing server needs, and nothing the rest of the
-// agent has to carry. Before this, the agent held the built server and its port
-// as two more fields of its own, started it in Setup and never stopped it --
-// only the command's signal handler did.
+// agent has to carry.
 type PairingConfig struct {
 	// Port is the pairing server's own listener. Required; a zero port means
 	// the caller did not want pairing, so do not build the component at all.
@@ -89,8 +87,7 @@ func (p *PairingServer) Start(ctx context.Context) error {
 	return p.server.Start()
 }
 
-// Stop closes it. The agent calls this on the way down, which is the part that
-// used to be missing.
+// Stop closes it, which the agent does on the way down.
 func (p *PairingServer) Stop() error {
 	p.server.Stop()
 	return nil

@@ -22,9 +22,8 @@ func runningAgent(t *testing.T, port int) *Agent {
 	return rt.Agent
 }
 
-// TestConcurrentLifecycle is the reason the lock exists. The tray, the console
-// and the network watcher all reach Start and Stop from different goroutines,
-// and before this they raced on Reader and the server fields.
+// TestConcurrentLifecycle is the reason the lock exists: the tray, the console
+// and the network watcher all reach Start and Stop from different goroutines.
 func TestConcurrentLifecycle(t *testing.T) {
 	a := runningAgent(t, 9467)
 
@@ -43,12 +42,10 @@ func TestConcurrentLifecycle(t *testing.T) {
 }
 
 // TestReaderIsSafeToReadWhileTheLifecycleMoves covers the other half of the
-// lock: the tray, the console and ApplySettings ask for the reader from their
-// own goroutines while Start and Stop replace it. TestConcurrentLifecycle only
-// ever calls Start and Stop, so a reader read concurrently with them went
-// unexercised, which is how an exported Reader field survived beside the atomic
-// it was mirrored from, and how devicePath kept being read without the lock
-// that guards its write.
+// lock: the tray and the console ask for the reader from their own goroutines
+// while Start and Stop replace it. TestConcurrentLifecycle only ever calls
+// Start and Stop, so a reader read concurrently with them goes unexercised
+// there.
 func TestReaderIsSafeToReadWhileTheLifecycleMoves(t *testing.T) {
 	a := runningAgent(t, 9469)
 

@@ -438,8 +438,8 @@ func (w *certificateWatch) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the watch, which nothing used to do: the manager's goroutine
-// outlived every agent that started one.
+// Stop ends the watch, so the manager's goroutine does not outlive the agent
+// that started it.
 func (w *certificateWatch) Stop() error {
 	w.certificates.StopWatching()
 	return nil

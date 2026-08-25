@@ -10,10 +10,7 @@ import (
 // agent's own reader, or a paired device holding it.
 //
 // Declared here because both sides of the call live below this package: the
-// client server asks, and the tag router answers. These used to be six channels
-// and a response-channel-per-request, which made an ordinary call look like a
-// message bus and gave two objects background goroutines they only had in order
-// to drain each other.
+// client server asks, and the tag router answers.
 type TagOps interface {
 	Write(ctx context.Context, req WriteOp) (*nfc.WriteResult, error)
 	Lock(ctx context.Context, req LockOp) (*nfc.LockResult, error)

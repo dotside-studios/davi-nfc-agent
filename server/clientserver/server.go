@@ -387,10 +387,7 @@ func firstNonEmpty(values ...string) string {
 // Broadcast hands a scan to the in-process observer and then to every
 // connected client.
 //
-// Called by whatever produced the scan. It used to arrive on a channel this
-// server drained in a goroutine of its own, which meant the server had a
-// lifetime whose only purpose was to receive, and something had to remember to
-// start it.
+// Called by whatever produced the scan.
 func (s *Server) Broadcast(data nfc.NFCData) {
 	if data.Card != nil {
 		s.cardMu.Lock()

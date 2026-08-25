@@ -10,9 +10,7 @@ import (
 // State is where the agent is in its lifecycle.
 //
 // Transitions are serialised: only one of Start, Stop or RestartServers runs at
-// a time, whichever goroutine asks. Before this existed the state was inferred
-// from whether Reader and the servers happened to be nil, which two callers
-// could disagree about halfway through a teardown.
+// a time, whichever goroutine asks.
 type State int32
 
 const (

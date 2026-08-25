@@ -1,13 +1,10 @@
 // Package unifiedserver is one HTTP listener: a port, a mux of whatever was
 // mounted on it, an optional TLS certificate, and an mDNS advertisement.
 //
-// It knows nothing about NFC, and nothing about the agent. It once did: the
-// agent ran a device server and a client server on two ports, and this package
-// was written to collapse them onto one and dispatch each /ws connection
-// between them by the mode it declared. Both are the agent's own routes now,
-// mounted here like anything else, so what is left is the listener. That is
-// what lets a build decide what it serves; see agent.ServerPlugin, which owns
-// one of these, and agent.Routes is what the agent asks it to carry.
+// It knows nothing about NFC, and nothing about the agent. The agent's own
+// routes are mounted here like anything else, which is what lets a build decide
+// what it serves; see agent.ServerPlugin, which owns one of these, and
+// agent.Routes is what the agent asks it to carry.
 package unifiedserver
 
 import (
@@ -101,9 +98,7 @@ type mount struct {
 // control API and the console are deliberately reachable only same-origin.
 //
 // Routes must be mounted before Start. Mounting afterwards returns an error
-// rather than being accepted and never served, which is the trap the console
-// used to fall into: the agent reported having one while the listener had never
-// heard of it.
+// rather than being accepted and never served.
 func (s *Server) Mount(pattern string, handler http.Handler) error {
 	if pattern == "" {
 		return fmt.Errorf("unifiedserver: empty mount pattern")
@@ -130,9 +125,8 @@ func (s *Server) Mount(pattern string, handler http.Handler) error {
 // Start binds the listener and serves on it.
 //
 // It binds before returning, so a port already in use is an error the caller
-// sees rather than a message in a log: the agent used to launch this on a
-// goroutine and drop the error, reporting itself running with nothing
-// listening. Serving continues on a goroutine until Stop.
+// sees rather than a message in a log. Serving continues on a goroutine until
+// Stop.
 //
 // A stopped server starts again on the routes it already carries. The agent
 // stops and starts one whenever the reader changes or the certificate is
@@ -229,7 +223,7 @@ func (s *Server) TLSEnabled() bool { return s.config.TLSEnabled() }
 
 // Port is the port this server binds. It is what a client should be told to
 // connect to, which is not necessarily what the agent is configured with: a
-// port changed in the settings takes effect only on a fresh listener.
+// port changed on the agent takes effect only on a fresh listener.
 func (s *Server) Port() int { return s.config.Port }
 
 // Stop withdraws the mDNS advertisement, shuts the listener down and cancels

@@ -88,8 +88,8 @@ func (h *host) SelectDevice(devicePath string) error {
 	if h.app == nil {
 		return errors.New("device cannot be changed from here")
 	}
-	// Refused rather than accepted and quietly ignored: the picker no longer
-	// offers a phone, so one arriving here came from somewhere that should hear
+	// Refused rather than accepted and quietly ignored: the picker does not
+	// offer a phone, so one arriving here came from somewhere that should hear
 	// why it cannot be the reader.
 	if nfc.IsRemoteDevice(h.agent.Manager(), devicePath) {
 		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")

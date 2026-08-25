@@ -13,7 +13,8 @@ import (
 // calling it again.
 //
 // Documented at:
-//   https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-notifyaddrchange
+//
+//	https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-notifyaddrchange
 var (
 	iphlpapi             = windows.NewLazySystemDLL("iphlpapi.dll")
 	procNotifyAddrChange = iphlpapi.NewProc("NotifyAddrChange")

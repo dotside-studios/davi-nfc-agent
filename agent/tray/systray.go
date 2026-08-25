@@ -157,9 +157,7 @@ func (s *App) setupUI() {
 	s.setupOriginsMenu()
 
 	// The menus open on what the agent is set to, which is not always the
-	// default: a mode restored from settings, or one the launcher set, was
-	// decided before the tray existed. The ones the launcher holds are shown
-	// and not offered.
+	// default: what the launcher set was decided before the tray existed.
 	s.SyncPreferencesToMenu(trayPreferences(s.agent))
 
 	s.menu.AddSeparator()

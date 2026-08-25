@@ -59,8 +59,8 @@ func main() {
 		})
 	}
 
-	// Hardware readers and phones behind one manager, which is what the agent
-	// opens its reader from.
+	// Hardware readers and phones behind one manager, which the agent opens
+	// its reader from.
 	manager := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
@@ -224,9 +224,9 @@ them down again.
 ### Activation
 
 Plugins are activated once, in the order they were added, before anything is
-opened or bound. The tray does it as it draws its menu, which is what puts the
-entries on the real one; `Agent.Start` does it if nothing else has. Adding a
-plugin after that is refused rather than accepted and never activated.
+opened or bound. The tray does it as it draws its menu, so the entries land on
+the real one; `Agent.Start` does it if nothing else has. Adding a plugin after
+that is refused.
 
 Activation is also where a plugin publishes what the agent is served from and
 mounts its routes, so a listener's port and address are worth reading only once
@@ -277,8 +277,7 @@ that asks for one.
 
 An endpoint is listed only if it sets `Menu`: a route nobody opens by hand is
 noise beside the addresses worth copying. A plugin with an `Activate` of its own
-can mount a route with `ctx.Mount` instead, which is what something wanting the
-agent as well as the route does.
+can mount a route with `ctx.Mount` instead.
 
 Registered with no `Config`, it serves on the port and name the agent was set up
 with, and on the certificate `Trust` holds. Set `Config` for a listener that
@@ -634,7 +633,7 @@ covered in [Extending NFC support](extending-nfc-support.md).
 
 `fyne.io/systray` talks to Cocoa, so `agent/tray` — and any command that
 imports it — needs cgo on macOS. Every other package builds without cgo for
-every supported target, which is what makes a headless build portable.
+every supported target, so a headless build is portable.
 
 ## Related documentation
 

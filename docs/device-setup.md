@@ -93,7 +93,7 @@ class PinnedTrustManager(private val expectedPin: String) : X509TrustManager {
 }
 ```
 
-`PublicKey.getEncoded()` returns SPKI DER directly, which is what the agent
+`PublicKey.getEncoded()` returns SPKI DER directly, which the agent
 hashes — no reassembly needed.
 
 Pair it with a hostname verifier appropriate to how you address the agent; a

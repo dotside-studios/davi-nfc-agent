@@ -51,7 +51,7 @@ means pairing again rather than looking it up.
 Each device holds its own credential, so one can be revoked from the tray under
 **Paired Devices** without disturbing the others. The shared API secret still
 works for devices configured with it, but rotating it logs out everything at
-once, which is what per-device tokens exist to avoid.
+once. Per-device tokens avoid that.
 
 Wrong PINs lock pairing after five attempts until the agent restarts.
 
@@ -131,8 +131,7 @@ sending one of all falses. A device that sends the object is taken at its word:
 a field it sets to `false` refuses that operation for every tag the device
 holds, since a bridge that cannot carry an operation cannot carry it for any
 tag. A device that omits the object has declared nothing about itself, so
-requests go out and it answers them, which is what a bridge that describes the
-tags it scans but not its own abilities should expect.
+requests go out and it answers them.
 
 Per-tag capabilities on `tagScanned` are read the same way, and take precedence
 for the tag they describe. See [Tag Capabilities](#tag-capabilities).

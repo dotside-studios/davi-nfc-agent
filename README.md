@@ -27,12 +27,12 @@ in real time, and provides the NFC functionality used by the
   read and write, once the operator turns it on
 - **System tray**: Reader selection, status, and device management
 - **Control Center**: A built-in web console for the log, tag inspection, NDEF
-  writing, device revocation and settings that survive a restart
+  writing, device revocation and the agent's settings
 - **Buildable as a library**: Import the agent and write your own `main.go`, in
   any shape from the full tray application to a headless service
 - **Assembled from plugins**: One method registers a background component, a
   route and a tray entry. The listener and the pairing server are plugins
-  themselves, so a build is what it registers
+  themselves
 - **Cross-platform**: Linux, macOS and Windows
 
 ## Supported Devices
@@ -65,7 +65,7 @@ for pairing a phone.
 
 Choose **Open Control Center** from the tray to manage the agent in a browser:
 read its log, inspect and write tags, revoke a paired device, edit the origin
-allowlist, and change settings that survive a restart.
+allowlist, and change the agent's settings.
 
 The console is privileged — it can rotate the API secret, revoke a device's
 credential and lock a tag irreversibly — so every request to it must clear three

@@ -222,10 +222,9 @@ that interface nil, and every call site already tolerates it.
 Dropping the console from a custom build is therefore a tag, not a patch — and
 deleting `webui/` outright leaves only `agent/console/` to remove.
 
-**The agent's protocol is unaffected.** Raw tag exchanges, settings
-persistence and the log ring stay in either build — each is reachable without
-the console, and the transceive channel in particular is part of the client API
-rather than a console feature.
+**The agent's protocol is unaffected.** Raw tag exchanges and the log ring stay
+in either build. Both are reachable without the console, and the transceive
+channel is part of the client API rather than a console feature.
 
 ## API
 

@@ -1,11 +1,11 @@
-// Package unifiedserver is one HTTP listener: a port, a mux of whatever was
+// Package listener is one HTTP listener: a port, a mux of whatever was
 // mounted on it, an optional TLS certificate, and an mDNS advertisement.
 //
 // It knows nothing about NFC, and nothing about the agent. The agent's own
 // routes are mounted here like anything else, which is what lets a build decide
 // what it serves; see agent.ServerPlugin, which owns one of these, and
 // agent.Routes is what the agent asks it to carry.
-package unifiedserver
+package listener
 
 import (
 	"context"
@@ -101,21 +101,21 @@ type mount struct {
 // rather than being accepted and never served.
 func (s *Server) Mount(pattern string, handler http.Handler) error {
 	if pattern == "" {
-		return fmt.Errorf("unifiedserver: empty mount pattern")
+		return fmt.Errorf("listener: empty mount pattern")
 	}
 	if handler == nil {
-		return fmt.Errorf("unifiedserver: nil handler for %q", pattern)
+		return fmt.Errorf("listener: nil handler for %q", pattern)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.started {
-		return fmt.Errorf("unifiedserver: cannot mount %q once started", pattern)
+		return fmt.Errorf("listener: cannot mount %q once started", pattern)
 	}
 	for _, m := range s.mounts {
 		if m.pattern == pattern {
-			return fmt.Errorf("unifiedserver: %q is already mounted", pattern)
+			return fmt.Errorf("listener: %q is already mounted", pattern)
 		}
 	}
 	s.mounts = append(s.mounts, mount{pattern: pattern, handler: handler})
@@ -138,7 +138,7 @@ func (s *Server) Start() error {
 	s.mu.Lock()
 	if s.httpServer != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("unifiedserver: already serving on port %d", s.config.Port)
+		return fmt.Errorf("listener: already serving on port %d", s.config.Port)
 	}
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	listener, err := net.Listen("tcp", addr)
@@ -146,7 +146,7 @@ func (s *Server) Start() error {
 		// Nothing is closed off by a start that never bound: the caller can
 		// mount, fix the port and try again.
 		s.mu.Unlock()
-		return fmt.Errorf("unifiedserver: listen on %s: %w", addr, err)
+		return fmt.Errorf("listener: listen on %s: %w", addr, err)
 	}
 
 	s.started = true

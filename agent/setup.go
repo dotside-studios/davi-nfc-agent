@@ -41,7 +41,7 @@ type Options struct {
 	// CertFile and KeyFile are a certificate provisioned outside this agent,
 	// which turns AutoTLS off. Setup does not read them either: what serves a
 	// certificate is the program's decision, so it passes them to whatever
-	// does, as [unifiedserver.Config] on a [ServerPlugin].
+	// does, as [listener.Config] on a [ServerPlugin].
 	CertFile string
 	KeyFile  string
 

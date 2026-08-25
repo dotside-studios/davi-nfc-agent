@@ -232,7 +232,7 @@ the same failure is reported by every start afterwards.
 
 ### The server plugin
 
-`agent.ServerPlugin` owns the `*unifiedserver.Server` and mounts everything on
+`agent.ServerPlugin` owns the `*listener.Server` and mounts everything on
 it: the agent's own routes first, then what is listed here. An endpoint is a
 route, something with a lifetime, a menu entry, or any combination:
 
@@ -272,7 +272,7 @@ differs from them, which is where a certificate provisioned outside the agent
 goes, or `Server` to hand over one built elsewhere:
 
 ```go
-&agent.ServerPlugin{Config: unifiedserver.Config{Port: 9480, CertFile: cert, KeyFile: key}}
+&agent.ServerPlugin{Config: listener.Config{Port: 9480, CertFile: cert, KeyFile: key}}
 ```
 
 `agent.Routes` is what the agent serves of its own: `/ws`, where devices and
@@ -390,7 +390,8 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server` | The bridge between tag sources and clients, and the device credential check |
 | `server/clientserver` | The client WebSocket endpoint |
 | `server/tagrouter` | Picks the reader or a device for each client request |
-| `server/unifiedserver` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
+| `server/listener` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
+| `server/wsconn` | Write-safe WebSocket wrapper shared by the servers and the device driver |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
 | `traymenu` | Declarative tray menus, with no toolkit behind them |
 | `clipboard` | Copying text to the system clipboard |

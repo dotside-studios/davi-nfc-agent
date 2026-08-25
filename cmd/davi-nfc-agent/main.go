@@ -26,7 +26,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
 func main() {
@@ -86,7 +86,7 @@ func main() {
 	// one, which -cert and -key turn off.
 	servers := &agent.ServerPlugin{
 		Trust:  trust,
-		Config: unifiedserver.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
+		Config: listener.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that

@@ -1,4 +1,4 @@
-package unifiedserver_test
+package listener_test
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
 
@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) string {
 	device := deviceMgr.Handler(remotenfc.ServerOptions{Authenticate: auth.Check})
 	client := clientserver.New(clientserver.Config{})
 
-	u := unifiedserver.New(unifiedserver.Config{})
+	u := listener.New(listener.Config{})
 	if err := u.Mount("/ws", server.CORS(server.RouteByMode(
 		http.HandlerFunc(client.ServeWS),
 		map[string]http.Handler{server.ModeDevice: device},

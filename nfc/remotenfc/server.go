@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
-	"github.com/dotside-studios/davi-nfc-agent/wsconn"
+	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/gorilla/websocket"
 )
 

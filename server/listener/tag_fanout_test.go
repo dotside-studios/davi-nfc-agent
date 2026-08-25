@@ -1,4 +1,4 @@
-package unifiedserver_test
+package listener_test
 
 import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -25,7 +25,7 @@ type Endpoint struct {
 	Name string
 
 	// Pattern and Handler are the route, mounted on the agent's listener as
-	// [unifiedserver.Server.Mount] would. Leave both blank for an endpoint
+	// [listener.Server.Mount] would. Leave both blank for an endpoint
 	// serving from somewhere else, such as the pairing server, which binds a
 	// port of its own.
 	//
@@ -62,7 +62,7 @@ func (e Endpoint) name() string {
 
 // ServerPlugin is the agent's listener and everything served from it.
 //
-// It owns the [unifiedserver.Server]. It builds one from Config or serves the
+// It owns the [listener.Server]. It builds one from Config or serves the
 // one it is given, publishes it to the agent, which mounts its own routes on
 // it, then mounts the endpoints registered here. A build decides what the agent
 // serves by registering one and listing what goes on it:
@@ -82,11 +82,11 @@ type ServerPlugin struct {
 	// the certificate and the advertised name fall back to the agent's own, so
 	// a plugin registered with no configuration serves what the agent was set
 	// up with.
-	Config unifiedserver.Config
+	Config listener.Config
 
 	// Server is a listener built elsewhere, for a program that mounts on it
 	// before handing it over. Nil builds one from Config.
-	Server *unifiedserver.Server
+	Server *listener.Server
 
 	// Endpoints are served in order: each is mounted, its component
 	// registered, and its menu entries added. See [ServerPlugin.Add].
@@ -127,7 +127,7 @@ func (p *ServerPlugin) Add(endpoints ...Endpoint) {
 
 // Listener returns the server the plugin serves from: the one it was given, or
 // the one it built at activation. Nil before activation when neither.
-func (p *ServerPlugin) Listener() *unifiedserver.Server { return p.Server }
+func (p *ServerPlugin) Listener() *listener.Server { return p.Server }
 
 // CertFile is the certificate being served, empty when none is, and TLSEnabled
 // reports the same as a question. Both are what the listener resolved, which is
@@ -163,7 +163,7 @@ func (p *ServerPlugin) Port() int {
 // A control center missing its API is worse than one that is not there.
 func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if p.Server == nil {
-		p.Server = unifiedserver.New(p.config(ctx.Agent))
+		p.Server = listener.New(p.config(ctx.Agent))
 	}
 	// The agent's own routes go on first, so an endpoint cannot displace /ws
 	// or the health checks.
@@ -194,7 +194,7 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 
 	// Last, so it is the first thing to come down: nothing new arrives while
 	// what answers it is being torn down. Components stop in reverse.
-	return ctx.Use(&listener{server: p.Server, agent: ctx.Agent})
+	return ctx.Use(&listenerComponent{server: p.Server, agent: ctx.Agent})
 }
 
 // Rebind stops the listener and starts it again, so a certificate reissued on
@@ -225,21 +225,21 @@ func (p *ServerPlugin) Rebind() error {
 	return nil
 }
 
-// listener binds the port for as long as the agent is running. It goes on as a
-// component so that starting and stopping it is the agent's ordinary lifecycle
-// rather than something the agent does about servers specifically.
-type listener struct {
-	server *unifiedserver.Server
+// listenerComponent binds the port for as long as the agent is running. It goes
+// on as a component so that starting and stopping it is the agent's ordinary
+// lifecycle rather than something the agent does about servers specifically.
+type listenerComponent struct {
+	server *listener.Server
 	agent  *Agent
 }
 
-func (l *listener) Name() string { return "listener" }
+func (l *listenerComponent) Name() string { return "listener" }
 
 // Start binds before returning, so a port already in use fails the agent's
 // start rather than leaving it reporting itself running with nothing listening.
-func (l *listener) Start(context.Context) error { return l.server.Start() }
+func (l *listenerComponent) Start(context.Context) error { return l.server.Start() }
 
-func (l *listener) Stop() error {
+func (l *listenerComponent) Stop() error {
 	l.server.Stop()
 	return nil
 }
@@ -446,7 +446,7 @@ func (w *certificateWatch) Stop() error {
 }
 
 // config fills what Config left blank from the agent.
-func (p *ServerPlugin) config(a *Agent) unifiedserver.Config {
+func (p *ServerPlugin) config(a *Agent) listener.Config {
 	cfg := p.Config
 	if cfg.Port == 0 {
 		cfg.Port = a.DevicePort()

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -29,7 +29,7 @@ func serverAgent(t *testing.T, p *ServerPlugin, extra ...Plugin) *Agent {
 }
 
 // get asks the listener's mux for a path, without binding anything.
-func get(t *testing.T, srv *unifiedserver.Server, path string) int {
+func get(t *testing.T, srv *listener.Server, path string) int {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
@@ -573,7 +573,7 @@ func TestTheListenerServesTheCertificateItWasGiven(t *testing.T) {
 
 	named := &ServerPlugin{
 		Trust:  trust,
-		Config: unifiedserver.Config{CertFile: "/tmp/named.pem", KeyFile: "/tmp/named.key"},
+		Config: listener.Config{CertFile: "/tmp/named.pem", KeyFile: "/tmp/named.key"},
 	}
 	if got := named.config(rt.Agent).CertFile; got != "/tmp/named.pem" {
 		t.Errorf("CertFile = %q, want the one Config named", got)

@@ -127,10 +127,10 @@ davi-nfc-agent/
 │   └── multimanager/    # Multiple manager aggregation
 ├── server/              # The bridge between tag sources and clients, and the
 │   │                    #   device credential check
-│   ├── unifiedserver/   # One HTTP listener: a port, a mux, TLS, mDNS
+│   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
 │   ├── tagrouter/       # Picks the reader or a device for each client request
-│   └── clientserver/    # Client connection handling logic
-├── wsconn/              # Write-safe WebSocket wrapper shared by the above
+│   ├── clientserver/    # Client connection handling logic
+│   └── wsconn/          # Write-safe WebSocket wrapper shared by the above
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
 │   └── fynetray/        # The real tray, on fyne.io/systray
 ├── clipboard/           # Copying text to the system clipboard

@@ -4,7 +4,7 @@
 // operation on whichever source holds the tag the request names.
 //
 // It serves no HTTP. The device protocol belongs to nfc/remotenfc and the
-// listener to server/unifiedserver; this is the part that has to see both a
+// listener to server/listener; this is the part that has to see both a
 // reader and a device driver at once, which is why it is neither of them.
 package tagrouter
 

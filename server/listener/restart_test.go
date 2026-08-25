@@ -1,4 +1,4 @@
-package unifiedserver_test
+package listener_test
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
 // freePort reserves a port by binding it and letting it go.
@@ -31,7 +31,7 @@ func freePort(t *testing.T) int {
 // they cannot be rebuilt.
 func TestAStoppedServerStartsAgainOnItsRoutes(t *testing.T) {
 	port := freePort(t)
-	srv := unifiedserver.New(unifiedserver.Config{Port: port})
+	srv := listener.New(listener.Config{Port: port})
 
 	if err := srv.Mount("/probe", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("mounted"))
@@ -70,7 +70,7 @@ func TestAStoppedServerStartsAgainOnItsRoutes(t *testing.T) {
 // Starting a server that is already serving is a mistake rather than a second
 // listener, and it has to be reported as one.
 func TestStartingATwiceRunningServerIsRefused(t *testing.T) {
-	srv := unifiedserver.New(unifiedserver.Config{Port: freePort(t)})
+	srv := listener.New(listener.Config{Port: freePort(t)})
 
 	if err := srv.Start(); err != nil {
 		t.Fatalf("start: %v", err)
@@ -85,7 +85,7 @@ func TestStartingATwiceRunningServerIsRefused(t *testing.T) {
 // Mounting stays closed once the mux has been built, including after a stop:
 // the route would not be served by the restart either.
 func TestMountingIsRefusedAfterAStop(t *testing.T) {
-	srv := unifiedserver.New(unifiedserver.Config{Port: freePort(t)})
+	srv := listener.New(listener.Config{Port: freePort(t)})
 
 	if err := srv.Start(); err != nil {
 		t.Fatalf("start: %v", err)

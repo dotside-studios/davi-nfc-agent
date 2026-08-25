@@ -71,7 +71,7 @@ func TestStateTransitions(t *testing.T) {
 
 	var mu sync.Mutex
 	var seen []State
-	a.OnStateChange(func(s State) {
+	a.Events().State.Connect(func(s State) {
 		mu.Lock()
 		defer mu.Unlock()
 		seen = append(seen, s)

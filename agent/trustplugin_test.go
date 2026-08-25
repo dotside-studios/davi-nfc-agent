@@ -41,7 +41,7 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	if err := os.WriteFile(caFile, []byte("ca"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a.notifyServerRestart()
+	a.fireServerRestart()
 	if entry.Visible() {
 		t.Fatal("the trust entry is still offered with a certificate authority installed")
 	}
@@ -49,7 +49,7 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	if err := os.Remove(caFile); err != nil {
 		t.Fatal(err)
 	}
-	a.notifyServerRestart()
+	a.fireServerRestart()
 	if !entry.Visible() {
 		t.Fatal("the trust entry stayed hidden after the certificate authority went missing")
 	}

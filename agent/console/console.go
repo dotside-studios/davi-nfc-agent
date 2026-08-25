@@ -54,24 +54,10 @@ func New(cfg Config) *Server {
 		Dev:     info.IsDev(),
 	})
 
-	// Both stores are optional configuration, so an agent built without them
-	// still gets a console; it just has less to follow.
-	if origins := a.Origins(); origins != nil {
-		origins.OnChange(s.NotifyChange)
-	}
-	if devices := a.Devices(); devices != nil {
-		devices.OnChange(s.NotifyChange)
-	}
-	a.OnClientsChange(s.NotifyChange)
-
-	// A preference changed anywhere, including from the tray, so an open page
-	// shows what the agent is set to rather than what it was set to when the
-	// page loaded.
-	a.OnPreferencesChange(s.NotifyChange)
-
-	// A rebound listener is an address change, and the certificate the page
-	// reports on is reissued by the same events that cause one.
-	a.OnServerRestart(s.NotifyChange)
+	// Every change the agent reports, whatever made it: an open page shows
+	// what the agent is set to rather than what it was set to when the page
+	// loaded, including changes made from the tray.
+	a.Events().Any.Connect(func(agent.Change) { s.NotifyChange() })
 
 	return s
 }

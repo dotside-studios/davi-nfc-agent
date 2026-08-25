@@ -144,7 +144,7 @@ func TestScanReachesTheClientServerAfterStart(t *testing.T) {
 	a := rt.Agent
 
 	seen := make(chan string, 1)
-	a.OnTag(func(data nfc.NFCData) {
+	a.Events().Tag.Connect(func(data nfc.NFCData) {
 		if data.Card != nil {
 			select {
 			case seen <- data.Card.UID:

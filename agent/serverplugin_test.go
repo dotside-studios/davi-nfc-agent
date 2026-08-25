@@ -292,7 +292,7 @@ func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
 	}
 
 	rebound := make(chan struct{}, 1)
-	rt.Agent.OnServerRestart(func() {
+	rt.Agent.Events().Servers.Connect(func(int) {
 		select {
 		case rebound <- struct{}{}:
 		default:

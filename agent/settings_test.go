@@ -29,7 +29,7 @@ func TestEveryPreferenceChangeIsAnnounced(t *testing.T) {
 			}
 
 			announced := 0
-			rt.Agent.OnPreferencesChange(func() { announced++ })
+			rt.Agent.Events().Preferences.Connect(func(Preferences) { announced++ })
 
 			tc.change(rt.Agent)
 			if announced == 0 {
@@ -57,8 +57,8 @@ func TestAPreferenceChangeDoesNotLookLikeAClientChange(t *testing.T) {
 	}
 
 	clients, preferences := 0, 0
-	rt.Agent.OnClientsChange(func() { clients++ })
-	rt.Agent.OnPreferencesChange(func() { preferences++ })
+	rt.Agent.Events().Clients.Connect(func(int) { clients++ })
+	rt.Agent.Events().Preferences.Connect(func(Preferences) { preferences++ })
 
 	rt.Agent.SetReaderMode(nfc.ModeReadOnly)
 
@@ -70,24 +70,24 @@ func TestAPreferenceChangeDoesNotLookLikeAClientChange(t *testing.T) {
 	}
 }
 
-// The client hooks are read when they fire, not captured when the client server
-// is built, so a hook registered after the agent starts is not left out. They
-// were once snapshotted, which would have left a late subscriber seeing
-// preference changes but no client ones.
-func TestClientHooksAreReadWhenTheyFire(t *testing.T) {
+// The client server captures one callback when it is built, so a subscriber
+// that connects after the agent starts must still be called. Subscribers were
+// once snapshotted there, which left a late one seeing preference changes but
+// no client ones.
+func TestALateClientSubscriberIsStillCalled(t *testing.T) {
 	rt, err := Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	// What the client server is handed, taken before any hook exists.
+	// What the client server is handed, taken before any subscriber exists.
 	notify := rt.Agent.fireClientsChanged
 
-	ran := 0
-	rt.Agent.OnClientsChange(func() { ran++ })
+	got := -1
+	rt.Agent.Events().Clients.Connect(func(clients int) { got = clients })
 
-	notify()
-	if ran != 1 {
-		t.Errorf("a hook registered after the callback was taken ran %d times, want 1", ran)
+	notify(3)
+	if got != 3 {
+		t.Errorf("a subscriber connected after the callback was taken saw %d clients, want 3", got)
 	}
 }

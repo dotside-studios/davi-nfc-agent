@@ -56,7 +56,7 @@ func (p *TrustPlugin) Activate(ctx AgentContext) error {
 	// Whether the authority is installed is a look at this machine, not a
 	// decision taken once: a trust store that loses it needs the offer back
 	// without an agent restart to notice.
-	ctx.Agent.OnServerRestart(p.refresh)
+	ctx.Events.Servers.Connect(func(int) { p.refresh() })
 	return nil
 }
 

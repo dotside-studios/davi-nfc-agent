@@ -128,8 +128,7 @@ func start(t *testing.T, opts options) *harness {
 		h.Pair = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(pairing.Port()))
 	}
 
-	// Before Start, the only point at which an observer is promised every scan.
-	rt.Agent.OnTag(func(data nfc.NFCData) {
+	rt.Agent.Events().Tag.Connect(func(data nfc.NFCData) {
 		select {
 		case h.scans <- data:
 		default:

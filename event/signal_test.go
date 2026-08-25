@@ -198,3 +198,48 @@ func TestSignalConcurrentConnectEmitDisconnect(t *testing.T) {
 		t.Fatalf("Len = %d, want 0", sig.Len())
 	}
 }
+
+// A channel is the escape hatch for a consumer that drains on its own terms.
+func TestChannelCarriesWhatIsEmitted(t *testing.T) {
+	var sig event.Signal[int]
+
+	values, stop := sig.Channel(4)
+	sig.Emit(1)
+	sig.Emit(2)
+
+	if got := <-values; got != 1 {
+		t.Errorf("first value is %d, want 1", got)
+	}
+	if got := <-values; got != 2 {
+		t.Errorf("second value is %d, want 2", got)
+	}
+
+	stop()
+	sig.Emit(3)
+
+	select {
+	case got := <-values:
+		t.Errorf("a stopped channel carried %d", got)
+	default:
+	}
+}
+
+// A reader that stops draining must not stall whoever is emitting, which is a
+// reader poll loop or a WebSocket read loop.
+func TestAFullChannelDropsRatherThanBlocking(t *testing.T) {
+	var sig event.Signal[int]
+
+	values, stop := sig.Channel(1)
+	defer stop()
+
+	for i := 0; i < 100; i++ {
+		sig.Emit(i) // would deadlock if a full buffer blocked
+	}
+
+	if got := <-values; got != 0 {
+		t.Errorf("the buffered value is %d, want the first one emitted", got)
+	}
+	if len(values) != 0 {
+		t.Errorf("%d values are queued, want the rest dropped", len(values))
+	}
+}

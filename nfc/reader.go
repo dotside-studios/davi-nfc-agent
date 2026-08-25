@@ -280,6 +280,7 @@ func (r *NFCReader) GetDeviceStatus() DeviceStatus {
 	}
 
 	return DeviceStatus{
+		Device:      r.deviceManager.DevicePath(),
 		Connected:   connected,
 		Message:     message,
 		CardPresent: cardPres,
@@ -401,7 +402,7 @@ func (r *NFCReader) handleDeviceErrors(err error) bool {
 	// For unhandled errors, send to data channel
 	if !recognized {
 		log.Printf("Unhandled error from getTags: %v. Sending to dataChan.", err)
-		r.dataChan <- NFCData{Card: nil, Err: fmt.Errorf("get tags error: %v", err)}
+		r.dataChan <- NFCData{Device: r.DevicePath(), Card: nil, Err: fmt.Errorf("get tags error: %v", err)}
 		r.clock.Sleep(UnhandledErrorRetryInterval)
 	}
 
@@ -449,13 +450,13 @@ func (r *NFCReader) handleTagPolling(tags []Tag) {
 			}
 			log.Printf("Error reading data for card UID %s (Type: %s): %v", uid, card.Type, err)
 			// Send card with error
-			r.dataChan <- NFCData{Card: card, Err: err}
+			r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: err}
 			continue
 		}
 
 		if r.cache.HasChanged(uid) {
 			log.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
-			r.dataChan <- NFCData{Card: card, Err: nil}
+			r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: nil}
 			r.signal(SignalSuccess)
 		}
 

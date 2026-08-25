@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The pinned device filters rather than locks. A scan from a reader the operator
+  is not asking for is dropped, wherever it was read, so a preference set from
+  the console takes effect without waiting for something to restart the reader.
+  A device that reports its own scans, such as a phone, is unaffected by which
+  reader is pinned
+- `event.Signal.Channel` hands back a channel carrying what a signal emits, and
+  the function that stops it, for a consumer that drains on its own terms or is
+  watching one while debugging. A full buffer drops rather than blocking, so a
+  slow reader cannot stall a reader poll loop or a socket
+- `nfc.NFCData` and `nfc.DeviceStatus` carry the device they came from, so a
+  consumer knows which reader presented a tag rather than asking the tag what
+  produced it. Filled by the reader and by the phone driver; the wire is
+  unchanged
 - A manager reports what its devices scan and answers for the tags they hold:
   `nfc.TagReporter` carries an `event.Signal` of scans, `nfc.TagHolder` is what
   the tag router asks, and `multimanager` implements both by fanning its

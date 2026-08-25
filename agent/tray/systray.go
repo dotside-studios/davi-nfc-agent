@@ -334,7 +334,7 @@ func (s *App) applyReaders(devices []string) {
 	currentDevice := s.agent.CurrentDevicePath()
 
 	// If agent is running but no device selected, auto-select first available
-	if s.agent.Reader() != nil && currentDevice == "" && len(devices) > 0 {
+	if s.agent.Running() && currentDevice == "" && len(devices) > 0 {
 		log.Printf("[systray] Auto-selecting discovered device: %s", devices[0])
 		s.SwitchDevice(devices[0])
 		currentDevice = s.agent.CurrentDevicePath()

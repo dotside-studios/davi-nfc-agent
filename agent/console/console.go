@@ -64,6 +64,11 @@ func New(cfg Config) *Server {
 	}
 	a.OnClientsChange(s.NotifyChange)
 
+	// A preference changed anywhere, including from the tray, so an open page
+	// shows what the agent is set to rather than what it was set to when the
+	// page loaded.
+	a.OnPreferencesChange(s.NotifyChange)
+
 	// A rebound listener is an address change, and the certificate the page
 	// reports on is reissued by the same events that cause one.
 	a.OnServerRestart(s.NotifyChange)

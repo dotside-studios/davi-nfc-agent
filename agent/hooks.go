@@ -13,6 +13,32 @@ func (a *Agent) OnClientsChange(fn func()) {
 	a.clientHooks = append(a.clientHooks, fn)
 }
 
+// OnPreferencesChange registers fn to run when a preference changes, whoever
+// changed it, so a surface showing one redraws without polling. See
+// [Agent.Preferences] for what counts.
+//
+// Called on the goroutine that made the change, so it must not block.
+func (a *Agent) OnPreferencesChange(fn func()) {
+	if fn == nil {
+		return
+	}
+	a.hooksMu.Lock()
+	defer a.hooksMu.Unlock()
+	a.preferenceHooks = append(a.preferenceHooks, fn)
+}
+
+// firePreferencesChanged runs the preference hooks, in registration order.
+func (a *Agent) firePreferencesChanged() {
+	a.hooksMu.Lock()
+	hooks := make([]func(), len(a.preferenceHooks))
+	copy(hooks, a.preferenceHooks)
+	a.hooksMu.Unlock()
+
+	for _, fn := range hooks {
+		fn()
+	}
+}
+
 // OnServerRestart registers fn to run after the listeners have been rebuilt,
 // which is when the addresses a menu or a page shows can have changed.
 //

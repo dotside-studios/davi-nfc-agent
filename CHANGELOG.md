@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
+- `Agent.OnPreferencesChange` reports a preference change. It used to ride
+  `OnClientsChange`, which is documented as running when a client connects or
+  disconnects, so nothing could follow one without the other
 - `Options.RequirePaired` is `Options.RequirePairedDevice`, matching
   `Config.RequirePairedDevice` and the agent's own methods
 - `Options.Version` is gone. Setup never read it; the shipped command's

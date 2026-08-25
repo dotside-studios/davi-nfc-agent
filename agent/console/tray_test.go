@@ -68,3 +68,22 @@ func TestSelectingAReaderNeedsATray(t *testing.T) {
 		t.Error("SelectDevice succeeded with no tray attached")
 	}
 }
+
+// An open page follows the agent, not just its own actions: a preference
+// changed from the tray, or by anything else holding the agent, has to wake the
+// live connection or the page keeps rendering what it loaded.
+func TestAnOpenPageIsWokenByAPreferenceChangedElsewhere(t *testing.T) {
+	a := quietAgent(t)
+	c := New(Config{Agent: a})
+
+	woken, done := c.subscribe()
+	t.Cleanup(done)
+
+	a.SetReaderMode(nfc.ModeReadOnly)
+
+	select {
+	case <-woken:
+	default:
+		t.Fatal("a preference change did not reach the open page")
+	}
+}

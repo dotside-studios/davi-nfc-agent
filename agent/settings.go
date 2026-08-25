@@ -110,7 +110,7 @@ func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
 	if reader := a.reader.Load(); reader != nil {
 		reader.SetMode(mode)
 	}
-	a.notifyPreferencesChanged()
+	a.firePreferencesChanged()
 }
 
 // CurrentReaderMode is the mode the reader is in, or the one the next reader
@@ -133,7 +133,7 @@ func (a *Agent) SetCardTypeFilter(cardTypes []string) {
 	}
 
 	a.cardTypes.replace(next)
-	a.notifyPreferencesChanged()
+	a.firePreferencesChanged()
 }
 
 // CardTypeFilter lists the allowed card types, sorted. Nil when nothing is
@@ -152,7 +152,7 @@ func (a *Agent) SetPinnedDevice(devicePath string) {
 	a.pinnedDevice = devicePath
 	a.settingsMu.Unlock()
 
-	a.notifyPreferencesChanged()
+	a.firePreferencesChanged()
 }
 
 // CurrentPinnedDevice is the reader the operator chose, empty for auto-detect.
@@ -173,7 +173,7 @@ func (a *Agent) SetDevicePort(port int) {
 	a.devicePort = port
 	a.settingsMu.Unlock()
 
-	a.notifyPreferencesChanged()
+	a.firePreferencesChanged()
 }
 
 // adoptReaderSettings hands a freshly built reader the preferences the agent
@@ -230,12 +230,4 @@ func sameCardTypes(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-// notifyPreferencesChanged runs the registered change hooks, so a change made
-// from the tray reaches whatever is displaying it.
-func (a *Agent) notifyPreferencesChanged() {
-	if fn := a.clientsChanged(); fn != nil {
-		fn()
-	}
 }

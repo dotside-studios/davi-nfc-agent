@@ -205,6 +205,7 @@ type Agent struct {
 	pumpCancel        context.CancelFunc
 	onTag             []func(nfc.NFCData)
 	clientHooks       []func()
+	preferenceHooks   []func()
 	restartHooks      []func()
 	serverRestartChan chan struct{} // Signals when servers are restarted
 
@@ -503,7 +504,7 @@ func (a *Agent) startServers() error {
 		OriginPolicy:   a.originPolicy(),
 		TokenVerifier:  a.tokenVerifier(),
 		Ops:            a.Router,
-		OnChange:       a.clientsChanged(),
+		OnChange:       a.fireClientsChanged,
 		OnTag:          a.tagObserver(),
 	})
 
@@ -630,7 +631,7 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	if a.DeviceAuth != nil {
 		a.DeviceAuth.SetRequirePaired(on)
 	}
-	a.notifyPreferencesChanged()
+	a.firePreferencesChanged()
 }
 
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
@@ -647,7 +648,7 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	if reader := a.reader.Load(); reader != nil {
 		reader.SetFeedback(on)
 	}
-	a.notifyPreferencesChanged()
+	a.firePreferencesChanged()
 }
 
 // OnTag registers fn to receive every scan the agent broadcasts, so a program
@@ -679,20 +680,18 @@ func (a *Agent) tagObserver() func(nfc.NFCData) {
 	}
 }
 
-// clientsChanged returns the hook that runs when the client list moves, or nil
-// when nothing registered one.
-func (a *Agent) clientsChanged() func() {
+// fireClientsChanged runs the client hooks, in registration order.
+//
+// Read when it fires rather than captured when the client server is built, so a
+// hook registered after the agent starts is not silently left out.
+func (a *Agent) fireClientsChanged() {
 	a.hooksMu.Lock()
-	defer a.hooksMu.Unlock()
-	if len(a.clientHooks) == 0 {
-		return nil
-	}
 	hooks := make([]func(), len(a.clientHooks))
 	copy(hooks, a.clientHooks)
-	return func() {
-		for _, fn := range hooks {
-			fn()
-		}
+	a.hooksMu.Unlock()
+
+	for _, fn := range hooks {
+		fn()
 	}
 }
 

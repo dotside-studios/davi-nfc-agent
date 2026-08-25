@@ -4,6 +4,7 @@ package console
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -184,6 +185,9 @@ func (c *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 // NotifyChange pushes fresh state to connected consoles. Safe from any
 // goroutine, and coalesces.
 func (c *Server) NotifyChange() {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, ch := range c.listeners {
@@ -353,6 +357,9 @@ func (c *Server) pumpEvents(changes <-chan struct{}, logs <-chan logbuf.Entry, o
 
 // ConsoleURL returns the console address carrying a fresh single-use token.
 func (c *Server) ConsoleURL() (string, error) {
+	if c == nil {
+		return "", errors.New("console: no console in this build")
+	}
 	token, err := c.auth.MintHandoff()
 	if err != nil {
 		return "", err

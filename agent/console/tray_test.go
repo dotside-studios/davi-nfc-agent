@@ -87,3 +87,26 @@ func TestAnOpenPageIsWokenByAPreferenceChangedElsewhere(t *testing.T) {
 		t.Fatal("a preference change did not reach the open page")
 	}
 }
+
+// A build with no console holds a nil *Server, which console_nowebui.go
+// promises every method tolerates. The stubs there do; these are the ones the
+// real build has to match, so the promise holds under either tag.
+func TestANilConsoleToleratesEveryCall(t *testing.T) {
+	var c *Server
+
+	c.NotifyChange()
+	c.AttachTray(nil)
+
+	if got := c.Endpoints(); got != nil {
+		t.Errorf("Endpoints() = %v, want nil", got)
+	}
+	if got := c.Routes(); got != nil {
+		t.Errorf("Routes() = %v, want nil", got)
+	}
+	if got := c.Assets(); got != nil {
+		t.Errorf("Assets() = %v, want nil", got)
+	}
+	if _, err := c.ConsoleURL(); err == nil {
+		t.Error("ConsoleURL() on a nil console returned no error")
+	}
+}

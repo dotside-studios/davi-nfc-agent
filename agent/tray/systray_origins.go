@@ -111,16 +111,3 @@ func (s *App) handleOriginAllowAny() {
 
 	s.refreshOriginsMenu()
 }
-
-// startOriginWatcher redraws the menu when an origin is refused, so a blocked
-// console becomes a visible one-click prompt instead of a silent failure.
-func (s *App) startOriginWatcher() {
-	if s.agent.Origins() == nil {
-		return
-	}
-
-	s.agent.Origins().OnBlocked(func(origin string) {
-		log.Printf("[systray] Blocked connection from %s: allow it under Allowed Origins to let it use the reader", origin)
-		s.refreshOriginsMenu()
-	})
-}

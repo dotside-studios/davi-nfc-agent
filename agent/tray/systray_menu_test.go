@@ -261,10 +261,10 @@ func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
 	agent := newTestAgentWith(nfcagent.Config{Origins: store})
 
 	app, _ := newTestTray(t, agent)
-	app.startOriginWatcher()
+	app.subscribe()
 
 	// A refused page shows up as a one-click offer to allow it, put there by
-	// the watcher rather than by reopening the menu.
+	// the agent's stream rather than by reopening the menu.
 	store.RecordBlocked("https://console.example")
 
 	row := findOriginRow(t, app, "Allow console.example")

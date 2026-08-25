@@ -208,8 +208,9 @@ opened or bound. The tray does it as it draws its menu, which is what puts the
 entries on the real one; `Agent.Start` does it if nothing else has. Adding a
 plugin after that is refused rather than accepted and never activated.
 
-Activation is also where a plugin publishes what the agent then serves from, so
-`rt.Agent.UnifiedServer` is worth reading only once it has happened.
+Activation is also where a plugin publishes what the agent is served from and
+mounts its routes, so a listener's port and address are worth reading only once
+it has happened.
 
 ```go
 // A headless build with no tray to draw their entries on.
@@ -357,7 +358,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server` | The bridge between tag sources and clients, and the device credential check |
 | `server/clientserver` | The client WebSocket endpoint |
 | `server/tagrouter` | Picks the reader or a device for each client request |
-| `server/unifiedserver` | One listener fronting all of the above |
+| `server/unifiedserver` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
 | `traymenu` | Declarative tray menus, with no toolkit behind them |
 | `clipboard` | Copying text to the system clipboard |
@@ -512,10 +513,6 @@ regardless, and the observer's return value changes nothing.
 
 Observers run on the goroutine that feeds those clients, so they must not block.
 Work that may take time belongs on a channel of your own.
-
-> Do not read `Agent.Bridge.TagData` directly. That channel has a single
-> consumer, so a second reader removes scans from the broadcast rather than
-> copying them.
 
 ## Driving a reader directly
 

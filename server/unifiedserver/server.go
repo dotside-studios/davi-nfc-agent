@@ -1,15 +1,13 @@
-// Package unifiedserver serves the device and client WebSocket endpoints from a
-// single HTTP listener on one port.
+// Package unifiedserver is one HTTP listener: a port, a mux of whatever was
+// mounted on it, an optional TLS certificate, and an mDNS advertisement.
 //
-// Historically the agent ran two servers on two ports: a device server (for NFC
-// readers/phones) and a client server (for web apps). They already share the
-// same WebSocket path (/ws), auth, origin, and CORS handling and communicate
-// in-process by direct call -- the two ports were a conceptual
-// boundary, not a technical requirement. This package collapses them onto one
-// listener and routes each incoming /ws connection to the device or client
-// handler based on the same discriminator the device server already used
-// (remotenfc.IsDeviceConnection: the ?mode=device query param or the
-// X-Device-Mode header).
+// It knows nothing about NFC, and nothing about the agent. It once did: the
+// agent ran a device server and a client server on two ports, and this package
+// was written to collapse them onto one and dispatch each /ws connection
+// between them by the mode it declared. Both are the agent's own routes now,
+// mounted here like anything else, so what is left is the listener. That is
+// what lets a build decide what it serves; see agent.ServerPlugin, which owns
+// one of these, and agent.Routes, which is what the agent asks it to carry.
 package unifiedserver
 
 import (
@@ -54,10 +52,9 @@ func (c Config) TLSEnabled() bool {
 	return c.CertFile != "" && c.KeyFile != ""
 }
 
-// Server owns the single HTTP listener and dispatches WebSocket connections to
-// the device or client handler. Those retain all NFC and client-fanout logic;
-// this type only fronts them with one listener, one mDNS advertisement, and
-// shared health/CORS handling.
+// Server owns the listener: it binds the port, serves the mux built from the
+// mounted routes, advertises itself over mDNS, and takes all three down again.
+// What is behind a route is the mounter's business, not this type's.
 type Server struct {
 	config Config
 	// mux is built from the mounts at Start. Nothing is served until then, so
@@ -142,7 +139,7 @@ func (s *Server) Mount(pattern string, handler http.Handler) error {
 // reissued, and rebuilding it there would lose whatever else was mounted on the
 // port, a control center included.
 func (s *Server) Start() error {
-	log.Printf("[unified] Starting NFC Agent server on port %d (device + client)...", s.config.Port)
+	log.Printf("[unified] Starting the agent's listener on port %d...", s.config.Port)
 
 	s.mu.Lock()
 	if s.httpServer != nil {
@@ -223,14 +220,14 @@ func (s *Server) handlerLocked() http.Handler {
 	return mux
 }
 
-// Stop stops the unified server: it shuts down mDNS, the HTTP listener, and
-// cancels the shared context (which stops the device and client background
-// workers running under it).
 // Port is the port this server binds. It is what a client should be told to
 // connect to, which is not necessarily what the agent is configured with: a
 // port changed in the settings takes effect only on a fresh listener.
 func (s *Server) Port() int { return s.config.Port }
 
+// Stop withdraws the mDNS advertisement, shuts the listener down and cancels
+// the context the routes on it were serving under. A stopped server starts
+// again on the routes it already carries; see Start.
 func (s *Server) Stop() {
 	// Take what needs shutting down under the lock, then do the shutting down
 	// outside it: Shutdown blocks, and Start must not be held up behind it.

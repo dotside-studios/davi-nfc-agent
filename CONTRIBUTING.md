@@ -125,9 +125,10 @@ davi-nfc-agent/
 │   ├── remotenfc/       # Phones and other networked devices, and the
 │   │                    #   WebSocket endpoint they connect to
 │   └── multimanager/    # Multiple manager aggregation
-├── server/              # WebSocket servers
-│   ├── unifiedserver/   # Single listener (port 9470) fronting both roles
-│   ├── deviceserver/    # Auth, and routing between reader and device
+├── server/              # The bridge between tag sources and clients, and the
+│   │                    #   device credential check
+│   ├── unifiedserver/   # One HTTP listener: a port, a mux, TLS, mDNS
+│   ├── tagrouter/       # Picks the reader or a device for each client request
 │   └── clientserver/    # Client connection handling logic
 ├── wsconn/              # Write-safe WebSocket wrapper shared by the above
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
@@ -148,13 +149,17 @@ davi-nfc-agent/
 - See [nfc/README.md](nfc/README.md) for details
 
 **Server Layer** (`server/`)
-- Single-server architecture: one listener on port 9470 (configurable via
-  `-device-port`) serves both roles, distinguished by connection path
-  (`/ws?mode=device` for devices, `/ws` for clients):
-  - **UnifiedServer**: Fronts both roles on the single port
-  - **DeviceServer**: Handles NFC devices and hardware readers
-  - **ClientServer**: Handles client applications
-- Bridge component connects the device and client handlers in-process
+- One listener on port 9470 (configurable via `-device-port`) serves both roles
+  on one path, distinguished by the mode a connection declares:
+  `/ws?mode=device` for devices, `/ws` for clients
+  - **UnifiedServer**: the listener itself, and the mux of what was mounted on
+    it. It knows nothing about NFC; `agent.Routes` is what the agent asks it to
+    carry, and `agent.ServerPlugin` is what mounts them
+  - **ClientServer**: fans a scan out to every connected client, and serves
+    their requests
+  - **TagRouter**: picks the reader or a paired device for each client request
+- A client request is a call rather than a message on a channel: there is no
+  bridge between the two halves
 
 **Tray Menu** (`traymenu/`)
 - Declarative menu building, with clicks delivered as signals rather than

@@ -26,6 +26,7 @@ type Config struct {
 	Logs     *logbuf.Ring
 	Servers  *agent.ServerPlugin
 	Pairing  *agent.PairingPlugin
+	Trust    *agent.TrustPlugin
 }
 
 // New reports that there is no console in this build.

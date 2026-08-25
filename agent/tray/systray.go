@@ -58,9 +58,6 @@ type App struct {
 	// Card type filter
 	cardTypes *traymenu.Checklist[string]
 
-	// Certificate trust
-	mTrustBrowsers *traymenu.Item
-
 	// settings is the store the tray writes its toggles back to. Nil when the
 	// agent has no config directory to persist to.
 	settings *settings.Store
@@ -178,7 +175,6 @@ func (s *App) onReady() {
 	s.setupUI()
 	s.autoStartAgent()
 	s.startCardInfoUpdater()
-	s.startServerRestartListener()
 	s.startOriginWatcher()
 	s.startDeviceWatcher()
 }
@@ -227,21 +223,6 @@ func (s *App) setupUI() {
 
 	s.setupDevicesMenu()
 	s.setupOriginsMenu()
-
-	// Certificate trust, the other half of what a browser needs.
-	s.setupTrustMenu()
-
-	s.menu.AddSeparator()
-
-	// The plugins add theirs here, between the entries this build declares
-	// itself and the ones that start and stop the agent. They go on the top
-	// level like any other, which is what makes a plugin's entry
-	// indistinguishable from one the tray declared.
-	//
-	// Done from inside the menu rather than after it, because a menu item
-	// always goes to the end of its parent: activated once Quit was on, every
-	// plugin entry would land under it.
-	s.activatePlugins()
 
 	// The menus open on what the agent is set to, which is not always the
 	// default: a mode restored from settings, or one the launcher set, was
@@ -380,21 +361,6 @@ func (s *App) startCardInfoUpdater() {
 				s.updateCardType(cardType)
 				lastType = cardType
 			}
-		}
-	}()
-}
-
-// startServerRestartListener listens for server restart events from the Agent
-// and brings the menu back in step with what the listeners are now serving.
-func (s *App) startServerRestartListener() {
-	go func() {
-		for range s.agent.ServerRestarts() {
-			log.Printf("[systray] Server restart detected, updating the menu")
-
-			// CAInstalled is a look at the filesystem, not a decision taken
-			// once: a config directory that loses its CA needs the offer to
-			// install one back, without an agent restart to notice.
-			s.RefreshTrustMenu()
 		}
 	}()
 }

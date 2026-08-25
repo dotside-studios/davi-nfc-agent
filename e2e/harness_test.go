@@ -99,14 +99,17 @@ func start(t *testing.T, opts options) *harness {
 	// The listener is a plugin, as it is in docs/custom-builds.md. With none
 	// registered the agent drives the reader and serves nothing. Pairing is a
 	// plugin of its own, on a listener of its own; with no tray here its menu
-	// entries go to a menu that draws nothing.
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{}); err != nil {
+	// entries go to a menu that draws nothing. The certificate the listener
+	// serves and the authority pairing hands out are the trust plugin's, which
+	// is what the agent no longer holds.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
 	var pairing *agent.PairingPlugin
 	if opts.Pairing {
-		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t))
+		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), trust)
 		if err := rt.Agent.Plugins.Add(pairing); err != nil {
 			t.Fatalf("Plugins.Add: %v", err)
 		}

@@ -17,7 +17,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -134,12 +133,6 @@ type Config struct {
 	// in the environment, or here. A field marked there belongs to the launcher
 	// for the whole run: no stored preference and no operator may change it.
 	Explicit settings.Explicit
-
-	// TLS configuration, used by the unified server. TLSManager also drives
-	// certificate regeneration and network-change watching.
-	CertFile   string
-	KeyFile    string
-	TLSManager *tls.Manager
 }
 
 // Agent runs the NFC reader and the servers in front of it. Build one with New;
@@ -186,9 +179,6 @@ type Agent struct {
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
-	certFile            string
-	keyFile             string
-	tlsManager          *tls.Manager
 	requirePairedDevice bool
 	readerFeedback      bool
 	settingsStore       *settings.Store
@@ -267,9 +257,6 @@ func New(cfg Config) *Agent {
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
-		certFile:            cfg.CertFile,
-		keyFile:             cfg.KeyFile,
-		tlsManager:          cfg.TLSManager,
 		requirePairedDevice: cfg.RequirePairedDevice,
 		explicit:            cfg.Explicit,
 		readerMode:          nfc.ModeReadWrite,
@@ -331,9 +318,6 @@ func (a *Agent) DevicePort() int {
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
-func (a *Agent) CertFile() string         { return a.certFile }
-func (a *Agent) KeyFile() string          { return a.keyFile }
-func (a *Agent) TLSManager() *tls.Manager { return a.tlsManager }
 func (a *Agent) RequirePairedDevice() bool {
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()

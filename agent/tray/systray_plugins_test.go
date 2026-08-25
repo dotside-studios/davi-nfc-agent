@@ -58,7 +58,7 @@ func indexOf(titles []string, want string) int {
 // section the tray hands the plugins rather than in its own URLs submenu.
 func TestPairingEntriesComeFromThePlugin(t *testing.T) {
 	a := newTestAgent()
-	pairing := nfcagent.NewPairingPlugin(a, 9498)
+	pairing := nfcagent.NewPairingPlugin(a, 9498, nil)
 	if err := a.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}

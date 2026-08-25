@@ -37,17 +37,20 @@ type PairingConfig struct {
 	AgentPort int
 }
 
-// PairingFor builds a pairing server for a, listening on port. Everything else
-// it needs is what the agent was already configured with: its certificate
-// authority, its device registry, its key pin, its name and its port.
+// PairingFor builds a pairing server for a, listening on port and handing out
+// ca. Everything else it needs is what the agent was already configured with:
+// its device registry, its key pin, its name and its port.
+//
+// ca may be nil: an agent serving an externally provisioned certificate has no
+// authority to give out, and pairing works regardless.
 //
 // The agent does not hold the result. Whoever builds one registers it, as a
 // component or as an endpoint of the server plugin, and hands it to whatever
 // displays the PIN.
-func PairingFor(a *Agent, port int) *PairingServer {
+func PairingFor(a *Agent, port int, ca tlspkg.CertificateAuthority) *PairingServer {
 	return NewPairingServer(PairingConfig{
 		Port:         port,
-		CA:           a.TLSManager(),
+		CA:           ca,
 		Devices:      a.Devices(),
 		PublicKeyPin: a.PublicKeyPin(),
 		AppName:      a.Info().DisplayName,

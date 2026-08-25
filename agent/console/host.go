@@ -21,6 +21,7 @@ type host struct {
 	settings *settings.Store
 	servers  *agent.ServerPlugin
 	pairing  *agent.PairingPlugin
+	trust    *agent.TrustPlugin
 	app      Tray
 }
 
@@ -110,8 +111,8 @@ func (h *host) SelectDevice(devicePath string) error {
 // the console must not hand out a URL nothing is listening on.
 func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
-func (h *host) CertFile() string   { return h.agent.CertFile() }
-func (h *host) TLSEnabled() bool   { return h.agent.CertFile() != "" && h.agent.KeyFile() != "" }
+func (h *host) CertFile() string   { return h.servers.CertFile() }
+func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
 func (h *host) ClientCount() int {
@@ -169,37 +170,35 @@ func (h *host) RotatePairingPIN() (string, error) {
 	return h.pairing.RotatePIN(), nil
 }
 
-func (h *host) CAInstalled() bool {
-	return h.agent.TLSManager() != nil && h.agent.TLSManager().CAInstalled()
-}
+func (h *host) CAInstalled() bool { return h.trust.Installed() }
 
 func (h *host) CAFingerprint() (string, error) {
-	if h.agent.TLSManager() == nil {
+	if !h.managesCertificates() {
 		return "", errors.New("no certificate authority")
 	}
-	return h.agent.TLSManager().GetCAFingerprint()
+	return h.trust.Fingerprint()
 }
 
+// InstallCA and RegenerateCertificate go through the trust plugin, so the tray
+// entry offering the same action follows an install done here.
 func (h *host) InstallCA() error {
-	if h.agent.TLSManager() == nil {
+	if !h.managesCertificates() {
 		return errors.New("agent is not managing its own certificates")
 	}
-	if err := h.agent.TLSManager().InstallCA(); err != nil {
-		return err
-	}
-	if h.app != nil {
-		// The tray offers the same action; it has nothing left to offer now.
-		h.app.RefreshTrustMenu()
-	}
-	return nil
+	return h.trust.Install()
 }
 
 func (h *host) RegenerateCertificate() error {
-	if h.agent.TLSManager() == nil {
+	if !h.managesCertificates() {
 		return errors.New("agent is not managing its own certificates")
 	}
-	return h.agent.TLSManager().RegenerateCertificates()
+	return h.trust.Regenerate()
 }
+
+// managesCertificates reports whether there is a certificate this agent can act
+// on. Without one the trust plugin does nothing, and saying so is better than
+// reporting success for work that never happened.
+func (h *host) managesCertificates() bool { return h.trust.Authority() != nil }
 
 // ---- paired devices ----
 

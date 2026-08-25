@@ -30,7 +30,7 @@ func TestPairingFollowsTheAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Use(PairingFor(rt.Agent, 9489)); err != nil {
+	if err := rt.Agent.Use(PairingFor(rt.Agent, 9489, nil)); err != nil {
 		t.Fatalf("Use: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestPairingForTakesTheAgentsConfiguration(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := PairingFor(rt.Agent, 9495)
+	pairing := PairingFor(rt.Agent, 9495, nil)
 	if got := pairing.Port(); got != 9495 {
 		t.Errorf("Port() = %d, want 9495", got)
 	}
@@ -123,7 +123,7 @@ func TestPairingRegistersAsAnEndpointComponent(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := PairingFor(rt.Agent, 9497)
+	pairing := PairingFor(rt.Agent, 9497, nil)
 	servers := &ServerPlugin{Endpoints: []Endpoint{{Name: "pairing", Component: pairing}}}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)

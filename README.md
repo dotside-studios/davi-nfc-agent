@@ -335,10 +335,11 @@ entry sits beside the ones the tray declared itself. Nothing is loaded at run
 time: which plugins a build has is decided by what it imports, so one left out
 takes its dependencies with it.
 
-The listener and the pairing server are plugins too. `agent.ServerPlugin` owns
-the port and everything served from it, `agent.PairingPlugin` the pairing
-listener and the entries that hand out its PIN. Register neither and the agent
-drives the reader and serves no HTTP at all. See
+The listener, the pairing server and the certificate are plugins too.
+`agent.ServerPlugin` owns the port and everything served from it,
+`agent.PairingPlugin` the pairing listener and the entries that hand out its
+PIN, and `agent.TrustPlugin` the certificate the other two are configured from.
+Register none and the agent drives the reader and serves no HTTP at all. See
 [Plugins](docs/custom-builds.md#plugins).
 
 ### NFC backends

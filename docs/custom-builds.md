@@ -71,14 +71,19 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// The certificate, and the tray entry that makes browsers accept it.
+	// Whatever needs a certificate is given this rather than reaching for one:
+	// the agent holds none.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+
 	// The listener and everything on it. Setup does not build one: what this
 	// agent serves is the program's decision.
-	servers := &agent.ServerPlugin{}
+	servers := &agent.ServerPlugin{Trust: trust}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
 	// address and PIN. The agent does not hold one, so this is where it is
 	// built and where it is handed to the console.
-	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
+	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, trust)
 
 	// The control center, served from the same listener and listed with the
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
@@ -89,12 +94,14 @@ func main() {
 		Logs:     rt.Logs,
 		Servers:  servers,
 		Pairing:  pairing,
+		Trust:    trust,
 	})
 	servers.Add(c.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,
-	// and plugins are activated in the order they were added.
-	if err := rt.Agent.Plugins.Add(servers, pairing); err != nil {
+	// and plugins are activated in the order they were added, which is also the
+	// order their entries appear in the tray.
+	if err := rt.Agent.Plugins.Add(servers, pairing, trust); err != nil {
 		log.Fatal(err)
 	}
 
@@ -116,14 +123,24 @@ the reader and serves no HTTP, which is a build rather than a broken one.
 Nothing binds until the agent starts, so a route is declared before the port it
 will be served from is bound. See [Plugins](#plugins).
 
+The certificate is `agent.TrustPlugin`, wrapping the `*tls.Manager` that
+`Setup` returns as `rt.Certificates`. It holds the files a listener serves, the
+authority a pairing device is given, and the tray entry that installs that
+authority so browsers on this machine accept the agent. Whatever needs a
+certificate takes this plugin: `ServerPlugin.Trust`, `NewPairingPlugin` and
+`console.Config.Trust` all read it, so the certificate is configured once. A
+build serving a certificate it does not manage leaves `Manager` nil, and every
+method answers as a build with no certificate should: no files, no authority,
+and no entry offering to install one.
+
 Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
 menu entries that hand out its address and PIN.
-`agent.NewPairingPlugin(a, port)` takes the rest from the agent: the certificate
-authority, the device registry, the key pin and the name, so nothing already
-given to `Setup` is repeated. Register none and the build pairs no devices; the
-console is handed `nil` and reports pairing as disabled. A build wanting the
-listener without the menu registers the component on its own instead, with
-`agent.PairingFor(a, port)` and `ctx.Use` or an `agent.Endpoint`.
+`agent.NewPairingPlugin(a, port, trust)` takes the rest from the agent: the
+device registry, the key pin and the name, so nothing already given to `Setup`
+is repeated. Register none and the build pairs no devices; the console is handed
+`nil` and reports pairing as disabled. A build wanting the listener without the
+menu registers the component on its own instead, with
+`agent.PairingFor(a, port, ca)` and `ctx.Use` or an `agent.Endpoint`.
 
 It does not choose an NFC backend. That is the second argument, and passing it
 in is what allows every package beneath `cmd` to build without one.
@@ -260,9 +277,10 @@ noise beside the addresses worth copying. A plugin with an `Activate` of its own
 can mount a route with `ctx.Mount` instead, which is what something wanting the
 agent as well as the route does.
 
-Registered with no `Config`, it serves on the port, certificate and name the
-agent was set up with. Set `Config` for a listener that differs from them, or
-`Server` to hand over one built elsewhere:
+Registered with no `Config`, it serves on the port and name the agent was set up
+with, and on the certificate `Trust` holds. Set `Config` for a listener that
+differs from them, which is where a certificate provisioned outside the agent
+goes, or `Server` to hand over one built elsewhere:
 
 ```go
 &agent.ServerPlugin{Config: unifiedserver.Config{Port: 9480, CertFile: cert, KeyFile: key}}
@@ -280,11 +298,12 @@ what backs `ctx.Mount` for the plugins registered after it. It takes an
 `agent.Mounter`, one method wide, so the agent never names a server type.
 
 The listener is bound by a component the plugin registers, so it comes up once
-the agent is serving and goes down before it. `Certificates` watches for a
-reissued certificate and calls `Rebind`, which stops and starts the listener so
-the new one is served. Nothing else has to: installing a certificate authority
-or reissuing a certificate reports itself, and the listener follows. `Rebind` is
-there for a program that has some other reason to bind again.
+the agent is serving and goes down before it. It watches `Trust` for a reissued
+certificate and calls `Rebind`, which stops and starts the listener so the new
+one is served. Nothing else has to: installing a certificate authority or
+reissuing a certificate reports itself, and the listener follows. Set
+`Certificates` to watch something other than `Trust`, and `Rebind` is there for
+a program that has some other reason to bind again.
 
 ### The control center
 
@@ -292,12 +311,23 @@ The console is two endpoints of the server plugin, so it is served from the
 agent's port and listed with the other addresses:
 
 ```go
-c := console.New(console.Config{Agent: rt.Agent, Settings: rt.Settings, Logs: rt.Logs, Servers: servers, Pairing: pairing})
+c := console.New(console.Config{
+	Agent:    rt.Agent,
+	Settings: rt.Settings,
+	Logs:     rt.Logs,
+	Servers:  servers,
+	Pairing:  pairing,
+	Trust:    trust,
+})
 servers.Add(c.Endpoints()...)
 ```
 
-`console.New` also follows what redraws an open page: an origin allowed, a
-device revoked, a client connecting. Under `-tags nowebui` there is no console
+The three plugins are what the console reports on and acts through: the address
+it hands out is the listener's, the PIN it rotates is the pairing server's, and
+the authority it installs is the trust plugin's, so the tray entry offering the
+same install follows one done from a page. `console.New` also follows what
+redraws an open page: an origin allowed, a device revoked, a client connecting,
+a listener rebound. Under `-tags nowebui` there is no console
 compiled in and `Endpoints` is empty, so a program needs no build tag of its own.
 
 `tray.App.AttachConsole` is the one thing left to the program. It runs both
@@ -306,12 +336,11 @@ so a device switched in the browser moves the tray's menu too.
 
 ### The pairing plugin
 
-`agent.PairingPlugin` is the other one the shipped build registers, and the
-smaller example: it wraps the pairing server, registers it as a component, and
+`agent.PairingPlugin` wraps the pairing server, registers it as a component, and
 owns the entries that show its address and PIN.
 
 ```go
-pairing := agent.NewPairingPlugin(rt.Agent, 9472)
+pairing := agent.NewPairingPlugin(rt.Agent, 9472, trust)
 rt.Agent.Plugins.Add(pairing)
 ```
 
@@ -320,6 +349,24 @@ top-level entries, and the labels follow the server: rotating the PIN from the
 menu or from the control center relabels both. `Port`, `PIN` and `RotatePIN`
 tolerate a nil plugin, so a build that registers none hands `nil` to the console
 and everything reports pairing as disabled.
+
+### The trust plugin
+
+`agent.TrustPlugin` is the smallest of the three: it holds the certificate the
+others are configured from, and adds the entry that installs the local authority
+behind it.
+
+```go
+trust := &agent.TrustPlugin{Manager: rt.Certificates}
+rt.Agent.Plugins.Add(trust)
+```
+
+The entry is offered only while there is something to install and hides itself
+once there is not, whether the install came from the menu or from the control
+center. Installing reissues the certificate, which the listener follows on its
+own. `Install` blocks on the operating system's password prompt; the menu calls
+it off the dispatch goroutine, and a program calling it directly should do the
+same.
 
 ## Naming your build
 
@@ -348,7 +395,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 
 | Package | Contents |
 |---|---|
-| `agent` | The agent: readers, servers, TLS, pairing, flags, configuration |
+| `agent` | The agent, and the plugins the shipped build registers: the listener, pairing and the certificate |
 | `agent/console` | The control center, adapting the agent to `webui.Host` |
 | `agent/tray` | The system tray |
 | `nfc` | Readers, tag drivers, NDEF encoding and decoding |
@@ -413,8 +460,10 @@ func main() {
 	}
 
 	// The listener, with nothing on it but the agent's own routes. Leave it
-	// out for a service that reads cards and serves no HTTP.
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{}); err != nil {
+	// out for a service that reads cards and serves no HTTP. Trust holds the
+	// certificate Setup generated; without it the listener serves plain HTTP.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust); err != nil {
 		log.Fatal(err)
 	}
 
@@ -452,7 +501,8 @@ rt, err := agent.Setup(agent.DefaultOptions(), manager)
 if err != nil {
 	log.Fatal(err)
 }
-rt.Agent.Plugins.Add(&agent.ServerPlugin{})
+trust := &agent.TrustPlugin{Manager: rt.Certificates}
+rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust)
 ```
 
 ```bash

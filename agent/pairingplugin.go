@@ -36,10 +36,17 @@ type PairingPlugin struct {
 
 var _ Plugin = (*PairingPlugin)(nil)
 
-// NewPairingPlugin builds the pairing server for a, listening on port, and the
-// plugin that runs it. See [PairingFor] for what it takes from the agent.
-func NewPairingPlugin(a *Agent, port int) *PairingPlugin {
-	return &PairingPlugin{Server: PairingFor(a, port)}
+// NewPairingPlugin builds the pairing server for a, listening on port and
+// handing out the authority trust holds, and the plugin that runs it. See
+// [PairingFor].
+//
+// A zero port is a build that pairs no devices: it returns nil, and every
+// method tolerates one.
+func NewPairingPlugin(a *Agent, port int, trust *TrustPlugin) *PairingPlugin {
+	if port <= 0 {
+		return nil
+	}
+	return &PairingPlugin{Server: PairingFor(a, port, trust.Authority())}
 }
 
 // Name identifies the plugin.
@@ -88,6 +95,9 @@ func (p *PairingPlugin) URL() string {
 
 // Activate registers the pairing server and adds the plugin's menu entries.
 func (p *PairingPlugin) Activate(ctx AgentContext) error {
+	if p == nil {
+		return nil
+	}
 	if p.Server == nil {
 		return fmt.Errorf("no pairing server to run")
 	}

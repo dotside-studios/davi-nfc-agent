@@ -37,9 +37,15 @@ type Options struct {
 	// displays the PIN, is the program's decision. See [PairingFor].
 	BootstrapPort int
 
-	APISecret      string
-	CertFile       string
-	KeyFile        string
+	APISecret string
+
+	// CertFile and KeyFile are a certificate provisioned outside this agent,
+	// which turns AutoTLS off. Setup does not read them either: what serves a
+	// certificate is the program's decision, so it passes them to whatever
+	// does, as [unifiedserver.Config] on a [ServerPlugin].
+	CertFile string
+	KeyFile  string
+
 	AutoTLS        bool
 	ConfigDir      string
 	AllowedOrigins string
@@ -96,6 +102,11 @@ type Runtime struct {
 	// DevicePath is the reader to open at startup, once the caller's choice
 	// and the stored preference have been reconciled.
 	DevicePath string
+
+	// Certificates is the certificate the agent manages for itself, nil for a
+	// build serving one provisioned elsewhere. Wrap it in a [TrustPlugin] and
+	// hand that to whatever serves it, pairs against it and reports on it.
+	Certificates *tls.Manager
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -116,27 +127,23 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		configDir = DefaultConfigDir(info.DirName)
 	}
 
-	certFile, keyFile := opts.CertFile, opts.KeyFile
-
-	// Initialize auto-TLS if enabled (and no manual cert/key provided)
+	// The certificate this agent manages for itself, unless one was
+	// provisioned outside it. Setup builds it because it is config-directory
+	// state; what serves it, hands out its authority and offers to install it
+	// is the program's business, through [TrustPlugin].
 	var tlsMgr *tls.Manager
 	var agentPublicKeyPin string
-	if opts.AutoTLS && certFile == "" && keyFile == "" {
+	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
 		tlsMgr = tls.NewManager(configDir)
 		tlsMgr.UseCA(opts.InstallCA)
-		cert, key, err := tlsMgr.EnsureCertificates()
-		if err != nil {
+		if _, _, err := tlsMgr.EnsureCertificates(); err != nil {
 			log.Printf("Warning: Auto-TLS failed: %v (running without TLS)", err)
 			tlsMgr = nil
-		} else {
-			certFile, keyFile = cert, key
-
+		} else if pin, err := tlsMgr.PublicKeyPin(); err == nil {
 			// Native devices authenticate the agent by this value rather than
 			// by a trust store, so log it where a first run will show it.
-			if pin, err := tlsMgr.PublicKeyPin(); err == nil {
-				log.Printf("Agent public key pin: %s", pin)
-				agentPublicKeyPin = pin
-			}
+			log.Printf("Agent public key pin: %s", pin)
+			agentPublicKeyPin = pin
 		}
 	}
 
@@ -246,18 +253,16 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Logs:                opts.Logs,
 		RequirePairedDevice: requirePaired,
 		Explicit:            explicit,
-		CertFile:            certFile,
-		KeyFile:             keyFile,
-		TLSManager:          tlsMgr,
 	})
 
 	a.ApplySettings(stored)
 
 	return &Runtime{
-		Agent:      a,
-		Settings:   settingsStore,
-		Logs:       opts.Logs,
-		DevicePath: devicePath,
+		Agent:        a,
+		Settings:     settingsStore,
+		Logs:         opts.Logs,
+		DevicePath:   devicePath,
+		Certificates: tlsMgr,
 	}, nil
 }
 

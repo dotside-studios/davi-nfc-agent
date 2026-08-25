@@ -3,16 +3,12 @@ package tray
 import (
 	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/settings"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -71,8 +67,6 @@ func TestMenuLayout(t *testing.T) {
 		"----",
 		"Paired Devices",
 		"Allowed Origins",
-		"Trust This Agent in Browsers",
-		"----",
 		"----",
 		"Start Agent",
 		"Stop Agent",
@@ -428,61 +422,6 @@ func TestAgentStateDrivesTheControls(t *testing.T) {
 		t.Fatalf("stopped: status %q, start enabled %v, stop enabled %v",
 			app.mStatus.Title(), app.mStart.Enabled(), app.mStop.Enabled())
 	}
-}
-
-// waitFor polls until cond holds, which is how a test waits on the tray's own
-// goroutines without a fixed sleep.
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
-func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
-	dir := t.TempDir()
-
-	agent := newTestAgent()
-	agent = newTestAgentWith(nfcagent.Config{TLSManager: tls.NewManager(dir)})
-
-	app, _ := newTestTray(t, agent)
-
-	if !app.mTrustBrowsers.Visible() {
-		t.Fatal("the trust entry is hidden with no certificate authority installed")
-	}
-
-	// Installing one is the whole job of the entry, so it has nothing left to
-	// offer once there is one.
-	caFile := filepath.Join(dir, "ca", "rootCA.pem")
-	if err := os.MkdirAll(filepath.Dir(caFile), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(caFile, []byte("ca"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	app.RefreshTrustMenu()
-	if app.mTrustBrowsers.Visible() {
-		t.Fatal("the trust entry is still offered with a certificate authority installed")
-	}
-
-	// CAInstalled reads the filesystem every time, so a config directory that
-	// loses its CA needs the offer back. A restart of the listeners is when the
-	// tray looks again.
-	if err := os.Remove(caFile); err != nil {
-		t.Fatal(err)
-	}
-	// The root package's version drove this through the agent's restart
-	// channel. ServerRestarts only hands out the receive side, so from here the
-	// refresh is called directly.
-	app.RefreshTrustMenu()
-
-	waitFor(t, "the trust entry to come back", app.mTrustBrowsers.Visible)
 }
 
 // The tray writes to the same file the console does. A mode picked from a menu

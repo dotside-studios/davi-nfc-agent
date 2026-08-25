@@ -558,3 +558,41 @@ func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
 		t.Errorf("error = %q, want it to name the endpoint", err)
 	}
 }
+
+// Which certificate the listener serves: the one named in Config, else the one
+// Trust manages, else none. This is where -cert and -key land, so a certificate
+// named on the command line has to win over the managed one.
+func TestTheListenerServesTheCertificateItWasGiven(t *testing.T) {
+	opts := testOptions(t)
+	opts.AutoTLS = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	trust := &TrustPlugin{Manager: rt.Certificates}
+	managed := trust.CertFile()
+	if managed == "" {
+		t.Fatal("Setup managed no certificate, so there is nothing to fall back to")
+	}
+
+	named := &ServerPlugin{
+		Trust:  trust,
+		Config: unifiedserver.Config{CertFile: "/tmp/named.pem", KeyFile: "/tmp/named.key"},
+	}
+	if got := named.config(rt.Agent).CertFile; got != "/tmp/named.pem" {
+		t.Errorf("CertFile = %q, want the one Config named", got)
+	}
+
+	inherited := &ServerPlugin{Trust: trust}
+	if got := inherited.config(rt.Agent).CertFile; got != managed {
+		t.Errorf("CertFile = %q, want the one Trust manages (%q)", got, managed)
+	}
+
+	// A build that manages no certificate and was given none serves plain HTTP
+	// rather than half a configuration.
+	none := &ServerPlugin{}
+	if cfg := none.config(rt.Agent); cfg.CertFile != "" || cfg.KeyFile != "" {
+		t.Errorf("CertFile/KeyFile = %q/%q, want empty", cfg.CertFile, cfg.KeyFile)
+	}
+}

@@ -96,10 +96,13 @@ type ServerPlugin struct {
 	// uses "Server URLs".
 	MenuTitle string
 
-	// Certificates reissues the listener's certificate when the machine's
-	// addresses change; the listener binds again when it reports one. Blank
-	// takes the agent's, and an agent without one is a build serving a
-	// certificate nothing here manages.
+	// Trust supplies the certificate the listener serves and reports when it
+	// is reissued, so that the listener binds again on its own. Blank serves
+	// no TLS unless Config names a certificate itself.
+	Trust *TrustPlugin
+
+	// Certificates overrides where the reissue signal comes from. Blank takes
+	// Trust's, which is what a build wants.
 	Certificates tlspkg.CertificateWatcher
 
 	// The entries whose labels follow what is being served.
@@ -125,6 +128,24 @@ func (p *ServerPlugin) Add(endpoints ...Endpoint) {
 // Listener returns the server the plugin serves from: the one it was given, or
 // the one it built at activation. Nil before activation when neither.
 func (p *ServerPlugin) Listener() *unifiedserver.Server { return p.Server }
+
+// CertFile is the certificate being served, empty when none is, and TLSEnabled
+// reports the same as a question. Both are what the listener resolved, which is
+// not always what any one place configured.
+func (p *ServerPlugin) CertFile() string {
+	if p == nil || p.Server == nil {
+		return ""
+	}
+	return p.Server.CertFile()
+}
+
+// TLSEnabled reports whether the listener is serving HTTPS and WSS.
+func (p *ServerPlugin) TLSEnabled() bool {
+	if p == nil || p.Server == nil {
+		return false
+	}
+	return p.Server.TLSEnabled()
+}
 
 // Port is the port being served, which is what a client should be told to
 // connect to. It differs from the agent's configured port after one is saved
@@ -372,10 +393,7 @@ func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint) error {
 // nothing to keep current.
 func (p *ServerPlugin) watchCertificates(ctx AgentContext) error {
 	if p.Certificates == nil {
-		// Explicitly, since a nil *tls.Manager in an interface is not nil.
-		if manager := ctx.Agent.TLSManager(); manager != nil {
-			p.Certificates = manager
-		}
+		p.Certificates = p.Trust.Watcher()
 	}
 	if p.Certificates == nil {
 		return nil
@@ -436,7 +454,7 @@ func (p *ServerPlugin) config(a *Agent) unifiedserver.Config {
 	// As a pair: half a certificate is not something to complete from
 	// somewhere else.
 	if cfg.CertFile == "" && cfg.KeyFile == "" {
-		cfg.CertFile, cfg.KeyFile = a.CertFile(), a.KeyFile()
+		cfg.CertFile, cfg.KeyFile = p.Trust.CertFile(), p.Trust.KeyFile()
 	}
 	if cfg.MDNSServiceName == "" {
 		cfg.MDNSServiceName = a.Info().DisplayName + " Device"

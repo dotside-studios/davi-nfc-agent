@@ -14,11 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the context: `ctx.Use` for a `Component`, `ctx.Mount` for a route,
   `ctx.Systray` for a tray entry. Plugins are Go values the program constructs,
   registered with `Agent.Plugins.Add` and activated in order; nothing is loaded
-  at run time, and adding one after activation is an error. Two ship:
+  at run time, and adding one after activation is an error. Three ship:
   `agent.ServerPlugin`, which owns the listener and the `agent.Endpoint`s served
-  from it, and `agent.PairingPlugin`, which runs the pairing server and the tray
-  entries that hand out its PIN. Also adds `Agent.OnServerRestart`,
-  `traymenu.Discard`, and `traymenu.Section` as a `Container`
+  from it, `agent.PairingPlugin`, which runs the pairing server and the tray
+  entries that hand out its PIN, and `agent.TrustPlugin`, which holds the
+  certificate the other two are configured from. Also adds
+  `Agent.OnServerRestart`, `traymenu.Discard`, and `traymenu.Section` as a
+  `Container`
 
 - **`docs/custom-builds.md`: building your own agent.** The package split left
   the agent importable but undocumented, so the way to change what the binary
@@ -110,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```go
   servers := &agent.ServerPlugin{}
   servers.Add(agent.Endpoint{Name: "control API", Pattern: "/control/", Handler: c.Routes()})
-  rt.Agent.Plugins.Add(servers, agent.NewPairingPlugin(rt.Agent, 9472))
+  rt.Agent.Plugins.Add(servers, agent.NewPairingPlugin(rt.Agent, 9472, trust))
   ```
 
   Registered with no configuration, each serves what the agent was already set
@@ -164,6 +166,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are `func() string`, read when a device registers rather than captured when
   the endpoint is built, so the pin no longer has to be settled before
   `agent.New`
+
+- **The agent holds no certificate either.** It never read one: a listener
+  serves it, the pairing server hands the authority out, and the console reports
+  on it. `agent.TrustPlugin` wraps the `*tls.Manager` `Setup` returns as
+  `Runtime.Certificates`, and each of the three is given the plugin rather than
+  reaching for a manager:
+
+  ```go
+  trust := &agent.TrustPlugin{Manager: rt.Certificates}
+  rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust)
+  ```
+
+  Gone: `Config.CertFile`, `Config.KeyFile`, `Config.TLSManager` and the
+  accessors over them. `PairingFor` takes the authority as an argument, and a
+  certificate provisioned outside the agent, which is what `-cert` and `-key`
+  are, goes to the listener as `unifiedserver.Config` and is served ahead of the
+  managed one. The tray loses its trust entry to the plugin, and `console.Tray`
+  loses `RefreshTrustMenu` with it: the entry hides itself once there is nothing
+  left to install, whichever place installed it. A build managing no certificate
+  leaves `Manager` nil, and every method answers as such
 
 - **`traymenu` has no toolkit, and the clipboard has a package of its own.**
   `fyne.io/systray` talks to Cocoa, so anything importing it needs cgo on macOS.

@@ -26,6 +26,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/unifiedserver"
 )
 
 func main() {
@@ -73,17 +74,27 @@ func main() {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
+	// The certificate this agent serves, and the entry that makes browsers
+	// accept it. Whatever needs a certificate is given this rather than
+	// reaching for one: the agent holds none.
+	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+
 	// The listener and everything on it. Setup does not build one: what this
 	// agent serves is this program's decision, and registering no server
 	// plugin at all leaves an agent that drives the reader and serves nothing.
-	servers := &agent.ServerPlugin{}
+	// A certificate named on the command line is served ahead of the managed
+	// one, which -cert and -key turn off.
+	servers := &agent.ServerPlugin{
+		Trust:  trust,
+		Config: unifiedserver.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
+	}
 
 	// The pairing server, on a listener of its own, with the menu entries that
 	// hand out its address and PIN. The agent does not hold one, so this is
 	// where it is built and where it is handed to the console.
 	var pairing *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
-		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort)
+		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, trust)
 	}
 
 	// The control center, served from the same listener. Nil in a -tags nowebui
@@ -95,15 +106,18 @@ func main() {
 		Logs:     rt.Logs,
 		Servers:  servers,
 		Pairing:  pairing,
+		Trust:    trust,
 	})
 	servers.Add(controlCenter.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,
-	// and plugins are activated in the order they were added.
+	// and plugins are activated in the order they were added, which is also the
+	// order their entries appear in the tray.
 	plugins := []agent.Plugin{servers}
 	if pairing != nil {
 		plugins = append(plugins, pairing)
 	}
+	plugins = append(plugins, trust)
 
 	if err := rt.Agent.Plugins.Add(plugins...); err != nil {
 		log.Fatalf("Failed to register a plugin: %v", err)

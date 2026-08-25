@@ -16,7 +16,7 @@ func TestPairingPluginRegistersItsServerAndItsEntries(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := NewPairingPlugin(rt.Agent, 9499)
+	pairing := NewPairingPlugin(rt.Agent, 9499, nil)
 	if err := rt.Agent.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestRotatingThePINRelabelsTheEntries(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := NewPairingPlugin(rt.Agent, 9501)
+	pairing := NewPairingPlugin(rt.Agent, 9501, nil)
 	if err := rt.Agent.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestPairingPluginActivatesWithNoTray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(NewPairingPlugin(rt.Agent, 9503)); err != nil {
+	if err := rt.Agent.Plugins.Add(NewPairingPlugin(rt.Agent, 9503, nil)); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 

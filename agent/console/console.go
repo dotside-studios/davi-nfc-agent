@@ -37,10 +37,12 @@ type Config struct {
 	Logs     *logbuf.Ring
 
 	// Servers is what the agent is served from, for the port and address the
-	// console hands out. Pairing is what issues pairing PINs. The agent holds
-	// neither, so whoever built them passes them here.
+	// console hands out. Pairing is what issues pairing PINs, and Trust what
+	// holds the certificate. The agent holds none of them, so whoever built
+	// them passes them here.
 	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
+	Trust   *agent.TrustPlugin
 }
 
 // New builds the console from cfg, and follows what changes it: an origin
@@ -49,7 +51,13 @@ type Config struct {
 // none.
 func New(cfg Config) *Server {
 	a := cfg.Agent
-	h := &host{agent: a, settings: cfg.Settings, servers: cfg.Servers, pairing: cfg.Pairing}
+	h := &host{
+		agent:    a,
+		settings: cfg.Settings,
+		servers:  cfg.Servers,
+		pairing:  cfg.Pairing,
+		trust:    cfg.Trust,
+	}
 	info := a.Info()
 	s := &Server{
 		Server: webui.New(webui.Config{
@@ -71,6 +79,10 @@ func New(cfg Config) *Server {
 		devices.OnChange(s.NotifyChange)
 	}
 	a.OnClientsChange(s.NotifyChange)
+
+	// A rebound listener is an address change, and the certificate the page
+	// reports on is reissued by the same events that cause one.
+	a.OnServerRestart(s.NotifyChange)
 
 	return s
 }

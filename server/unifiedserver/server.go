@@ -220,6 +220,13 @@ func (s *Server) handlerLocked() http.Handler {
 	return mux
 }
 
+// CertFile is the certificate this server serves, empty when it serves none,
+// and TLSEnabled reports the same as a question.
+func (s *Server) CertFile() string { return s.config.CertFile }
+
+// TLSEnabled reports whether this server serves HTTPS and WSS.
+func (s *Server) TLSEnabled() bool { return s.config.TLSEnabled() }
+
 // Port is the port this server binds. It is what a client should be told to
 // connect to, which is not necessarily what the agent is configured with: a
 // port changed in the settings takes effect only on a fresh listener.

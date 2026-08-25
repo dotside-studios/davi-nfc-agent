@@ -6,10 +6,12 @@ that came out of it, written down so the design conversation starts from a
 fixed text rather than from memory. The decisions taken so far are §12 to
 §14.
 
-It follows [device-bridge-protocols.md](device-bridge-protocols.md) (the survey
-of prior art) and [device-bridge-plan.md](device-bridge-plan.md) (the phased
-work that produced v1). Where those two are about *our* protocol, this one is
-about the semantics underneath it — what the tags, the platforms and the
+It follows [device-bridge-protocols.md](device-bridge-protocols.md), the survey
+of prior art. It also follows a `device-bridge-plan.md` that no longer exists —
+it sequenced the phased work that produced v1 and was deleted as stale once
+those phases landed, so the "Phase N" references below are historical and
+resolve against the git history and the changelog rather than a file. Where the
+survey is about *our* protocol, this one is about the semantics underneath it — what the tags, the platforms and the
 hardware actually offer, and therefore what a wire protocol can honestly carry.
 
 ## 0. Scope, and the test a design has to pass
@@ -39,7 +41,7 @@ capability field is `omitempty`. Three things were genuinely narrowed.
 `Options nfc.WriteOptions` — the whole struct: `Overwrite`, `Index`,
 `ForceInitialize`, `ExpectUID`, `SkipVerify`, `MaxWriteAttempts`,
 `SkipCapacityCheck`, `Lock`. v1 replaced it with `Lock bool` plus
-`NDEFBytes` / `IdempotencyKey` / `TagUID` (`protocol/device.go:109`), and the
+`NDEFBytes` / `IdempotencyKey` / `TagUID` (`nfc/remotenfc/wire.go:115`), and the
 call sites hard-code the rest: `nfc/remotenfc/tag.go:207` and `:227` pass
 `{Overwrite: true, Index: -1}`, and `writeTag` forwards only `opts.Lock`
 (`nfc/remotenfc/requests.go:341`). Append-at-index, force-initialising a
@@ -52,9 +54,9 @@ headroom, not a working feature — but the shape was right, and the wire is now
 narrower than the internal model it projects.
 
 **The write outcome.** Neither version's `deviceWriteResponse` carries a
-result, so `deviceWriteResult` (`server/deviceserver/server.go:439`)
-manufactures one: `BytesWritten` = what we sent, `Attempts: 1`, and
-`Verified = !ReadsAreSnapshot`. On the reader route `Verified` means "read back
+result, so the agent manufactures one (`server/tagrouter/ops.go:65`):
+`BytesWritten` = what we sent, `Attempts: 1`, and `Verified` from a
+`verifiable()` helper that is just `!ReadsAreSnapshot`. On the reader route `Verified` means "read back
 and compared". On the device route it means "could in principle have been". One
 field, two meanings, and the device route reports a verification nobody
 performed.
@@ -104,7 +106,7 @@ it. The mechanism has five gaps worth recording before v2 touches any of it:
 The bridge has the better lifecycle — it is the only source that knows a tag
 left, and which one — and the agent narrows it on the way out:
 `SendTagRemoved` receives `data.UID` and broadcasts `Card: nil`
-(`nfc/remotenfc/manager.go:214`). A client watching a phone cannot tell which
+(`nfc/remotenfc/manager.go:218`). A client watching a phone cannot tell which
 tag departed, or whether it was its own.
 
 ## 3. The device protocol is announce-only; every native API is query-based
@@ -171,7 +173,7 @@ a different class from "retry now".
 
 ## 6. Identity: UID is load-bearing and unsound
 
-`resolveRoute` (`server/deviceserver/resolve.go`) is good design — it resolves
+`resolveRoute` (`server/tagrouter/resolve.go:33`) is good design — it resolves
 *which holder has this tag* at request time rather than preferring a source.
 But it addresses by UID, and UID is not an identity: MIFARE Classic and DESFire
 ship random IDs, Web NFC's `serialNumber` may be the empty string, and a
@@ -211,7 +213,7 @@ writing `example.com/c/$uid` onto a card is a real use case here. Three
 hazards:
 
 - **Spelling.** Our canonical form is colon-separated uppercase
-  (`ParseUID`, `protocol/convert.go:40` → `04:A2:24:52:9F:5C:80`), Android
+  (`ParseUID`, `nfc/remotenfc/convert.go:40` → `04:A2:24:52:9F:5C:80`), Android
   hands out a `byte[]`, ESPHome prints `74-10-37-94`, PC/SC gives raw bytes. A
   mismatch between whoever writes the value and whoever looks it up is silent
   and surfaces much later as "not found". Pick one canonical spelling for
@@ -285,7 +287,7 @@ express intents.
 - **Outputs are first-class**: `CMD_LED`, `CMD_BUZ`, `CMD_TEXT`, `CMD_OUT`
   (relay/strike). The reader is an actuator, not only a sensor.
 - **`REPLY_BUSY` and `REPLY_NAK`** — explicit backpressure and negative ack.
-  We have a 10-deep channel (`nfc/remotenfc/manager.go:57`) and then
+  We have a 10-deep channel (`nfc/remotenfc/manager.go:61`) and then
   unspecified behaviour.
 - **`CMD_MFG` / `REPLY_MFGREP`** — a sanctioned vendor-extension channel, so
   proprietary features do not fork the protocol.
@@ -318,7 +320,7 @@ typed into a screen.
 
 Consequences: frames must fit a 2–4 KB max fragment (base64 raw-data dumps are
 hostile), and the device endpoint currently sets **no read limit at all** —
-only the web UI does (`webui/server.go:257`, 4 KB). `-auto-tls=false` already
+only the web UI does (`agent/console/server.go:263`, 4 KB). `-auto-tls=false` already
 gives a plain-`ws://` path, which is the honest escape hatch for the
 constrained tier and for USB-attached boards where physical attachment is the
 authentication.
@@ -387,7 +389,7 @@ class:
 Cutting across all four: **the credential is not necessarily a UID.** It has a
 declared kind — `uid` | `wiegand(bits)` | `opaque` — where UID is one case
 rather than the assumed one. Today the wire rejects a device that cannot supply
-both `uid` and `technology` (`nfc/remotenfc/protocol.go:58`), which a Wiegand
+both `uid` and `technology` (`nfc/remotenfc/protocol.go:51`), which a Wiegand
 bridge or a Home Assistant tag source (an opaque `tag_id` and nothing else)
 can never do honestly.
 
@@ -461,7 +463,7 @@ Checkable rules, each traceable to something above.
   was the right call even though its mechanism needs work (§1.1).
 - **Designing for the phone and treating everything else as degraded.** That
   assumption produced `smartphone:{id}`, the platform allowlist, and a
-  manager-wide `RemoteDevices() → true` (`nfc/remotenfc/manager.go:377`) that
+  manager-wide `RemoteDevices() → true` (`nfc/remotenfc/manager.go:381`) that
   locks a real PN532 reader out of ever being a reader.
 
 The last one is the summary: v1 is a phone protocol that other devices are
@@ -478,7 +480,7 @@ from the package layout, so it needs stating before any deletion sweep.
 
 ### The premise, as checked
 
-- `@davi/nfc-client` is **not published to npm** (the registry returns 404), so
+- `@davi/nfc-agent-client` is **not published to npm** (the registry returns 404), so
   the bundled JS client has no package consumers.
 - Agent binaries have shipped publicly since **v1.0.0 (January 2026)**.
   `v1.0.0`–`v1.0.3` are **v0-only**; the v1 dialect first ships in `v1.1.0`
@@ -497,9 +499,11 @@ v2 designed under the same constraint inherits the same shape.
 
 The surface is not two constants either. It is the dual-dialect
 `awaitRegistration` and `handleRegisterDevice`, `DeviceProtocolV0` and
-`NegotiateDeviceVersion`, `v0capabilities_test.go`, the JS client's
-`protocolVersion >= 1 ? 'hello' : 'registerDevice'` branching, and a section of
-`docs/api.md`.
+`NegotiateDeviceVersion`, `nfc/remotenfc/v0capabilities_test.go`, the device
+client's `protocolVersion >= 1 ? 'hello' : 'registerDevice'` branching, and a
+section of `docs/api.md`. The client library was rewritten in TypeScript in
+`#32`, but `client/nfc-device-client.js` was left as it was and still carries
+that branching.
 
 And the freeze only means something if the old dialect actually goes. v1 is
 described here, preserved in git history, and shipped in tagged releases;
@@ -592,7 +596,7 @@ console and the logs read, not beside `Capabilities`. A field the deciding code
 cannot reach cannot be sniffed.
 
 **Bound it.** This is device-controlled text that reaches the logs, the tray
-and the Control Center's device list (`webui/state.go:42`), so: a maximum
+and the Control Center's device list (`agent/console/state.go:48`), so: a maximum
 length — real User-Agent strings grow without limit — printable ASCII only per
 RFC 9110's `token` and comment rules, no control characters and no line breaks.
 Truncate rather than refuse: a malformed description is not a reason to turn

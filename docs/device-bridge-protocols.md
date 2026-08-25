@@ -403,6 +403,17 @@ elsewhere; §5.2 is that list. It is worth re-testing the assumption if the
 product ever centres on ISO-DEP applet transactions rather than NDEF payloads,
 because that is the workload the APDU-level protocols are actually shaped for.
 
+## 6. Successor work
+
+Research toward a successor protocol is in
+[device-api-v2-research.md](device-api-v2-research.md): the tag, platform and
+hardware semantics this bridge projects, the design rules that came out of
+them, and the decisions taken so far — **v0 and v1 are removed rather than
+deprecated** when v2 lands, on the device protocol only; a device's `platform`
+field gives way to a **User-Agent-shaped self-description** that nothing may
+branch on; and **pairing is designed for an attended deployment**, with
+unattended provisioning deferred. Most of the rest is still open.
+
 ## References
 
 - [vsmartcard / vpcd: Virtual PC/SC Driver](https://frankmorgner.github.io/vsmartcard/virtualsmartcard/README.html) and [wire protocol notes](https://deepwiki.com/frankmorgner/vsmartcard/2.1-vpcd:-virtual-pcsc-driver)

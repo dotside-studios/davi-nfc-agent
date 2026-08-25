@@ -89,12 +89,11 @@ func main() {
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
 	// so this program needs no build tag of its own.
 	c := console.New(console.Config{
-		Agent:    rt.Agent,
-		Settings: rt.Settings,
-		Logs:     rt.Logs,
-		Servers:  servers,
-		Pairing:  pairing,
-		Trust:    trust,
+		Agent:   rt.Agent,
+		Logs:    rt.Logs,
+		Servers: servers,
+		Pairing: pairing,
+		Trust:   trust,
 	})
 	servers.Add(c.Endpoints()...)
 
@@ -205,7 +204,7 @@ The context carries what a plugin needs to wire itself in:
 | `ctx.Systray` | The menu the plugin's entries go on |
 | `ctx.Serve(srv)` | Publishes the listener the agent serves from |
 | `ctx.Mount(pattern, h)` | Adds a route to it |
-| `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Settings()`, `ctx.Logs()` | The agent's log, identity, config directory, preference store and log ring |
+| `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Logs()` | The agent's log, identity, config directory and log ring |
 
 `ctx.Systray` is the top level of the tray's own menu, so a plugin's entry is
 not marked out from one the tray declared itself: the shipped tray is one
@@ -314,12 +313,11 @@ agent's port and listed with the other addresses:
 
 ```go
 c := console.New(console.Config{
-	Agent:    rt.Agent,
-	Settings: rt.Settings,
-	Logs:     rt.Logs,
-	Servers:  servers,
-	Pairing:  pairing,
-	Trust:    trust,
+	Agent:   rt.Agent,
+	Logs:    rt.Logs,
+	Servers: servers,
+	Pairing: pairing,
+	Trust:   trust,
 })
 servers.Add(c.Endpoints()...)
 ```

@@ -165,3 +165,38 @@ func TestOriginStoreChangeNotification(t *testing.T) {
 		t.Errorf("OnChange fired %d times, want 3", changes)
 	}
 }
+
+func TestEveryOriginSubscriberIsNotified(t *testing.T) {
+	store, _ := NewOriginStore("")
+
+	var first, second int
+	store.OnChange(func() { first++ })
+	conn := store.OnChange(func() { second++ })
+
+	_ = store.Allow("a.example")
+
+	if first != 1 || second != 1 {
+		t.Fatalf("subscribers fired %d and %d times, want 1 and 1", first, second)
+	}
+
+	conn.Disconnect()
+	_ = store.Allow("b.example")
+
+	if first != 2 || second != 1 {
+		t.Errorf("after Disconnect subscribers fired %d and %d times, want 2 and 1", first, second)
+	}
+}
+
+func TestEveryBlockedSubscriberIsNotified(t *testing.T) {
+	store, _ := NewOriginStore("")
+
+	var got []string
+	store.OnBlocked(func(origin string) { got = append(got, "first:"+origin) })
+	store.OnBlocked(func(origin string) { got = append(got, "second:"+origin) })
+
+	store.RecordBlocked("evil.example")
+
+	if len(got) != 2 || got[0] != "first:evil.example" || got[1] != "second:evil.example" {
+		t.Errorf("subscribers saw %v, want both notified in order", got)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -43,9 +44,12 @@ type OriginStore struct {
 	sessionAllowAny bool
 
 	// blocked records origins rejected since start, so the tray can offer them.
-	blocked      []string
-	onBlocked    func(origin string)
-	onChangeFunc func()
+	blocked []string
+
+	// rejected carries each newly blocked origin; changed carries the
+	// allowlist after every edit.
+	rejected event.Signal[string]
+	changed  event.Signal[[]string]
 }
 
 // NewOriginStore loads the allowlist from configDir, seeding it with the
@@ -89,20 +93,28 @@ func (s *OriginStore) seedDefaults() {
 	}
 }
 
-// OnBlocked registers a callback for rejected origins, so the tray can offer to
-// allow one instead of leaving the operator with an unexplained failure.
-func (s *OriginStore) OnBlocked(fn func(origin string)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.onBlocked = fn
+// OnBlocked registers fn to run for each rejected origin, so the tray can offer
+// to allow one instead of leaving the operator with an unexplained failure. It
+// returns the handle that removes fn again.
+func (s *OriginStore) OnBlocked(fn func(origin string)) *event.Connection {
+	if fn == nil {
+		return nil
+	}
+	return s.rejected.Connect(fn)
 }
 
-// OnChange registers a callback fired whenever the allowlist changes.
-func (s *OriginStore) OnChange(fn func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.onChangeFunc = fn
+// OnChange registers fn to run whenever the allowlist changes, and returns the
+// handle that removes it again.
+func (s *OriginStore) OnChange(fn func()) *event.Connection {
+	if fn == nil {
+		return nil
+	}
+	return s.changed.Connect(func([]string) { fn() })
 }
+
+// notifyChanged publishes the allowlist. Called with the lock released, since a
+// handler reads the list back.
+func (s *OriginStore) notifyChanged() { s.changed.Emit(s.List()) }
 
 // Allowed reports whether an origin may connect.
 func (s *OriginStore) Allowed(origin string) bool {
@@ -132,12 +144,9 @@ func (s *OriginStore) RecordBlocked(origin string) {
 		}
 	}
 	s.blocked = append(s.blocked, origin)
-	notify := s.onBlocked
 	s.mu.Unlock()
 
-	if notify != nil {
-		notify(origin)
-	}
+	s.rejected.Emit(origin)
 }
 
 // Blocked returns origins rejected since start that are not now allowed.
@@ -178,12 +187,9 @@ func (s *OriginStore) Allow(origin string) error {
 	s.mu.Lock()
 	s.persisted[origin] = struct{}{}
 	err := s.saveLocked()
-	notify := s.onChangeFunc
 	s.mu.Unlock()
 
-	if notify != nil {
-		notify()
-	}
+	s.notifyChanged()
 	return err
 }
 
@@ -194,12 +200,9 @@ func (s *OriginStore) Revoke(origin string) error {
 	s.mu.Lock()
 	delete(s.persisted, origin)
 	err := s.saveLocked()
-	notify := s.onChangeFunc
 	s.mu.Unlock()
 
-	if notify != nil {
-		notify()
-	}
+	s.notifyChanged()
 	return err
 }
 
@@ -208,12 +211,9 @@ func (s *OriginStore) Revoke(origin string) error {
 func (s *OriginStore) SessionAllowAny(on bool) {
 	s.mu.Lock()
 	s.sessionAllowAny = on
-	notify := s.onChangeFunc
 	s.mu.Unlock()
 
-	if notify != nil {
-		notify()
-	}
+	s.notifyChanged()
 }
 
 // IsSessionAllowAny reports whether the check is off for this run.

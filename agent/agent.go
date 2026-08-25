@@ -253,7 +253,7 @@ func New(cfg Config) *Agent {
 		readerMode:          cfg.Mode,
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
-		cardTypes:           newCardTypeFilter(),
+		cardTypes:           newCardTypeFilter(cfg.CardTypes),
 		serverRestartChan:   make(chan struct{}, 1),
 		logs:                cfg.Logs,
 		Plugins:             &PluginSet{},

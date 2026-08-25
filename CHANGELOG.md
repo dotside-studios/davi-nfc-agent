@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
+- `Options.RequirePaired` is `Options.RequirePairedDevice`, matching
+  `Config.RequirePairedDevice` and the agent's own methods
+- `Options.Version` is gone. Setup never read it; the shipped command's
+  `parseFlags` returns it alongside the options instead
 - `console.Server` holds one reference to its host. `AttachTray` asks whether
   that host is this package's own adapter instead of a second field caching the
   concrete pointer
@@ -138,6 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Config.CardTypes` reached nothing. New built an empty card-type filter and
+  dropped it, so an agent built with a card-type allowlist read every type
 - Choosing a reader from the control center did not announce the change, so a
   second open console page kept showing the previous one until something
   unrelated redrew it. Every other preference already announced itself

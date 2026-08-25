@@ -22,12 +22,20 @@ const (
 	DefaultBootstrapPort = 9472
 )
 
-// Options is everything Setup needs. The shipped command fills it from its
-// flags; a program embedding the agent builds one directly, starting from
-// DefaultOptions rather than the zero value, which would ask for no TLS and
-// port 0.
+// Options is what an agent is built from: what Setup resolves the agent's own
+// state out of, plus the ports a program wires the rest of its plugins with.
+// BootstrapPort is the second kind, read by whoever builds the pairing plugin
+// rather than by Setup.
+//
+// The shipped command fills this from its flags; a program embedding the agent
+// builds one directly, starting from DefaultOptions rather than the zero value,
+// which would ask for no TLS and port 0.
+//
+// Setup resolves what it can: a blank ConfigDir becomes the platform default, a
+// blank APISecret is loaded or generated, and the origin allowlist and paired
+// devices are read from disk. What it cannot resolve it passes through, so a
+// field here that names an agent setting arrives on the agent unchanged.
 type Options struct {
-	Version    bool
 	DevicePath string
 	DevicePort int
 
@@ -45,11 +53,11 @@ type Options struct {
 	CertFile string
 	KeyFile  string
 
-	AutoTLS        bool
-	ConfigDir      string
-	AllowedOrigins string
-	InstallCA      bool
-	RequirePaired  bool
+	AutoTLS             bool
+	ConfigDir           string
+	AllowedOrigins      string
+	InstallCA           bool
+	RequirePairedDevice bool
 
 	// RemoteOps and RemoteScans connect a driver of paired devices, and
 	// DeviceEndpoint serves their connections. All three come from a driver the
@@ -201,7 +209,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// Asked for on the command line or in the environment, as opposed to
 	// remembered from a previous run. The distinction matters below: a stored
 	// preference may raise the requirement but not withdraw one set here.
-	askedForPairing := opts.RequirePaired || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
+	askedForPairing := opts.RequirePairedDevice || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
 
 	// Load persisted preferences. Explicit flags still win: something that
 

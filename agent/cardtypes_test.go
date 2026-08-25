@@ -40,7 +40,7 @@ func TestCardTypeFilterUnderConcurrentUse(t *testing.T) {
 // An empty filter admits everything, which is what an agent with no card-type
 // preference must do. Naming one narrows it to that one.
 func TestCardTypeFilterSemantics(t *testing.T) {
-	f := newCardTypeFilter()
+	f := newCardTypeFilter(nil)
 
 	if !f.isAllowed("NTAG215") {
 		t.Error("an empty filter must admit every type")

@@ -30,9 +30,9 @@ import (
 )
 
 func main() {
-	opts := parseFlags()
+	opts, showVersion := parseFlags()
 
-	if opts.Version {
+	if showVersion {
 		fmt.Println(buildinfo.BuildInfo())
 		// Which PC/SC backend this binary was built with; the first thing to
 		// know when a reader is not being detected.

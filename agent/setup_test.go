@@ -166,3 +166,51 @@ func TestSetupResolvesTheCertificateToServe(t *testing.T) {
 		t.Errorf("CertFile/KeyFile = %q/%q, want empty", none.CertFile, none.KeyFile)
 	}
 }
+
+// Setup hands the agent what Options named. Each of these is copied field by
+// field into the Config that New takes, so a field added to both structs and
+// forgotten in that copy leaves the agent on its zero value, silently.
+func TestSetupPassesOptionsThroughToTheAgent(t *testing.T) {
+	opts := testOptions(t)
+	opts.Mode = nfc.ModeWriteOnly
+	opts.CardTypes = []string{"NTAG215"}
+	opts.DevicePath = "ACS ACR122U 07"
+	opts.DevicePort = 9487
+	opts.ReaderFeedback = true
+	opts.RequirePairedDevice = true
+	opts.Logs = logbuf.New(16)
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	a := rt.Agent
+
+	if got := a.CurrentReaderMode(); got != opts.Mode {
+		t.Errorf("mode = %v, want %v", got, opts.Mode)
+	}
+	if got := a.CardTypeFilter(); len(got) != 1 || got[0] != "NTAG215" {
+		t.Errorf("card types = %v, want [NTAG215]", got)
+	}
+	if got := a.CurrentPinnedDevice(); got != opts.DevicePath {
+		t.Errorf("pinned device = %q, want %q", got, opts.DevicePath)
+	}
+	if got := rt.DevicePath; got != opts.DevicePath {
+		t.Errorf("Runtime.DevicePath = %q, want %q", got, opts.DevicePath)
+	}
+	if got := a.DevicePort(); got != opts.DevicePort {
+		t.Errorf("port = %d, want %d", got, opts.DevicePort)
+	}
+	if got := a.ReaderFeedback(); got != opts.ReaderFeedback {
+		t.Errorf("reader feedback = %v, want %v", got, opts.ReaderFeedback)
+	}
+	if got := a.RequirePairedDevice(); got != opts.RequirePairedDevice {
+		t.Errorf("require paired = %v, want %v", got, opts.RequirePairedDevice)
+	}
+	if a.Logs() != opts.Logs {
+		t.Error("the log ring did not reach the agent")
+	}
+	if got := a.ConfigDir(); got != opts.ConfigDir {
+		t.Errorf("config dir = %q, want %q", got, opts.ConfigDir)
+	}
+}

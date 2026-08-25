@@ -16,8 +16,10 @@ type cardTypeFilter struct {
 	allowed map[string]bool
 }
 
-func newCardTypeFilter() *cardTypeFilter {
-	return &cardTypeFilter{allowed: make(map[string]bool)}
+func newCardTypeFilter(allowed []string) *cardTypeFilter {
+	f := &cardTypeFilter{allowed: make(map[string]bool, len(allowed))}
+	f.replace(normalizeCardTypes(allowed))
+	return f
 }
 
 func (f *cardTypeFilter) allow(cardType string) {

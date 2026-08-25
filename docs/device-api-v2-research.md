@@ -123,6 +123,68 @@ left, and which one — and the agent narrows it on the way out:
 (`nfc/remotenfc/manager.go:218`). A client watching a phone cannot tell which
 tag departed, or whether it was its own.
 
+### 2.1 Where this is going: edges at the device, state at the agent
+
+The reader's column of that table is the agent reconstructing something its
+backend already knew. `nfc/pcsc/device.go` runs a `GetStatusChange` monitor
+with an event state and an event counter and a `cardRemoved` channel (`:24`,
+`:99`), and uses it only for removal detection inside the device while
+`NFCReader` polls and re-derives presence above it. Driving the reader from
+those edges and deleting `TagCache` collapses the first two columns into one
+shape: every holder becomes an event source.
+
+**Presence is three layers, and `TagCache` smears all of them.**
+
+| Layer | Owner | What it is |
+|---|---|---|
+| Field | the device | edge detection, and whatever debounce it applied |
+| State | the agent | what each holder is holding now, derived from those events |
+| Delivery | the wire | event identity, so a replayed delivery dedupes exactly |
+
+The agent keeps the middle layer — `ActiveTag`, `GetTags` and `resolveRoute`
+all need it — and gives up the first entirely.
+
+**Mechanism belongs to the device; the policy it applied must be declared.**
+Edge detection is physical and only the device can observe it. Debounce is
+policy, and a holder that picks its own silently makes the event stream mean
+different things depending on which holder produced it — exactly what §0 says a
+client must not be able to detect. So a device reports its events *and* the
+policy behind them: a debounce window, or a presence model (edge-triggered,
+polled at interval N, unknown).
+
+**No second debouncer at the agent.** Two filters in series, with different
+windows and phases, produce behaviour neither of them designed, and the failure
+is silent event loss. That is unacceptable wherever the same credential is
+presented repeatedly and each presentation counts — apartment time-in and
+time-out, event check-in and check-out. A duplicate can be recognised by its
+event id; a tap that was never delivered cannot be recovered at all.
+
+**Presence is not hold mode.** Both are declared by the device and neither is
+determined by the agent, but they answer different questions: hold mode says
+what the agent may ask for (§9), presence says what the event stream means.
+Hold mode stays advisory and never a gate.
+
+### 2.2 Three cautions for that change
+
+Recorded because they are cheap to trip over:
+
+- **`SupportsEvents` carries a coupling.** A PC/SC device that starts declaring
+  events makes `BuildDeviceCapabilities` (`nfc/capabilities.go:127`) set
+  `CanPoll = false` *and* `CanTransceive = false`, and the PC/SC device
+  implements neither `DeviceEventEmitter` nor `DeviceTransceiver` today.
+  `CanPoll` has no readers, so that half is inert; the other half would have
+  hardware readers declaring they cannot transceive. `BuildDeviceCapabilities`
+  has no internal consumer at present, so it is wrong on paper immediately and
+  wrong in practice as soon as something reads it — and it is a documented
+  extension surface. A one-line `SupportsTransceive()` in the same change
+  closes it.
+- **Order matters.** `HasChanged` is what gates the broadcast
+  (`nfc/reader.go:456`). Removing `TagCache` before the trigger is edge-driven
+  leaves the reader broadcasting on every poll.
+- **Arrival and read separate.** `handleTagPolling` detects and reads in one
+  step, so a tag that arrives but cannot be read surfaces as an error carrying
+  a Card. Splitting them is more honest, and matches what the wire already does.
+
 ## 3. The device protocol is announce-only; every native API is query-based
 
 This is the structural finding. Our wire has three commands (`write`, `lock`,
@@ -460,6 +522,12 @@ Checkable rules, each traceable to something above.
 19. The device's account of itself is descriptive and inert: User-Agent-shaped,
     bounded in length and character set, never branched on, and kept out of the
     types the deciding code can see (§13).
+
+**Presence**
+
+20. Edge detection belongs to the device, and the debounce policy it applied is
+    declared rather than assumed. The agent holds state derived from those
+    events and never filters them a second time (§2.1).
 
 ## 11. What to resist
 

@@ -127,12 +127,3 @@ func (s *App) handleRevokeAllDevices() {
 	log.Printf("[systray] Revoked all paired devices")
 	s.refreshDevicesMenu()
 }
-
-// startDeviceWatcher redraws the menu when a device pairs, so a completed
-// pairing shows up without the operator reopening the menu.
-func (s *App) startDeviceWatcher() {
-	if s.agent.Devices() == nil {
-		return
-	}
-	s.agent.Devices().OnChange(s.refreshDevicesMenu)
-}

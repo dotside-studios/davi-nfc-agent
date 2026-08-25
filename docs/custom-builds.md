@@ -198,7 +198,8 @@ The context carries what a plugin needs to wire itself in:
 
 | | |
 |---|---|
-| `ctx.Agent` | The agent, for its configuration and for hooks such as `OnTag` and `OnStateChange` |
+| `ctx.Agent` | The agent, for its configuration and for what it can be told to do |
+| `ctx.Events` | What the agent reports: see [Following the agent](#following-the-agent) |
 | `ctx.Use(c)` | Registers an `agent.Component`, started and stopped with the agent |
 | `ctx.Systray` | The menu the plugin's entries go on |
 | `ctx.Serve(srv)` | Publishes the listener the agent serves from |
@@ -405,6 +406,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `server/wsconn` | Write-safe WebSocket wrapper shared by the servers and the device driver |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
 | `traymenu` | Declarative tray menus, with no toolkit behind them |
+| `event` | The signal the agent and the menus publish their callbacks on |
 | `clipboard` | Copying text to the system clipboard |
 | `traymenu/fynetray` | The real tray, on `fyne.io/systray` |
 | `tls`, `logbuf` | Certificates, the log ring |
@@ -513,10 +515,47 @@ Phones and WebNFC browsers connect over the [Device API](api.md#device-api) and
 report the tags they scan, so such a build is complete for deployments where
 every reader is a phone.
 
-## Observing scans
+## Following the agent
 
-An observer registered before the agent starts receives every scan, in the order
-the connected clients receive it.
+`rt.Agent.Events()` is what the agent reports. Connect a handler to a signal and
+it runs on every emission; the connection it returns removes it again.
+
+| Signal | Carries |
+|---|---|
+| `State` | Each settled lifecycle transition |
+| `Preferences` | The preferences after a change, whoever made it |
+| `Clients` | The number of connected clients |
+| `Servers` | The port the listeners are bound on, after a restart |
+| `Reader` | The reader's status: connected, and whether a card is on it |
+| `Readers` | The readers that can be picked, when the set changes |
+| `Devices` | The paired devices, after a pairing or a revocation |
+| `Origins` | The allowlist, after an edit |
+| `Blocked` | Each origin refused a connection |
+| `Tag` | Every scan the agent broadcasts |
+| `Any` | The kind of every change above, except scans and reader status |
+
+```go
+conn := rt.Agent.Events().Preferences.Connect(func(p agent.Preferences) {
+	log.Printf("reader is now in %s mode", p.Mode)
+})
+defer conn.Disconnect()
+```
+
+`Any` is for a surface that redraws rather than acts on the value, so it carries
+an `agent.Change` naming what moved instead of the value itself. Scans and
+reader status are left out of it: a page redrawing per card is not what a
+subscriber to "something changed" is asking for. Subscribe to `Tag` and `Reader`
+by name for those.
+
+Handlers run on the goroutine that made the change, in the order they connected,
+so they must not block. Work that may take time belongs on a channel of your
+own. Connecting and disconnecting is safe at any time, including from inside a
+handler and while the agent runs.
+
+### Observing scans
+
+`Events().Tag` carries every scan the agent broadcasts, in the order the
+connected clients receive it.
 
 ```go
 package main
@@ -538,9 +577,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Register before Start. The servers read the set of observers once, when
-	// they are constructed.
-	rt.Agent.OnTag(func(data nfc.NFCData) {
+	rt.Agent.Events().Tag.Connect(func(data nfc.NFCData) {
 		if data.Card == nil {
 			return
 		}
@@ -558,11 +595,8 @@ func main() {
 }
 ```
 
-`OnTag` observes rather than intercepts. The scan reaches every connected client
-regardless, and the observer's return value changes nothing.
-
-Observers run on the goroutine that feeds those clients, so they must not block.
-Work that may take time belongs on a channel of your own.
+A subscriber observes rather than intercepts. The scan reaches every connected
+client regardless, and what the handler returns changes nothing.
 
 ## Driving a reader directly
 

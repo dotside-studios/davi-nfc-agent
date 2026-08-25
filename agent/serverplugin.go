@@ -220,7 +220,7 @@ func (p *ServerPlugin) Rebind() error {
 
 	p.logf("Listener rebound successfully")
 	if p.agent != nil {
-		p.agent.notifyServerRestart()
+		p.agent.fireServerRestart()
 	}
 	return nil
 }
@@ -274,8 +274,8 @@ func (p *ServerPlugin) serverURLs(ctx AgentContext) error {
 	// The addresses follow the machine's own, so they are redrawn whenever the
 	// agent starts or stops and whenever the listener is bound again.
 	p.refresh(ctx.Agent)
-	ctx.Agent.OnStateChange(func(State) { p.refresh(ctx.Agent) })
-	ctx.Agent.OnServerRestart(func() { p.refresh(ctx.Agent) })
+	ctx.Events.State.Connect(func(State) { p.refresh(ctx.Agent) })
+	ctx.Events.Servers.Connect(func(int) { p.refresh(ctx.Agent) })
 	return nil
 }
 

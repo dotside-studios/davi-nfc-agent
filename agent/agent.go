@@ -201,13 +201,17 @@ type Agent struct {
 	// pumpCtx bounds the goroutines draining the reader and the paired devices
 	// onto the bridge. Cancelled by stopServers, so they end with the bridge
 	// they feed.
-	pumpCtx           context.Context
-	pumpCancel        context.CancelFunc
-	onTag             []func(nfc.NFCData)
-	clientHooks       []func()
-	preferenceHooks   []func()
-	restartHooks      []func()
-	serverRestartChan chan struct{} // Signals when servers are restarted
+	pumpCtx    context.Context
+	pumpCancel context.CancelFunc
+
+	// events is the subscription surface, published by Events. Signals are
+	// safe from any goroutine, so it needs no lock of its own.
+	events Events
+
+	// done ends what runs for the agent's lifetime rather than for a run.
+	// Closed by Shutdown.
+	done     chan struct{}
+	doneOnce sync.Once
 
 	// mounter is what the agent's routes are served from, published by
 	// whichever plugin serves them. Nil is an agent serving no HTTP at all.
@@ -255,10 +259,13 @@ func New(cfg Config) *Agent {
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(cfg.CardTypes),
-		serverRestartChan:   make(chan struct{}, 1),
 		logs:                cfg.Logs,
+		done:                make(chan struct{}),
 		Plugins:             &PluginSet{},
 	}
+
+	a.watchStores()
+	a.watchManager()
 
 	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
 		// Only a nil entry can fail here: the set is new, so nothing is sealed.
@@ -286,7 +293,19 @@ func New(cfg Config) *Agent {
 // Info reports what this build calls itself.
 func (a *Agent) Info() buildinfo.Info { return a.info }
 
-func (a *Agent) Manager() nfc.Manager     { return a.manager }
+func (a *Agent) Manager() nfc.Manager { return a.manager }
+
+// Readers lists the readers that can be picked, which is what a reader picker
+// offers. Phones are left out: pinning the reader to one pins it to a device
+// that is never opened.
+func (a *Agent) Readers() []string {
+	readers, err := nfc.ListReaders(a.manager)
+	if err != nil {
+		a.logger.Printf("Listing readers failed: %v", err)
+		return nil
+	}
+	return readers
+}
 func (a *Agent) Logger() *log.Logger      { return a.logger }
 func (a *Agent) APISecret() string        { return a.apiSecret }
 func (a *Agent) ConfigDir() string        { return a.configDir }
@@ -326,12 +345,6 @@ func (a *Agent) ReaderFeedback() bool {
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
 	return a.readerFeedback
-}
-
-// ServerRestarts returns a channel that signals when servers are restarted
-// due to network changes or certificate regeneration.
-func (a *Agent) ServerRestarts() <-chan struct{} {
-	return a.serverRestartChan
 }
 
 // startLocked opens the reader and brings the servers up. The caller holds the
@@ -414,6 +427,11 @@ func (a *Agent) stopLocked() {
 // Closing it belongs here, on the way out.
 func (a *Agent) Shutdown() {
 	a.Stop()
+	a.doneOnce.Do(func() {
+		if a.done != nil {
+			close(a.done)
+		}
+	})
 
 	if closer, ok := a.manager.(interface{ Close() }); ok {
 		closer.Close()
@@ -460,19 +478,8 @@ func (a *Agent) RestartServers() error {
 	}
 
 	a.logger.Println("Servers restarted successfully")
-	a.notifyServerRestart()
-	return nil
-}
-
-// notifyServerRestart tells whatever follows the listeners that they have been
-// rebuilt. Called with the lifecycle released, as the state hooks are.
-func (a *Agent) notifyServerRestart() {
-	select {
-	case a.serverRestartChan <- struct{}{}:
-	default:
-		// Channel full, skip
-	}
 	a.fireServerRestart()
+	return nil
 }
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
@@ -505,7 +512,7 @@ func (a *Agent) startServers() error {
 		TokenVerifier:  a.tokenVerifier(),
 		Ops:            a.Router,
 		OnChange:       a.fireClientsChanged,
-		OnTag:          a.tagObserver(),
+		OnTag:          a.events.Tag.Emit,
 	})
 
 	// The agent's tag sources feed the client server directly. There is no
@@ -649,50 +656,6 @@ func (a *Agent) SetReaderFeedback(on bool) {
 		reader.SetFeedback(on)
 	}
 	a.firePreferencesChanged()
-}
-
-// OnTag registers fn to receive every scan the agent broadcasts, so a program
-// embedding the agent can act on cards without connecting to its own WebSocket
-// endpoint. Register before Start: the servers read the set once, when they are
-// built.
-//
-// fn runs on the goroutine that feeds every connected client, so it must not
-// block. Hand slow work to a channel of your own.
-func (a *Agent) OnTag(fn func(nfc.NFCData)) {
-	if fn == nil {
-		return
-	}
-	a.onTag = append(a.onTag, fn)
-}
-
-// tagObserver folds the registered observers into one callback, or nil when
-// there are none: the client server checks for nil, and a non-nil func
-// calling an empty slice would defeat that.
-func (a *Agent) tagObserver() func(nfc.NFCData) {
-	if len(a.onTag) == 0 {
-		return nil
-	}
-	observers := a.onTag
-	return func(data nfc.NFCData) {
-		for _, fn := range observers {
-			fn(data)
-		}
-	}
-}
-
-// fireClientsChanged runs the client hooks, in registration order.
-//
-// Read when it fires rather than captured when the client server is built, so a
-// hook registered after the agent starts is not silently left out.
-func (a *Agent) fireClientsChanged() {
-	a.hooksMu.Lock()
-	hooks := make([]func(), len(a.clientHooks))
-	copy(hooks, a.clientHooks)
-	a.hooksMu.Unlock()
-
-	for _, fn := range hooks {
-		fn()
-	}
 }
 
 // tokenVerifier returns the device registry as a token verifier, or nil when

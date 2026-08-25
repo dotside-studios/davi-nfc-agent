@@ -25,6 +25,7 @@ func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagS
 		case data := <-reader.Data():
 			a.forwardScan(data, sink)
 		case status := <-reader.StatusUpdates():
+			a.fireReaderStatus(status)
 			sink.BroadcastDeviceStatus(status)
 		}
 	}

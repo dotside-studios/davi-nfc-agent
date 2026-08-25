@@ -1145,4 +1145,3 @@ Something happened at the tag. These mirror the agent's internal error codes.
 - [JavaScript client](javascript-client.md): the browser and Node.js client library
 - [Device setup](device-setup.md): pairing a phone or a reader
 - [Control Center](control-center.md): the built-in web console
-- [Device bridge protocols](device-bridge-protocols.md): what a phone or browser implements

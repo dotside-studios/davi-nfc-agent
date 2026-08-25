@@ -88,6 +88,34 @@ func TestAnOpenPageIsWokenByAPreferenceChangedElsewhere(t *testing.T) {
 	}
 }
 
+// Every open page is woken, and one that closes stops being woken without
+// taking the others with it.
+func TestEveryOpenPageIsWoken(t *testing.T) {
+	c := New(Config{Agent: quietAgent(t)})
+
+	first, closeFirst := c.subscribe()
+	second, closeSecond := c.subscribe()
+	t.Cleanup(closeSecond)
+
+	c.NotifyChange()
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("pages woken %d and %d times, want both", len(first), len(second))
+	}
+	<-first
+	<-second
+
+	closeFirst()
+	closeFirst() // closing twice is what a deferred close after an early return does
+
+	c.NotifyChange()
+	if len(first) != 0 {
+		t.Error("a closed page was still woken")
+	}
+	if len(second) != 1 {
+		t.Error("closing one page stopped the others being woken")
+	}
+}
+
 // A build with no console holds a nil *Server, which console_nowebui.go
 // promises every method tolerates. The stubs there do; these are the ones the
 // real build has to match, so the promise holds under either tag.

@@ -134,7 +134,7 @@ func (s *Server) Disconnect(clientID string) bool {
 // notifyChange tells any observer that the client list moved.
 func (s *Server) notifyChange() {
 	if s.config.OnChange != nil {
-		s.config.OnChange()
+		s.config.OnChange(s.clientCount())
 	}
 }
 

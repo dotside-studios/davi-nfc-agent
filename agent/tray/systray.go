@@ -2,7 +2,6 @@ package tray
 
 import (
 	"log"
-	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
@@ -103,10 +102,8 @@ func (s *App) Run() {
 // onReady is called when the systray is ready
 func (s *App) onReady() {
 	s.setupUI()
+	s.subscribe()
 	s.autoStartAgent()
-	s.startCardInfoUpdater()
-	s.startOriginWatcher()
-	s.startDeviceWatcher()
 }
 
 // onExit is called when the systray is exiting
@@ -234,61 +231,12 @@ func (s *App) activatePlugins() {
 
 // autoStartAgent starts the agent automatically
 func (s *App) autoStartAgent() {
-	// Set up device change listener
-	s.setupDeviceChangeListener()
-
 	go func() {
 		// Start with initial device (may be empty for auto-discovery)
-		if err := s.agent.Start(s.initialDevice); err == nil {
-			s.showRunning()
-		} else {
+		if err := s.agent.Start(s.initialDevice); err != nil {
 			s.showStopped("Failed to Start")
 		}
 		s.updateDeviceList()
-	}()
-}
-
-// setupDeviceChangeListener sets up automatic device list refresh on device changes
-func (s *App) setupDeviceChangeListener() {
-	notifier, ok := s.agent.Manager().(nfc.DeviceChangeNotifier)
-	if !ok {
-		return
-	}
-
-	go func() {
-		for range notifier.DeviceChanges() {
-			log.Printf("[systray] Device change detected, refreshing device list")
-			s.updateDeviceList()
-		}
-	}()
-}
-
-// startCardInfoUpdater starts a goroutine to update card information
-func (s *App) startCardInfoUpdater() {
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		lastUID := ""
-		lastType := ""
-
-		for range ticker.C {
-			var card *nfc.Card
-			if s.agent.ClientServer != nil {
-				card = s.agent.ClientServer.GetLastCard()
-			}
-
-			uid, cardType := s.getCardInfo(card)
-
-			if uid != lastUID {
-				s.updateCardUID(uid)
-				lastUID = uid
-			}
-
-			if cardType != lastType {
-				s.updateCardType(cardType)
-				lastType = cardType
-			}
-		}
 	}()
 }
 
@@ -301,15 +249,11 @@ func (s *App) handleStartAgent() {
 		return
 	}
 
-	s.showRunning()
 	s.updateDeviceList() // Refresh to show current device
 }
 
 // StopAgent stops the agent
-func (s *App) StopAgent() {
-	s.agent.Stop()
-	s.showStopped("Stopped")
-}
+func (s *App) StopAgent() { s.agent.Stop() }
 
 // showRunning puts the menu into the state of a running agent: addresses that
 // mean something, and Stop as the control that can be clicked.
@@ -365,9 +309,7 @@ func (s *App) applyCardTypes(types []string) {
 func (s *App) SwitchDevice(deviceName string) {
 	// Restart agent with new device
 	s.agent.Stop()
-	if err := s.agent.Start(deviceName); err == nil {
-		s.showRunning()
-	} else {
+	if err := s.agent.Start(deviceName); err != nil {
 		s.showStopped("Failed to Start")
 	}
 
@@ -386,13 +328,10 @@ func (s *App) markCurrentReader() {
 }
 
 // updateDeviceList refreshes the list of available devices
-func (s *App) updateDeviceList() {
-	devices, err := s.agent.Manager().ListDevices()
-	if err != nil {
-		log.Printf("Error listing devices: %v", err)
-		return
-	}
+func (s *App) updateDeviceList() { s.applyReaders(s.agent.Readers()) }
 
+// applyReaders redraws the reader picker from the readers the agent reports.
+func (s *App) applyReaders(devices []string) {
 	// Get current device from agent (source of truth)
 	currentDevice := s.agent.CurrentDevicePath()
 
@@ -434,15 +373,6 @@ func (s *App) updateStatus(status string) {
 		// Starting or other states
 		s.menu.SetIcon(iconData)
 	}
-}
-
-// getCardInfo extracts UID and type from a card
-func (s *App) getCardInfo(card *nfc.Card) (uid, cardType string) {
-	if card != nil {
-		uid = card.UID
-		cardType = card.Type
-	}
-	return
 }
 
 // updateCardUID updates the card UID display

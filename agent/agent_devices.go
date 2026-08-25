@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/google/uuid"
 )
@@ -45,7 +46,8 @@ type DeviceRegistry struct {
 	configDir string
 	devices   map[string]*PairedDevice // id -> device
 
-	onChangeFunc func()
+	// changed carries the registry after every pairing and revocation.
+	changed event.Signal[[]PairedDevice]
 }
 
 // NewDeviceRegistry loads the registry from configDir.
@@ -79,12 +81,18 @@ func NewDeviceRegistry(configDir string) (*DeviceRegistry, error) {
 	return r, nil
 }
 
-// OnChange registers a callback fired when a device is paired or revoked.
-func (r *DeviceRegistry) OnChange(fn func()) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.onChangeFunc = fn
+// OnChange registers fn to run when a device is paired or revoked, and returns
+// the handle that removes it again.
+func (r *DeviceRegistry) OnChange(fn func()) *event.Connection {
+	if fn == nil {
+		return nil
+	}
+	return r.changed.Connect(func([]PairedDevice) { fn() })
 }
+
+// notifyChanged publishes the registry. Called with the lock released, since a
+// handler reads the registry back.
+func (r *DeviceRegistry) notifyChanged() { r.changed.Emit(r.List()) }
 
 // Pair registers a device and returns its token. The token is returned exactly
 // once; only its hash is kept.
@@ -110,12 +118,9 @@ func (r *DeviceRegistry) Pair(name, platform string) (*PairedDevice, string, err
 	r.mu.Lock()
 	r.devices[device.ID] = device
 	err := r.saveLocked()
-	notify := r.onChangeFunc
 	r.mu.Unlock()
 
-	if notify != nil {
-		notify()
-	}
+	r.notifyChanged()
 	if err != nil {
 		return nil, "", err
 	}
@@ -180,15 +185,12 @@ func (r *DeviceRegistry) Revoke(id string) error {
 	_, existed := r.devices[id]
 	delete(r.devices, id)
 	err := r.saveLocked()
-	notify := r.onChangeFunc
 	r.mu.Unlock()
 
 	if !existed {
 		return fmt.Errorf("no such device: %s", id)
 	}
-	if notify != nil {
-		notify()
-	}
+	r.notifyChanged()
 	return err
 }
 
@@ -197,12 +199,9 @@ func (r *DeviceRegistry) RevokeAll() error {
 	r.mu.Lock()
 	r.devices = make(map[string]*PairedDevice)
 	err := r.saveLocked()
-	notify := r.onChangeFunc
 	r.mu.Unlock()
 
-	if notify != nil {
-		notify()
-	}
+	r.notifyChanged()
 	return err
 }
 

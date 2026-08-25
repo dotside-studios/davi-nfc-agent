@@ -17,13 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three plugins ship: `agent.ServerPlugin` owns the listener and its
   `agent.Endpoint`s, `agent.PairingPlugin` runs the pairing server and its tray
   entries, `agent.TrustPlugin` holds the certificate the other two read
-- `Agent.OnServerRestart`, `traymenu.Discard`, and `traymenu.Section` as a
-  `Container`
-- `(*Agent).OnTag` calls an observer on every scan, so a program embedding the
-  agent can act on cards without connecting to its own WebSocket. Registered
-  before `Start`; the broadcast to clients is unaffected
+- `traymenu.Discard` and `traymenu.Section` as a `Container`
+- Subscriptions: `Agent.Events()` publishes what the agent reports as typed
+  signals, connected to at any time and disconnected through the handle each
+  connection returns. `State`, `Preferences`, `Clients`, `Servers`, `Devices`,
+  `Origins`, `Blocked` and `Tag` carry the new value; `Any` carries an
+  `agent.Change` naming what moved, for a surface that redraws. A plugin gets
+  the same surface as `ctx.Events`
+- `Events().Tag` carries every scan the agent broadcasts, so a program embedding
+  the agent acts on cards without connecting to its own WebSocket. The broadcast
+  to clients is unaffected
+- `Events().Reader` carries the reader's status and `Events().Readers` the
+  readers that can be picked, which used to reach the WebSocket clients and
+  nothing else. `Agent.Readers` is the matching read, filtered so a phone is
+  never offered as a reader to pin
+- `event.Signal`, the fan-out primitive behind all of it, extracted from
+  `traymenu`, which now aliases it
 - Explicit agent lifecycle: `Agent.State` reports `stopped`, `starting`,
-  `running` or `stopping`, `OnStateChange` observes settled transitions, and
+  `running` or `stopping`, `Events().State` observes settled transitions, and
   `Use` registers a `Component` started after the reader and servers and stopped
   first. A component that fails to start unwinds the ones before it
 - `agent.DefaultOptions` returns what the flags default to, for building an agent
@@ -44,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend, and reacting to tags in Go. Every Go sample compiles against this tree
 - End-to-end tests in `e2e/`, wiring an agent as that page does and driving it
   over its published protocols on a real TLS listener: scans reaching clients and
-  `OnTag`, writes and raw exchanges routed to a phone, read-only mode, pairing
+  subscribers, writes and raw exchanges routed to a phone, read-only mode, pairing
   and revocation, and the lifecycle. Only the reader hardware is a stand-in
 
 ### Changed
@@ -52,9 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/unifiedserver` is now `server/listener`, package `listener`, so
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
-- `Agent.OnPreferencesChange` reports a preference change. It used to ride
-  `OnClientsChange`, which is documented as running when a client connects or
-  disconnects, so nothing could follow one without the other
+- A preference change is reported on its own signal. It used to ride the client
+  hook, which runs when a client connects or disconnects, so nothing could
+  follow one without the other
 - `Options.RequirePaired` is `Options.RequirePairedDevice`, matching
   `Config.RequirePairedDevice` and the agent's own methods
 - `Options.Version` is gone. Setup never read it; the shipped command's
@@ -145,8 +156,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The tray follows the agent rather than only its own clicks. A mode, filter or
+  feedback setting changed from the console left the tray's menu showing the old
+  value, a device paired elsewhere did not appear, and an agent that stopped on
+  its own left the tray offering Stop
+- The tray no longer offers a phone as a reader to pin. It listed the manager's
+  devices raw, where the console filtered them through `nfc.ListReaders`;
+  choosing one pinned the reader to a device that is never opened
+- More than one subscriber can follow devices and origins. `DeviceRegistry.OnChange`,
+  `OriginStore.OnChange` and `OriginStore.OnBlocked` stored a single callback, so
+  the last registration replaced the previous one: with the console and the tray
+  both following the registry, only the tray was told when a device was paired
 - `traymenu.Close` now stops clicks. It closed a done channel that the click
-  path and the dispatch loop each selected on alongside the event queue, and Go
+  path and the dispatch loop each selected on alongside the click queue, and Go
   picks at random when both are ready, so a click racing a close ran about half
   the time
 - Every method on a nil `*console.Server` tolerates it, as a build without a
@@ -220,6 +242,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The tray's 500ms card poll and its direct subscription to the NFC manager's
+  device-change channel. Both are `Agent.Events()` subscriptions now
 - The settings file and everything that arbitrated with it. Preferences were
   persisted to `settings.json` and read back at startup, which is what made three
   shapes necessary for six values. The agent holds them now and nothing writes
@@ -232,6 +256,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReaderMode.String`; the console keeps its own `webui.Preferences`
 - Dead code in `deviceserver`: `Handle` had no callers, the `devices` map was
   never read, and the fallback WebSocket loop ran only with no driver configured
+- The agent's callback registrations, replaced by `Agent.Events()`: `OnTag`,
+  `OnStateChange`, `OnClientsChange`, `OnPreferencesChange`, `OnServerRestart`
+  and the `ServerRestarts` channel. The channel had one consumer by
+  construction, and a second reader would have taken the signal from the first
 
 ## [1.1.2] - 2026-08-15
 

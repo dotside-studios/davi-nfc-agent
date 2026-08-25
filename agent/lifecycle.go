@@ -75,21 +75,6 @@ func (a *Agent) State() State { return State(a.state.Load()) }
 // rather than checking first.
 func (a *Agent) Running() bool { return a.State() == StateRunning }
 
-// OnStateChange registers fn to run on every settled lifecycle transition, in
-// registration order.
-//
-// Hooks run after the transition completes and outside the lifecycle lock, so a
-// hook may call State, and may call Start or Stop without deadlocking, though
-// doing so from a hook is a good way to write a loop.
-func (a *Agent) OnStateChange(fn func(State)) {
-	if fn == nil {
-		return
-	}
-	a.hooksMu.Lock()
-	defer a.hooksMu.Unlock()
-	a.stateHooks = append(a.stateHooks, fn)
-}
-
 // Use registers a component to run alongside the agent. Components must be
 // registered before Start; registering while the agent is running returns an
 // error rather than silently never starting.
@@ -127,18 +112,6 @@ func (a *Agent) Components() []Component {
 	out := make([]Component, len(a.components))
 	copy(out, a.components)
 	return out
-}
-
-// fireState runs the state hooks. Called with the lifecycle lock released.
-func (a *Agent) fireState(s State) {
-	a.hooksMu.Lock()
-	hooks := make([]func(State), len(a.stateHooks))
-	copy(hooks, a.stateHooks)
-	a.hooksMu.Unlock()
-
-	for _, fn := range hooks {
-		fn(s)
-	}
 }
 
 // startComponents brings the registered components up in order. On the first
@@ -252,9 +225,6 @@ type atomicState = atomic.Int32
 type lifecycle struct {
 	lifecycleMu sync.Mutex
 	state       atomicState
-
-	hooksMu    sync.Mutex
-	stateHooks []func(State)
 
 	components []Component
 	runCtx     context.Context

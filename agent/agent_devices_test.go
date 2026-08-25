@@ -179,3 +179,31 @@ func TestPairNotifiesOnChange(t *testing.T) {
 		t.Errorf("OnChange fired %d times, want 2", changes)
 	}
 }
+
+func TestEveryDeviceSubscriberIsNotified(t *testing.T) {
+	registry, err := NewDeviceRegistry(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDeviceRegistry: %v", err)
+	}
+
+	var first, second int
+	registry.OnChange(func() { first++ })
+	conn := registry.OnChange(func() { second++ })
+
+	if _, _, err := registry.Pair("First", "android"); err != nil {
+		t.Fatalf("Pair: %v", err)
+	}
+
+	if first != 1 || second != 1 {
+		t.Fatalf("subscribers fired %d and %d times, want 1 and 1", first, second)
+	}
+
+	conn.Disconnect()
+	if _, _, err := registry.Pair("Second", "ios"); err != nil {
+		t.Fatalf("Pair: %v", err)
+	}
+
+	if first != 2 || second != 1 {
+		t.Errorf("after Disconnect subscribers fired %d and %d times, want 2 and 1", first, second)
+	}
+}

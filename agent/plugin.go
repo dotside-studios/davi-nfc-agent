@@ -136,9 +136,14 @@ func (s *PluginSet) seal() []Plugin {
 // Activate. What a plugin registers outlives the call; the context does not.
 type AgentContext struct {
 	// Agent is the agent being assembled. It is not running yet: read its
-	// configuration, register hooks such as OnTag and OnStateChange, and leave
-	// starting it to whoever owns it.
+	// configuration, register what the plugin needs, and leave starting it to
+	// whoever owns it.
 	Agent *Agent
+
+	// Events is what the agent reports, which is how a plugin follows a state
+	// change, a preference, a scan or a pairing without polling for it. It is
+	// [Agent.Events], and a connection made here outlives Activate.
+	Events *Events
 
 	// Systray is where the plugin's menu entries go, which for the shipped
 	// tray is the top level of its menu: a plugin's entry is not marked out
@@ -238,7 +243,7 @@ func (a *Agent) activateLocked(systray traymenu.Container) error {
 	if systray == nil {
 		systray = a.discardMenu()
 	}
-	ctx := AgentContext{Agent: a, Systray: systray}
+	ctx := AgentContext{Agent: a, Events: a.Events(), Systray: systray}
 
 	for _, p := range plugins {
 		name := PluginName(p)

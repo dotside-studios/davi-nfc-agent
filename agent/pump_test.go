@@ -10,9 +10,17 @@ import (
 
 // recordingSink stands in for the client server: it receives what the pumps
 // forward.
-type recordingSink struct{ tags chan nfc.NFCData }
+type recordingSink struct {
+	tags     chan nfc.NFCData
+	statuses chan nfc.DeviceStatus
+}
 
-func newSink() *recordingSink { return &recordingSink{tags: make(chan nfc.NFCData, 8)} }
+func newSink() *recordingSink {
+	return &recordingSink{
+		tags:     make(chan nfc.NFCData, 8),
+		statuses: make(chan nfc.DeviceStatus, 8),
+	}
+}
 
 func (s *recordingSink) Broadcast(data nfc.NFCData) {
 	select {
@@ -21,7 +29,12 @@ func (s *recordingSink) Broadcast(data nfc.NFCData) {
 	}
 }
 
-func (s *recordingSink) BroadcastDeviceStatus(nfc.DeviceStatus) {}
+func (s *recordingSink) BroadcastDeviceStatus(status nfc.DeviceStatus) {
+	select {
+	case s.statuses <- status:
+	default:
+	}
+}
 
 func awaitScan(t *testing.T, sink *recordingSink) nfc.NFCData {
 	t.Helper()
@@ -144,7 +157,7 @@ func TestScanReachesTheClientServerAfterStart(t *testing.T) {
 	a := rt.Agent
 
 	seen := make(chan string, 1)
-	a.OnTag(func(data nfc.NFCData) {
+	a.Events().Tag.Connect(func(data nfc.NFCData) {
 		if data.Card != nil {
 			select {
 			case seen <- data.Card.UID:
@@ -167,5 +180,47 @@ func TestScanReachesTheClientServerAfterStart(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("the scan never reached the client server: its bridge listeners are not running")
+	}
+}
+
+// The reader's status reaches a subscriber as well as the clients. It used to
+// reach the clients only, which left the tray polling the last card twice a
+// second to find out what the agent already knew.
+func TestReaderStatusReachesSubscribersAndClients(t *testing.T) {
+	a := newPumpAgent(t)
+
+	reader, err := nfc.NewNFCReader("", nfc.NewMockManager(), time.Second)
+	if err != nil {
+		t.Fatalf("NewNFCReader: %v", err)
+	}
+	reader.Start()
+	defer reader.Close()
+
+	seen := make(chan nfc.DeviceStatus, 4)
+	a.Events().Reader.Connect(func(status nfc.DeviceStatus) {
+		select {
+		case seen <- status:
+		default:
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sink := newSink()
+	go a.pumpReader(ctx, reader, sink)
+
+	select {
+	case status := <-seen:
+		if !status.Connected {
+			t.Errorf("subscriber saw %+v, want the reader connected", status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reader's status never reached a subscriber")
+	}
+
+	select {
+	case <-sink.statuses:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reader's status never reached the clients")
 	}
 }

@@ -30,10 +30,11 @@ type Config struct {
 	// which is what an agent that is not running does.
 	Ops server.TagOps
 
-	// OnChange, when set, is called whenever a client connects or disconnects
-	// so an observer can refresh without polling. Called off the hot path but
-	// on the connection's own goroutine, so it must not block.
-	OnChange func()
+	// OnChange, when set, is called with the number of connected clients
+	// whenever one connects or disconnects, so an observer can refresh without
+	// polling. Called off the hot path but on the connection's own goroutine,
+	// so it must not block.
+	OnChange func(clients int)
 
 	// OnTag, when set, is called for every scan before it is broadcast, so a
 	// program embedding the agent can act on cards without pretending to be a

@@ -118,14 +118,14 @@ host:port. Otherwise any site the operator visits could drive the reader,
 including permanently locking cards. A console served from anywhere else, which
 includes every hosted one, must be allowed.
 
-**The Davi consoles are allowed out of the box**, so nothing needs configuring
-for them. The allowlist lives in `allowed-origins.json` in the config directory
-and is managed from the tray under **Allowed Origins**, which lists what is
+The Davi consoles are allowed out of the box, so nothing needs configuring for
+them. The allowlist lives in `allowed-origins.json` in the config directory and
+is managed from the tray under **Allowed Origins**, which lists what is
 permitted and lets you revoke any of it.
 
-**When a page is refused, the tray offers it.** The blocked origin appears as
+When a page is refused, the tray offers it: the blocked origin appears as
 *"Allow example.com"*, and one click admits it and persists the choice, with no
-restart. That is the intended way to add a console.
+restart. This is the usual way to add a console.
 
 To preload one instead, at first run or for an unattended install:
 
@@ -163,10 +163,10 @@ the form `sha256/<base64>` over the SubjectPublicKeyInfo:
 Agent public key pin: sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
 ```
 
-Record it when pairing and compare it on every later connection. **It survives
-certificate reissues**, which happen whenever the host's addresses change, so a
-device that pins it keeps working when the machine moves network. Pin this
-value, never the certificate.
+Record it when pairing and compare it on every later connection. The pin
+survives certificate reissues, which happen whenever the host's addresses
+change, so a device that pins it keeps working when the machine moves network.
+Pin this value, never the certificate.
 
 [Setting up an iOS or Android device](docs/device-setup.md) covers the pairing
 flow and the trust-evaluation code for both platforms.

@@ -3,15 +3,14 @@
 The client library for the Davi NFC Agent. Docs in
 [docs/client/](../docs/client).
 
-`src/` is the one implementation of the client protocol. `dist/` is the same
-code built for a page with no build step, and is committed for that reason.
+`dist/` is generated from `src/` — don't hand-edit it.
 
-`nfc-device-client.js` is the other role — a phone or Node process acting as a
-reader for the agent. Different protocol.
+`nfc-device-client.js` is the other role: a phone or Node process acting as a
+reader for the agent, on a different protocol.
 
 ```bash
 npm install
 npm test        # vitest, against a fake WebSocket
 npm run typecheck
-npm run build   # regenerate dist/ — commit the result
+npm run build   # regenerate dist/, and commit it
 ```

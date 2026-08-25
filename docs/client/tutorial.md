@@ -15,7 +15,7 @@ It listens on port 9470. Leave it running.
 
 The flag allows the origin the page will be served from. Without it the agent
 refuses the connection, which is what stops a random site from driving the
-reader — see
+reader. See
 [Connecting from a web console](../../README.md#connecting-from-a-web-console).
 
 Check <http://localhost:9470/api/v1/health>:

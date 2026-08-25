@@ -11,8 +11,10 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
+	"github.com/gorilla/websocket"
 )
 
 // stack is what the agent composes: the driver's device endpoint behind the
@@ -163,4 +165,78 @@ func supervisorOver(t *testing.T, hardware nfc.Manager, remote *remotenfc.Manage
 	}
 	readers.SetMode(mode)
 	return readers
+}
+
+// A device the tests can act as. The protocol itself is the driver's to test;
+// what matters here is a registered device holding a tag, which is what an
+// operation routes to.
+
+// registerCapableV1 registers a device declaring it can do everything, so a
+// refusal in a test is the agent's policy rather than the device's limits.
+func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
+	t.Helper()
+	return registerDevice(t, url, "Capable Device", map[string]any{
+		"canRead":       true,
+		"canWrite":      true,
+		"canTransceive": true,
+		"canLock":       true,
+		"nfcType":       "nfca",
+	})
+}
+
+// registerV1 registers a device that declares no capabilities, which is what
+// the agent has to assume the least about.
+func registerV1(t *testing.T, url string) (*websocket.Conn, string) {
+	t.Helper()
+	return registerDevice(t, url, "Test Device", nil)
+}
+
+func registerDevice(t *testing.T, url, name string, capabilities map[string]any) (*websocket.Conn, string) {
+	t.Helper()
+
+	conn, _, err := (&websocket.Dialer{
+		HandshakeTimeout: 3 * time.Second,
+		Subprotocols:     []string{remotenfc.SubprotocolDeviceV1},
+	}).Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial device: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	hello := map[string]any{
+		"protocolVersion": remotenfc.DeviceProtocolV1,
+		"deviceName":      name,
+		"platform":        "android",
+	}
+	if capabilities != nil {
+		hello["capabilities"] = capabilities
+	}
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: remotenfc.WSTypeHello, Payload: hello}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	_, payload := readResponse(t, conn)
+	deviceID, _ := payload["deviceID"].(string)
+	if deviceID == "" {
+		t.Fatal("registration returned no deviceID")
+	}
+	return conn, deviceID
+}
+
+// readResponse reads one response from a device connection.
+func readResponse(t *testing.T, conn *websocket.Conn) (protocol.WebSocketResponse, map[string]any) {
+	t.Helper()
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var out protocol.WebSocketResponse
+	if err := conn.ReadJSON(&out); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+
+	payload, ok := out.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected payload shape: %#v", out.Payload)
+	}
+	return out, payload
 }

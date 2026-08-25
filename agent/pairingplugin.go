@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/url"
 
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -37,16 +38,17 @@ type PairingPlugin struct {
 var _ Plugin = (*PairingPlugin)(nil)
 
 // NewPairingPlugin builds the pairing server for a, listening on port and
-// handing out the authority trust holds, and the plugin that runs it. See
+// handing out ca to a device that pairs, and the plugin that runs it. Pass
+// Runtime.Certificates, or nil for a build with no authority to give. See
 // [PairingFor].
 //
 // A zero port is a build that pairs no devices: it returns nil, and every
 // method tolerates one.
-func NewPairingPlugin(a *Agent, port int, trust *TrustPlugin) *PairingPlugin {
+func NewPairingPlugin(a *Agent, port int, ca tlspkg.CertificateAuthority) *PairingPlugin {
 	if port <= 0 {
 		return nil
 	}
-	return &PairingPlugin{Server: PairingFor(a, port, trust.Authority())}
+	return &PairingPlugin{Server: PairingFor(a, port, ca)}
 }
 
 // Name identifies the plugin.

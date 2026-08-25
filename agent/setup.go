@@ -98,14 +98,22 @@ type Runtime struct {
 	// Logs is the ring passed in through Options, for the console to display.
 	Logs *logbuf.Ring
 
-	// DevicePath is the reader to open at startup, once the caller's choice
-	// and the stored preference have been reconciled.
+	// DevicePath is the reader to open at startup, as Options named it. Empty
+	// selects the first reader, and waits if none is attached yet.
 	DevicePath string
 
 	// Certificates is the certificate the agent manages for itself, nil for a
-	// build serving one provisioned elsewhere. Wrap it in a [TrustPlugin] and
-	// hand that to whatever serves it, pairs against it and reports on it.
+	// build serving one provisioned elsewhere. Wrap it in a [TrustPlugin] for
+	// the tray entry that installs the authority behind it, and hand it to
+	// [NewPairingPlugin] as the authority a pairing device is given.
 	Certificates *tls.Manager
+
+	// CertFile and KeyFile are the certificate a listener should serve: the one
+	// named by Options, or the one Certificates manages, or empty for a build
+	// serving plain HTTP. Resolved here so every build does not repeat the
+	// fallback; put them on [ServerPlugin.Config].
+	CertFile string
+	KeyFile  string
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -129,7 +137,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// The certificate this agent manages for itself, unless one was
 	// provisioned outside it. Setup builds it because it is config-directory
 	// state; what serves it, hands out its authority and offers to install it
-	// is the program's business, through [TrustPlugin].
+	// is the program's business.
 	var tlsMgr *tls.Manager
 	var agentPublicKeyPin string
 	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
@@ -216,6 +224,14 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	//
 	// Not the listener: that is a plugin the caller registers, which is what
 	// lets a build decide what it serves. See [ServerPlugin].
+	// The pair a listener serves: the one Options named, or the one the manager
+	// keeps. As a pair, since half a certificate is not something to complete
+	// from somewhere else.
+	certFile, keyFile := opts.CertFile, opts.KeyFile
+	if certFile == "" && keyFile == "" && tlsMgr != nil {
+		certFile, keyFile = tlsMgr.GetCertFile(), tlsMgr.GetKeyFile()
+	}
+
 	a := New(Config{
 		RemoteOps:           opts.RemoteOps,
 		RemoteScans:         opts.RemoteScans,
@@ -241,6 +257,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Logs:         opts.Logs,
 		DevicePath:   opts.DevicePath,
 		Certificates: tlsMgr,
+		CertFile:     certFile,
+		KeyFile:      keyFile,
 	}, nil
 }
 

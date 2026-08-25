@@ -96,13 +96,13 @@ type ServerPlugin struct {
 	// uses "Server URLs".
 	MenuTitle string
 
-	// Trust supplies the certificate the listener serves and reports when it
-	// is reissued, so that the listener binds again on its own. Blank serves
-	// no TLS unless Config names a certificate itself.
-	Trust *TrustPlugin
-
-	// Certificates overrides where the reissue signal comes from. Blank takes
-	// Trust's.
+	// Certificates is the reissue signal: when it reports one, the listener
+	// binds again so the new certificate is served. Nil for a build whose
+	// certificate never changes under it, including one serving a certificate
+	// provisioned elsewhere.
+	//
+	// The certificate itself comes from Config.CertFile and Config.KeyFile,
+	// which Setup resolves onto Runtime.
 	Certificates tlspkg.CertificateWatcher
 
 	// The entries whose labels follow what is being served.
@@ -392,8 +392,11 @@ func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint) error {
 // certificate is this plugin's configuration: an agent that serves no HTTP has
 // nothing to keep current.
 func (p *ServerPlugin) watchCertificates(ctx AgentContext) error {
-	if p.Certificates == nil {
-		p.Certificates = p.Trust.Watcher()
+	// A nil *tls.Manager assigned to this interface is not a nil interface, and
+	// its methods dereference the receiver. Normalised here as
+	// tls.NewBootstrapServer does for the authority.
+	if m, ok := p.Certificates.(*tlspkg.Manager); ok && m == nil {
+		p.Certificates = nil
 	}
 	if p.Certificates == nil {
 		return nil
@@ -450,11 +453,6 @@ func (p *ServerPlugin) config(a *Agent) listener.Config {
 	cfg := p.Config
 	if cfg.Port == 0 {
 		cfg.Port = a.DevicePort()
-	}
-	// As a pair: half a certificate is not something to complete from
-	// somewhere else.
-	if cfg.CertFile == "" && cfg.KeyFile == "" {
-		cfg.CertFile, cfg.KeyFile = p.Trust.CertFile(), p.Trust.KeyFile()
 	}
 	if cfg.MDNSServiceName == "" {
 		cfg.MDNSServiceName = a.Info().DisplayName + " Device"

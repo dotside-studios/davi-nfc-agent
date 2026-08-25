@@ -33,6 +33,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
 func main() {
@@ -70,18 +71,22 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// The certificate, and the tray entry that makes browsers accept it. The
-	// agent holds no certificate, so everything needing one is given this.
+	// The tray entry that installs the local authority, so browsers on this
+	// machine accept the agent.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
 
-	// The listener and everything on it. Setup builds no listener; the
-	// program decides what this agent serves.
-	servers := &agent.ServerPlugin{Trust: trust}
+	// The listener and everything on it. Setup builds no listener; the program
+	// decides what this agent serves. Setup resolved which certificate to
+	// serve; Certificates is what rebinds the listener when it is reissued.
+	servers := &agent.ServerPlugin{
+		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates: rt.Certificates,
+	}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
 	// address and PIN. The agent holds no pairing server, so it is built here
-	// and passed to the console.
-	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, trust)
+	// and passed to the console. It hands the authority to a device that pairs.
+	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
 
 	// The control center, served from the same listener and listed with the
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
@@ -119,14 +124,18 @@ registers, not part of `Setup`. An agent with none of them drives the reader and
 serves no HTTP, which is a valid build. Binding happens at start, so routes can
 be declared before the port exists. See [Plugins](#plugins).
 
-The certificate is `agent.TrustPlugin`, wrapping the `*tls.Manager` that
-`Setup` returns as `rt.Certificates`. It holds the files a listener serves, the
-authority a pairing device is given, and the tray entry that installs that
-authority so browsers on this machine accept the agent. Whatever needs a
-certificate takes this plugin: `ServerPlugin.Trust`, `NewPairingPlugin` and
-`console.Config.Trust` all read it, so the certificate is configured once. A
-Leave `Manager` nil for a build serving a certificate managed elsewhere: every
-method then reports nothing to serve, no authority and no install entry.
+The certificate is the `*tls.Manager` that `Setup` returns as
+`rt.Certificates`, alongside `rt.CertFile` and `rt.KeyFile`, the pair a listener
+should serve. Each plugin takes the narrow part it needs: `ServerPlugin.Config`
+the files and `ServerPlugin.Certificates` the reissue signal, `NewPairingPlugin`
+the authority a pairing device is given. A build serving a certificate
+provisioned elsewhere passes that pair and leaves `Certificates` nil, there
+being nothing to reissue.
+
+`agent.TrustPlugin` wraps the same manager for the one job the others do not do:
+the tray entry that installs the local authority, hidden once there is nothing
+left to install. `console.Config.Trust` takes it so the same install can be
+started from a page. Leave `Manager` nil and the plugin is inert.
 
 Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
 menu entries that hand out its address and PIN.
@@ -267,9 +276,9 @@ hand out of the submenu. A plugin with an `Activate` of its own can mount a
 route with `ctx.Mount` instead.
 
 Registered with no `Config`, it serves on the port and name the agent was set up
-with, and on the certificate `Trust` holds. Set `Config` for a listener that
-differs from them, which is where a certificate provisioned outside the agent
-goes, or `Server` to hand over one built elsewhere:
+with, and no certificate. Set `Config` for the certificate to serve and for a
+listener that differs from the agent's port, or `Server` to hand over one built
+elsewhere:
 
 ```go
 &agent.ServerPlugin{Config: listener.Config{Port: 9480, CertFile: cert, KeyFile: key}}
@@ -286,12 +295,13 @@ backs `ctx.Mount` for the plugins registered after it. It takes an
 `agent.Mounter`, one method wide, so the agent never names a server type.
 
 The listener is bound by a component the plugin registers, so it comes up once
-the agent is serving and goes down before it. It watches `Trust` for a reissued
-certificate and calls `Rebind`, which stops and starts the listener so the new
-certificate is served. Nothing else has to act: installing a certificate
+the agent is serving and goes down before it. It watches `Certificates` for a
+reissued certificate and calls `Rebind`, which stops and starts the listener so
+the new one is served. Nothing else has to act: installing a certificate
 authority or reissuing a certificate reports itself, and the listener follows.
-Set `Certificates` to watch something other than `Trust`, and `Rebind` is there
-for a program that has some other reason to bind again.
+Leave `Certificates` nil for a certificate that never changes underneath the
+listener; `Rebind` is there for a program with some other reason to bind
+again.
 
 ### The control center
 
@@ -338,8 +348,9 @@ and everything reports pairing as disabled.
 
 ### The trust plugin
 
-`agent.TrustPlugin` holds the certificate the others are configured from, and
-adds the entry that installs the local authority behind it.
+`agent.TrustPlugin` adds the entry that installs the local certificate
+authority. It is the only part of the certificate the other plugins do not take
+directly.
 
 ```go
 trust := &agent.TrustPlugin{Manager: rt.Certificates}
@@ -428,6 +439,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
 func main() {
@@ -443,10 +455,13 @@ func main() {
 	}
 
 	// The listener, with nothing on it but the agent's own routes. Leave it
-	// out for a service that reads cards and serves no HTTP. Trust holds the
-	// certificate Setup generated; without it the listener serves plain HTTP.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust); err != nil {
+	// out for a service that reads cards and serves no HTTP. Setup resolved
+	// the certificate; blank leaves the listener serving plain HTTP.
+	servers := &agent.ServerPlugin{
+		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates: rt.Certificates,
+	}
+	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		log.Fatal(err)
 	}
 
@@ -484,8 +499,10 @@ rt, err := agent.Setup(agent.DefaultOptions(), manager)
 if err != nil {
 	log.Fatal(err)
 }
-trust := &agent.TrustPlugin{Manager: rt.Certificates}
-rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust)
+rt.Agent.Plugins.Add(&agent.ServerPlugin{
+	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+	Certificates: rt.Certificates,
+})
 ```
 
 ```bash

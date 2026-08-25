@@ -125,3 +125,44 @@ func TestDefaultConfigDirUsesTheGivenName(t *testing.T) {
 		t.Errorf("DefaultConfigDir(%q) = %q", "turnstile", mine)
 	}
 }
+
+// Which certificate a listener should serve: the one Options named, else the
+// one Setup manages, else none. This is where -cert and -key land, so a
+// certificate named on the command line has to win over the managed one.
+func TestSetupResolvesTheCertificateToServe(t *testing.T) {
+	managedOpts := testOptions(t)
+	managedOpts.AutoTLS = true
+
+	managed, err := Setup(managedOpts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if managed.Certificates == nil {
+		t.Fatal("Setup managed no certificate, so there is nothing to fall back to")
+	}
+	if managed.CertFile != managed.Certificates.GetCertFile() {
+		t.Errorf("CertFile = %q, want the managed one (%q)", managed.CertFile, managed.Certificates.GetCertFile())
+	}
+
+	namedOpts := testOptions(t)
+	namedOpts.CertFile, namedOpts.KeyFile = "/tmp/named.pem", "/tmp/named.key"
+
+	named, err := Setup(namedOpts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if named.CertFile != "/tmp/named.pem" || named.KeyFile != "/tmp/named.key" {
+		t.Errorf("CertFile/KeyFile = %q/%q, want the pair Options named", named.CertFile, named.KeyFile)
+	}
+
+	noneOpts := testOptions(t)
+	noneOpts.AutoTLS = false
+
+	none, err := Setup(noneOpts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if none.CertFile != "" || none.KeyFile != "" {
+		t.Errorf("CertFile/KeyFile = %q/%q, want empty", none.CertFile, none.KeyFile)
+	}
+}

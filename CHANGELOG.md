@@ -53,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
   `listener.Config`
 - `wsconn` moved to `server/wsconn`
+- `ServerPlugin` and `PairingPlugin` no longer take a `*TrustPlugin`. Each takes
+  what it needs: `ServerPlugin.Config` the certificate files, with `Setup`
+  resolving them onto `Runtime.CertFile`/`KeyFile`, `ServerPlugin.Certificates`
+  the reissue signal, and `NewPairingPlugin` a `tls.CertificateAuthority`.
+  `TrustPlugin` keeps the tray entry that installs the local authority and loses
+  `CertFile`, `KeyFile`, `Authority` and `Watcher`
 - The `webui` package merged into `agent/console`, which now holds the gate, the
   routes, the state snapshot, the dispatcher, the `Host` adapter and the
   embedded frontend. `webui.Host` and `webui.Preferences` are `console.Host` and

@@ -18,6 +18,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
 
@@ -102,13 +103,13 @@ func start(t *testing.T, opts options) *harness {
 	// serves and the authority pairing hands out are the trust plugin's, not
 	// the agent's.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Trust: trust}, trust); err != nil {
+	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Config: listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile}, Certificates: rt.Certificates}, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
 	var pairing *agent.PairingPlugin
 	if opts.Pairing {
-		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), trust)
+		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), rt.Certificates)
 		if err := rt.Agent.Plugins.Add(pairing); err != nil {
 			t.Fatalf("Plugins.Add: %v", err)
 		}

@@ -75,18 +75,18 @@ func main() {
 	}
 
 	// The certificate this agent serves, and the entry that makes browsers
-	// accept it. Whatever needs a certificate is given this rather than
-	// reaching for one: the agent holds none.
+	// accept it. It adds the tray entry; what the certificate is for goes to
+	// each plugin as the narrow type that plugin needs.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
 
 	// The listener and everything on it. Setup does not build one: what this
 	// agent serves is this program's decision, and registering no server
 	// plugin at all leaves an agent that drives the reader and serves nothing.
-	// A certificate named on the command line is served ahead of the managed
-	// one, which -cert and -key turn off.
+	// Setup already resolved which certificate to serve, the one named on the
+	// command line or the one it manages.
 	servers := &agent.ServerPlugin{
-		Trust:  trust,
-		Config: listener.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
+		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates: rt.Certificates,
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that
@@ -94,7 +94,7 @@ func main() {
 	// where it is built and where it is handed to the console.
 	var pairing *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
-		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, trust)
+		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
 	}
 
 	// The control center, served from the same listener. Nil in a -tags nowebui

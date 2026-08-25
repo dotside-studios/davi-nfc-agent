@@ -26,8 +26,8 @@ type Config struct {
 
 	// Servers is what the agent is served from, for the port and address the
 	// console hands out. Pairing is what issues pairing PINs, and Trust what
-	// holds the certificate. The agent holds none of them, so whoever built
-	// them passes them here.
+	// installs the local authority and reports on it. The agent holds none of
+	// them, so whoever built them passes them here.
 	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 	Trust   *agent.TrustPlugin

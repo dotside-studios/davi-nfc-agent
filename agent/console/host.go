@@ -187,7 +187,7 @@ func (h *host) RegenerateCertificate() error {
 // managesCertificates reports whether there is a certificate this agent can act
 // on. Without one the trust plugin does nothing, and saying so is better than
 // reporting success for work that never happened.
-func (h *host) managesCertificates() bool { return h.trust.Authority() != nil }
+func (h *host) managesCertificates() bool { return h.trust.Manages() }
 
 func (h *host) PairedDevices() []PairedDevice {
 	if h.agent.Devices() == nil {

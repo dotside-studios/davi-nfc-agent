@@ -73,11 +73,8 @@ func TestTrustPluginWithoutAManagerIsInert(t *testing.T) {
 	if entry := fake.Find("Trust This Agent in Browsers"); entry != nil {
 		t.Errorf("the trust entry is offered by a build managing no certificate:\n%s", fake.Render())
 	}
-	if trust.CertFile() != "" || trust.KeyFile() != "" {
-		t.Errorf("CertFile/KeyFile = %q/%q, want empty", trust.CertFile(), trust.KeyFile())
-	}
-	if trust.Authority() != nil || trust.Watcher() != nil {
-		t.Error("a plugin with no manager handed out an authority or a watcher")
+	if trust.Manages() {
+		t.Error("Manages reported true with no manager")
 	}
 	if trust.Installed() {
 		t.Error("Installed reported true with no manager")

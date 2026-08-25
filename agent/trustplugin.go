@@ -7,16 +7,16 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// TrustPlugin owns the agent's certificate: the files a listener serves, the
-// local authority behind them, and the tray entry that installs that authority
-// so browsers on this machine accept the agent.
+// TrustPlugin adds the tray entry that installs the local certificate
+// authority, so browsers on this machine accept the agent, and hides it once
+// there is nothing left to install, however the install was started.
 //
-// The agent does not hold this. Its certificate is not something the agent
-// reads: a listener serves it, the pairing server hands the authority out, and
-// the console reports on it. Whoever builds one passes it to each of them.
+// It is the only part of the certificate that is a plugin. A listener takes the
+// certificate files and the reissue signal, and the pairing server the
+// authority, each as the narrow type it needs.
 //
 //	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-//	rt.Agent.Plugins.Add(trust, &agent.ServerPlugin{Trust: trust})
+//	rt.Agent.Plugins.Add(trust)
 //
 // Every method tolerates a nil plugin and a nil Manager, which is what a build
 // serving a certificate it does not manage holds.
@@ -60,40 +60,10 @@ func (p *TrustPlugin) Activate(ctx AgentContext) error {
 	return nil
 }
 
-// CertFile and KeyFile are the certificate a listener serves, empty when this
-// build manages none.
-func (p *TrustPlugin) CertFile() string {
-	if p == nil || p.Manager == nil {
-		return ""
-	}
-	return p.Manager.GetCertFile()
-}
-
-func (p *TrustPlugin) KeyFile() string {
-	if p == nil || p.Manager == nil {
-		return ""
-	}
-	return p.Manager.GetKeyFile()
-}
-
-// Authority hands the certificate authority out to a device pairing with this
-// agent. Nil when there is none, which is normal: an agent serving an
-// externally provisioned certificate has no authority to give.
-func (p *TrustPlugin) Authority() tlspkg.CertificateAuthority {
-	if p == nil || p.Manager == nil {
-		return nil
-	}
-	return p.Manager
-}
-
-// Watcher reports every reissue, for the listener that serves the certificate.
-// Nil when this build manages none, so there is nothing to reissue.
-func (p *TrustPlugin) Watcher() tlspkg.CertificateWatcher {
-	if p == nil || p.Manager == nil {
-		return nil
-	}
-	return p.Manager
-}
+// Manages reports whether this build manages its own certificate. False for one
+// serving a certificate provisioned elsewhere, which has no authority to hand
+// out and nothing to install.
+func (p *TrustPlugin) Manages() bool { return p != nil && p.Manager != nil }
 
 // Installed reports whether the local authority is in this machine's trust
 // store.

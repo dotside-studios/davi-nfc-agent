@@ -554,9 +554,9 @@ func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
 	}
 }
 
-// Which certificate the listener serves: the one named in Config, else the one
-// Trust manages, else none. This is where -cert and -key land, so a certificate
-// named on the command line has to win over the managed one.
+// The listener serves the certificate Config names, and plain HTTP when it
+// names none. Which certificate that should be is Setup's decision; see
+// TestSetupResolvesTheCertificateToServe.
 func TestTheListenerServesTheCertificateItWasGiven(t *testing.T) {
 	opts := testOptions(t)
 	opts.AutoTLS = true
@@ -565,29 +565,44 @@ func TestTheListenerServesTheCertificateItWasGiven(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	trust := &TrustPlugin{Manager: rt.Certificates}
-	managed := trust.CertFile()
-	if managed == "" {
-		t.Fatal("Setup managed no certificate, so there is nothing to fall back to")
-	}
 
 	named := &ServerPlugin{
-		Trust:  trust,
 		Config: listener.Config{CertFile: "/tmp/named.pem", KeyFile: "/tmp/named.key"},
 	}
 	if got := named.config(rt.Agent).CertFile; got != "/tmp/named.pem" {
 		t.Errorf("CertFile = %q, want the one Config named", got)
 	}
 
-	inherited := &ServerPlugin{Trust: trust}
-	if got := inherited.config(rt.Agent).CertFile; got != managed {
-		t.Errorf("CertFile = %q, want the one Trust manages (%q)", got, managed)
-	}
-
-	// A build that manages no certificate and was given none serves plain HTTP
-	// rather than half a configuration.
+	// A build given no certificate serves plain HTTP rather than half a
+	// configuration.
 	none := &ServerPlugin{}
 	if cfg := none.config(rt.Agent); cfg.CertFile != "" || cfg.KeyFile != "" {
 		t.Errorf("CertFile/KeyFile = %q/%q, want empty", cfg.CertFile, cfg.KeyFile)
 	}
+}
+
+// A build that manages no certificate hands Certificates a nil *tls.Manager,
+// which is not a nil interface. Without normalising it the watch starts and
+// dereferences the nil receiver, so this covers the one path where a typed nil
+// reaches an interface field from ordinary wiring.
+func TestAnUnmanagedCertificateDoesNotStartAWatch(t *testing.T) {
+	opts := testOptions(t)
+	opts.AutoTLS = false
+	opts.DevicePort = freePort(t)
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if rt.Certificates != nil {
+		t.Fatal("this build managed a certificate, so there is no typed nil to normalise")
+	}
+
+	if err := rt.Agent.Plugins.Add(&ServerPlugin{Certificates: rt.Certificates}); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	if err := rt.Agent.Start(rt.DevicePath); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(rt.Agent.Shutdown)
 }

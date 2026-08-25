@@ -3,7 +3,6 @@ package agent
 import (
 	"net/http"
 
-	"github.com/dotside-studios/davi-nfc-agent/server"
 	"log"
 	"net/url"
 	"os"
@@ -59,12 +58,10 @@ type Options struct {
 	InstallCA           bool
 	RequirePairedDevice bool
 
-	// RemoteOps and RemoteScans connect a driver of paired devices, and
-	// DeviceEndpoint serves their connections. All three come from a driver the
-	// caller built; leaving them nil is an agent that serves its own reader
-	// only. See agent.Config.
-	RemoteOps      server.DeviceOps
-	RemoteScans    <-chan nfc.NFCData
+	// DeviceEndpoint serves the connections of a driver the caller built.
+	// Leaving it nil is an agent that serves its own reader only. What those
+	// devices scan and what they are holding come from the manager, which is
+	// where the driver is registered. See agent.Config.
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
@@ -241,8 +238,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}
 
 	a := New(Config{
-		RemoteOps:           opts.RemoteOps,
-		RemoteScans:         opts.RemoteScans,
 		DeviceEndpoint:      opts.DeviceEndpoint,
 		Manager:             manager,
 		Info:                info,

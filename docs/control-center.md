@@ -211,7 +211,7 @@ the frontend it embeds:
 ```
 agent/console/
   doc.go              the package doc
-  console.go          the wiring entry point: New, Endpoints, AttachTray
+  console.go          the wiring entry point: New, Endpoints
   host_contract.go    the Host interface, the console's only view of the agent
   host.go             the Host implementation over a live agent
   auth.go             the three-check gate

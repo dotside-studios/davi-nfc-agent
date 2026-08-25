@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -21,6 +22,10 @@ type MultiManager struct {
 	deviceChangeChan chan struct{}          // Aggregated device change channel
 	stopForward      chan struct{}          // Stop channel forwarding
 	closeOnce        sync.Once              // Close is idempotent
+
+	// scans is every child's scans as one signal, so whatever consumes them
+	// subscribes here rather than to each manager it happens to know about.
+	scans event.Signal[nfc.NFCData]
 
 	// listErrMu guards lastListErr, which holds the last ListDevices error
 	// reported per manager so a persistent one is logged once rather than on
@@ -73,6 +78,10 @@ func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 		if notifier, ok := entry.Manager.(nfc.DeviceChangeNotifier); ok {
 			go mm.forwardDeviceChanges(notifier.DeviceChanges())
 		}
+
+		// A child that reports scans reports them through here. No goroutine:
+		// the child publishes on its own, and this passes it on.
+		nfc.OnScan(entry.Manager, mm.scans.Emit)
 	}
 
 	return mm
@@ -222,6 +231,82 @@ func (mm *MultiManager) Close() {
 		}
 	})
 }
+
+// TagOn reports the tag a device is holding, asking the child managers whose
+// devices hold their own. An empty deviceID asks each in turn for its most
+// recent scan, so a build with one such manager answers exactly as it would.
+func (mm *MultiManager) TagOn(deviceID string) (string, nfc.Tag, bool) {
+	for _, holder := range mm.holders() {
+		if holding, tag, ok := holder.TagOn(deviceID); ok {
+			return holding, tag, true
+		}
+	}
+	return "", nil, false
+}
+
+// DevicesHoldingTags lists every device holding a tag, across the managers that
+// have any.
+func (mm *MultiManager) DevicesHoldingTags() []string {
+	var out []string
+	for _, holder := range mm.holders() {
+		out = append(out, holder.DevicesHoldingTags()...)
+	}
+	return out
+}
+
+// WriteTag asks the manager whose device is holding the tag to encode onto it.
+func (mm *MultiManager) WriteTag(deviceID, tagUID string, ndef []byte, lock bool, idempotencyKey string) error {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return err
+	}
+	return holder.WriteTag(deviceID, tagUID, ndef, lock, idempotencyKey)
+}
+
+// TransceiveTag asks the manager whose device is holding the tag to exchange
+// raw bytes with it.
+func (mm *MultiManager) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.TransceiveTag(deviceID, tagUID, data, raw)
+}
+
+// holders lists the child managers whose devices hold tags, in registration
+// order.
+func (mm *MultiManager) holders() []nfc.TagHolder {
+	var out []nfc.TagHolder
+	for _, name := range mm.managerOrder {
+		if holder := nfc.TagsHeldBy(mm.managers[name]); holder != nil {
+			out = append(out, holder)
+		}
+	}
+	return out
+}
+
+// holderFor picks the manager an operation goes to. A single one takes every
+// operation, so its own refusal is what the caller sees; with more than one the
+// device holding the tag decides.
+func (mm *MultiManager) holderFor(deviceID string) (nfc.TagHolder, error) {
+	holders := mm.holders()
+	switch len(holders) {
+	case 0:
+		return nil, fmt.Errorf("no manager holds tags for device %s", deviceID)
+	case 1:
+		return holders[0], nil
+	}
+
+	for _, holder := range holders {
+		if _, _, ok := holder.TagOn(deviceID); ok {
+			return holder, nil
+		}
+	}
+	return nil, fmt.Errorf("no device %s is holding a tag", deviceID)
+}
+
+// Scans carries what every child manager's devices report.
+func (mm *MultiManager) Scans() *event.Signal[nfc.NFCData] { return &mm.scans }
 
 // DeviceChanges returns a channel that signals when devices are registered or unregistered
 // in any of the child managers.

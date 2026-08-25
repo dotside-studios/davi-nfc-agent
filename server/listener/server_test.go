@@ -1,8 +1,6 @@
 package listener_test
 
 import (
-	"context"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,14 +38,12 @@ func newTestServer(t *testing.T) string {
 
 	// The driver feeds the client server directly, which is what the agent
 	// wires up.
-	ctx, cancel := context.WithCancel(context.Background())
-	go pumpTo(ctx, deviceMgr.Data(), client)
+	deviceMgr.Scans().Connect(client.Broadcast)
 
 	ts := httptest.NewServer(u.Handler())
 
 	t.Cleanup(func() {
 		ts.Close()
-		cancel()
 		deviceMgr.Close()
 	})
 
@@ -104,20 +100,5 @@ func TestWSDispatch(t *testing.T) {
 	// yields the device handler's INVALID_MESSAGE_TYPE.
 	if code := dialAndProbe(t, base+"/ws?mode=device"); code != "INVALID_MESSAGE_TYPE" {
 		t.Errorf("device /ws?mode=device routed to wrong handler: got code %q, want INVALID_MESSAGE_TYPE", code)
-	}
-}
-
-// pumpTo forwards a driver's scans to the client server.
-func pumpTo(ctx context.Context, src <-chan nfc.NFCData, sink *clientserver.Server) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-src:
-			if !ok {
-				return
-			}
-			sink.Broadcast(data)
-		}
 	}
 }

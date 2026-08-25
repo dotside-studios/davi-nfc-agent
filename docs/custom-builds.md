@@ -45,11 +45,10 @@ func main() {
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
-	// The driver serving phones. The agent takes it as an interface, a channel
-	// of scans and a handler builder, so it names no device protocol itself.
+	// The driver serving phones. What it scans and what its devices hold reach
+	// the agent through the manager below; only its handler is handed over, so
+	// the agent names no device protocol itself.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.RemoteOps = devices
-	opts.RemoteScans = devices.Data()
 	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
 		return devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         o.Authenticate,
@@ -88,6 +87,8 @@ func main() {
 	// and passed to the console. It hands the authority to a device that pairs.
 	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
 
+	app := tray.New(rt)
+
 	// The control center, served from the same listener and listed with the
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
 	// so this program needs no build tag of its own.
@@ -97,6 +98,7 @@ func main() {
 		Servers: servers,
 		Pairing: pairing,
 		Trust:   trust,
+		Quit:    app.Quit,
 	})
 	servers.Add(c.Endpoints()...)
 
@@ -107,8 +109,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	app := tray.New(rt)
-	app.AttachConsole(c)
 	app.Run()
 }
 ```
@@ -147,9 +147,12 @@ the component directly with `agent.PairingFor(a, port, ca)` and `ctx.Use` or an
 `agent.Endpoint`.
 
 The NFC backend is `Setup`'s second argument, which is why every package beneath
-`cmd` builds without one. Serving phones takes three more values from a driver
-the caller built: `RemoteOps` to route operations, `RemoteScans` to receive what
-they scan, and `DeviceEndpoint` to build their handler. Supply none and the
+`cmd` builds without one. A manager reports what its devices scan through
+`nfc.TagReporter` and answers for the tags they hold through `nfc.TagHolder`,
+both optional, so the agent subscribes to the manager it was given rather than
+being handed the driver. `multimanager` implements both by fanning its children
+in. The one value left is `DeviceEndpoint`, which builds the handler serving
+those devices, since a route is not the manager's business. Supply none and the
 agent serves its own reader.
 
 Flags and the standard logger belong to the program. Registering flags writes to
@@ -240,69 +243,60 @@ if err := rt.Agent.Activate(nil); err != nil {
 A plugin that returns an error fails the agent's start, naming the plugin, and
 the same failure is reported by every start afterwards.
 
-### The server plugin
+### The shipped plugins
 
-`agent.ServerPlugin` owns the `*listener.Server` and mounts everything on
-it: the agent's own routes first, then what is listed here. An endpoint is a
-route, something with a lifetime, a menu entry, or any combination:
+Three plugins ship with the agent. A build registers what it wants; registering
+none leaves an agent that drives the reader and serves nothing.
 
-```go
-servers := &agent.ServerPlugin{Endpoints: []agent.Endpoint{
-	{Name: "metrics", Pattern: "/metrics", Handler: metrics},
-	{Name: "queue drain", Component: drain},
-}}
-servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
-
-rt.Agent.Plugins.Add(servers)
-```
-
-The plugin also owns the tray's **Server URLs** submenu, since it holds the
-port: the device and client addresses, the API secret a client presents to them,
-and a line per endpoint that asks for one.
+| Plugin | Owns |
+|---|---|
+| `agent.ServerPlugin` | The listener, everything mounted on it, and the tray's **Server URLs** submenu |
+| `agent.PairingPlugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
+| `agent.TrustPlugin` | The entry that installs the local certificate authority |
 
 ```go
-{
-	Name:    "control center",
-	Pattern: "/",
-	Handler: assets,
-	Menu: func(menu traymenu.Container, url string) {
-		menu.Add("Control Center: "+url, traymenu.Disabled())
-		menu.Add("  Copy Control Center URL", traymenu.OnClick(func() { copy(url) }))
-	},
+trust := &agent.TrustPlugin{Manager: rt.Certificates}
+servers := &agent.ServerPlugin{
+	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+	Certificates: rt.Certificates,
 }
+pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
+
+rt.Agent.Plugins.Add(servers, pairing, trust)
 ```
 
-An endpoint is listed only if it sets `Menu`, which keeps routes nobody opens by
-hand out of the submenu. A plugin with an `Activate` of its own can mount a
-route with `ctx.Mount` instead.
+The server plugin goes on first. It publishes the listener with `ctx.Serve`,
+which is what backs `ctx.Mount` for every plugin registered after it, and an
+`agent.Mounter` is one method wide so the agent never names a server type.
 
-Registered with no `Config`, it serves on the port and name the agent was set up
-with, and no certificate. Set `Config` for the certificate to serve and for a
-listener that differs from the agent's port, or `Server` to hand over one built
-elsewhere:
+What goes on that listener is an `agent.Endpoint`: a route, something with a
+lifetime, a menu entry, or any combination.
 
 ```go
-&agent.ServerPlugin{Config: listener.Config{Port: 9480, CertFile: cert, KeyFile: key}}
+servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
+servers.Add(agent.Endpoint{Name: "queue drain", Component: drain})
 ```
 
-`agent.Routes` is what the agent serves of its own: `/ws`, where devices and
-clients both connect, and `/health` with `/api/v1/health` beside it. The agent
-holds no listener: whatever serves it mounts these first, ahead of anything
-else. An endpoint on one of their paths fails the
-start, as two endpoints on one path do, instead of leaving the mux to decide.
-
-`ctx.Serve` publishes the plugin as what the agent is served from, which is what
-backs `ctx.Mount` for the plugins registered after it. It takes an
-`agent.Mounter`, one method wide, so the agent never names a server type.
+`agent.Routes` is mounted first and reserves what the agent serves of its own:
+`/ws`, where devices and clients both connect, and `/health` with
+`/api/v1/health` beside it. An endpoint on one of those paths fails the start,
+as two endpoints on one path do, rather than leaving the mux to decide.
 
 The listener is bound by a component the plugin registers, so it comes up once
-the agent is serving and goes down before it. It watches `Certificates` for a
-reissued certificate and calls `Rebind`, which stops and starts the listener so
-the new one is served. Nothing else has to act: installing a certificate
-authority or reissuing a certificate reports itself, and the listener follows.
-Leave `Certificates` nil for a certificate that never changes underneath the
-listener; `Rebind` is there for a program with some other reason to bind
-again.
+the agent is serving and goes down before it. Give it `Certificates` and a
+reissued certificate rebinds it on its own; leave it nil for one that never
+changes underneath.
+
+`PairingPlugin` and `TrustPlugin` tolerate being nil, so a build that registers
+neither hands `nil` to the console and it reports both as unavailable. The
+per-field details are on the types themselves: `go doc agent.ServerPlugin`,
+`agent.Endpoint`, `agent.NewPairingPlugin`, `agent.TrustPlugin`.
+
+The pairing entries follow the server, so rotating the PIN from the menu or from
+the console relabels both. The trust entry is shown only while there is
+something to install and hides once there is not, and `Install` blocks on the
+operating system's password prompt: the menu calls it off the dispatch
+goroutine, and a program calling it directly should do the same.
 
 ### The control center
 
@@ -316,6 +310,7 @@ c := console.New(console.Config{
 	Servers: servers,
 	Pairing: pairing,
 	Trust:   trust,
+	Quit:    app.Quit,
 })
 servers.Add(c.Endpoints()...)
 ```
@@ -323,47 +318,14 @@ servers.Add(c.Endpoints()...)
 The three plugins are what the console reports on and acts through: the address
 it hands out is the listener's, the PIN it rotates is the pairing server's, and
 the authority it installs is the trust plugin's, so a tray entry stays in step
-with the same action taken from a page. `console.New` also subscribes to what
-redraws an open page: an origin allowed, a device revoked, a client connecting,
-a listener rebound. Under `-tags nowebui` there is no console compiled in and
-`Endpoints` is empty, so a program needs no build tag of its own.
+with the same action taken from a page. `console.New` also connects to
+`Events().Any`, so every change the agent reports redraws an open page. Under
+`-tags nowebui` there is no console compiled in and `Endpoints` is empty, so a
+program needs no build tag of its own.
 
-`tray.App.AttachConsole` is left to the program. The link runs both ways, so a
-device switched in the browser moves the tray's menu too.
-
-### The pairing plugin
-
-`agent.PairingPlugin` wraps the pairing server, registers it as a component, and
-owns the entries that show its address and PIN.
-
-```go
-pairing := agent.NewPairingPlugin(rt.Agent, 9472, trust)
-rt.Agent.Plugins.Add(pairing)
-```
-
-Its entries go under a `Pairing` submenu of their own, beside the tray's own
-top-level entries, and the labels follow the server: rotating the PIN from the
-menu or from the control center relabels both. `Port`, `PIN` and `RotatePIN`
-tolerate a nil plugin, so a build that registers none hands `nil` to the console
-and everything reports pairing as disabled.
-
-### The trust plugin
-
-`agent.TrustPlugin` adds the entry that installs the local certificate
-authority. It is the only part of the certificate the other plugins do not take
-directly.
-
-```go
-trust := &agent.TrustPlugin{Manager: rt.Certificates}
-rt.Agent.Plugins.Add(trust)
-```
-
-The entry is shown only while there is something to install and hides once there
-is not, whether the install came from the menu or from the control center.
-Installing reissues the certificate, which the listener follows on its own.
-`Install` blocks on the operating system's password prompt; the menu calls it
-off the dispatch goroutine, and a program calling it directly should do the
-same.
+`Quit` is what the console's quit control calls, since ending the program
+belongs to whoever owns it. Everything else the console does goes to the agent,
+and the tray redraws from the agent's events rather than being told.
 
 ## Naming your build
 

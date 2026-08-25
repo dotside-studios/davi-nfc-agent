@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/google/uuid"
@@ -22,10 +23,10 @@ type Manager struct {
 	devices           map[string]*Device // deviceID -> device
 	mu                sync.RWMutex       // Protects devices and the policy fields
 	cleanupTicker     *time.Ticker       // Periodic sweep for silent devices
-	stopCleanup       chan struct{}      // Stop cleanup goroutine
+	stopped           chan struct{}      // Closed by Close, ending the manager's goroutines
 	inactivityTimeout time.Duration      // Device timeout duration
 	closed            bool               // Whether Close() has been called
-	dataChan          chan nfc.NFCData   // Broadcasts tag data to the server
+	dataChan          chan nfc.NFCData   // Scans, drained onto scans
 	deviceChangeChan  chan struct{}      // Signals registration and unregistration
 
 	// Policy supplied by the agent through Handler.
@@ -46,6 +47,11 @@ type Manager struct {
 
 	// reqSeq labels each request to a device.
 	reqSeq atomic.Uint64
+
+	// scans is what subscribers connect to. The channel in front of it keeps a
+	// device's read loop off the subscribers: a scan is buffered and dropped
+	// here rather than at the socket.
+	scans event.Signal[nfc.NFCData]
 }
 
 // NewManager creates a new smartphone manager.
@@ -57,7 +63,7 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 	m := &Manager{
 		devices:           make(map[string]*Device),
 		inactivityTimeout: inactivityTimeout,
-		stopCleanup:       make(chan struct{}),
+		stopped:           make(chan struct{}),
 		dataChan:          make(chan nfc.NFCData, 10), // Buffered to prevent blocking
 		deviceChangeChan:  make(chan struct{}, 1),     // Buffered to prevent blocking
 		sessions:          make(map[string]*wsconn.SafeConn),
@@ -67,6 +73,7 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 
 	// Start cleanup routine
 	m.startCleanupRoutine()
+	go m.publishScans()
 
 	return m
 }
@@ -209,9 +216,21 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	return nil
 }
 
-// Data returns a channel that provides NFCData as tags are scanned.
-func (m *Manager) Data() <-chan nfc.NFCData {
-	return m.dataChan
+// Scans carries every tag the registered devices report.
+func (m *Manager) Scans() *event.Signal[nfc.NFCData] { return &m.scans }
+
+// publishScans hands what the devices reported to the subscribers. It runs on a
+// goroutine of its own so a slow subscriber holds up neither the socket a scan
+// arrived on nor the other devices.
+func (m *Manager) publishScans() {
+	for {
+		select {
+		case <-m.stopped:
+			return
+		case data := <-m.dataChan:
+			m.scans.Emit(data)
+		}
+	}
 }
 
 // SendTagRemoved broadcasts a tag removal event via the data channel.
@@ -266,7 +285,7 @@ func (m *Manager) Close() {
 	if m.cleanupTicker != nil {
 		m.cleanupTicker.Stop()
 	}
-	close(m.stopCleanup)
+	close(m.stopped)
 
 	// Drop the sessions first so their serve loops exit; each unregisters the
 	// device it owned on the way out.
@@ -302,7 +321,7 @@ func (m *Manager) startCleanupRoutine() {
 			select {
 			case <-m.cleanupTicker.C:
 				m.cleanupInactiveDevices()
-			case <-m.stopCleanup:
+			case <-m.stopped:
 				return
 			}
 		}

@@ -25,6 +25,7 @@ type Config struct {
 	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 	Trust   *agent.TrustPlugin
+	Quit    func()
 }
 
 // New reports that there is no console in this build.
@@ -43,5 +44,3 @@ func (s *Server) NotifyChange() {}
 func (s *Server) ConsoleURL() (string, error) {
 	return "", errors.New("console: built with -tags nowebui")
 }
-
-func (s *Server) AttachTray(Tray) {}

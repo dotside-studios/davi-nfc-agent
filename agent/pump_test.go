@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -120,30 +121,6 @@ func TestForwardScanPassesErrorsThrough(t *testing.T) {
 	}
 }
 
-// pumpDevices is what joins a driver to the client server.
-func TestPumpDevicesForwardsUntilCancelled(t *testing.T) {
-	sink := newSink()
-
-	src := make(chan nfc.NFCData, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	go pumpDevices(ctx, src, sink)
-
-	src <- nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04FFFFFF"))}
-	if got := awaitScan(t, sink); got.Card == nil || got.Card.UID != "04FFFFFF" {
-		t.Fatalf("got %+v, want the scan", got)
-	}
-
-	cancel()
-
-	// After cancellation nothing is drained, so the buffered send stays put.
-	src <- nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04EEEEEE"))}
-	select {
-	case data := <-sink.tags:
-		t.Errorf("the pump forwarded %+v after being cancelled", data)
-	case <-time.After(300 * time.Millisecond):
-	}
-}
-
 // A scan has to travel reader-or-device, bridge, client server, clients. The
 // client server's leg is background work that something must start, and when
 // the unified server stopped doing it as a side effect of binding, nothing did:
@@ -222,5 +199,60 @@ func TestReaderStatusReachesSubscribersAndClients(t *testing.T) {
 	case <-sink.statuses:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the reader's status never reached the clients")
+	}
+}
+
+// reportingManager stands in for a driver whose devices report their own scans,
+// which is what the phone driver is.
+type reportingManager struct {
+	nfc.Manager
+	scans event.Signal[nfc.NFCData]
+}
+
+func (m *reportingManager) Scans() *event.Signal[nfc.NFCData] { return &m.scans }
+
+// What a manager reports reaches the clients while the agent is serving, and
+// stops reaching them once it is not: the subscription belongs to the run, not
+// to the agent.
+func TestManagerScansReachTheClientsWhileServing(t *testing.T) {
+	m := &reportingManager{Manager: nfc.NewMockManager()}
+	rt, err := Setup(testOptions(t), m)
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	a := rt.Agent
+
+	seen := make(chan string, 4)
+	a.Events().Tag.Connect(func(data nfc.NFCData) {
+		if data.Card == nil {
+			return
+		}
+		select {
+		case seen <- data.Card.UID:
+		default:
+		}
+	})
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	m.scans.Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04ABCDEF"))})
+
+	select {
+	case uid := <-seen:
+		if uid != "04ABCDEF" {
+			t.Errorf("got %q, want the scan the manager reported", uid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("what the manager reported never reached the clients")
+	}
+
+	a.Stop()
+	m.scans.Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04EEEEEE"))})
+
+	select {
+	case uid := <-seen:
+		t.Errorf("a scan reached %q after the agent stopped", uid)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

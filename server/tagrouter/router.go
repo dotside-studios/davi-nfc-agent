@@ -13,7 +13,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // Config names the tag sources to route between.
@@ -23,13 +22,13 @@ type Config struct {
 
 	// Devices is the driver serving paired devices. Nil when none are
 	// configured.
-	Devices server.DeviceOps
+	Devices nfc.TagHolder
 }
 
 // Router routes client requests to a tag source.
 type Router struct {
 	config  Config
-	devices server.DeviceOps
+	devices nfc.TagHolder
 }
 
 // New builds the router. It has no lifetime of its own: every operation is a

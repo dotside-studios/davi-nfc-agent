@@ -252,3 +252,26 @@ func TestDuplicateComponentRejected(t *testing.T) {
 	}
 	_ = time.Now
 }
+
+// A stop takes the pumps down with the servers. It used to repeat their
+// teardown inline and leave out the cancel, so the goroutine draining the
+// reader survived every stop and a start after it added another.
+func TestStopEndsThePumps(t *testing.T) {
+	a := runningAgent(t, 9474)
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	pumps := a.pumpCtx
+	if pumps == nil {
+		t.Fatal("the agent started without a pump context")
+	}
+
+	a.Stop()
+
+	select {
+	case <-pumps.Done():
+	default:
+		t.Error("a stop left the pumps running")
+	}
+}

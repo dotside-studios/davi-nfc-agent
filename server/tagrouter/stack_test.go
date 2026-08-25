@@ -1,7 +1,6 @@
 package tagrouter_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,16 +93,14 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 
 	router := tagrouter.New(tagrouter.Config{Reader: cfg.Reader, Devices: remote})
 
-	ctx, cancel := context.WithCancel(context.Background())
 	if remote != nil {
-		go pumpTo(ctx, remote.Data(), client)
+		remote.Scans().Connect(client.Broadcast)
 	}
 
 	ts := httptest.NewServer(endpoint)
 
 	t.Cleanup(func() {
 		ts.Close()
-		cancel()
 		if remote != nil {
 			remote.Close()
 		}
@@ -122,20 +119,6 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 }
 
 // pumpTo forwards a driver's scans to the sink, which is what the agent does.
-func pumpTo(ctx context.Context, src <-chan nfc.NFCData, sink *fakeClient) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-src:
-			if !ok {
-				return
-			}
-			sink.Broadcast(data)
-		}
-	}
-}
-
 // tagModificationPolicy captures the reader's mode as a predicate, so the
 // driver can refuse a modifying operation the agent's mode forbids.
 func tagModificationPolicy(reader *nfc.NFCReader) func() bool {

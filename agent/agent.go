@@ -141,6 +141,11 @@ type Agent struct {
 	// and cleared on stop.
 	serving atomic.Pointer[endpoints]
 
+	// lastCard is the most recent scan the agent reported, kept here rather
+	// than in the client server it is reported through: the servers are rebuilt
+	// by every restart, and the card on the reader is still there afterwards.
+	lastCard atomic.Pointer[nfc.Card]
+
 	// supervisor operates the readers, nil before Start and after Stop.
 	// Atomic because the handlers read it from their own goroutines, and Stop
 	// holds the lifecycle lock while the server waits for them to finish.
@@ -511,7 +516,7 @@ func (a *Agent) startServers() error {
 		Tags:                 a,
 		AllowTagModification: a.TagModificationAllowed,
 		OnChange:             a.fireClientsChanged,
-		OnTag:                a.events.Tag.Emit,
+		OnTag:                a.reportTag,
 	})
 
 	// The agent's tag sources feed the client server directly. Connected to the

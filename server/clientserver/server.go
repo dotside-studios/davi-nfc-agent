@@ -30,10 +30,6 @@ type Server struct {
 	// Client connections (multiple allowed)
 	clients    map[*wsconn.SafeConn]*clientSession
 	clientsMux sync.RWMutex
-
-	// Last received data for late joiners
-	lastCard *nfc.Card
-	cardMu   sync.RWMutex
 }
 
 // New creates a client server. It has no lifetime of its own: connections are
@@ -163,13 +159,6 @@ func (s *Server) clientCount() int {
 	s.clientsMux.RLock()
 	defer s.clientsMux.RUnlock()
 	return len(s.clients)
-}
-
-// GetLastCard returns the last received card data.
-func (s *Server) GetLastCard() *nfc.Card {
-	s.cardMu.RLock()
-	defer s.cardMu.RUnlock()
-	return s.lastCard
 }
 
 // handleWebSocket handles WebSocket connections from clients.
@@ -390,12 +379,6 @@ func firstNonEmpty(values ...string) string {
 //
 // Called by whatever produced the scan.
 func (s *Server) Broadcast(data nfc.NFCData) {
-	if data.Card != nil {
-		s.cardMu.Lock()
-		s.lastCard = data.Card
-		s.cardMu.Unlock()
-	}
-
 	// The observer sees it before the clients do. This is the supported way to
 	// read tags from Go.
 	if s.config.OnTag != nil {

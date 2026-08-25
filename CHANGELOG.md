@@ -92,6 +92,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The agent remembers the last scan rather than reading it back out of the
+  client server, which kept it for nobody else. It survives a restart now: the
+  servers are rebuilt, and the card on the reader is still there.
+  `clientserver.Server.GetLastCard` is gone
 - The client server asks the agent for the tag a request names rather than the
   readers the agent happens to hold. `Agent` implements `nfc.TagHolder`, so a
   plugin acts on a card through the agent too, and an operation before `Start`

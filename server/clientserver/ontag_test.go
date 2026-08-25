@@ -60,7 +60,7 @@ func TestOnTagStillBroadcasts(t *testing.T) {
 		},
 	})
 
-	dial(t, s, "https://app.example.com")
+	conn := dial(t, s, "https://app.example.com")
 
 	s.Broadcast(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04DEADBE"))})
 
@@ -71,10 +71,11 @@ func TestOnTagStillBroadcasts(t *testing.T) {
 	}
 
 	// The scan the observer saw is still the client's to receive.
-	waitFor(t, func() bool {
-		card := s.GetLastCard()
-		return card != nil && card.UID == "04DEADBE"
-	})
+	msg := readResponse(t, conn)
+	payload, _ := msg["payload"].(map[string]any)
+	if uid, _ := payload["uid"].(string); uid != "04DEADBE" {
+		t.Errorf("the client received %#v, want the scan the observer saw", msg)
+	}
 }
 
 // TestNilOnTagIsFine keeps the zero-config path working: most callers set no

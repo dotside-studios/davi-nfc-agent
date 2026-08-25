@@ -39,13 +39,18 @@ func (a *Agent) DisconnectClient(id string) error {
 	return nil
 }
 
-// LastCard is the most recent scan, from the reader or from a device. Nil
-// before anything has been scanned.
-func (a *Agent) LastCard() *nfc.Card {
-	if a.ClientServer == nil {
-		return nil
+// LastCard is the most recent scan, from a reader or from a device. Nil before
+// anything has been scanned.
+func (a *Agent) LastCard() *nfc.Card { return a.lastCard.Load() }
+
+// reportTag records a scan and reports it. Every scan a client receives passes
+// through here, whichever source produced it, so this is where the agent learns
+// what was last presented to it.
+func (a *Agent) reportTag(data nfc.NFCData) {
+	if data.Card != nil {
+		a.lastCard.Store(data.Card)
 	}
-	return a.ClientServer.GetLastCard()
+	a.events.Tag.Emit(data)
 }
 
 // deviceRoster is what a manager carrying devices of its own can report about

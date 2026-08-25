@@ -37,9 +37,14 @@ func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route
 		if !ok {
 			return route{}, refuse(protocol.ErrCodeNoCard, "device %s is not holding a tag", deviceID)
 		}
-		if uid != "" && !strings.EqualFold(rt.uid, uid) {
-			return route{}, refuse(protocol.ErrCodeTagMismatch,
-				"request named tag %s but device %s is holding %s", uid, deviceID, rt.uid)
+		if uid != "" {
+			if rt.uid != "" && !strings.EqualFold(rt.uid, uid) {
+				return route{}, refuse(protocol.ErrCodeTagMismatch,
+					"request named tag %s but device %s is holding %s", uid, deviceID, rt.uid)
+			}
+			// The caller named it, so the tag it named is what the source is
+			// held to, whether or not the source could name the one it has.
+			rt.uid = uid
 		}
 		return rt, nil
 	}
@@ -58,54 +63,39 @@ func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route
 	return s.guessRoute()
 }
 
-// holding asks each source for the tag a device is holding. An empty deviceID
-// asks each for its most recent.
+// holding asks what the named device is holding. An empty deviceID asks for
+// whatever is holding a tag.
 func (s *Router) holding(deviceID string) (route, bool) {
-	for _, holder := range s.holders() {
-		if device, uid, ok := holder.TagOn(deviceID); ok {
-			return route{holder: holder, device: device, uid: uid}, true
-		}
+	holder := s.config.Tags
+	if holder == nil {
+		return route{}, false
 	}
-	return route{}, false
+	device, uid, ok := holder.TagOn(deviceID)
+	if !ok {
+		return route{}, false
+	}
+	return route{holder: holder, device: device, uid: uid}, true
 }
 
-// holdingUID finds the source holding a tag by UID.
+// holdingUID finds the device holding a tag by UID.
 func (s *Router) holdingUID(uid string) (route, bool) {
-	for _, holder := range s.holders() {
-		for _, device := range holder.DevicesHoldingTags() {
-			held, heldUID, ok := holder.TagOn(device)
-			if ok && strings.EqualFold(heldUID, uid) {
-				return route{holder: holder, device: held, uid: heldUID}, true
-			}
+	holder := s.config.Tags
+	if holder == nil {
+		return route{}, false
+	}
+	for _, device := range holder.DevicesHoldingTags() {
+		held, heldUID, ok := holder.TagOn(device)
+		if ok && strings.EqualFold(heldUID, uid) {
+			return route{holder: holder, device: held, uid: heldUID}, true
 		}
 	}
 	return route{}, false
 }
 
-// guessRoute is what allowUntargeted opts into: whichever source is holding a
-// tag, and failing that a reader to try, so a request that has to go somewhere
-// is not refused for having no route.
+// guessRoute is what allowUntargeted opts into: whatever is holding a tag.
 func (s *Router) guessRoute() (route, error) {
 	if rt, ok := s.holding(""); ok {
 		return rt, nil
 	}
-	if readers := s.config.Readers; readers != nil {
-		if device, ok := readers.Any(); ok {
-			return route{holder: readers, device: device}, nil
-		}
-	}
 	return route{}, refuse(protocol.ErrCodeNoCard, "no reader or device is holding a tag")
-}
-
-// holders lists the sources to ask, readers first: an operation for a tag on a
-// reader should not wait on a phone that is holding one too.
-func (s *Router) holders() []nfc.TagHolder {
-	var out []nfc.TagHolder
-	if s.config.Readers != nil {
-		out = append(out, s.config.Readers)
-	}
-	if s.devices != nil {
-		out = append(out, s.devices)
-	}
-	return out
 }

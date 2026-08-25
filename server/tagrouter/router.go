@@ -1,11 +1,11 @@
-// Package tagrouter answers one question for every client request: which of the
-// agent's tag sources does this apply to, the hardware reader or a paired
-// device? It reads the request channels of the bridge and performs the
-// operation on whichever source holds the tag the request names.
+// Package tagrouter answers one question for every client request: which tag
+// does this apply to, and is the agent allowing it? It resolves the tag the
+// request names against whatever is holding one, applies the agent's policy,
+// and reports the outcome in the codes a client understands.
 //
 // It serves no HTTP. The device protocol belongs to nfc/remotenfc and the
-// listener to server/listener; this is the part that has to see both a
-// reader and a device driver at once, which is why it is neither of them.
+// listener to server/listener; this is the part between a client's request and
+// the tag it names.
 package tagrouter
 
 import (
@@ -15,35 +15,36 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
-// Config names the tag sources to route between.
+// Config names what holds the tags and what the agent allows to be done to
+// them.
 type Config struct {
-	// Readers operates the agent's own readers. Nil when it has none.
-	Readers *nfc.Supervisor
+	// Tags answers for every tag the agent can reach, which is the supervisor:
+	// the readers it polls and the devices that report their own scans. Nil
+	// leaves nothing to route to.
+	Tags nfc.TagHolder
 
-	// Devices is the driver serving paired devices. Nil when none are
-	// configured.
-	Devices nfc.TagHolder
+	// AllowTagModification reports whether writes, locks and raw exchanges are
+	// allowed, which is the agent's mode rather than any one source's. Nil
+	// allows them, and the source enforces its own policy either way.
+	AllowTagModification func() bool
 }
 
-// Router routes client requests to a tag source.
+// Router resolves a client request to the tag it names.
 type Router struct {
-	config  Config
-	devices nfc.TagHolder
+	config Config
 }
 
 // New builds the router. It has no lifetime of its own: every operation is a
 // call, so there is nothing to start or stop.
 func New(config Config) *Router {
-	return &Router{config: config, devices: config.Devices}
+	return &Router{config: config}
 }
 
-// modeAllowsTagModification reports whether the agent's current mode permits a
-// write, a lock or a raw exchange.
-//
-// The mode belongs to the agent rather than to the reader, so it governs tags
-// held by remote devices too. A nil reader has no mode to consult.
-func modeAllowsTagModification(readers *nfc.Supervisor) bool {
-	return readers == nil || readers.Mode() != nfc.ModeReadOnly
+// modificationAllowed reports whether the agent permits a write, a lock or a
+// raw exchange. It governs tags held by devices as well as those on a reader:
+// the mode is the agent's.
+func (s *Router) modificationAllowed() bool {
+	return s.config.AllowTagModification == nil || s.config.AllowTagModification()
 }
 
 // readOnlyModeMessage explains a mode refusal for the named operation.

@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The supervisor answers for every tag the agent can reach, the ones on its
+  readers and the ones the manager's own devices hold. A phone's scan already
+  arrived on its signal, so what can be done to that tag is now asked in the
+  same place. `tagrouter.Config` takes one holder and the agent's mode instead
+  of a source per kind
 - One interface answers for a tag wherever it is. `nfc.TagHolder` names the tag
   a device holds and performs the write, lock, raw exchange and capability
   report on it, and `nfc.Supervisor` implements it for the readers the agent

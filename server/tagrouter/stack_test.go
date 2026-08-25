@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
@@ -18,11 +19,12 @@ import (
 // credential check, and the router draining the bridge behind both. The tests
 // build it the same way so they exercise the composition, not a stand-in.
 type stack struct {
-	URL    string
-	Router *tagrouter.Router
-	Client *fakeClient
-	Auth   *server.DeviceAuth
-	Remote *remotenfc.Manager
+	URL     string
+	Router  *tagrouter.Router
+	Client  *fakeClient
+	Auth    *server.DeviceAuth
+	Remote  *remotenfc.Manager
+	Readers *nfc.Supervisor
 }
 
 // fakeClient stands in for the client server: it receives the scans the driver
@@ -62,7 +64,13 @@ func (c *fakeClient) await(t *testing.T) nfc.NFCData {
 }
 
 type stackConfig struct {
-	Readers       *nfc.Supervisor
+	// Hardware is a manager whose devices are opened as readers. Nil leaves the
+	// agent with none, which is a build that only serves paired devices.
+	Hardware nfc.Manager
+
+	// Mode is what the readers are allowed to do. The zero value is read/write.
+	Mode nfc.ReaderMode
+
 	APISecret     string
 	TokenVerifier server.TokenVerifier
 	RequirePaired bool
@@ -86,12 +94,20 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		remote = remotenfc.NewManager(30 * time.Second)
 		endpoint = remote.Handler(remotenfc.ServerOptions{
 			Authenticate:         auth.Check,
-			AllowTagModification: tagModificationPolicy(cfg.Readers),
+			AllowTagModification: func() bool { return cfg.Mode != nfc.ModeReadOnly },
 			PublicKeyPin:         func() string { return cfg.PublicKeyPin },
 		})
 	}
 
-	router := tagrouter.New(tagrouter.Config{Readers: cfg.Readers, Devices: remote})
+	// One supervisor over every manager, which is how the agent composes them:
+	// readers are polled, and the tags a device holds are answered for by the
+	// driver behind the same supervisor.
+	readers := supervisorOver(t, cfg.Hardware, remote, cfg.Mode)
+
+	router := tagrouter.New(tagrouter.Config{
+		Tags:                 readers,
+		AllowTagModification: func() bool { return readers.Mode() != nfc.ModeReadOnly },
+	})
 
 	if remote != nil {
 		remote.Scans().Connect(func(scan nfc.ScannedTag) {
@@ -112,25 +128,39 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		if remote != nil {
 			remote.Close()
 		}
-		if cfg.Readers != nil {
-			cfg.Readers.Stop()
-		}
+		readers.Stop()
 	})
 
 	return &stack{
-		URL:    "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device",
-		Router: router,
-		Client: client,
-		Auth:   auth,
-		Remote: remote,
+		URL:     "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device",
+		Router:  router,
+		Client:  client,
+		Auth:    auth,
+		Remote:  remote,
+		Readers: readers,
 	}
 }
 
-// tagModificationPolicy captures the readers' mode as a predicate, so the
-// driver can refuse a modifying operation the agent's mode forbids.
-func tagModificationPolicy(readers *nfc.Supervisor) func() bool {
-	if readers == nil {
-		return nil
+// supervisorOver builds the supervisor the stack routes through. A manager with
+// no readers to open still answers for the tags its devices hold.
+func supervisorOver(t *testing.T, hardware nfc.Manager, remote *remotenfc.Manager, mode nfc.ReaderMode) *nfc.Supervisor {
+	t.Helper()
+
+	var entries []multimanager.ManagerEntry
+	if hardware != nil {
+		entries = append(entries, multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: hardware})
 	}
-	return func() bool { return readers.Mode() != nfc.ModeReadOnly }
+	if remote != nil {
+		entries = append(entries, multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: remote})
+	}
+
+	readers, err := nfc.NewSupervisor(multimanager.NewMultiManager(entries...), time.Second)
+	if err != nil {
+		t.Fatalf("NewSupervisor: %v", err)
+	}
+	if err := readers.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	readers.SetMode(mode)
+	return readers
 }

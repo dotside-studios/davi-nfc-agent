@@ -498,8 +498,12 @@ func (a *Agent) startServers() error {
 		return errors.New("the readers are not initialized")
 	}
 
-	// Routes each client request to whichever source holds the tag it names.
-	a.Router = tagrouter.New(tagrouter.Config{Readers: readers, Devices: nfc.TagsHeldBy(a.manager)})
+	// Resolves each client request to the tag it names, which the supervisor
+	// answers for wherever it is.
+	a.Router = tagrouter.New(tagrouter.Config{
+		Tags:                 readers,
+		AllowTagModification: a.TagModificationAllowed,
+	})
 
 	a.ClientServer = clientserver.New(clientserver.Config{
 		APISecret:      a.apiSecret,

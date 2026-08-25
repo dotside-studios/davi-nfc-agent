@@ -16,7 +16,7 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 	// The mode gates every route to a tag, not just the one on a reader. What
 	// performs the write enforces it too, which a write routed to a device
 	// never reaches.
-	if !modeAllowsTagModification(s.config.Readers) {
+	if !s.modificationAllowed() {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly, "%s", readOnlyModeMessage("writes"))
 	}
 
@@ -39,7 +39,7 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 
 // Lock makes the named tag permanently read-only.
 func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, error) {
-	if !modeAllowsTagModification(s.config.Readers) {
+	if !s.modificationAllowed() {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly, "%s", readOnlyModeMessage("locks"))
 	}
 
@@ -61,7 +61,7 @@ func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, 
 func (s *Router) Transceive(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
 	// A raw exchange cannot be assumed harmless: the same call carries a SELECT
 	// and a write to a configuration page, so the mode treats it as a write.
-	if !modeAllowsTagModification(s.config.Readers) {
+	if !s.modificationAllowed() {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly,
 			"Reader is in read-only mode; raw exchanges are refused because they can write")
 	}

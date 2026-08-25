@@ -137,9 +137,9 @@ export interface LogEntry {
 /* ---- tag traffic ---- */
 
 /**
- * The wire types belong to the client library, not to the console. Re-exported
- * so a panel imports one thing, and so the console is held to the same
- * definitions every other consumer of the agent is.
+ * The wire types belong to the client library. Re-exported so a panel imports
+ * one thing, and so the console is held to the definitions every other
+ * consumer is.
  */
 export type {
   NDEFRecord,

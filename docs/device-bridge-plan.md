@@ -243,7 +243,7 @@ expressible, 2.1 makes it *truthful*, and only then does 3.1 have anything to
 negotiate against. Phase 4 is independent of 1–3 and can move earlier if
 security review demands it. Phase 5 is demand-driven throughout.
 
-Each phase updates `docs/api.md`, `docs/javascript-client.md`, and `client/`
+Each phase updates `docs/api.md`, `docs/client/`, `docs/javascript-client.md`, and `client/`
 alongside the Go changes — the JS device client is the reference implementation
 of this protocol, so a phase that does not update it is not finished.
 

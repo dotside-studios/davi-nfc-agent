@@ -96,10 +96,6 @@ var DaviNFC = (() => {
       __publicField(this, "intentionalDisconnect", false);
       __publicField(this, "pendingRequests", {});
       __publicField(this, "requestIdCounter", 0);
-      /**
-       * The tag the agent last reported, or null once it left the field. Requests
-       * name it unless the caller names another.
-       */
       __publicField(this, "tag", null);
       __publicField(this, "eventHandlers", {
         tagData: [],
@@ -127,7 +123,7 @@ var DaviNFC = (() => {
     isConnected() {
       return this.connected;
     }
-    /** The tag currently in the field, as the agent last reported it. */
+    /** The tag in the field, as the agent last reported it. */
     currentTag() {
       return this.tag;
     }
@@ -289,12 +285,7 @@ var DaviNFC = (() => {
         }
       }
     }
-    /**
-     * Writes NDEF records to a tag, replacing whatever it holds.
-     *
-     * Names the tag in the field unless the request names another. Set `lock` to
-     * make the tag permanently read-only once the write lands.
-     */
+    /** Writes NDEF records to a tag, replacing whatever it holds. */
     async write(writeRequest) {
       return this.sendRequest(
         "writeRequest",
@@ -305,10 +296,7 @@ var DaviNFC = (() => {
     async lock(target) {
       return this.sendRequest("lockRequest", this.aimed({}, target));
     }
-    /**
-     * Exchanges raw bytes with a tag: an APDU, or a framing-level command when
-     * `raw` is set. Resolves with the tag's response.
-     */
+    /** Exchanges raw bytes with a tag and resolves with its response. */
     async transceive(request) {
       const { data, raw, ...target } = request;
       if (data.length === 0) {
@@ -320,10 +308,7 @@ var DaviNFC = (() => {
       );
       return response.data ? decodeBase64(response.data) : new Uint8Array();
     }
-    /**
-     * Asks the agent what a tag supports, rather than reading the capabilities
-     * captured when it was scanned.
-     */
+    /** Asks the tag what it supports, rather than reading what the scan captured. */
     async getCapabilities(target) {
       const response = await this.sendRequest(
         "capabilitiesRequest",
@@ -335,10 +320,7 @@ var DaviNFC = (() => {
       const response = await fetch(`${this.serverUrl}/api/v1/health`);
       return await response.json();
     }
-    /**
-     * Names the tag a request applies to: the caller's choice when it made one,
-     * otherwise the tag in the field.
-     */
+    /** The caller's target when it named one, otherwise the tag in the field. */
     aimed(payload, target) {
       if (target?.uid || target?.deviceID || target?.allowUntargeted) {
         const { uid, deviceID, allowUntargeted } = target;

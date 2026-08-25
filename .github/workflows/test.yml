@@ -134,9 +134,8 @@ jobs:
 
   web:
     # The client library and the console that consumes it. Both build outputs
-    # are committed -- client/dist for a page with no build step, the console's
-    # dist for `go build .` without Node -- so this also checks that what is in
-    # the tree is what the current source produces.
+    # are committed, so this also checks the tree holds what the source
+    # produces.
     runs-on: ubuntu-latest
 
     steps:

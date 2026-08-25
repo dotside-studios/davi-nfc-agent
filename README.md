@@ -190,7 +190,7 @@ The agent listens on two ports, both configurable:
 
 ### JavaScript / TypeScript
 
-Use the included [client library](docs/javascript-client.md) for browser or Node.js applications.
+Use the included [client library](docs/client/) for browser or Node.js applications.
 
 ```javascript
 const client = new NFCClient('http://localhost:9470');
@@ -234,7 +234,7 @@ See [API Reference](docs/api.md) for the full WebSocket protocol.
 
 ### Use Your Phone as an NFC Reader
 
-Connect your smartphone to the agent using the [NFCDeviceClient](docs/javascript-client.md#nfcdeviceclient-device-input).
+Connect your smartphone to the agent using the [NFCDeviceClient](docs/javascript-client.md).
 
 ```javascript
 const device = new NFCDeviceClient('ws://192.168.1.100:9470');

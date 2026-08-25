@@ -34,9 +34,8 @@ webui: webui-install
 webui-install:
 	cd webui/frontend && npm install --no-audit --no-fund
 
-# Rebuild the client library's no-build-step distribution. Run this after
-# changing anything under client/src and commit the result — client/dist is what
-# a <script> tag and a copy-and-paste integration consume.
+# Rebuild the client library's dist. Run this after changing client/src and
+# commit the result — it is what a <script> tag consumes.
 client: client-install
 	cd client && npm run build
 

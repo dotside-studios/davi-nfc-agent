@@ -22,8 +22,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Matches the vite alias: the console consumes the agent's client library
-       from source, under the name the production apps import it by. */
+    /* Matches the vite alias in vite.config.ts. */
     "paths": {
       "@davi/nfc-agent-client": ["../../client/src/index.ts"]
     }

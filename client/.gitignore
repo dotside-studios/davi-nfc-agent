@@ -1,5 +1,4 @@
 node_modules
 
-# dist/ is deliberately NOT ignored. It is the no-build-step distribution of
-# this library, generated from src/ with `npm run build` and committed so that
-# client/test-client.html and a copy-and-paste integration work without Node.
+# dist/ is deliberately NOT ignored: it is generated from src/ with
+# `npm run build` and committed so consuming this library needs no Node.

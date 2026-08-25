@@ -61,20 +61,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be written; and `capabilitiesResponse` was read one level too high, so
   **re-read** replaced the capabilities with a wrapper around them.
 
-  `webui/frontend` now imports `@davi/nfc-agent-client` under the name the Davi
-  apps import it by, aliased to `client/src` in this repository. Nothing about
-  the protocol lives in the console any more: what is left is the live event
-  feed and the scan history, which are the console's own. A protocol change
-  that breaks a consumer now breaks the console's build in the same commit.
+  `webui/frontend` now imports `@davi/nfc-agent-client` under the same name
+  consumers import it by, aliased to `client/src` in this repository. Nothing
+  about the protocol lives in the console any more: what is left is the live
+  event feed and the scan history, which are the console's own. A protocol
+  change that breaks a consumer now breaks the console's build in the same
+  commit.
 
 - **`client/` is TypeScript, and `client/nfc-client.js` is generated from it.**
-  The library existed twice — hand-maintained JavaScript here, a TypeScript
-  port in the Davi monorepo — and the two had drifted: the port carried fixes
-  this copy lacked, this copy tracked a `lastTag` the port did not, and neither
-  had the operations the wire had grown. `client/src` is now the one
-  implementation; `client/dist/nfc-client.js` is built from it with
-  `make client` and committed, so a `<script>` tag and a copy-and-paste
-  integration still work without Node.
+  The library was hand-maintained JavaScript, and downstream consumers had each
+  ported it; the copies drifted, and none of them had grown the operations the
+  wire had. `client/src` is now the one implementation; `client/dist/nfc-client.js`
+  is built from it with `make client` and committed, so a `<script>` tag and a
+  copy-and-paste integration still work without Node.
 
   `getStatus()` and `getLastTag()` are gone. They called `/api/v1/status` and
   `/api/v1/tags/last`, which this agent does not serve and has not for some

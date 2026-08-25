@@ -42,12 +42,7 @@ export interface WireMessage<P = unknown> {
   error?: string;
 }
 
-/**
- * The agent carries byte slices as base64 in both directions -- a transceive
- * command and its response, an NDEF record's raw payload. These are here rather
- * than left to each caller because the wire format is the client's business,
- * and every consumer that reached for `atob` was re-deriving it.
- */
+/** The agent carries byte slices as base64 in both directions. */
 export function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);

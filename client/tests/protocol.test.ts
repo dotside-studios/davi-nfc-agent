@@ -74,8 +74,6 @@ describe("base64", () => {
 });
 
 describe("the device that scanned a tag", () => {
-  // deviceStatus describes the agent's own reader only, so a consumer showing a
-  // tag needs to know whether that status has anything to say about it.
   it("names the paired device, and leaves it undefined for the local reader", () => {
     expect(parseTagData({ uid: "X", deviceID: "phone-7" }).deviceID).toBe("phone-7");
     expect(parseTagData({ uid: "X" }).deviceID).toBeUndefined();

@@ -38,13 +38,8 @@ const CONNECTION_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * A request the agent refused, carrying why.
- *
- * The agent answers a failed operation with an error code from a fixed
- * vocabulary -- `NO_CARD`, `TAG_MISMATCH`, `READ_ONLY`, `CAPACITY_EXCEEDED` and
- * the rest -- and says whether repeating the request could plausibly succeed.
- * Flattening that to a message string is what leaves a caller retrying a write
- * to a locked tag.
+ * A request the agent refused, carrying the code it refused with and whether
+ * repeating it could plausibly succeed.
  */
 export class NFCRequestError extends Error {
   readonly code?: string;
@@ -71,17 +66,11 @@ export class NFCRequestError extends Error {
 }
 
 /**
- * Framework-agnostic client for the Davi NFC Agent.
+ * Framework-agnostic client for the Davi NFC Agent, over its client endpoint
+ * (plain `/ws`) on the shared agent port.
  *
- * Connects to the agent's client endpoint (plain `/ws`) on the shared agent
- * port (default 9470). NFC readers/devices use the device endpoint
- * (`/ws?mode=device`) on the same port.
- *
- * Every tag operation names the tag it applies to. The client remembers the
- * tag it last saw and names that one, so a caller acting on what is in front of
- * the operator does not have to thread a UID through itself; pass a
- * `TagTarget` to act on a different one, or `allowUntargeted` to let the agent
- * guess.
+ * Every tag operation names the tag it applies to, taken from the tag the
+ * client last saw unless the caller names another.
  *
  * @example
  * const client = new NFCClient("https://localhost:9470");
@@ -102,10 +91,6 @@ export class NFCClient {
   private pendingRequests: Record<string, PendingRequest> = {};
   private requestIdCounter = 0;
 
-  /**
-   * The tag the agent last reported, or null once it left the field. Requests
-   * name it unless the caller names another.
-   */
   private tag: TagData | null = null;
 
   private eventHandlers: EventHandlers = {
@@ -142,15 +127,14 @@ export class NFCClient {
     return this.connected;
   }
 
-  /** The tag currently in the field, as the agent last reported it. */
+  /** The tag in the field, as the agent last reported it. */
   currentTag(): TagData | null {
     return this.tag;
   }
 
   async connect(): Promise<void> {
     try {
-      // Cleared here rather than only in the constructor, so a client that was
-      // deliberately disconnected reconnects on its own again afterwards.
+      // So a client that was deliberately disconnected auto-reconnects again.
       this.intentionalDisconnect = false;
 
       let wsUrl = this.serverUrl.replace(/^http/, "ws") + "/ws";
@@ -189,8 +173,7 @@ export class NFCClient {
       ws.onclose = () => {
         if (this.ws !== ws) return;
         this.connected = false;
-        // A request in flight cannot be answered on a socket that is gone.
-        // Left pending it would sit until the 30s timeout with nothing coming.
+        // Nothing will answer a request left in flight on a dead socket.
         this.failPending(new Error("connection closed"));
         this.emit("disconnected", {});
         if (!this.intentionalDisconnect && this.autoReconnect) {
@@ -260,10 +243,9 @@ export class NFCClient {
       return;
     }
 
-    // Backs off rather than retrying at a fixed interval: on loopback a drop
-    // usually means the agent is rebinding its listeners, which takes about a
-    // second, so a short first delay reconnects almost immediately -- while a
-    // genuinely absent agent is not polled every few seconds forever.
+    // A short first delay catches the common case -- the agent rebinding its
+    // listeners, over in about a second -- without polling an absent one
+    // forever.
     const delay = Math.min(
       this.maxReconnectDelay,
       this.reconnectDelay * 2 ** this.reconnectAttempts,
@@ -293,9 +275,7 @@ export class NFCClient {
     switch (type) {
       case "tagData": {
         const tag = parseTagData(payload as RawTagPayload);
-        // A tag with no UID is how the agent reports that the one being held
-        // has left the field. Passing it on as a scan would show a blank tag
-        // over the real one.
+        // A tag with no UID is how removal is reported.
         if (!tag.uid) {
           this.clearTag();
           break;
@@ -306,9 +286,8 @@ export class NFCClient {
       }
       case "deviceStatus": {
         const status = (payload ?? {}) as DeviceStatus;
-        // deviceStatus describes the agent's own reader and nothing else, so
-        // its cardPresent says nothing about a tag a phone is holding -- and is
-        // false the whole time one is.
+        // cardPresent describes the local reader only, and is false the whole
+        // time a phone is holding a tag.
         if (status.cardPresent === false && !this.tag?.deviceID) {
           this.clearTag();
         }
@@ -344,12 +323,7 @@ export class NFCClient {
     }
   }
 
-  /**
-   * Writes NDEF records to a tag, replacing whatever it holds.
-   *
-   * Names the tag in the field unless the request names another. Set `lock` to
-   * make the tag permanently read-only once the write lands.
-   */
+  /** Writes NDEF records to a tag, replacing whatever it holds. */
   async write(writeRequest: WriteRequest): Promise<WriteResponse> {
     return this.sendRequest<WriteResponse>(
       "writeRequest",
@@ -362,10 +336,7 @@ export class NFCClient {
     return this.sendRequest<LockResponse>("lockRequest", this.aimed({}, target));
   }
 
-  /**
-   * Exchanges raw bytes with a tag: an APDU, or a framing-level command when
-   * `raw` is set. Resolves with the tag's response.
-   */
+  /** Exchanges raw bytes with a tag and resolves with its response. */
   async transceive(request: TransceiveRequest): Promise<Uint8Array> {
     const { data, raw, ...target } = request;
     if (data.length === 0) {
@@ -378,10 +349,7 @@ export class NFCClient {
     return response.data ? decodeBase64(response.data) : new Uint8Array();
   }
 
-  /**
-   * Asks the agent what a tag supports, rather than reading the capabilities
-   * captured when it was scanned.
-   */
+  /** Asks the tag what it supports, rather than reading what the scan captured. */
   async getCapabilities(target?: TagTarget): Promise<TagCapabilities> {
     const response = await this.sendRequest<{ capabilities?: TagCapabilities }>(
       "capabilitiesRequest",
@@ -395,10 +363,7 @@ export class NFCClient {
     return (await response.json()) as HealthCheckResponse;
   }
 
-  /**
-   * Names the tag a request applies to: the caller's choice when it made one,
-   * otherwise the tag in the field.
-   */
+  /** The caller's target when it named one, otherwise the tag in the field. */
   private aimed<P extends object>(
     payload: P,
     target: TagTarget | undefined,
@@ -463,7 +428,6 @@ export class NFCClient {
   }
 }
 
-/** The error taxonomy the agent attaches to a refusal, when it sent one. */
 function errorDetail(payload: unknown): {
   code?: string;
   retryable?: boolean;

@@ -286,8 +286,7 @@ describe("naming the tag a request applies to", () => {
     return JSON.parse(calls[calls.length - 1][0]);
   }
 
-  // Without this the agent refuses the request with TAG_NOT_NAMED: routing by
-  // preference let a card lifted between the scan and the write redirect it.
+  // Without a uid the agent refuses the request with TAG_NOT_NAMED.
   it("names the scanned tag on a write the caller did not target", async () => {
     const { client, ws } = await connected();
     ws.emit({ type: "tagData", payload: { uid: "04A1B2", type: "NTAG215" } });
@@ -345,8 +344,8 @@ describe("naming the tag a request applies to", () => {
     expect(lastSent(ws).payload).toEqual({});
   });
 
-  // deviceStatus describes the agent's own reader only, and reports no card the
-  // whole time a phone is holding one.
+  // cardPresent describes the local reader, and is false the whole time a
+  // phone is holding a tag.
   it("keeps a phone's tag when the local reader reports no card", async () => {
     const { client, ws } = await connected();
     ws.emit({ type: "tagData", payload: { uid: "04A1B2", deviceID: "phone-7" } });
@@ -432,8 +431,6 @@ describe("tag operations", () => {
     await expect(locking).resolves.toEqual({ message: "ok", locked: true });
   });
 
-  // A caller that cannot tell "present the tag again" from "this tag is locked"
-  // retries a refusal forever.
   it("rejects with the agent's error code and retryability", async () => {
     const { client, ws } = await connected();
     const writing = client.write({ records: [] });
@@ -476,8 +473,6 @@ describe("reconnection backoff", () => {
     vi.useRealTimers();
   });
 
-  // A fixed interval either reconnects slowly after the agent rebinds its
-  // listeners, or polls an absent agent forever. Backoff does neither.
   it("doubles the delay between attempts, up to the ceiling", async () => {
     const client = new NFCClient("http://localhost:18080", {
       autoReconnect: true,

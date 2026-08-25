@@ -11,14 +11,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LiveEvent, ScanRecord } from './types'
 
 /**
- * The console's connection to the ordinary client endpoint, over the same
- * client library every other consumer uses. It holds no protocol of its own:
- * the socket, the reconnect, the request correlation and which tag an operation
- * applies to all belong to `NFCClient`, so a change to any of them reaches the
- * console and the apps together.
- *
- * What is left here is what the console alone wants — a feed of everything that
- * happened, and the tags seen during a run.
+ * The console's connection to the client endpoint, over the same library every
+ * other consumer uses. The protocol belongs to `NFCClient`; what is here is
+ * what the console alone wants — a feed of everything that happened, and the
+ * tags seen during a run.
  */
 
 const EVENT_LIMIT = 2000
@@ -60,9 +56,8 @@ export function useTags(secret?: string): Tags {
     })
   }, [])
 
-  // Keyed by UID, so re-presenting the same tag bumps a counter rather than
-  // adding a row — which is what makes the list readable during a run where
-  // one tag is tapped repeatedly.
+  // Keyed by UID, so a tag tapped repeatedly bumps a counter rather than
+  // filling the list with its own rows.
   const remember = useCallback((data: TagData) => {
     if (!data.uid) return
     const at = (data.scannedAt ?? new Date()).toISOString()
@@ -83,8 +78,8 @@ export function useTags(secret?: string): Tags {
 
   useEffect(() => {
     // Loopback is exempt from the secret; sent anyway in case that narrows.
-    // The console watches its agent for as long as it is open, so it retries
-    // for as long as it is open rather than giving up after a fixed count.
+    // The console watches its agent for as long as it is open, so it never
+    // stops retrying.
     const nfc = new NFCClient(location.origin, {
       apiSecret: secret,
       maxReconnectAttempts: 0,
@@ -121,8 +116,8 @@ export function useTags(secret?: string): Tags {
     }
 
     const onError = (e: NFCErrorEvent) => {
-      // A socket that dropped is already reported by the link indicator; the
-      // feed is for what the agent said, not for every retry behind it.
+      // The link indicator already reports a dropped socket; this feed is for
+      // what the agent said.
       if (e.phase) return
       push({ kind: 'error', summary: e.error.message, detail: e.code, ok: false })
     }
@@ -151,7 +146,6 @@ export function useTags(secret?: string): Tags {
     }
   }, [secret, push, remember])
 
-  /** The connected client, or a rejection a caller can show. */
   const connected = useCallback((): NFCClient => {
     const nfc = client.current
     if (!nfc?.isConnected()) throw new Error('not connected to the agent')

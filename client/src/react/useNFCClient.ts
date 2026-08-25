@@ -18,32 +18,20 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 export interface UseNFCClientReturn {
   connectionStatus: ConnectionStatus;
   lastTag: TagData | null;
-  /**
-   * What the tag in the field supports. Seeded from the scan and replaced by
-   * `refreshCapabilities`, which asks the tag rather than reading what was
-   * captured when it was scanned.
-   */
+  /** Seeded from the scan, replaced by `refreshCapabilities`. */
   capabilities: TagCapabilities | null;
   error: NFCErrorEvent | null;
   /**
    * Why the connection failed, in terms an operator can act on. Null while
-   * connected, or while the first attempt is still in flight. A WebSocket
-   * failure carries no detail, so this comes from probing the agent over HTTP
-   * rather than from the socket.
+   * connected, or while the first attempt is still in flight.
    */
   diagnosis: AgentDiagnosis | null;
   reconnect: () => Promise<void>;
   clearLastTag: () => void;
-  /**
-   * Writes NDEF records to the tag in the field, or the one the request names.
-   * Resolves when the agent confirms the write.
-   */
   write: (request: WriteRequest) => Promise<WriteResponse>;
-  /** Makes the tag permanently read-only. Irreversible. */
+  /** Irreversible. */
   lock: (target?: TagTarget) => Promise<LockResponse>;
-  /** Exchanges raw bytes with the tag and resolves with its response. */
   transceive: (request: TransceiveRequest) => Promise<Uint8Array>;
-  /** Asks the tag what it supports, and keeps the answer in `capabilities`. */
   refreshCapabilities: (target?: TagTarget) => Promise<TagCapabilities>;
 }
 
@@ -59,8 +47,7 @@ export function useNFCClient(
   const [error, setError] = useState<NFCErrorEvent | null>(null);
   const [diagnosis, setDiagnosis] = useState<AgentDiagnosis | null>(null);
 
-  // Guards the probe so a reconnect loop cannot fire one per attempt; cleared
-  // whenever a connection succeeds.
+  // Guards the probe so a reconnect loop cannot fire one per attempt.
   const diagnosing = useRef(false);
 
   const runDiagnosis = useCallback(async (url: string) => {
@@ -93,8 +80,8 @@ export function useNFCClient(
     if (clientRef.current?.isConnected()) {
       await clientRef.current.disconnect();
     }
-    // An explicit retry is the operator saying they changed something, so let
-    // it probe again rather than showing them a stale reason.
+    // An explicit retry means the operator changed something; probe again
+    // rather than showing them a stale reason.
     diagnosing.current = false;
     setDiagnosis(null);
     await connect();

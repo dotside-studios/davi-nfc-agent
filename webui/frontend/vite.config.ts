@@ -12,10 +12,9 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      // The console is a consumer of the agent's own client library, under the
-      // same name the production apps import it by. Aliased to the source in
-      // this repo rather than an installed copy, so a protocol change that
-      // breaks a consumer breaks the console's build in the same commit.
+      // The console consumes the agent's client library under the same name
+      // the production apps import it by, from source in this repo — so a
+      // protocol change that breaks a consumer breaks this build too.
       '@davi/nfc-agent-client': fileURLToPath(
         new URL('../../client/src/index.ts', import.meta.url),
       ),

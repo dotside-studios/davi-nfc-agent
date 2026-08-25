@@ -42,9 +42,9 @@ func TestGetCapabilities_MultipleCards(t *testing.T) {
 	mockDevice.SetTags([]Tag{NewMockTag("04AAAA01"), NewMockTag("04BBBB02")})
 	manager.MockDevice = mockDevice
 
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 	t.Cleanup(reader.Close)
 	time.Sleep(100 * time.Millisecond)

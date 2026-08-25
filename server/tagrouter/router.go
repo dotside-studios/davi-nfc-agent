@@ -17,8 +17,8 @@ import (
 
 // Config names the tag sources to route between.
 type Config struct {
-	// Reader is the agent's own hardware reader. Nil when it has none.
-	Reader *nfc.NFCReader
+	// Readers operates the agent's own readers. Nil when it has none.
+	Readers *nfc.Supervisor
 
 	// Devices is the driver serving paired devices. Nil when none are
 	// configured.
@@ -37,34 +37,13 @@ func New(config Config) *Router {
 	return &Router{config: config, devices: config.Devices}
 }
 
-// targetDevice resolves which remote device a request is for. A request naming
-// one is answered by that device or not at all; naming none falls back to the
-// most recent scan.
-func (s *Router) targetDevice(target string) (deviceTag, bool) {
-	if s.devices == nil {
-		return deviceTag{}, false
-	}
-	deviceID, tag, ok := s.devices.TagOn(target)
-	if !ok {
-		return deviceTag{}, false
-	}
-	return deviceTag{DeviceID: deviceID, UID: tag.UID(), Tag: tag}, true
-}
-
-// deviceTag is a tag a remote device is holding.
-type deviceTag struct {
-	DeviceID string
-	UID      string
-	Tag      nfc.Tag
-}
-
 // modeAllowsTagModification reports whether the agent's current mode permits a
 // write, a lock or a raw exchange.
 //
 // The mode belongs to the agent rather than to the reader, so it governs tags
 // held by remote devices too. A nil reader has no mode to consult.
-func modeAllowsTagModification(reader *nfc.NFCReader) bool {
-	return reader == nil || reader.GetMode() != nfc.ModeReadOnly
+func modeAllowsTagModification(readers *nfc.Supervisor) bool {
+	return readers == nil || readers.Mode() != nfc.ModeReadOnly
 }
 
 // readOnlyModeMessage explains a mode refusal for the named operation.

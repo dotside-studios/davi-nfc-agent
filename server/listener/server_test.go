@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -38,7 +39,15 @@ func newTestServer(t *testing.T) string {
 
 	// The driver feeds the client server directly, which is what the agent
 	// wires up.
-	deviceMgr.Scans().Connect(client.Broadcast)
+	deviceMgr.Scans().Connect(func(scan nfc.ScannedTag) {
+		// What the supervisor does with a raw scan, which is what
+		// stands between the driver and the clients in a real agent.
+		data := nfc.NFCData{Device: scan.Device, Err: scan.Err}
+		if scan.Tag != nil {
+			data.Card = nfc.NewCard(scan.Tag)
+		}
+		client.Broadcast(data)
+	})
 
 	ts := httptest.NewServer(u.Handler())
 

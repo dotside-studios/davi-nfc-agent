@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"log"
 
@@ -15,34 +14,21 @@ type tagSink interface {
 	BroadcastDeviceStatus(nfc.DeviceStatus)
 }
 
-// readerSelected reports whether a reader's scans are wanted. The pinned device
+// readerSelected reports whether a scan's source is wanted. The pinned device
 // is a filter rather than a lock: a scan from a reader the operator is not
 // asking for is dropped here, wherever it was read.
 //
-// Scans a device reports for itself do not come through here, so a phone is
-// unaffected by which reader is pinned.
+// Only readers are filtered. A device that reports its own scans, such as a
+// phone, is not one the agent chose to read from, so pinning a reader says
+// nothing about it.
 func (a *Agent) readerSelected(device string) bool {
 	pinned := a.CurrentPinnedDevice()
-	if pinned == "" || device == "" {
+	if pinned == "" || device == "" || device == pinned {
 		return true
 	}
-	return device == pinned
-}
 
-// pumpReader forwards what the hardware reader scans to the sink. It returns
-// once ctx is done.
-func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagSink) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data := <-reader.Data():
-			a.forwardScan(data, sink)
-		case status := <-reader.StatusUpdates():
-			a.fireReaderStatus(status)
-			sink.BroadcastDeviceStatus(status)
-		}
-	}
+	readers := a.supervisor.Load()
+	return readers == nil || !readers.Operates(device)
 }
 
 // forwardScan applies the agent's filters and hands the scan on.

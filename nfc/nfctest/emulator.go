@@ -785,10 +785,10 @@ func (c *EmulatedCard) Locked() *EmulatedCard {
 	return c
 }
 
-// EmulatedReader is an NFCReader wired to an emulated device, onto which cards
-// can be presented and removed as if tapped on a real reader.
+// EmulatedReader is a supervisor over one emulated device, onto which cards can
+// be presented and removed as if tapped on a real reader.
 type EmulatedReader struct {
-	*nfc.NFCReader
+	*nfc.Supervisor
 	dev   *nfc.MockDevice
 	mu    sync.Mutex
 	cards []*EmulatedCard
@@ -805,16 +805,37 @@ func NewEmulatedReader(tb TB, cards ...*EmulatedCard) *EmulatedReader {
 	r := &EmulatedReader{dev: dev, cards: append([]*EmulatedCard(nil), cards...)}
 	r.sync()
 
-	reader, err := nfc.NewNFCReader("mock:usb:001", mgr, 5*time.Second)
+	readers, err := nfc.NewSupervisor(mgr, 5*time.Second)
 	if err != nil {
 		tb.Fatalf("nfctest: create reader: %v", err)
 	}
-	r.NFCReader = reader
-	tb.Cleanup(reader.Close)
+	if err := readers.Start(); err != nil {
+		tb.Fatalf("nfctest: start reader: %v", err)
+	}
+	r.Supervisor = readers
+	tb.Cleanup(readers.Stop)
 
 	// Give the reader time to establish the initial connection.
 	time.Sleep(100 * time.Millisecond)
 	return r
+}
+
+// WriteMessage encodes a message onto the card on the reader. The emulator has
+// one, so nothing has to name it.
+func (r *EmulatedReader) WriteMessage(msg *nfc.NDEFMessage, opts nfc.WriteOptions) (*nfc.WriteResult, error) {
+	return r.Supervisor.WriteMessage("", msg, opts)
+}
+
+// Erase writes an empty message over whatever the card holds.
+func (r *EmulatedReader) Erase() (*nfc.WriteResult, error) {
+	msg := nfc.NewNDEFMessage()
+	msg.AddRecord((&nfc.NDEFEmpty{}).ToRecord())
+	return r.WriteMessage(msg, nfc.WriteOptions{Overwrite: true, Index: -1})
+}
+
+// Capabilities reports what the card on the reader supports.
+func (r *EmulatedReader) Capabilities() (*nfc.TagCapabilities, error) {
+	return r.Supervisor.Capabilities("", "")
 }
 
 // Present taps additional cards onto the reader.

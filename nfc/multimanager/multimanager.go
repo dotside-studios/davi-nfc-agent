@@ -25,7 +25,8 @@ type MultiManager struct {
 
 	// scans is every child's scans as one signal, so whatever consumes them
 	// subscribes here rather than to each manager it happens to know about.
-	scans event.Signal[nfc.NFCData]
+	// Raw, as the children report them: reading the tag is the supervisor's.
+	scans event.Signal[nfc.ScannedTag]
 
 	// listErrMu guards lastListErr, which holds the last ListDevices error
 	// reported per manager so a persistent one is logged once rather than on
@@ -235,13 +236,13 @@ func (mm *MultiManager) Close() {
 // TagOn reports the tag a device is holding, asking the child managers whose
 // devices hold their own. An empty deviceID asks each in turn for its most
 // recent scan, so a build with one such manager answers exactly as it would.
-func (mm *MultiManager) TagOn(deviceID string) (string, nfc.Tag, bool) {
+func (mm *MultiManager) TagOn(deviceID string) (string, string, bool) {
 	for _, holder := range mm.holders() {
-		if holding, tag, ok := holder.TagOn(deviceID); ok {
-			return holding, tag, true
+		if holding, uid, ok := holder.TagOn(deviceID); ok {
+			return holding, uid, true
 		}
 	}
-	return "", nil, false
+	return "", "", false
 }
 
 // DevicesHoldingTags lists every device holding a tag, across the managers that
@@ -255,12 +256,31 @@ func (mm *MultiManager) DevicesHoldingTags() []string {
 }
 
 // WriteTag asks the manager whose device is holding the tag to encode onto it.
-func (mm *MultiManager) WriteTag(deviceID, tagUID string, ndef []byte, lock bool, idempotencyKey string) error {
+func (mm *MultiManager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
 	holder, err := mm.holderFor(deviceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return holder.WriteTag(deviceID, tagUID, ndef, lock, idempotencyKey)
+	return holder.WriteTag(deviceID, tagUID, msg, lock, idempotencyKey)
+}
+
+// LockTag asks the manager whose device is holding the tag to make it
+// permanently read-only.
+func (mm *MultiManager) LockTag(deviceID, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.LockTag(deviceID, tagUID, idempotencyKey)
+}
+
+// TagCapabilities reports what the tag a device is holding supports.
+func (mm *MultiManager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapabilities, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.TagCapabilities(deviceID, tagUID)
 }
 
 // TransceiveTag asks the manager whose device is holding the tag to exchange
@@ -305,8 +325,8 @@ func (mm *MultiManager) holderFor(deviceID string) (nfc.TagHolder, error) {
 	return nil, fmt.Errorf("no device %s is holding a tag", deviceID)
 }
 
-// Scans carries what every child manager's devices report.
-func (mm *MultiManager) Scans() *event.Signal[nfc.NFCData] { return &mm.scans }
+// Scans carries what every child manager's devices report, as reported.
+func (mm *MultiManager) Scans() *event.Signal[nfc.ScannedTag] { return &mm.scans }
 
 // DeviceChanges returns a channel that signals when devices are registered or unregistered
 // in any of the child managers.

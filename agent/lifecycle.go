@@ -145,10 +145,10 @@ func (a *Agent) Start(devicePath string) error {
 	a.lifecycleMu.Lock()
 
 	if State(a.state.Load()) != StateStopped {
-		reader := a.reader.Load()
+		running := a.CurrentDevicePath()
 		a.lifecycleMu.Unlock()
-		if reader != nil && devicePath == reader.DevicePath() {
-			a.logger.Printf("NFC reader already running on device: %s", devicePath)
+		if devicePath != "" && devicePath == running {
+			a.logger.Printf("The readers are already running, on %s", devicePath)
 			return nil
 		}
 		return fmt.Errorf("agent: cannot start while %s", a.State())

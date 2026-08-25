@@ -46,8 +46,8 @@ const (
 	ModeWriteOnly
 )
 
-// NFCReader manages NFC device interactions and broadcasts tag data.
-type NFCReader struct {
+// deviceReader manages NFC device interactions and broadcasts tag data.
+type deviceReader struct {
 	deviceManager    *DeviceManager
 	dataChan         chan NFCData      // Broadcasts successfully read NFC data
 	statusChan       chan DeviceStatus // Broadcasts device status updates
@@ -78,7 +78,7 @@ type classicKeyConfigurable interface {
 // to try when reading or writing Classic cards that don't use default keys.
 // Keys are applied to each Classic tag the reader encounters, tried before the
 // built-in defaults. Pass nil to clear.
-func (r *NFCReader) SetClassicKeys(keys [][]byte) {
+func (r *deviceReader) SetClassicKeys(keys [][]byte) {
 	cp := make([][]byte, 0, len(keys))
 	for _, k := range keys {
 		cp = append(cp, append([]byte(nil), k...))
@@ -90,7 +90,7 @@ func (r *NFCReader) SetClassicKeys(keys [][]byte) {
 
 // applyClassicKeys injects any configured Classic keys into a tag that supports
 // them, just before it is wrapped in a Card for a read or write.
-func (r *NFCReader) applyClassicKeys(tag Tag) {
+func (r *deviceReader) applyClassicKeys(tag Tag) {
 	r.statusMux.RLock()
 	keys := r.classicKeys
 	r.statusMux.RUnlock()
@@ -102,14 +102,14 @@ func (r *NFCReader) applyClassicKeys(tag Tag) {
 	}
 }
 
-// NewNFCReader creates and initializes a new NFCReader instance with default ModeReadWrite.
-func NewNFCReader(deviceStr string, manager Manager, opTimeout time.Duration) (*NFCReader, error) {
-	return NewNFCReaderWithClock(deviceStr, manager, opTimeout, nil)
+// newDeviceReader creates and initializes a new deviceReader instance with default ModeReadWrite.
+func newDeviceReader(deviceStr string, manager Manager, opTimeout time.Duration) (*deviceReader, error) {
+	return newDeviceReaderWithClock(deviceStr, manager, opTimeout, nil)
 }
 
-// NewNFCReaderWithClock creates and initializes a new NFCReader with a custom clock.
+// newDeviceReaderWithClock creates and initializes a new deviceReader with a custom clock.
 // If clock is nil, uses RealClock.
-func NewNFCReaderWithClock(deviceStr string, manager Manager, opTimeout time.Duration, clock Clock) (*NFCReader, error) {
+func newDeviceReaderWithClock(deviceStr string, manager Manager, opTimeout time.Duration, clock Clock) (*deviceReader, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("NFCManager cannot be nil")
 	}
@@ -122,7 +122,7 @@ func NewNFCReaderWithClock(deviceStr string, manager Manager, opTimeout time.Dur
 
 	deviceManager := NewDeviceManager(manager, deviceStr, clock)
 
-	reader := &NFCReader{
+	reader := &deviceReader{
 		deviceManager:    deviceManager,
 		dataChan:         make(chan NFCData, 1),      // Buffered to prevent blocking on send if no listener
 		statusChan:       make(chan DeviceStatus, 1), // Buffered for status updates
@@ -142,7 +142,7 @@ func NewNFCReaderWithClock(deviceStr string, manager Manager, opTimeout time.Dur
 }
 
 // SetMode changes the reader's access mode at runtime.
-func (r *NFCReader) SetMode(mode ReaderMode) {
+func (r *deviceReader) SetMode(mode ReaderMode) {
 	r.statusMux.Lock()
 	defer r.statusMux.Unlock()
 	r.mode = mode
@@ -150,7 +150,7 @@ func (r *NFCReader) SetMode(mode ReaderMode) {
 }
 
 // GetMode returns the current reader mode.
-func (r *NFCReader) GetMode() ReaderMode {
+func (r *deviceReader) GetMode() ReaderMode {
 	r.statusMux.RLock()
 	defer r.statusMux.RUnlock()
 	return r.mode
@@ -159,7 +159,7 @@ func (r *NFCReader) GetMode() ReaderMode {
 // SetFeedback turns reader feedback on or off. With it on, a reader that has
 // an indicator LED or a buzzer flashes and beeps when a tag is read or
 // written. Readers with neither are unaffected.
-func (r *NFCReader) SetFeedback(on bool) {
+func (r *deviceReader) SetFeedback(on bool) {
 	if r.feedbackOn.Swap(on) == on {
 		return
 	}
@@ -171,7 +171,7 @@ func (r *NFCReader) SetFeedback(on bool) {
 }
 
 // FeedbackEnabled reports whether the reader signals what it does.
-func (r *NFCReader) FeedbackEnabled() bool {
+func (r *deviceReader) FeedbackEnabled() bool {
 	return r.feedbackOn.Load()
 }
 
@@ -180,7 +180,7 @@ func (r *NFCReader) FeedbackEnabled() bool {
 // It returns immediately, because the reader answers only once it has finished
 // flashing and the operation being signalled is already done. One signal plays
 // at a time; a card presented during one is read as usual, just not announced.
-func (r *NFCReader) signal(s Signal) {
+func (r *deviceReader) signal(s Signal) {
 	if !r.feedbackOn.Load() {
 		return
 	}
@@ -203,7 +203,7 @@ func (r *NFCReader) signal(s Signal) {
 // reportSignalError logs a failed signal once for as long as the reason holds.
 // The reasons a signal fails, such as a stack that will not carry reader
 // commands, persist across every scan that follows.
-func (r *NFCReader) reportSignalError(err error) {
+func (r *deviceReader) reportSignalError(err error) {
 	var message string
 	if err != nil && !IsNotSupportedError(err) {
 		message = err.Error()
@@ -220,16 +220,16 @@ func (r *NFCReader) reportSignalError(err error) {
 }
 
 // Close releases resources. Does not stop the worker, use Stop() for that.
-func (r *NFCReader) Close() {
-	log.Println("NFCReader Close called (resource cleanup).")
+func (r *deviceReader) Close() {
+	log.Println("deviceReader Close called (resource cleanup).")
 	r.deviceManager.Close()
 	// Note: Channels dataChan, statusChan are not closed here as they might be read by other goroutines.
-	// They are managed by the lifecycle of the NFCReader user.
+	// They are managed by the lifecycle of the deviceReader user.
 }
 
-// Stop gracefully shuts down the NFCReader worker and waits for it to complete.
-func (r *NFCReader) Stop() {
-	log.Println("Stopping NFCReader...")
+// Stop gracefully shuts down the deviceReader worker and waits for it to complete.
+func (r *deviceReader) Stop() {
+	log.Println("Stopping deviceReader...")
 	select {
 	case <-r.stopChan:
 		log.Println("Stop channel already closed or closing.")
@@ -240,29 +240,29 @@ func (r *NFCReader) Stop() {
 	}
 	// Wait for the worker to finish
 	r.workerWg.Wait()
-	log.Println("NFCReader worker stopped successfully.")
+	log.Println("deviceReader worker stopped successfully.")
 	// Worker's defer will handle device closing and final status.
 }
 
 // Start begins the NFC reading process in a separate goroutine.
-func (r *NFCReader) Start() {
-	log.Println("NFCReader Start called, starting worker.")
+func (r *deviceReader) Start() {
+	log.Println("deviceReader Start called, starting worker.")
 	r.workerWg.Add(1)
 	go r.worker()
 }
 
 // Data returns a channel that provides NFCData as tags are read.
-func (r *NFCReader) Data() <-chan NFCData {
+func (r *deviceReader) Data() <-chan NFCData {
 	return r.dataChan
 }
 
 // StatusUpdates returns a channel that provides DeviceStatus updates.
-func (r *NFCReader) StatusUpdates() <-chan DeviceStatus {
+func (r *deviceReader) StatusUpdates() <-chan DeviceStatus {
 	return r.statusChan
 }
 
 // GetDeviceStatus returns the current device status by querying live state.
-func (r *NFCReader) GetDeviceStatus() DeviceStatus {
+func (r *deviceReader) GetDeviceStatus() DeviceStatus {
 	cardPres := r.readCardPresent()
 	connected := r.deviceManager.HasDevice()
 	var message string
@@ -288,14 +288,14 @@ func (r *NFCReader) GetDeviceStatus() DeviceStatus {
 }
 
 // readCardPresent safely reads the cardPresent flag.
-func (r *NFCReader) readCardPresent() bool {
+func (r *deviceReader) readCardPresent() bool {
 	r.statusMux.RLock()
 	defer r.statusMux.RUnlock()
 	return r.cardPresent
 }
 
 // handleDeviceEvent processes device lifecycle events from DeviceManager.
-func (r *NFCReader) handleDeviceEvent(event DeviceEvent) {
+func (r *deviceReader) handleDeviceEvent(event DeviceEvent) {
 	switch event.Type {
 	case DeviceConnected:
 		log.Printf("Device event: Connected - %s", event.Message)
@@ -332,7 +332,7 @@ func (r *NFCReader) handleDeviceEvent(event DeviceEvent) {
 }
 
 // handleCardCheck updates card presence based on cache status.
-func (r *NFCReader) handleCardCheck() {
+func (r *deviceReader) handleCardCheck() {
 	currentCacheCardPresent := r.cache.IsCardPresent()
 	cardPres := r.readCardPresent()
 	if cardPres != currentCacheCardPresent {
@@ -349,7 +349,7 @@ func (r *NFCReader) handleCardCheck() {
 // handleDeviceErrors processes errors from getTags and determines recovery action.
 // Returns true if the error was handled and the caller should continue the loop.
 // Retry logic is now managed internally by DeviceManager.
-func (r *NFCReader) handleDeviceErrors(err error) bool {
+func (r *deviceReader) handleDeviceErrors(err error) bool {
 	// Clear write flag on error
 	r.statusMux.Lock()
 	r.isWriting = false
@@ -410,7 +410,7 @@ func (r *NFCReader) handleDeviceErrors(err error) bool {
 }
 
 // handleTagPolling processes detected tags and sends data to the channel.
-func (r *NFCReader) handleTagPolling(tags []Tag) {
+func (r *deviceReader) handleTagPolling(tags []Tag) {
 	// Check read permission
 	r.statusMux.RLock()
 	mode := r.mode
@@ -464,9 +464,9 @@ func (r *NFCReader) handleTagPolling(tags []Tag) {
 	}
 }
 
-func (r *NFCReader) worker() {
-	log.Println("NFCReader worker started.")
-	defer log.Println("NFCReader worker stopped.")
+func (r *deviceReader) worker() {
+	log.Println("deviceReader worker started.")
+	defer log.Println("deviceReader worker stopped.")
 
 	r.cardCheckTicker = r.clock.NewTicker(CardCheckTickerInterval)
 	pollTicker := r.clock.NewTicker(DefaultPollingInterval)
@@ -499,7 +499,7 @@ func (r *NFCReader) worker() {
 
 // pollOnce performs a single polling iteration for device connection and tag reading.
 // It runs the actual polling in a goroutine with a timeout to prevent blocking shutdown.
-func (r *NFCReader) pollOnce() {
+func (r *deviceReader) pollOnce() {
 	// Check if we're stopping before starting any work
 	select {
 	case <-r.stopChan:
@@ -527,7 +527,7 @@ func (r *NFCReader) pollOnce() {
 }
 
 // doPoll performs the actual polling work.
-func (r *NFCReader) doPoll() {
+func (r *deviceReader) doPoll() {
 	hasDev := r.deviceManager.HasDevice()
 	inCool := r.deviceManager.InCooldown()
 
@@ -588,7 +588,7 @@ func (r *NFCReader) doPoll() {
 // broadcastDeviceStatus broadcasts a device status update.
 // It queries the current live state via GetDeviceStatus().
 // An optional custom message can be provided to override the default message.
-func (r *NFCReader) broadcastDeviceStatus(customMessage ...string) {
+func (r *deviceReader) broadcastDeviceStatus(customMessage ...string) {
 	status := r.GetDeviceStatus()
 
 	// Allow override for specific messages like "Reconnecting...", "Failed to connect", etc.
@@ -604,7 +604,7 @@ func (r *NFCReader) broadcastDeviceStatus(customMessage ...string) {
 }
 
 // LogDeviceInfo logs information about the connected NFC device.
-func (r *NFCReader) LogDeviceInfo() {
+func (r *deviceReader) LogDeviceInfo() {
 	dev := r.deviceManager.Device()
 	if dev == nil {
 		return
@@ -616,11 +616,11 @@ func (r *NFCReader) LogDeviceInfo() {
 }
 
 // GetLastScannedData retrieves the last scanned UID from the cache.
-func (r *NFCReader) GetLastScannedData() string {
+func (r *deviceReader) GetLastScannedData() string {
 	return r.cache.GetLastScanned()
 }
 
-func (r *NFCReader) setCardPresent(present bool) {
+func (r *deviceReader) setCardPresent(present bool) {
 	r.statusMux.Lock()
 	if r.cardPresent == present { // Avoid redundant updates
 		r.statusMux.Unlock()
@@ -719,7 +719,7 @@ type LockResult struct {
 }
 
 // WriteCardData attempts to write data to a detected NFC card using default options (overwrite mode).
-func (r *NFCReader) WriteCardData(text string) error {
+func (r *deviceReader) WriteCardData(text string) error {
 	msg := &NDEFMessageBuilder{
 		Records: []NDEFRecordBuilder{
 			&NDEFText{Content: text, Language: "en"},
@@ -735,7 +735,7 @@ func (r *NFCReader) WriteCardData(text string) error {
 // EraseCard overwrites the presented tag with an empty NDEF message, making it
 // read as blank. This is reversible: the tag can be rewritten afterward. The
 // write is verified like any other write.
-func (r *NFCReader) EraseCard() (*WriteResult, error) {
+func (r *deviceReader) EraseCard() (*WriteResult, error) {
 	msg := NewNDEFMessage()
 	msg.AddRecord((&NDEFEmpty{}).ToRecord())
 	return r.WriteMessageWithResult(msg, WriteOptions{
@@ -746,7 +746,7 @@ func (r *NFCReader) EraseCard() (*WriteResult, error) {
 
 // prepareCardForWrite performs common validation and card retrieval for write operations.
 // It checks permissions, device availability, retrieves and validates the tag, and returns the Card.
-func (r *NFCReader) prepareCardForWrite(expectUID string) (*Card, error) {
+func (r *deviceReader) prepareCardForWrite(expectUID string) (*Card, error) {
 	// Check write permission
 	r.statusMux.RLock()
 	mode := r.mode
@@ -1014,7 +1014,7 @@ func newWriteResult(card *Card, bytesWritten int, verified bool, attempts int, l
 // options for record manipulation. It performs a pre-flight capacity check,
 // retries on transient failures, and (unless disabled) verifies the write by
 // reading the data back. Use WriteMessageWithResult to obtain the WriteResult.
-func (r *NFCReader) WriteMessageWithOptions(msg *NDEFMessage, opts WriteOptions) error {
+func (r *deviceReader) WriteMessageWithOptions(msg *NDEFMessage, opts WriteOptions) error {
 	_, err := r.WriteMessageWithResult(msg, opts)
 	return err
 }
@@ -1022,7 +1022,7 @@ func (r *NFCReader) WriteMessageWithOptions(msg *NDEFMessage, opts WriteOptions)
 // WriteMessageWithResult is like WriteMessageWithOptions but returns a
 // WriteResult describing the outcome (verification status, attempts, and bytes
 // written) so callers can surface real write confidence to the user.
-func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
+func (r *deviceReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
 	var result *WriteResult
 	err := r.withTagOperation(func() error {
 		card, err := r.prepareCardForWrite(opts.ExpectUID)
@@ -1063,14 +1063,14 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 // It locks whatever tag is present. Prefer LockCardExpecting, which refuses
 // unless the tag present is the one you meant. For an operation that cannot
 // be undone, "whatever is on the reader now" is rarely what the caller means.
-func (r *NFCReader) LockCard() (*LockResult, error) {
+func (r *deviceReader) LockCard() (*LockResult, error) {
 	return r.LockCardExpecting("")
 }
 
 // LockCardExpecting locks the presented tag only if it carries expectUID,
 // refusing with ErrTagUIDMismatch otherwise. An empty expectUID locks whatever
 // is present, as LockCard does.
-func (r *NFCReader) LockCardExpecting(expectUID string) (*LockResult, error) {
+func (r *deviceReader) LockCardExpecting(expectUID string) (*LockResult, error) {
 	var result *LockResult
 	err := r.withTagOperation(func() error {
 		card, err := r.prepareCardForWrite(expectUID)
@@ -1119,7 +1119,7 @@ func lockCard(card *Card) (*LockResult, error) {
 }
 
 // withTagOperation performs a protected tag operation with timeout.
-func (r *NFCReader) withTagOperation(operation func() error) error {
+func (r *deviceReader) withTagOperation(operation func() error) error {
 	r.operationMutex.Lock()
 	defer r.operationMutex.Unlock()
 
@@ -1142,7 +1142,7 @@ func (r *NFCReader) withTagOperation(operation func() error) error {
 // present, or when the tag is not the one expectUID names. Callers run it
 // inside withTagOperation, so the tag it returns cannot be swapped underneath
 // the operation that follows.
-func (r *NFCReader) soleTag(expectUID string) (Tag, error) {
+func (r *deviceReader) soleTag(expectUID string) (Tag, error) {
 	if !r.deviceManager.HasDevice() {
 		return nil, fmt.Errorf("no NFC device connected")
 	}
@@ -1171,7 +1171,7 @@ func (r *NFCReader) soleTag(expectUID string) (Tag, error) {
 // read-only state. It requires exactly one tag to be present, performs no
 // write, and works regardless of reader mode (including read-only). This lets
 // clients query what a tag supports before attempting a write or lock.
-func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
+func (r *deviceReader) GetCapabilities() (*TagCapabilities, error) {
 	return r.GetCapabilitiesExpecting("")
 }
 
@@ -1179,7 +1179,7 @@ func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
 // carries expectUID, so a client is never told about a different tag than the
 // one it asked about, and then writes to it on that answer. An empty
 // expectUID reports whatever is present, as GetCapabilities does.
-func (r *NFCReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities, error) {
+func (r *deviceReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities, error) {
 	var caps TagCapabilities
 	err := r.withTagOperation(func() error {
 		tag, err := r.soleTag(expectUID)
@@ -1202,14 +1202,14 @@ func (r *NFCReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities
 // is neither a read nor a write as far as this layer can tell, since the same
 // interface carries a SELECT and a write to a config page, so the policy call
 // belongs where the request enters, not here.
-func (r *NFCReader) Transceive(data []byte) ([]byte, error) {
+func (r *deviceReader) Transceive(data []byte) ([]byte, error) {
 	return r.TransceiveExpecting(data, "")
 }
 
 // TransceiveExpecting exchanges raw bytes only with the tag expectUID names,
 // refusing otherwise. A raw exchange can carry a write, so it is held to the
 // same guard as one. An empty expectUID exchanges with whatever is present.
-func (r *NFCReader) TransceiveExpecting(data []byte, expectUID string) ([]byte, error) {
+func (r *deviceReader) TransceiveExpecting(data []byte, expectUID string) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("no command bytes to send")
 	}
@@ -1244,7 +1244,7 @@ func (r *NFCReader) TransceiveExpecting(data []byte, expectUID string) ([]byte, 
 }
 
 // GetTags retrieves available tags from the connected NFC device.
-func (r *NFCReader) GetTags() ([]Tag, error) {
+func (r *deviceReader) GetTags() ([]Tag, error) {
 	dev := r.deviceManager.Device()
 	if dev == nil {
 		return nil, fmt.Errorf("getTags: no device connected or device is nil")
@@ -1257,6 +1257,6 @@ func (r *NFCReader) GetTags() ([]Tag, error) {
 	return tags, nil
 }
 
-func (r *NFCReader) DevicePath() string {
+func (r *deviceReader) DevicePath() string {
 	return r.deviceManager.DevicePath()
 }

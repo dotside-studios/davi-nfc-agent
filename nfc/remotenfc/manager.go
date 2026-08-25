@@ -20,14 +20,14 @@ import (
 // It owns both the device registry and the sessions behind it, so a
 // registration and its connection cannot outlive one another.
 type Manager struct {
-	devices           map[string]*Device // deviceID -> device
-	mu                sync.RWMutex       // Protects devices and the policy fields
-	cleanupTicker     *time.Ticker       // Periodic sweep for silent devices
-	stopped           chan struct{}      // Closed by Close, ending the manager's goroutines
-	inactivityTimeout time.Duration      // Device timeout duration
-	closed            bool               // Whether Close() has been called
-	dataChan          chan nfc.NFCData   // Scans, drained onto scans
-	deviceChangeChan  chan struct{}      // Signals registration and unregistration
+	devices           map[string]*Device  // deviceID -> device
+	mu                sync.RWMutex        // Protects devices and the policy fields
+	cleanupTicker     *time.Ticker        // Periodic sweep for silent devices
+	stopped           chan struct{}       // Closed by Close, ending the manager's goroutines
+	inactivityTimeout time.Duration       // Device timeout duration
+	closed            bool                // Whether Close() has been called
+	dataChan          chan nfc.ScannedTag // Scans, drained onto scans
+	deviceChangeChan  chan struct{}       // Signals registration and unregistration
 
 	// Policy supplied by the agent through Handler.
 	publicKeyPin         func() string
@@ -51,7 +51,7 @@ type Manager struct {
 	// scans is what subscribers connect to. The channel in front of it keeps a
 	// device's read loop off the subscribers: a scan is buffered and dropped
 	// here rather than at the socket.
-	scans event.Signal[nfc.NFCData]
+	scans event.Signal[nfc.ScannedTag]
 }
 
 // NewManager creates a new smartphone manager.
@@ -64,8 +64,8 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 		devices:           make(map[string]*Device),
 		inactivityTimeout: inactivityTimeout,
 		stopped:           make(chan struct{}),
-		dataChan:          make(chan nfc.NFCData, 10), // Buffered to prevent blocking
-		deviceChangeChan:  make(chan struct{}, 1),     // Buffered to prevent blocking
+		dataChan:          make(chan nfc.ScannedTag, 10), // Buffered to prevent blocking
+		deviceChangeChan:  make(chan struct{}, 1),        // Buffered to prevent blocking
 		sessions:          make(map[string]*wsconn.SafeConn),
 		sessionConn:       make(map[*wsconn.SafeConn]string),
 		pending:           make(map[string]pendingRequest),
@@ -202,10 +202,8 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	// immediate write must find the device already holding the tag.
 	m.setActiveTag(deviceID, tag.UID(), tag)
 
-	// Create Card and broadcast via data channel
-	card := nfc.NewCard(tag)
 	select {
-	case m.dataChan <- nfc.NFCData{Device: deviceID, Card: card, Err: nil}:
+	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: tag}:
 	default:
 		log.Printf("[smartphone] Data channel full, dropping tag data for device %s", deviceID)
 	}
@@ -216,8 +214,9 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	return nil
 }
 
-// Scans carries every tag the registered devices report.
-func (m *Manager) Scans() *event.Signal[nfc.NFCData] { return &m.scans }
+// Scans carries every tag the registered devices report, as reported. What is
+// read off the tag is the supervisor's, not this driver's.
+func (m *Manager) Scans() *event.Signal[nfc.ScannedTag] { return &m.scans }
 
 // publishScans hands what the devices reported to the subscribers. It runs on a
 // goroutine of its own so a slow subscriber holds up neither the socket a scan
@@ -245,7 +244,7 @@ func (m *Manager) SendTagRemoved(deviceID string, data TagRemovedData) error {
 
 	// Broadcast removal via data channel (Card: nil signals removal)
 	select {
-	case m.dataChan <- nfc.NFCData{Device: deviceID, Card: nil, Err: nil}:
+	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: nil}:
 		log.Printf("[smartphone] Tag removed: device=%s, UID=%s", deviceID, data.UID)
 	default:
 		log.Printf("[smartphone] Data channel full, dropping tag removal for device %s", deviceID)

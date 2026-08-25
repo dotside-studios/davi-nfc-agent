@@ -23,7 +23,7 @@ func TestConcurrency_InterleavedOperations(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			for j := 0; j < 15; j++ {
-				_, _ = reader.WriteMessageWithResult(
+				_, _ = reader.WriteMessage(
 					textMessage(fmt.Sprintf("w%d-%d", n, j)),
 					nfc.WriteOptions{Overwrite: true, Index: -1})
 			}
@@ -34,13 +34,13 @@ func TestConcurrency_InterleavedOperations(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 15; j++ {
-				_, _ = reader.GetCapabilities()
+				_, _ = reader.Capabilities()
 			}
 		}()
 	}
 	wg.Wait()
 
-	res, err := reader.WriteMessageWithResult(textMessage("final"), nfc.WriteOptions{Overwrite: true, Index: -1})
+	res, err := reader.WriteMessage(textMessage("final"), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("final write after concurrency: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestConcurrency_TapChurn(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 40; j++ {
-				_, _ = reader.WriteMessageWithResult(textMessage("c"), nfc.WriteOptions{Overwrite: true, Index: -1})
+				_, _ = reader.WriteMessage(textMessage("c"), nfc.WriteOptions{Overwrite: true, Index: -1})
 			}
 		}()
 	}

@@ -133,7 +133,7 @@ if fb, ok := device.(nfc.FeedbackDevice); ok {
 }
 ```
 
-`NFCReader.SetFeedback(true)` has the reader signal its own reads, writes and
+`Supervisor.SetFeedback(true)` has the readers signal their own reads, writes and
 locks. The signal plays in the background and a reader that cannot show it
 reports a not-supported error, so nothing about the operation changes.
 

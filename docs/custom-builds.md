@@ -357,13 +357,13 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `agent` | The agent, and the plugins the shipped build registers: the listener, pairing and the certificate |
 | `agent/console` | The control center: the privileged API, the embedded frontend, and the adapter onto the agent |
 | `agent/tray` | The system tray |
-| `nfc` | Readers, tag drivers, NDEF encoding and decoding |
+| `nfc` | The reader supervisor, tag drivers, NDEF encoding and decoding |
 | `nfc/pcsc` | The PC/SC hardware backend |
 | `nfc/remotenfc` | Phones and WebNFC browsers: the device protocol, its WebSocket endpoint, the sessions and the tags behind them |
 | `nfc/multimanager` | Several backends behind one `nfc.Manager` |
 | `server` | The bridge between tag sources and clients, and the device credential check |
 | `server/clientserver` | The client WebSocket endpoint |
-| `server/tagrouter` | Picks the reader or a device for each client request |
+| `server/tagrouter` | Picks the reader or the device holding the tag a client request names |
 | `server/listener` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
 | `server/wsconn` | Write-safe WebSocket wrapper shared by the servers and the device driver |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |
@@ -560,10 +560,12 @@ func main() {
 A subscriber observes rather than intercepts. The scan reaches every connected
 client regardless, and what the handler returns changes nothing.
 
-## Driving a reader directly
+## Driving the readers directly
 
-A program that needs no WebSocket API at all can skip the agent and use a reader
-on its own.
+A program that needs no WebSocket API at all can skip the agent and operate the
+readers itself. `nfc.Supervisor` opens every reader the manager offers, so a
+second one plugged in is picked up rather than ignored, and each scan names the
+reader it was read on.
 
 ```go
 package main
@@ -577,35 +579,43 @@ import (
 )
 
 func main() {
-	manager := pcsc.NewManager()
-
-	devices, err := manager.ListDevices()
-	if err != nil || len(devices) == 0 {
-		log.Fatalf("no reader: %v", err)
-	}
-
-	reader, err := nfc.NewNFCReader(devices[0], manager, 5*time.Second)
+	readers, err := nfc.NewSupervisor(pcsc.NewManager(), 5*time.Second)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer reader.Close()
+	defer readers.Stop()
 
-	// Read-only also puts the write path out of reach, including LockCard,
-	// which cannot be undone.
-	reader.SetMode(nfc.ModeReadOnly)
-	reader.Start()
+	// Read-only also puts the write path out of reach, including Lock, which
+	// cannot be undone. It applies to every reader, including one opened later.
+	readers.SetMode(nfc.ModeReadOnly)
 
-	for data := range reader.Data() {
+	scans, stop := readers.Scans().Channel(16)
+	defer stop()
+
+	if err := readers.Start(); err != nil {
+		log.Fatal(err)
+	}
+
+	for data := range scans {
 		if data.Err != nil {
-			log.Printf("scan error: %v", data.Err)
+			log.Printf("scan error on %s: %v", data.Device, data.Err)
 			continue
 		}
 		if data.Card != nil {
-			log.Printf("scanned %s (%s)", data.Card.UID, data.Card.Type)
+			log.Printf("%s scanned %s (%s)", data.Device, data.Card.UID, data.Card.Type)
 		}
 	}
 }
 ```
+
+An operation names the reader it applies to, which `data.Device` carries:
+
+```go
+result, err := readers.WriteMessage(data.Device, msg, nfc.WriteOptions{ExpectUID: data.Card.UID})
+```
+
+Naming no reader means the only one there is, and is refused once there is more
+than one rather than picking for you.
 
 Both loops are testable without hardware: `nfc` exports `NewMockManager` and
 `NewMockTag`, and `nfc/nfctest` provides an emulator. Construct cards with

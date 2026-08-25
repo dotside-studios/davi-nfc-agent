@@ -107,8 +107,8 @@ func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
 	a.readerMode = mode
 	a.settingsMu.Unlock()
 
-	if reader := a.reader.Load(); reader != nil {
-		reader.SetMode(mode)
+	if readers := a.supervisor.Load(); readers != nil {
+		readers.SetMode(mode)
 	}
 	a.firePreferencesChanged()
 }
@@ -116,8 +116,8 @@ func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
 // CurrentReaderMode is the mode the reader is in, or the one the next reader
 // will start in while there is none.
 func (a *Agent) CurrentReaderMode() nfc.ReaderMode {
-	if reader := a.reader.Load(); reader != nil {
-		return reader.GetMode()
+	if readers := a.supervisor.Load(); readers != nil {
+		return readers.Mode()
 	}
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
@@ -176,12 +176,12 @@ func (a *Agent) SetDevicePort(port int) {
 	a.firePreferencesChanged()
 }
 
-// adoptReaderSettings hands a freshly built reader the preferences the agent
-// holds. Start creates the reader long after they were set, so without this a
-// read-only agent comes back from every restart able to write.
+// adoptReaderSettings hands the readers the preferences the agent holds. Start
+// opens them long after those were set, so without this a read-only agent comes
+// back from every restart able to write.
 func (a *Agent) adoptReaderSettings() {
-	reader := a.reader.Load()
-	if reader == nil {
+	readers := a.supervisor.Load()
+	if readers == nil {
 		return
 	}
 
@@ -189,8 +189,8 @@ func (a *Agent) adoptReaderSettings() {
 	mode, feedback := a.readerMode, a.readerFeedback
 	a.settingsMu.RUnlock()
 
-	reader.SetMode(mode)
-	reader.SetFeedback(feedback)
+	readers.SetMode(mode)
+	readers.SetFeedback(feedback)
 }
 
 // normalizeCardTypes drops blanks and duplicates and sorts what is left, so two

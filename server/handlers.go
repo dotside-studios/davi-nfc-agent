@@ -200,31 +200,6 @@ func uriWithScheme(scheme, content string) (nfc.NDEFRecordBuilder, error) {
 	return &nfc.NDEFURI{Content: content}, nil
 }
 
-// HandleWriteRequest processes a write request and performs the NFC write operation.
-// This always performs a complete overwrite of the NDEF message on the card.
-// It returns a WriteResult describing the verified outcome of the write.
-func HandleWriteRequest(reader *nfc.NFCReader, writeReq WriteRequest) (*nfc.WriteResult, error) {
-	// Build complete NDEF message
-	ndefMsg, err := BuildNDEFMessage(writeReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build NDEF message: %w", err)
-	}
-
-	// Write with overwrite option (complete replacement)
-	result, err := reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
-		Overwrite: true,
-		Index:     -1,
-		Lock:      writeReq.Lock,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("write failed: %w", err)
-	}
-
-	log.Printf("WriteRequest: Successfully wrote NDEF message to card (verified=%v, attempts=%d)",
-		result.Verified, result.Attempts)
-	return result, nil
-}
-
 // BuildNDEFInput converts a write request into the record form sent to remote
 // devices. Smart poster titles have no representation here, which is why the
 // encoded bytes travel alongside and take precedence.

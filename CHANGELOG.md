@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The agent operates every reader through `nfc.Supervisor` rather than opening
+  one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
+  Classic keys are set on the supervisor, which applies them to a reader opened
+  later too. `tagrouter` routes to the reader holding the tag rather than to
+  the reader
+- `nfc.Supervisor` operates every reader a manager offers rather than one chosen
+  at startup. It opens each, polls it, and publishes what they scan on one
+  signal, with each scan naming the reader it came from. A reader plugged in
+  while it runs is picked up and one unplugged is dropped. Operations name the
+  reader they apply to, so two readers do not queue behind each other, and mode,
+  feedback and Classic keys are the supervisor's policy so a reader opened later
+  runs under it too
+
 - The pinned device filters rather than locks. A scan from a reader the operator
   is not asking for is dropped, wherever it was read, so a preference set from
   the console takes effect without waiting for something to restart the reader.
@@ -23,9 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   produced it. Filled by the reader and by the phone driver; the wire is
   unchanged
 - A manager reports what its devices scan and answers for the tags they hold:
-  `nfc.TagReporter` carries an `event.Signal` of scans, `nfc.TagHolder` is what
-  the tag router asks, and `multimanager` implements both by fanning its
-  children in. The agent subscribes to the manager it was given
+  `nfc.TagReporter` carries an `event.Signal` of `nfc.ScannedTag`, the tag as
+  the device reported it, `nfc.TagHolder` is what the tag router asks, and
+  `multimanager` implements both by fanning its children in. What is read off a
+  tag is the supervisor's, so every scan is processed in one place however it
+  arrived, and the agent subscribes to the supervisor alone
 - Plugin API: `agent.Plugin` is one method, `Activate(agent.AgentContext) error`,
   run before the agent starts. A plugin registers a `Component` with `ctx.Use`, a
   route with `ctx.Mount` and a tray entry with `ctx.Systray`. Plugins are Go
@@ -77,6 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- One interface answers for a tag wherever it is. `nfc.TagHolder` names the tag
+  a device holds and performs the write, lock, raw exchange and capability
+  report on it, and `nfc.Supervisor` implements it for the readers the agent
+  opened. The tag router picks a source and calls it, having carried a branch
+  per operation before
+- `nfc.NFCReader` is internal. One reader covers one device, which is machinery
+  behind `nfc.Supervisor` rather than something to hold: a program driving
+  readers itself builds a supervisor, and `nfctest.EmulatedReader` is one over
+  an emulated device
 - `Config.RemoteOps` and `Config.RemoteScans` are gone, with `Options` matching.
   A driver of paired devices is registered with the manager, which is where the
   agent now asks. `server.DeviceOps` is `nfc.TagHolder`

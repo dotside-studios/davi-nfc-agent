@@ -1,9 +1,9 @@
 # Davi NFC Agent
 
-A lightweight NFC card reader agent with WebSocket broadcasting. It reads and
-writes NDEF-formatted data from NFC tags and broadcasts it to connected clients
-in real time, and provides the NFC functionality used by the
-[Davi](https://davi.social) platform.
+An NFC card reader agent with WebSocket broadcasting. It reads and writes
+NDEF-formatted data from NFC tags and broadcasts it to connected clients in real
+time, and provides the NFC functionality used by the [Davi](https://davi.social)
+platform.
 
 ## Features
 
@@ -67,11 +67,11 @@ Choose **Open Control Center** from the tray to manage the agent in a browser:
 read its log, inspect and write tags, revoke a paired device, edit the origin
 allowlist, and change the agent's settings.
 
-The console is privileged — it can rotate the API secret, revoke a device's
-credential and lock a tag irreversibly — so every request to it must clear three
+The console is privileged: it can rotate the API secret, revoke a device's
+credential and lock a tag irreversibly. Every request to it must clear three
 checks. It has to come from loopback, from a page the agent itself served, and
-carry a session opened through that tray entry. There is no other way in, which
-is deliberate. See [Control Center](docs/control-center.md) for the detail.
+carry a session opened through that tray entry. There is no other way in. See
+[Control Center](docs/control-center.md) for the detail.
 
 To leave it out of the binary entirely, build with `-tags nowebui`. Neither the
 privileged API nor the console's frontend is compiled in, and `/control` serves
@@ -83,15 +83,15 @@ go build -tags nowebui ./cmd/davi-nfc-agent
 
 ### Reader Feedback
 
-**Flash and Beep on Scan** in the tray menu has the reader announce its own
-work: one green flash with a short beep when a tag is read or written, two red
-flashes when a write or a lock fails. It is off by default, and turning it on
-lasts as long as the agent runs.
+**Flash and Beep on Scan** in the tray menu makes the reader signal each
+operation: one green flash with a short beep when a tag is read or written, two
+red flashes when a write or a lock fails. It is off by default, and turning it
+on lasts as long as the agent runs.
 
-The commands come from the ACS ACR122U instruction set, so ACR122 readers
-answer them and other readers report the feature as unsupported and are left
-alone. They are sent with `SCardControl`, falling back to a pseudo-APDU over
-the card connection where the PC/SC stack will not carry escape commands. See
+The commands come from the ACS ACR122U instruction set, so ACR122 readers answer
+them; other readers report the feature as unsupported and are skipped. They are
+sent with `SCardControl`, falling back to a pseudo-APDU over the card connection
+where the PC/SC stack will not carry escape commands. See
 [Installation](docs/installation.md#reader-led-and-buzzer) for the two stacks
 that need configuring.
 
@@ -114,9 +114,9 @@ that need configuring.
 ### Connecting from a web console
 
 The agent only accepts WebSocket upgrades whose `Origin` matches its own
-host:port — otherwise any site the operator visits could drive the reader,
+host:port. Otherwise any site the operator visits could drive the reader,
 including permanently locking cards. A console served from anywhere else, which
-is every hosted one, must be allowed.
+includes every hosted one, must be allowed.
 
 **The Davi consoles are allowed out of the box**, so nothing needs configuring
 for them. The allowlist lives in `allowed-origins.json` in the config directory
@@ -124,8 +124,8 @@ and is managed from the tray under **Allowed Origins**, which lists what is
 permitted and lets you revoke any of it.
 
 **When a page is refused, the tray offers it.** The blocked origin appears as
-*"Allow example.com"* — one click admits it and persists the choice, no restart.
-That is the intended way to add a console.
+*"Allow example.com"*, and one click admits it and persists the choice, with no
+restart. That is the intended way to add a console.
 
 To preload one instead, at first run or for an unattended install:
 
@@ -140,12 +140,12 @@ Entries are matched on host:port. Full URLs are accepted and reduced, so
 
 **Allow any origin (this session)** in the tray turns the check off until the
 agent restarts. It is deliberately never persisted, and it is not a way to skip
-configuring an origin — while it is on, any page the operator opens can read,
+configuring an origin: while it is on, any page the operator opens can read,
 write and permanently lock cards.
 
 > A trusted certificate is a separate requirement. The origin allowlist decides
 > *who may connect*; TLS decides whether the browser will open the connection at
-> all. A `wss://` connection to an untrusted certificate fails outright — unlike
+> all. A `wss://` connection to an untrusted certificate fails outright: unlike
 > a page visit, there is no warning to click through. See
 > [How devices trust the agent](#how-devices-trust-the-agent).
 
@@ -173,16 +173,17 @@ flow and the trust-evaluation code for both platforms.
 
 Browsers cannot pin, so they need a certificate they already trust. Three ways:
 
-1. **Provide one** — point `-cert` / `-key` at a certificate for a name you
+1. **Provide one**: point `-cert` / `-key` at a certificate for a name you
    control that resolves to the agent. Nothing is installed, and the browser
-   trusts it because a public CA issued it. This is the option that scales.
-2. **Trust This Agent in Browsers** — in the tray, or under *Device trust* in the
+   trusts it because a public CA issued it. This is the option that scales past
+   one machine.
+2. **Trust This Agent in Browsers**: in the tray, or under *Device trust* in the
    [Control Center](docs/control-center.md). Creates a local certificate
    authority, installs it in the system trust store and reissues the agent's
    certificate under it. The operating system asks for a password, and the
    listeners restart so the new certificate is the one served. This is the same
    thing `-install-ca` does, without needing a terminal or a restart with flags.
-3. **`-install-ca`** — the launch-flag equivalent of option 2, for a machine
+3. **`-install-ca`**: the launch-flag equivalent of option 2, for a machine
    provisioned by a script.
 
 > A certificate authority in a trust store can sign for **any** name, not just
@@ -200,10 +201,10 @@ across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
 The shipped agent listens on two ports, both configurable. Each is a plugin the
 program registers, so a build can move either, or leave one out:
 
-- **9470 — agent server** (`-device-port`): One listener for both roles. NFC
+- **9470, agent server** (`-device-port`): One listener for both roles. NFC
   devices connect to `/ws?mode=device`, client applications to `/ws`, and the
   Control Center is served from the same port
-- **9472 — pairing server** (`-bootstrap-port`, `0` disables it): Serves the
+- **9472, pairing server** (`-bootstrap-port`, `0` disables it): Serves the
   page a phone opens to pair, and issues each device its own credential against
   the PIN printed at startup. Where a local CA is in use, it hands that out too,
   to a request carrying the PIN
@@ -299,9 +300,9 @@ ws.send(JSON.stringify({
 ## Extending
 
 The agent is a Go module, and the binary is an ordinary program built from the
-packages it exports. A build without the tray or the control center, or one with
-no hardware backend at all, is a matter of which packages you import. See
-[Custom Builds](docs/custom-builds.md).
+packages it exports. Leaving out the tray, the control center or the hardware
+backend is a matter of which packages you import.
+See [Custom Builds](docs/custom-builds.md).
 
 ```bash
 go get github.com/dotside-studios/davi-nfc-agent
@@ -309,8 +310,8 @@ go get github.com/dotside-studios/davi-nfc-agent
 
 ### Plugins
 
-What an agent is made of is what its program registers. A plugin is a value with
-one method, handed everything it needs once, before the agent starts:
+An agent is made of what its program registers. A plugin is a value with one
+method, handed everything it needs once, before the agent starts:
 
 ```go
 type BackupPlugin struct {
@@ -332,8 +333,8 @@ rt.Agent.Plugins.Add(&BackupPlugin{Every: time.Hour})
 `ctx.Use` registers something to start and stop with the agent, `ctx.Mount` adds
 a route to the listener, and `ctx.Systray` is the tray's own menu, so a plugin's
 entry sits beside the ones the tray declared itself. Nothing is loaded at run
-time: which plugins a build has is decided by what it imports, so one left out
-takes its dependencies with it.
+time: a build's plugins are what it imports, so one left out takes its
+dependencies with it.
 
 The listener, the pairing server and the certificate are plugins too.
 `agent.ServerPlugin` owns the port and everything served from it,
@@ -344,7 +345,9 @@ Register none and the agent drives the reader and serves no HTTP at all. See
 
 ### NFC backends
 
-The agent's modular NFC layer supports adding custom readers and tag types beyond the built-in PC/SC and smartphone support. See [Extending NFC Support](docs/extending-nfc-support.md) to integrate your own hardware or protocols.
+The NFC layer takes custom readers and tag types beyond the built-in PC/SC and
+smartphone backends. See [Extending NFC Support](docs/extending-nfc-support.md)
+to integrate your own hardware or protocols.
 
 ## Contributing
 

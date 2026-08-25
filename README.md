@@ -65,35 +65,9 @@ for pairing a phone.
 
 Choose **Open Control Center** from the tray to manage the agent in a browser:
 read its log, inspect and write tags, revoke a paired device, edit the origin
-allowlist, and change the agent's settings.
-
-The console is privileged: it can rotate the API secret, revoke a device's
-credential and lock a tag irreversibly. Every request to it must clear three
-checks. It has to come from loopback, from a page the agent itself served, and
-carry a session opened through that tray entry. There is no other way in. See
-[Control Center](docs/control-center.md) for the detail.
-
-To leave it out of the binary entirely, build with `-tags nowebui`. Neither the
-privileged API nor the console's frontend is compiled in, and `/control` serves
-the same plain-text banner as `/`:
-
-```bash
-go build -tags nowebui ./cmd/davi-nfc-agent
-```
-
-### Reader Feedback
-
-**Flash and Beep on Scan** in the tray menu makes the reader signal each
-operation: one green flash with a short beep when a tag is read or written, two
-red flashes when a write or a lock fails. It is off by default, and turning it
-on lasts as long as the agent runs.
-
-The commands come from the ACS ACR122U instruction set, so ACR122 readers answer
-them; other readers report the feature as unsupported and are skipped. They are
-sent with `SCardControl`, falling back to a pseudo-APDU over the card connection
-where the PC/SC stack will not carry escape commands. See
-[Installation](docs/installation.md#reader-led-and-buzzer) for the two stacks
-that need configuring.
+allowlist, and change the agent's settings. It is reachable from loopback only,
+through a session the tray opens. Build with `-tags nowebui` to leave it out of
+the binary. See [Control Center](docs/control-center.md).
 
 ### Command-line Options
 
@@ -116,18 +90,11 @@ that need configuring.
 The agent only accepts WebSocket upgrades whose `Origin` matches its own
 host:port. Otherwise any site the operator visits could drive the reader,
 including permanently locking cards. A console served from anywhere else, which
-includes every hosted one, must be allowed.
+includes every hosted one, must be allowed. The Davi consoles already are.
 
-The Davi consoles are allowed out of the box, so nothing needs configuring for
-them. The allowlist lives in `allowed-origins.json` in the config directory and
-is managed from the tray under **Allowed Origins**, which lists what is
-permitted and lets you revoke any of it.
-
-When a page is refused, the tray offers it: the blocked origin appears as
-*"Allow example.com"*, and one click admits it and persists the choice, with no
-restart. This is the usual way to add a console.
-
-To preload one instead, at first run or for an unattended install:
+When a page is refused, the tray offers it as *"Allow example.com"*, and one
+click admits it. To preload one instead, at first run or for an unattended
+install:
 
 ```bash
 ./davi-nfc-agent -allowed-origins "console.example.com,localhost:3002"
@@ -135,19 +102,11 @@ To preload one instead, at first run or for an unattended install:
 DAVI_NFC_ALLOWED_ORIGINS="console.example.com" ./davi-nfc-agent
 ```
 
-Entries are matched on host:port. Full URLs are accepted and reduced, so
-`https://console.example.com` and `console.example.com` are equivalent.
-
-**Allow any origin (this session)** in the tray turns the check off until the
-agent restarts. It is deliberately never persisted, and it is not a way to skip
-configuring an origin: while it is on, any page the operator opens can read,
-write and permanently lock cards.
-
-> A trusted certificate is a separate requirement. The origin allowlist decides
-> *who may connect*; TLS decides whether the browser will open the connection at
-> all. A `wss://` connection to an untrusted certificate fails outright: unlike
-> a page visit, there is no warning to click through. See
-> [How devices trust the agent](#how-devices-trust-the-agent).
+The allowlist lives in `allowed-origins.json` in the config directory and is
+managed from the tray under **Allowed Origins**. A trusted certificate is a
+separate requirement, and a failure of either looks the same from the page. See
+[Control Center](docs/control-center.md) and
+[API reference](docs/api.md#tls--certificates).
 
 ### How devices trust the agent
 
@@ -155,46 +114,28 @@ By default the agent serves a **self-signed certificate** using a key it
 generates once and keeps. Nothing is added to any trust store.
 
 Phones, readers and other native clients authenticate the agent by **pinning its
-public key** rather than by trusting an authority. The pin is reported in the
-registration response as `serverInfo.publicKeyPin`, logged at startup, and takes
-the form `sha256/<base64>` over the SubjectPublicKeyInfo:
+public key** rather than by trusting an authority. The pin is reported at
+registration, logged at startup, and takes the form `sha256/<base64>` over the
+SubjectPublicKeyInfo:
 
 ```
 Agent public key pin: sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
 ```
 
-Record it when pairing and compare it on every later connection. The pin
-survives certificate reissues, which happen whenever the host's addresses
-change, so a device that pins it keeps working when the machine moves network.
-Pin this value, never the certificate.
+It survives certificate reissues, so a device that pins it keeps working when
+the machine moves network. Pin this value, never the certificate.
 
-[Setting up an iOS or Android device](docs/device-setup.md) covers the pairing
-flow and the trust-evaluation code for both platforms.
+Browsers cannot pin, so they need a certificate they already trust: point
+`-cert` / `-key` at one you control, or use **Trust This Agent in Browsers** in
+the tray (`-install-ca` on the command line) to create a local authority and
+install it. A local authority can sign for any name, so prefer your own
+certificate where you can arrange it.
 
-Browsers cannot pin, so they need a certificate they already trust. Three ways:
-
-1. **Provide one**: point `-cert` / `-key` at a certificate for a name you
-   control that resolves to the agent. Nothing is installed, and the browser
-   trusts it because a public CA issued it. This is the option that scales past
-   one machine.
-2. **Trust This Agent in Browsers**: in the tray, or under *Device trust* in the
-   [Control Center](docs/control-center.md). Creates a local certificate
-   authority, installs it in the system trust store and reissues the agent's
-   certificate under it. The operating system asks for a password, and the
-   listeners restart so the new certificate is the one served. This is the same
-   thing `-install-ca` does, without needing a terminal or a restart with flags.
-3. **`-install-ca`**: the launch-flag equivalent of option 2, for a machine
-   provisioned by a script.
-
-> A certificate authority in a trust store can sign for **any** name, not just
-> this agent. Whoever holds its key can intercept that machine's traffic, so
-> option 1 is preferable wherever you can arrange it. An install that already
-> has a CA keeps using it, so upgrading changes nothing for a console that
-> works today.
-
-By default the agent generates and persists a TLS certificate and an API secret
-under a platform-specific config directory, so paired devices keep working
-across restarts. Run `./davi-nfc-agent -help` for the full list of flags.
+The agent persists its certificate and API secret under a platform-specific
+config directory, so paired devices keep working across restarts. Run
+`./davi-nfc-agent -help` for the full list of flags. See
+[Setting up an iOS or Android device](docs/device-setup.md) and
+[API reference](docs/api.md#tls--certificates).
 
 ## Ports
 
@@ -326,21 +267,8 @@ func (p *BackupPlugin) Activate(ctx agent.AgentContext) error {
 }
 ```
 
-```go
-rt.Agent.Plugins.Add(&BackupPlugin{Every: time.Hour})
-```
-
-`ctx.Use` registers something to start and stop with the agent, `ctx.Mount` adds
-a route to the listener, and `ctx.Systray` is the tray's own menu, so a plugin's
-entry sits beside the ones the tray declared itself. Nothing is loaded at run
-time: a build's plugins are what it imports, so one left out takes its
-dependencies with it.
-
-The listener, the pairing server and the certificate are plugins too.
-`agent.ServerPlugin` owns the port and everything served from it,
-`agent.PairingPlugin` the pairing listener and the entries that hand out its
-PIN, and `agent.TrustPlugin` the certificate the other two are configured from.
-Register none and the agent drives the reader and serves no HTTP at all. See
+The listener, the pairing server and the certificate are plugins too, so a build
+that registers none drives the reader and serves no HTTP at all. See
 [Plugins](docs/custom-builds.md#plugins).
 
 ### NFC backends

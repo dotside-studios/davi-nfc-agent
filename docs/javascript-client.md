@@ -31,7 +31,7 @@ A framework-agnostic JavaScript client for integrating with the NFC Agent.
 
 Use `NFCClient` to consume NFC data as a client application. It connects to the
 same agent port as [`NFCDeviceClient`](#nfcdeviceclient-device-input) (port 9470
-by default, configurable via `-device-port`) — devices and clients share one
+by default, configurable via `-device-port`): devices and clients share one
 port, distinguished only by the connection path (`/ws?mode=device` for devices,
 plain `/ws` for clients).
 
@@ -44,7 +44,7 @@ import { NFCClient } from "@davi/nfc-agent-client";
 import { useNFCClient } from "@davi/nfc-agent-client/react";
 ```
 
-Without one, copy a built file — `client/dist` is generated from the same
+Without one, copy a built file. `client/dist` is generated from the same
 source and committed:
 
 ```bash
@@ -104,7 +104,7 @@ await client.disconnect();
 ## Naming the tag
 
 Every tag operation names the tag it applies to. The agent refuses one that does
-not, with `TAG_NOT_NAMED` — see [Naming the Tag](api.md#naming-the-tag) for why.
+not, with `TAG_NOT_NAMED`. See [Naming the Tag](api.md#naming-the-tag) for why.
 
 `NFCClient` remembers the tag the agent last reported and names it, so the
 common case needs nothing from the caller:
@@ -187,7 +187,7 @@ Set `lock: true` to make the tag permanently read-only once the write lands, and
 
 #### `lock(target?)`
 
-Make a tag permanently read-only without writing to it. Irreversible — see
+Make a tag permanently read-only without writing to it. Irreversible; see
 [Locking Tags](api.md#locking-tags-make-read-only).
 
 ```javascript
@@ -250,9 +250,9 @@ const health = await client.healthCheck();
 
 #### `diagnoseAgent(serverUrl)`
 
-A standalone export, not a method. A failed WebSocket carries no detail — a
+A standalone export, not a method. A failed WebSocket carries no detail: a
 refused connection, an untrusted certificate and a blocked origin all arrive as
-the same empty `error` event — so this probes the agent over HTTP instead.
+the same empty `error` event, so this probes the agent over HTTP instead.
 
 ```javascript
 const why = await diagnoseAgent('https://localhost:9470');
@@ -291,8 +291,8 @@ client.on('disconnected', () => { /* ... */ });
 client.on('error', (err) => { /* ... */ });
 ```
 
-`deviceStatus` describes the agent's own reader and nothing else, so its
-`cardPresent` says nothing about a tag a paired phone is holding — and is false
+`deviceStatus` describes the agent's own reader, so its `cardPresent` says
+nothing about a tag a paired phone is holding, and is false
 the whole time one is. `tagRemoved` is the event to act on.
 
 ### Errors
@@ -306,9 +306,9 @@ try {
   await client.write({ records });
 } catch (err) {
   if (err.retryable) {
-    // TAG_REMOVED, WRITE_FAILED, NO_CARD — present the tag again
+    // TAG_REMOVED, WRITE_FAILED, NO_CARD: present the tag again
   } else {
-    // READ_ONLY, CAPACITY_EXCEEDED, TAG_MISMATCH — retrying wastes a round trip
+    // READ_ONLY, CAPACITY_EXCEEDED, TAG_MISMATCH: retrying wastes a round trip
     console.error(err.code, err.message);
   }
 }
@@ -616,7 +616,7 @@ if (client.isConnected()) {
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `registered` | `{ deviceID, serverInfo }` | Successfully registered with server |
-| `writeRequest` | `{ requestID, deviceID, ndefMessage, ndefBytes, tagUID, lock, idempotencyKey }` | Server requests a write operation. `lock` with no `ndefMessage`/`ndefBytes` is a lock-only request — lock the tag as it stands and write nothing |
+| `writeRequest` | `{ requestID, deviceID, ndefMessage, ndefBytes, tagUID, lock, idempotencyKey }` | Server requests a write operation. `lock` with no `ndefMessage`/`ndefBytes` is a lock-only request: lock the tag as it stands and write nothing |
 | `connected` | `{}` | WebSocket connected |
 | `disconnected` | `{}` | WebSocket disconnected |
 | `error` | `{ error, phase?, code? }` | Error occurred |

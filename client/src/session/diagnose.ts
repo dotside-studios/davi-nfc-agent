@@ -1,7 +1,7 @@
 /**
  * Why a connection to the local agent failed, in terms an operator can act on.
  *
- * The browser deliberately withholds WebSocket failure detail — a refused
+ * The browser deliberately withholds WebSocket failure detail: a refused
  * connection, a rejected certificate and a blocked origin all surface as the
  * same contentless `error` event. So rather than reading the socket's failure,
  * this probes the agent over HTTP and reasons about what answers.
@@ -36,7 +36,7 @@ async function probe(url: string): Promise<Response | null> {
     return await fetch(url, { signal: controller.signal });
   } catch {
     // A network-level failure. Indistinguishable by design between "nothing is
-    // listening" and "the certificate was rejected" — see diagnoseAgent.
+    // listening" and "the certificate was rejected". See diagnoseAgent.
     return null;
   } finally {
     clearTimeout(timer);
@@ -74,7 +74,7 @@ export async function diagnoseAgent(serverUrl: string): Promise<AgentDiagnosis> 
       title: "The agent refused this page",
       detail:
         `The NFC agent answered with ${health.status}. If that is 403, this site is not on its ` +
-        `allowed-origins list — allow ${location.host} on the agent.`,
+        `allowed-origins list: allow ${location.host} on the agent.`,
     };
   }
 
@@ -102,7 +102,7 @@ export async function diagnoseAgent(serverUrl: string): Promise<AgentDiagnosis> 
     title: "Can't reach the NFC agent",
     detail:
       "The agent runs on this computer. Either it isn't running, or this browser doesn't trust " +
-      "its certificate yet — which looks identical from here. Open it directly to find out: a " +
+      "its certificate yet, which looks identical from here. Open it directly to find out: a " +
       "certificate warning means it's running and its certificate needs trusting, and a " +
       "connection error means it isn't running.",
     openUrl: base,

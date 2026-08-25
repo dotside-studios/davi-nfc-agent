@@ -2,7 +2,7 @@
 
 A Go package providing a unified, high-level abstraction for NFC operations across multiple card types.
 
-The package itself is transport-agnostic: it defines the tag and device interfaces and the tag drivers, and the backends that implement them live beside it — `nfc/pcsc` for readers attached to this machine, `nfc/remotenfc` for a phone acting as a reader.
+The package itself is transport-agnostic: it defines the tag and device interfaces and the tag drivers, while the backends that implement them live beside it (`nfc/pcsc` for readers attached to this machine, `nfc/remotenfc` for a phone acting as a reader).
 
 ## Overview
 
@@ -279,7 +279,9 @@ package main
 import (
     "fmt"
     "io"
+
     "github.com/dotside-studios/davi-nfc-agent/nfc"
+    "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 )
 
 func main() {

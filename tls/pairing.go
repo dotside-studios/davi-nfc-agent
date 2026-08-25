@@ -48,7 +48,7 @@ func (s *BootstrapServer) SetPairingIssuer(issuer PairingIssuer, agentPort int) 
 // handlePair issues a per-device credential to a caller that knows the PIN.
 //
 // The PIN is proof the operator can see the kiosk, and it is rate-limited and
-// locks out after repeated failures — the same gate that protects the CA
+// locks out after repeated failures, the same gate that protects the CA
 // download, reused because it answers the same question.
 func (s *BootstrapServer) handlePair(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

@@ -25,7 +25,7 @@ export interface TagTarget {
 }
 /** A record to write. `type` selects which of the other fields are read. */
 export interface WriteRecord {
-    /** "text", "uri", "smartposter", "mime", "raw" — see the reference. */
+    /** "text", "uri", "smartposter", "mime", "raw". See the reference. */
     type: string;
     content?: string;
     language?: string;

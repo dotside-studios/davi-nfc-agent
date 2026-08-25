@@ -15,12 +15,12 @@ import (
 //
 // The function blocks until stop is closed, then returns promptly. It does
 // NOT rely on closing the socket from another goroutine to interrupt a
-// blocked Recvfrom — Linux does not guarantee that close() wakes a thread
+// blocked Recvfrom. Linux does not guarantee that close() wakes a thread
 // already blocked in recvfrom on that fd, so a quiescent socket (no address
 // changes) would otherwise hang shutdown forever. Instead the socket is
 // given a short receive timeout so the loop wakes periodically to observe
 // stop. On socket setup failure the function returns immediately and the
-// channel from addrChangeNotifier simply never emits — the periodic poll
+// channel from addrChangeNotifier simply never emits, so the periodic poll
 // handles change detection in that case.
 func watchAddrChanges(stop <-chan struct{}, notify func()) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)

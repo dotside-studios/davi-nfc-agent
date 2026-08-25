@@ -376,7 +376,7 @@ func TestMaxHoldMsSurvivesTheWire(t *testing.T) {
 		"capabilities": {"canRead": true, "canWrite": false, "nfcType": "corenfc", "maxHoldMs": 20000}
 	}`
 
-	var req protocol.DeviceRegistrationRequest
+	var req DeviceRegistrationRequest
 	if err := json.Unmarshal([]byte(registration), &req); err != nil {
 		t.Fatalf("unmarshal registration: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestMaxHoldMsIsAbsentWhenOpenEnded(t *testing.T) {
 	// A reader holding a tag in its field has no bound, and a device predating
 	// the field declares nothing. Both must serialize to the same bytes as
 	// before it existed, so an agent reading only the old fields is unaffected.
-	encoded, err := json.Marshal(protocol.DeviceCapabilities{
+	encoded, err := json.Marshal(DeviceCapabilities{
 		CanRead:  true,
 		CanWrite: true,
 		NFCType:  "isodep",

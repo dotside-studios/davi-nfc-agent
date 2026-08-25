@@ -1,0 +1,170 @@
+package remotenfc
+
+import (
+	"time"
+
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
+)
+
+// WebSocket message types of the device protocol. The client protocol keeps
+// its own in package protocol; these are only ever spoken to a device.
+const (
+	WSTypeHello                    = "hello"
+	WSTypeHelloResponse            = "helloResponse"
+	WSTypeGoodbye                  = "goodbye"
+	WSTypeRegisterDevice           = "registerDevice"
+	WSTypeRegisterDeviceResponse   = "registerDeviceResponse"
+	WSTypeTagScanned               = "tagScanned"
+	WSTypeTagRemoved               = "tagRemoved"
+	WSTypeDeviceHeartbeat          = "deviceHeartbeat"
+	WSTypeDeviceWriteRequest       = "deviceWriteRequest"
+	WSTypeDeviceWriteResponse      = "deviceWriteResponse"
+	WSTypeDeviceTransceiveRequest  = "deviceTransceiveRequest"
+	WSTypeDeviceTransceiveResponse = "deviceTransceiveResponse"
+)
+
+// DeviceCapabilities defines the capabilities of a connected NFC device.
+//
+// The first three fields are the original v0 declaration. Everything below is
+// additive: a v0 device omits them and reads as all-false, which is what it
+// could actually do anyway.
+type DeviceCapabilities struct {
+	CanRead  bool   `json:"canRead"`
+	CanWrite bool   `json:"canWrite"`
+	NFCType  string `json:"nfcType"` // "nfca", "nfcb", "nfcf", "nfcv", "isodep", etc.
+
+	// CanTransceive is APDU-level exchange (Android IsoDep.transceive, iOS
+	// sendCommand, PN532 InDataExchange). CanTransceiveRaw is framing-level
+	// exchange (Android NfcA.transceive, PN532 InCommunicateThru), a strictly
+	// rarer capability, which is why it is a separate bit.
+	CanTransceive    bool `json:"canTransceive,omitempty"`
+	CanTransceiveRaw bool `json:"canTransceiveRaw,omitempty"`
+	CanLock          bool `json:"canLock,omitempty"`
+
+	SupportedTagTypes []string `json:"supportedTagTypes,omitempty"` // e.g. ["MIFARE Classic", "NTAG"]
+	DeviceType        string   `json:"deviceType,omitempty"`        // e.g. "smartphone", "pn532-serial"
+	MaxBaudRate       int      `json:"maxBaudRate,omitempty"`
+
+	// MaxHoldMs is how long this device can keep a tag available for work after
+	// reporting it, zero meaning open-ended. A reader holding a tag in its field
+	// has no bound; an iOS device does, because CoreNFC connects a tag for about
+	// twenty seconds and cannot renew that.
+	//
+	// The deadline for a given tag is the arrival of its tagScanned plus this,
+	// and that sum is optimistic, since the tag was connected before the message
+	// was sent, so leave margin rather than treating it as exact.
+	//
+	// Advisory. A device declaring nothing is open-ended, which is how every
+	// device behaved before this field existed, so it must not become a gate:
+	// use it to decide what is worth attempting, never to refuse a device that
+	// stayed silent.
+	MaxHoldMs int `json:"maxHoldMs,omitempty"`
+}
+
+// DeviceRegistrationResponse is sent by server after successful registration.
+type DeviceRegistrationResponse struct {
+	DeviceID     string     `json:"deviceID"`     // Unique device identifier (UUID)
+	SessionToken string     `json:"sessionToken"` // Authentication token (optional future use)
+	ServerInfo   ServerInfo `json:"serverInfo"`
+}
+
+// ServerInfo contains information about the server.
+type ServerInfo struct {
+	Version      string   `json:"version"`
+	SupportedNFC []string `json:"supportedNFC"` // ["mifare", "desfire", etc.]
+
+	// PublicKeyPin identifies this agent across certificate reissues, as
+	// "sha256/<base64>" over the SubjectPublicKeyInfo. A device records it when
+	// pairing and compares it on later connections, which is how it recognizes
+	// the agent without a certificate authority.
+	//
+	// Empty when the agent runs without its own generated certificate.
+	PublicKeyPin string `json:"publicKeyPin,omitempty"`
+}
+
+// DeviceTagData is sent by a device when a tag is scanned.
+type DeviceTagData struct {
+	DeviceID    string                     `json:"deviceID"`    // Device that scanned the tag
+	UID         string                     `json:"uid"`         // Tag UID (hex format)
+	Technology  string                     `json:"technology"`  // "ISO14443A", "ISO14443B", etc.
+	Type        string                     `json:"type"`        // "MIFARE Classic 1K", "Type4", etc.
+	ATR         string                     `json:"atr"`         // Answer to Reset (if applicable)
+	ScannedAt   time.Time                  `json:"scannedAt"`   // Timestamp of scan
+	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
+	RawData     []byte                     `json:"rawData"`     // Raw tag data (base64 encoded)
+
+	// Capabilities is what the device determined about this specific tag. When
+	// omitted the agent infers them from Type, which is all a v0 device allows.
+	Capabilities *protocol.TagCapabilities `json:"capabilities,omitempty"`
+}
+
+// DeviceHeartbeat is sent by a device periodically.
+type DeviceHeartbeat struct {
+	DeviceID  string    `json:"deviceID"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// DeviceTagRemovedData is sent by a device when a tag leaves the NFC field.
+type DeviceTagRemovedData struct {
+	DeviceID  string    `json:"deviceID"`
+	UID       string    `json:"uid"`       // UID of the removed tag
+	RemovedAt time.Time `json:"removedAt"` // Timestamp of removal
+}
+
+// DeviceWriteRequest is sent by the agent to a device to write a tag.
+type DeviceWriteRequest struct {
+	RequestID   string                     `json:"requestID"`   // Unique request ID for correlation
+	DeviceID    string                     `json:"deviceID"`    // Target device
+	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Data to write, as records
+	TagUID      string                     `json:"tagUID,omitempty"`
+	Lock        bool                       `json:"lock,omitempty"` // Make read-only after writing
+
+	// NDEFBytes is the same message already encoded, and is authoritative where
+	// the two disagree. A device that can write raw NDEF should prefer it; the
+	// record form exists for APIs like Web NFC that only accept records and
+	// cannot express every record type faithfully.
+	NDEFBytes []byte `json:"ndefBytes,omitempty"`
+
+	// IdempotencyKey identifies the logical write. A device that has already
+	// applied this key must report the previous outcome rather than write
+	// again, since the same request can arrive twice if a response is lost to a
+	// dropped connection.
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+}
+
+// DeviceTransceiveRequest asks a device to exchange raw data with the tag it is
+// holding.
+//
+// There is deliberately no connect/disconnect pair around this: a tag session
+// is already delimited by the tagScanned and tagRemoved events, and on phones
+// the OS owns the session anyway.
+type DeviceTransceiveRequest struct {
+	RequestID string `json:"requestID"`
+	DeviceID  string `json:"deviceID"`
+	TagUID    string `json:"tagUID,omitempty"` // Report TAG_REMOVED if a different tag is present
+	Data      []byte `json:"data"`             // Command bytes, base64 in transit
+
+	// Raw selects framing-level exchange (Android NfcA.transceive, PN532
+	// InCommunicateThru) over APDU-level (IsoDep.transceive, InDataExchange).
+	Raw bool `json:"raw,omitempty"`
+
+	// TimeoutMS bounds this single exchange on the device.
+	TimeoutMS int `json:"timeoutMs,omitempty"`
+}
+
+// DeviceTransceiveResponse carries the tag's reply.
+type DeviceTransceiveResponse struct {
+	RequestID string             `json:"requestID"`
+	Success   bool               `json:"success"`
+	Data      []byte             `json:"data,omitempty"` // Response bytes, base64 in transit
+	Error     string             `json:"error,omitempty"`
+	ErrorCode protocol.ErrorCode `json:"errorCode,omitempty"`
+}
+
+// DeviceWriteResponse is sent by a device after a write operation.
+type DeviceWriteResponse struct {
+	RequestID string             `json:"requestID"`
+	Success   bool               `json:"success"`
+	Error     string             `json:"error,omitempty"`
+	ErrorCode protocol.ErrorCode `json:"errorCode,omitempty"` // Preferred over parsing Error
+}

@@ -17,7 +17,7 @@ type classicKeySetter interface {
 
 // TestClassicEmulator_CustomKeyAuthentication verifies the Classic driver can
 // read and write a card provisioned with non-default keys once those keys are
-// configured — and that it correctly fails when they are not.
+// configured, and that it correctly fails when they are not.
 func TestClassicEmulator_CustomKeyAuthentication(t *testing.T) {
 	e := newClassicEmulator()
 	custom := []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
@@ -167,7 +167,7 @@ func TestClassicEmulator_ForceInitializeAbortsOnInaccessibleSector(t *testing.T)
 // TestClassicEmulator_FormattedTrailerRecoverableWithKeyB proves, in software,
 // the recoverability guarantee: after formatting, a data sector trailer (access
 // condition 011) cannot be rewritten with Key A but CAN be rewritten with the
-// known Key B (0xFF) — so a misconfiguration is always recoverable.
+// known Key B (0xFF), so a misconfiguration is always recoverable.
 func TestClassicEmulator_FormattedTrailerRecoverableWithKeyB(t *testing.T) {
 	e := newClassicEmulator()
 	tag := nfc.NewEmulatedTag(e, "04112233", nfc.DetectedClassic1K)
@@ -187,7 +187,7 @@ func TestClassicEmulator_FormattedTrailerRecoverableWithKeyB(t *testing.T) {
 	if err := classic.Write(1, 3, replacement, nfc.KeyNFCForum, nfc.KeyTypeA); err == nil {
 		t.Error("trailer should NOT be rewritable with Key A under access condition 011")
 	}
-	// Key B (still the known 0xFF) can rewrite it — the recovery path.
+	// Key B (still the known 0xFF) can rewrite it, which is the recovery path.
 	if err := classic.Write(1, 3, replacement, nfc.KeyDefault, nfc.KeyTypeB); err != nil {
 		t.Errorf("trailer should be recoverable with Key B: %v", err)
 	}

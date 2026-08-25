@@ -2,12 +2,15 @@
 
 Declarative system tray menus for Go, with clicks delivered as signals.
 
-`traymenu` sits on top of [`fyne.io/systray`](https://github.com/fyne-io/systray)
-and is free of anything else in this repository, so it can be lifted out into a
-module of its own.
+`traymenu` is a menu model and nothing else. The real tray lives one package
+down, in `traymenu/fynetray`, on top of
+[`fyne.io/systray`](https://github.com/fyne-io/systray). That keeps the toolkit,
+and the cgo it needs on macOS, out of everything that only builds menus. Neither
+package depends on anything else in this repository, so both can be lifted out
+into a module of their own.
 
 ```go
-menu := traymenu.New(nil) // nil driver: the real tray
+menu := traymenu.New(fynetray.New()) // a nil driver draws nothing
 
 menu.Run(func() {
     menu.SetIcon(icon)

@@ -214,7 +214,7 @@ describe("NFCClient request/response", () => {
     // Attach rejection handler before advancing time so the rejection is
     // never "unhandled" from Node's perspective.
     const assertion = expect(writePromise).rejects.toThrow(/timeout/);
-    // No response — fast-forward past the 30s request timeout.
+    // No response, so fast-forward past the 30s request timeout.
     await vi.advanceTimersByTimeAsync(30_000);
 
     await assertion;

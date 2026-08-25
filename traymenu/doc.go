@@ -1,10 +1,13 @@
 // Package traymenu builds system tray menus declaratively and delivers their
 // clicks as signals.
 //
-// It runs on a Driver: Fyne in production, NewFake in tests, so a menu can be
-// built, clicked and inspected without a display server.
+// It runs on a Driver: fynetray in production, NewFake in tests, and Discard
+// where there is no tray at all, so a menu can be built, clicked and inspected
+// without a display server. The toolkit lives in traymenu/fynetray rather than
+// here, so this package needs no cgo, and neither does anything that only
+// builds menus.
 //
-//	menu := traymenu.New(nil)
+//	menu := traymenu.New(fynetray.New())
 //	menu.Run(func() {
 //	    menu.SetIcon(icon)
 //

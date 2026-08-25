@@ -257,7 +257,7 @@ func TestCASignedCertificateCarriesThePinnedKey(t *testing.T) {
 		t.Fatalf("parse leaf: %v", err)
 	}
 
-	// It is still a CA-issued certificate, which is the point of the route.
+	// It is still a CA-issued certificate.
 	roots := x509.NewCertPool()
 	roots.AddCert(caCert)
 	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: "localhost", Roots: roots}); err != nil {

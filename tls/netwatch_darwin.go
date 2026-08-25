@@ -11,7 +11,7 @@ import (
 // watchAddrChanges opens a route socket (PF_ROUTE / AF_ROUTE) and treats
 // every kernel routing message as a wake-up. macOS posts RTM_IFINFO,
 // RTM_NEWADDR, RTM_DELADDR, RTM_IFANNOUNCE etc. to this socket whenever
-// interfaces or addresses change. We don't parse the messages — the
+// interfaces or addresses change. We don't parse the messages: the
 // caller only needs to know "something happened" to re-check hosts.
 //
 // The function blocks until stop is closed, then returns promptly. As on

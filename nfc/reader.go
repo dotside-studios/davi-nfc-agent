@@ -389,8 +389,8 @@ func (r *NFCReader) handleDeviceErrors(err error) bool {
 		// An error no branch above recognized left the device exactly as it
 		// was, so "still has a device" means untouched rather than recovered.
 		// Polling straight back into it spins the loop at full speed, and every
-		// turn logs — which is how one unrecognized error becomes hundreds of
-		// identical lines a second and no reconnection ever attempted.
+		// turn logs, which turns one unrecognized error into hundreds of
+		// identical lines a second with no reconnection ever attempted.
 		if !recognized {
 			r.clock.Sleep(UnhandledErrorRetryInterval)
 		}
@@ -557,8 +557,8 @@ func (r *NFCReader) doPoll() {
 			// No card present is normal - just wait and retry
 			//
 			// Reported once for as long as the reason holds. This runs on every
-			// poll, so a reader that is unplugged — or a device path naming one
-			// that will not reappear — otherwise fills the log at the polling
+			// poll, so a reader that is unplugged, or a device path naming one
+			// that will not reappear, otherwise fills the log at the polling
 			// rate with the same line.
 			if !IsNoCardError(err) && !r.deviceManager.recordError(err) {
 				log.Printf("Connection attempt failed: %v", err)
@@ -732,7 +732,7 @@ func (r *NFCReader) WriteCardData(text string) error {
 }
 
 // EraseCard overwrites the presented tag with an empty NDEF message, making it
-// read as blank. This is reversible — the tag can be rewritten afterward. The
+// read as blank. This is reversible: the tag can be rewritten afterward. The
 // write is verified like any other write.
 func (r *NFCReader) EraseCard() (*WriteResult, error) {
 	msg := NewNDEFMessage()
@@ -1060,7 +1060,7 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 // others return a not-supported error.
 //
 // It locks whatever tag is present. Prefer LockCardExpecting, which refuses
-// unless the tag present is the one you meant -- for an operation that cannot
+// unless the tag present is the one you meant. For an operation that cannot
 // be undone, "whatever is on the reader now" is rarely what the caller means.
 func (r *NFCReader) LockCard() (*LockResult, error) {
 	return r.LockCardExpecting("")
@@ -1166,7 +1166,7 @@ func (r *NFCReader) soleTag(expectUID string) (Tag, error) {
 }
 
 // GetCapabilities reports the capabilities of the tag currently presented to
-// the reader — memory size, writability, lock and password support, and
+// the reader: memory size, writability, lock and password support, and
 // read-only state. It requires exactly one tag to be present, performs no
 // write, and works regardless of reader mode (including read-only). This lets
 // clients query what a tag supports before attempting a write or lock.
@@ -1176,7 +1176,7 @@ func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
 
 // GetCapabilitiesExpecting reports the presented tag's capabilities only if it
 // carries expectUID, so a client is never told about a different tag than the
-// one it asked about -- and then writes to it on that answer. An empty
+// one it asked about, and then writes to it on that answer. An empty
 // expectUID reports whatever is present, as GetCapabilities does.
 func (r *NFCReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities, error) {
 	var caps TagCapabilities
@@ -1198,8 +1198,8 @@ func (r *NFCReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities
 // Transceive exchanges raw bytes with the tag currently on the reader.
 //
 // Deliberately not gated on ReaderMode here: the caller decides. A raw exchange
-// is neither a read nor a write as far as this layer can tell — the same
-// interface carries a SELECT and a write to a config page — so the policy call
+// is neither a read nor a write as far as this layer can tell, since the same
+// interface carries a SELECT and a write to a config page, so the policy call
 // belongs where the request enters, not here.
 func (r *NFCReader) Transceive(data []byte) ([]byte, error) {
 	return r.TransceiveExpecting(data, "")

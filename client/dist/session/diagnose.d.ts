@@ -1,7 +1,7 @@
 /**
  * Why a connection to the local agent failed, in terms an operator can act on.
  *
- * The browser deliberately withholds WebSocket failure detail — a refused
+ * The browser deliberately withholds WebSocket failure detail: a refused
  * connection, a rejected certificate and a blocked origin all surface as the
  * same contentless `error` event. So rather than reading the socket's failure,
  * this probes the agent over HTTP and reasons about what answers.

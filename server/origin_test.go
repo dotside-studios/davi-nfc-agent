@@ -86,7 +86,7 @@ func TestCheckOriginPolicy(t *testing.T) {
 }
 
 // A refused origin must be admitted once allowed, without restarting the
-// listener — that is the whole point of a policy over a static list.
+// listener, which is the whole point of a policy over a static list.
 func TestCheckOriginPolicyPicksUpChanges(t *testing.T) {
 	policy := &fakePolicy{allow: map[string]bool{}}
 	fn := CheckOriginPolicy(policy)

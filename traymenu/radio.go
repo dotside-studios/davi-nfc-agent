@@ -50,7 +50,7 @@ func (r *Radio[T]) Add(value T, title string, opts ...Option) *Item {
 }
 
 // Set ticks the option for value and unticks the rest, without raising
-// Selected. It reflects a change made elsewhere, such as restored settings,
+// Selected. It reflects a change made elsewhere, such as one from the console,
 // without looping into the handler that would apply it again.
 func (r *Radio[T]) Set(value T) {
 	r.mu.Lock()

@@ -9,318 +9,229 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`lock()`, `transceive()` and `getCapabilities()` on `NFCClient`.**
-  `lockRequest`, `transceiveRequest` and `capabilitiesRequest` had been on the
-  wire for releases without reaching the library.
-
-  Alongside them: `tagRemoved`, so a tag leaving the field is an event rather
-  than a broadcast with an empty UID; `deviceID` on a scan, so a consumer can
-  tell the agent's own reader from a paired phone; and `NFCRequestError`,
-  carrying the agent's error code and whether a retry could succeed.
-
-- **The reader can say what it just did.** Someone holding a card at the reader
-  had no way to tell a completed scan from one that never happened: the agent
-  said so on a screen they were not looking at. **Flash and Beep on Scan** in
-  the tray menu now has the reader answer for its own work, with one green
-  flash and a short beep on a tag read, written or locked, and two red flashes
-  when a write or a lock fails. It is off by default and the choice is saved to
-  `settings.json`
-- **`SCardControl`, and LED and buzzer commands for ACR122 readers.** The
-  adapter over the platform's PC/SC library only carried commands to the card,
-  so a reader's own peripherals were unreachable. `scardCard` gained `Control`
-  in both backends, with the escape control code built per platform, and
-  `nfc/pcsc` implements the ACS bi-color LED and buzzer command on top of it.
-  Where a stack will not carry escape commands, which is the default on
-  pcsc-lite and on the Windows CCID class driver, the same command travels as a
-  pseudo-APDU over the card connection instead. The channel that answers is
-  remembered per connection, and a reader that answers on neither is left alone
+- Plugin API: `agent.Plugin` is one method, `Activate(agent.AgentContext) error`,
+  run before the agent starts. A plugin registers a `Component` with `ctx.Use`, a
+  route with `ctx.Mount` and a tray entry with `ctx.Systray`. Plugins are Go
+  values the program constructs and registers with `Agent.Plugins.Add`; nothing
+  is loaded at run time
+- Three plugins ship: `agent.ServerPlugin` owns the listener and its
+  `agent.Endpoint`s, `agent.PairingPlugin` runs the pairing server and its tray
+  entries, `agent.TrustPlugin` holds the certificate the other two read
+- `Agent.OnServerRestart`, `traymenu.Discard`, and `traymenu.Section` as a
+  `Container`
+- `(*Agent).OnTag` calls an observer on every scan, so a program embedding the
+  agent can act on cards without connecting to its own WebSocket. Registered
+  before `Start`; the broadcast to clients is unaffected
+- Explicit agent lifecycle: `Agent.State` reports `stopped`, `starting`,
+  `running` or `stopping`, `OnStateChange` observes settled transitions, and
+  `Use` registers a `Component` started after the reader and servers and stopped
+  first. A component that fails to start unwinds the ones before it
+- `agent.DefaultOptions` returns what the flags default to, for building an agent
+  without a command line
+- `lock()`, `transceive()` and `getCapabilities()` on `NFCClient`, which had been
+  on the wire for releases without reaching the library. With them: `tagRemoved`,
+  `deviceID` on a scan, and `NFCRequestError` carrying the agent's error code and
+  whether a retry could succeed
+- Reader feedback: **Flash and Beep on Scan** in the tray has ACR122 readers
+  flash green and beep on a read, write or lock, and flash red twice on a refused
+  write or lock. Off by default
+- `SCardControl` in both PC/SC backends, with the escape control code built per
+  platform, and the ACS LED and buzzer command on top of it. Where a stack will
+  not carry escape commands the same command travels as a pseudo-APDU; the
+  channel that answers is remembered per connection
+- `docs/custom-builds.md`, on building your own agent: the shipped agent as a
+  `main.go` you could have written, then headless, no control center, no hardware
+  backend, and reacting to tags in Go. Every Go sample compiles against this tree
+- End-to-end tests in `e2e/`, wiring an agent as that page does and driving it
+  over its published protocols on a real TLS listener: scans reaching clients and
+  `OnTag`, writes and raw exchanges routed to a phone, read-only mode, pairing
+  and revocation, and the lifecycle. Only the reader hardware is a stand-in
 
 ### Changed
 
-- **The control center consumes the client library instead of reimplementing
-  it.** The console had its own WebSocket, reconnect, request correlation and
-  copy of every wire type. `webui/frontend` now imports
-  `@davi/nfc-agent-client`, aliased to `client/src`; what is left in the
-  console is the live event feed and the scan history.
-
-- **`client/` is TypeScript, and `client/dist` is generated from it.** The
-  library was hand-maintained JavaScript that downstream consumers had each
-  ported, and the copies drifted. `client/src` is now the one implementation;
-  `make client` builds `dist/`, which is committed so a `<script>` tag still
-  works without Node. The package is `@davi/nfc-agent-client`, was
-  `@davi/nfc-client`.
-
-  `getStatus()` and `getLastTag()` are gone — they called `/api/v1/status` and
-  `/api/v1/tags/last`, which this agent does not serve. `healthCheck()` is
-  unaffected.
-
-  Reconnection backs off from 250ms to 5s rather than retrying every 3s.
-
-- **What the launcher set, the run keeps.** Three surfaces configure this agent
-  and each had invented its own precedence: the port came with a lock flag, the
-  pairing requirement with a different one under a different name, and the rest
-  with none at all. The tray made it worse by persisting reader feedback and
-  forgetting mode and card types, so where an operator clicked decided whether
-  their choice survived a restart.
-
-  `settings.Explicit` marks the fields a caller set deliberately, on the command
-  line, in the environment, or when building the agent in code, and replaces
-  both lock flags. A field marked there belongs to the launcher for the whole
-  run: the stored file does not change it, an operator does not change it, and
-  both the tray and the console show the control disabled with the reason rather
-  than accepting an edit the agent would refuse. The file keeps the operator's
-  own preference untouched underneath, so a start without the flag applies it
-  again.
-
-  The tray now writes every preference it changes to `settings.json`, as the
-  console does. Both are the same operator at the same machine; only **allow any
-  origin** is still deliberately session-only, in both, because a safety-off
-  should not outlive the session that needed it. The tray also opens its menus
-  from the agent instead of from a hardcoded default, so a stored read-only mode
-  no longer reads as read/write until something else redraws it
-
-- **The agent holds the settings, and the console reads them back from it.**
-  Preferences lived in two places at once. `settings.json` had what was last
-  saved, the agent had what it was actually doing, and the console rendered a
-  mixture: mode and card filter from the file, the reader's live mode and the
-  pairing requirement from the agent, in fields beside each other in the same
-  snapshot. A mode switched from the tray never reached the file, so the console
-  went on showing the old one, and a pairing requirement the command line would
-  not let a preference withdraw was reported as withdrawn.
-
-  `Agent.ApplySettings` puts a stored file in force and `Agent.Settings` reports
-  what is in force in the same shape, so the agent parses and holds the whole
-  preference set rather than having its parts pushed at it. The console's
-  `settings` block is that answer, and the duplicates beside it (`reader.mode`,
-  `reader.devicePath`, `security.requirePairedDevice`) are gone from the
-  snapshot and from `webui.Host` with them. A pairing requirement that came from
-  the command line is now shown as locked instead of springing back when
-  switched off.
-
-  There is also one path from a saved preference to the running agent: the
-  store's change hook. The console and the tray write to the store and neither
-  applies anything itself, so the two cannot put the agent in different states.
-  The agent's port is the port it is set to and the listener reports the one it
-  is bound on, which is what makes a port saved in the console take effect on
-  **Restart servers** rather than only at the next startup
-
-- **The tray menu is a package now, and its clicks are signals.** A menu item
-  from the tray library *drops* a click when nobody is receiving on its channel,
-  and a `select` cannot name a changing set of items, so the card filters, the
-  readers, the origins and the paired devices were polled with a `default`
-  branch after each event. A click on one of those rows was lost unless another
-  item happened to be handled at the same moment.
-
-  `traymenu` builds the menu declaratively on the same library, keeps a receiver
-  on every item for its whole life, and fans each click out through a `Signal`.
-  Handlers are declared next to their item and run one at a time on a single
-  dispatch goroutine, so they still need no lock to touch menu state. A radio
-  group and a fixed-pool list replace what the tray had open-coded three times
-  each, the list reporting what did not fit rather than truncating quietly, and
-  the reader picker no longer leaks a menu item per refresh.
-
-  The menu the operator sees is unchanged, and a fake driver builds and clicks
-  it under test with no desktop involved
-
-### Fixed
-
-- **A write through the client library could not succeed.** It named no tag,
-  and the agent refuses that with `TAG_NOT_NAMED`. `NFCClient` now names the
-  tag it last saw on every operation; `uid`, `deviceID` and `allowUntargeted`
-  are there for a caller that means something else.
-
-- **The control center's capability panel was blank on every tag.** It read
-  `usableCapacity`, `writable`, `lockable`, `passwordProtectable` and
-  `readOnly`, none of which the agent sends, so the panel and the composer's
-  capacity meter reported nothing and refused writes to tags that accept them.
-  **re-read** compounded it by reading `capabilitiesResponse` one level too
-  high.
-
-- **A deliberately disconnected client never auto-reconnected again.**
-  `connect()` did not clear the flag `disconnect()` sets.
-
-- **A stored reader mode survives a restart.** The mode was applied to the
-  reader and nowhere else, and settings are applied before `Start` builds one,
-  so an agent saved as read-only came back from every restart able to write
-  while the console reported the read-only it had read from the file. The agent
-  holds the mode and hands it to each reader it starts, next to the feedback
-  preference that already worked this way. Picking a mode from the tray with the
-  agent stopped now sticks too, instead of the tick springing back
-
-- **Copying a device URL from the tray hands out a device URL.** The Server URLs
-  submenu showed `ws://host:9470/ws?mode=device` and copied
-  `ws://host:9470/ws`, which is the client address: a device set up from that
-  clipboard connected as a client and was never routed a tag. Both now come from
-  one builder, so an entry copies what it reads. The pairing entry also stopped
-  labelling itself `CA Cert` once the agent stopped
-
-- **The offer to trust this agent in browsers comes back if the certificate
-  authority goes away.** `CAInstalled` is a look at the filesystem taken on
-  every call, not a decision taken once, but the tray only looked at it at
-  startup and after an install of its own. A config directory that lost its CA
-  therefore left the menu entry hidden until the agent was restarted, which is
-  the one entry that would put the CA back. The tray now looks again whenever
-  the listeners restart
-
-- **All Types accepts a card type the agent has never heard of.** The filter
-  admitted everything when it was empty, but **All Types** filled it with the
-  eight types this agent enumerates instead of emptying it. A phone reports the
-  tag types it recognizes, and one outside that list was then refused under a
-  setting that says every type is welcome. Stored settings with no card types
-  took the same path at startup
-
-- **A device that said nothing about itself no longer refuses for its tags.**
-  `capabilities` on `hello` was a value on the wire, so a device that omitted it
-  and one that declared every field false arrived identically, and both read as
-  a refusal. A device that reports what it finds on each tag while saying
-  nothing about its own abilities therefore had every one of those tags reported
-  incapable: the same collapse of silence into no that the per-tag capabilities
-  work removed one level down, still in place one level up.
-
-  The field is a pointer now, matching the per-tag one, and the three states are
-  distinct. A device that sends the object is taken at its word, and a `false`
-  refuses that operation for every tag it holds, because a bridge that cannot
-  carry an operation cannot carry it for any tag reached through it. A device
-  that omits it has declared nothing, so the request goes out and the device
-  answers it. A v0 device always sends the original triple, so nothing about it
-  changes.
-
-  Reading it either way stays backward compatible: an omitted object and an
-  explicit `null` both mean nothing declared, and an empty object means declared.
-
-- **A device is no longer refused for what it calls itself.** Registration
-  required `platform` to be `ios`, `android` or `web`, but nothing branches on
-  the value: it reaches a column in the console and stops. The allowlist turned
-  a description into an admission test on a bridge that carries whatever speaks
-  the protocol, which is why `DeviceCapabilities` documents `deviceType` values
-  like `pn532-serial` that could never register.
-
-  The bundled client failed it too. `nfc-device-client.js` defaults `platform`
-  to `unknown` and its Node example sends `node`, so following the shipped
-  documentation was refused at the door. Any identifier is accepted now, and a
-  device that sends none is recorded as `unknown`.
-
-- **A write to a phone reports its outcome.** The device route answered with a
-  bare `{uid, deviceID}` map while the client server reads a write outcome by
-  asserting `*nfc.WriteResult`. The assertion failed, the whole block was
-  skipped, and a client got `success: true` carrying none of the documented
-  fields -- no `uid`, `tagType`, `bytesWritten`, `verified`, `attempts` or
-  `locked` -- where the same write through the agent's own reader returned all
-  six. Both routes now answer in the one shape, with `verified` asked of the tag
-  rather than assumed from the route: a tag whose reads are a snapshot cannot
-  confirm a write, which is the same fact the reader's pipeline consults.
-
-- **A tag that declared nothing is unknown, not incapable.** `remotenfc.Tag`
-  refused writes, locks and exchanges whenever the scan carried no per-tag
-  capabilities, collapsing "the device said this tag cannot" together with "the
-  device said nothing about this tag". Only a v1 device can describe a tag it
-  scanned; a v0 device sends what it can do and no more, and the wire protocol
-  keeps accepting that forever. So every v0 device held tags that could do
-  nothing -- the hard-coded `false` the capability work exists to remove,
-  surviving in a narrower form.
-
-  The three states are now distinct. A tag that declared it cannot is refused, a
-  tag declared read-only is refused however capable its device, and a tag that
-  declared nothing defers to the device holding it, which is the inference the
-  protocol documents. The device-level check is unchanged, so a capability that
-  outlives its session still buys nothing.
-
-- **A write can no longer land on a tag the client did not mean.** Requests were
-  routed by preference rather than by name: the agent's own reader while it
-  reported a card, otherwise whichever device had scanned most recently. That
-  preference was evaluated when the request arrived, not when the tag was
-  scanned, so lifting a card in between moved the request to a phone's tag. A
-  payload encoded for one tag was written to another, irreversibly when the
-  request also locked. Nothing caught it, because the request had no field
-  naming the tag it meant: `uid` was reported in the *response*, so a client
-  learned which tag it had hit only afterwards.
-
-  `writeRequest`, `lockRequest`, `transceiveRequest` and `capabilitiesRequest`
-  now carry the `uid` of the tag they apply to, and the agent finds whichever
-  source is holding it instead of choosing one. A tag that is not present fails
-  with `NO_CARD`; a tag present but not the one named fails with the new
-  `TAG_MISMATCH`, which is not retryable. Naming a `deviceID` as well holds that
-  device to the UID too, so an id remembered from an earlier scan cannot act on
-  whatever that device is holding now.
-
-  A request that names no tag is refused with `TAG_NOT_NAMED` unless it sets
-  `allowUntargeted`, which is per-request rather than an agent-wide flag so one
-  legacy client cannot weaken the guarantee for the others.
-
-- **A tag declares what it cannot confirm, instead of the pipeline branching on
-  its kind.** A tag whose contents arrive from elsewhere answers a read with the
-  snapshot taken when it was scanned, so reading back after a write compares
-  against data the write could not have changed: confirmation with nothing
-  behind it. `TagCapabilities.ReadsAreSnapshot` says so, and the write skips the
-  step rather than asking what kind of tag it holds. `nfc.AtomicLockWriter` does
-  the same for locking, folding it into the write where a tag offers both in one
-  exchange, so a failure between the two cannot leave data written and the lock
-  not applied.
-
-- **A phone's device reports the tag it is holding.** `nfc.Device.GetTags` is
-  the question "what tag do you have", and `remotenfc.Device` satisfied the
-  interface without answering it: the method waited and returned nothing, on
-  the grounds that scans arrive by push and a phone is never opened as the
-  agent's reader. So the driver grew a second place to keep held tags, a map on
-  the manager keyed by device ID, and every path that needed one had to know to
-  look there instead. That is the origin of the reader-and-device split in the
-  request routing.
-
-  The tag now lives on the device holding it, which is what `GetTags` returns.
-  The manager keeps only which device scanned most recently, for a request that
-  names no device. The wait stays for the empty case, since that is what paces a
-  caller polling a device with nothing in its field.
-
-- **The agent starts without auto-TLS again.** `-auto-tls=false` and an
-  externally provisioned `-cert`/`-key` both panicked at startup, before the
-  systray appeared. Neither configuration has a certificate authority, and the
-  bootstrap server is built to run without one so phones can still pair. Its
-  nil checks did not work: the caller passed a nil `*tls.Manager`, and a nil
-  pointer boxed into an interface is not a nil interface, so every check passed
-  and then dereferenced nil. `NewBootstrapServer` now unboxes it once, so those
-  checks hold
-
-## [1.1.3] - 2026-08-15
+- `server/unifiedserver` is now `server/listener`, package `listener`, so
+  `unifiedserver.Server` and `unifiedserver.Config` are `listener.Server` and
+  `listener.Config`
+- `Agent.OnPreferencesChange` reports a preference change. It used to ride
+  `OnClientsChange`, which is documented as running when a client connects or
+  disconnects, so nothing could follow one without the other
+- `Options.RequirePaired` is `Options.RequirePairedDevice`, matching
+  `Config.RequirePairedDevice` and the agent's own methods
+- `Options.Version` is gone. Setup never read it; the shipped command's
+  `parseFlags` returns it alongside the options instead
+- `console.Server` holds one reference to its host. `AttachTray` asks whether
+  that host is this package's own adapter instead of a second field caching the
+  concrete pointer
+- One `Preferences` type. `agent.Preferences` is what the agent holds and what
+  the console and the tray both take; `console.Preferences` is gone, along with
+  the converter between them. The reader mode is an `nfc.ReaderMode` throughout
+  and travels as its name on the wire, so the `ModeName` field that held the
+  same value a second way is gone too. The JSON shape is unchanged
+- `wsconn` moved to `server/wsconn`. `server.SafeConn` and `server.NewSafeConn`,
+  which were aliases onto it, are gone: take `wsconn.SafeConn` directly
+- `ServerPlugin` and `PairingPlugin` no longer take a `*TrustPlugin`. Each takes
+  what it needs: `ServerPlugin.Config` the certificate files, with `Setup`
+  resolving them onto `Runtime.CertFile`/`KeyFile`, `ServerPlugin.Certificates`
+  the reissue signal, and `NewPairingPlugin` a `tls.CertificateAuthority`.
+  `TrustPlugin` keeps the tray entry that installs the local authority and loses
+  `CertFile`, `KeyFile`, `Authority` and `Watcher`
+- The `webui` package merged into `agent/console`, which now holds the gate, the
+  routes, the state snapshot, the dispatcher, the `Host` adapter and the
+  embedded frontend. `webui.Host` and `webui.Preferences` are `console.Host` and
+  `console.Preferences`; the two-layer `Config`/`New`/`Server` collapsed into one
+- The agent holds no listener. `Agent.Routes` is what it serves of its own,
+  `/ws` and the two health checks, as data for whatever mounts it. `Setup` builds
+  no listener and no pairing server: the program registers both as plugins. Gone
+  with it: `Config.Server`, `Agent.UnifiedServer`, `Runtime.Server`
+- The agent holds no certificate. `agent.TrustPlugin` wraps the `*tls.Manager`
+  from `Runtime.Certificates`, and the pairing server and listener take narrower
+  contracts: `PairingConfig.CA` is `tls.CertificateAuthority`, two methods rather
+  than the whole manager
+- `tls.Manager` reports every reissue on `CertificateWatcher.WatchReissues`, and
+  `ServerPlugin` rebinds on one, so installing a CA no longer needs a restart
+- The server plugin owns the tray's Server URLs submenu: the device and client
+  addresses, the API secret, and their copy and regenerate actions moved out of
+  `agent/tray`
+- `traymenu` no longer imports a toolkit. The Fyne driver is `traymenu/fynetray`,
+  so only a command using the real tray needs cgo on macOS, and `traymenu.New(nil)`
+  draws nothing. Clipboard copying is its own `clipboard` package
+- The binary is `cmd/davi-nfc-agent`, and the module root holds no Go files. The
+  agent, console and tray are packages of their own; the root package was 19
+  files in which the tray read the agent's private fields
+- `Agent` configuration is settled at construction. `Setup` assigned twelve
+  exported fields one at a time after `NewAgent`, so anything holding the agent
+  could rebind the port or swap the origin allowlist behind the running servers
+- `agent.Runtime` carries only what the agent does not. `Origins`, `Devices`,
+  `Bootstrap` and `BootstrapPort` were assigned twice and could drift apart
+- `tray.New` takes the `agent.Runtime` rather than four fields unpacked from it
+- `buildinfo` is per-build rather than package-level variables, so a program
+  built on the agent announces its own name and writes to its own config
+  directory instead of `davi-nfc-agent`'s
+- Routes are mounted on the server rather than configured into it. A console
+  attached after the mux was built was never served
+- CORS is applied per route at the mount, rather than wrapping everything except
+  two routes named in the server's own code
+- The agent no longer knows what a console is: `agent.Console`, `SetConsole` and
+  the accessors are gone, and a program mounts the control center's routes itself
+- The device protocol lives with the driver that speaks it. `protocol` held both
+  wire formats; the device half is now in `nfc/remotenfc`
+- The device endpoint requires an authenticator. `Manager.Handler` took an origin
+  check and nothing else, so mounting it unwrapped served an open endpoint
+- `deviceserver` is split into what it was: a credential check and the routing
+  that answers "reader or device?"
+- The agent drains its own tag sources; the reader pump was in `deviceserver`
+- `ServerBridge` is gone. It was six channels connecting two objects that could
+  call each other. `server.TagOps` replaces the request half, and
+  `protocol.CodedError` carries a wire code on an ordinary error
+- `nfc.WriteMessage` is the write pipeline for any tag. Encoding, the capacity
+  check, retries and confirmation were methods on `*NFCReader` that never touched
+  one
+- A tag declares what it cannot confirm rather than the pipeline branching on its
+  kind. `TagCapabilities.ReadsAreSnapshot` says a read answers from the scan, so
+  the write skips a confirmation it cannot trust
+- The agent no longer searches its manager for a device driver.
+  `server.DeviceOps` and a scan channel are handed in, so `agent` and
+  `server/tagrouter` import `nfc/remotenfc` nowhere
+- `Agent.Shutdown` is the way out; `Stop` pauses. `Stop` no longer closes the NFC
+  manager, which is built once for the process
+- The control center consumes the client library instead of reimplementing it.
+  `webui/frontend` imports `@davi/nfc-agent-client`; what is left is the event
+  feed and the scan history
+- `client/` is TypeScript and `client/dist` is generated from it. `make client`
+  builds `dist/`, which is committed so a `<script>` tag still works. The package
+  is `@davi/nfc-agent-client`, was `@davi/nfc-client`. `getStatus()` and
+  `getLastTag()` are gone: they called endpoints this agent does not serve.
+  Reconnection backs off from 250ms to 5s rather than retrying every 3s
 
 ### Fixed
 
-- **A phone is no longer offered as the agent's own reader.** Every device the
-  managers knew was listed as a reader to pick, phones included, so the reader
-  menu offered `smartphone:85bacf02-…` beside an ACR122 and picking one pinned
-  it in settings; auto-selection could reach the same result on its own, taking
-  whatever `ListDevices` returned first. But a phone is never opened and polled
-  here — it reports what it scans over the device bridge, which is why its tags
-  arrive whether or not the reader has it selected. So the pin named a device
-  that could not be connected and would not become connectable, and the agent
-  spent every poll trying, forever, with a line each time, while the console
-  said "No readers detected" beside the reader it claimed was pinned — both
-  true and neither explaining the other. A manager now reports whether its
-  devices are remote and `MultiManager` can list readers alone; the reader menu
-  and both auto-selections ask for readers, while the device list keeps
-  everything, since that is what the pairing views are built from. A phone
-  already pinned is ignored at startup with a line saying why, and selecting one
-  is refused rather than accepted and quietly dropped
-- **A reader that will not open is reported once, not every poll.** `doPoll`
-  runs continuously and logged each failed connection attempt, so an unplugged
-  reader — or a device path naming one that will never appear — filled the log
-  at the polling rate with one repeated line. It is now reported once for as
-  long as the reason holds, and again once the reader has worked in between,
-  which is the rule `HandleError` was given in 1.1.2. The same counter serves
-  both, so a fault reported by one is not repeated by the other
-- **The console shows what an NDEF record says.** The record tables read
-  `r.text` and `r.uri`. The agent sends neither: it decodes text and URI records
-  alike into one `content` field, named that because a record carries one value
-  and the type beside it already says which kind. So the value column was empty
-  for every record of every type, and a tag holding a URL showed the type `uri`,
-  a dash, and the base64 of the bytes — everything except the URL
-- **The protocol reference described NDEF records that the agent never sent.**
-  The read direction in [api.md](docs/api.md) documented each record as carrying
-  `type: "T"`, a `text` field and a `uri` field, with `payload` as an array of
-  numbers. The agent sends a human-readable `type`, one `content` field, and a
-  base64 `payload` — so a client written against that page saw an empty value
-  for every record, which is the bug the console had just been fixed for. The
-  section now describes what is actually on the wire, and says that the read and
-  write directions share these names
+- `traymenu.Close` now stops clicks. It closed a done channel that the click
+  path and the dispatch loop each selected on alongside the event queue, and Go
+  picks at random when both are ready, so a click racing a close ran about half
+  the time
+- Every method on a nil `*console.Server` tolerates it, as a build without a
+  console has always been documented to expect. `NotifyChange` and `ConsoleURL`
+  did not
+- `Config.CardTypes` reached nothing. New built an empty card-type filter and
+  dropped it, so an agent built with a card-type allowlist read every type
+- Choosing a reader from the control center did not announce the change, so a
+  second open console page kept showing the previous one until something
+  unrelated redrew it. Every other preference already announced itself
+- A write can no longer land on a tag the client did not mean. Requests were
+  routed by preference, evaluated when the request arrived rather than when the
+  tag was scanned, so lifting a card between the two moved the write. Requests
+  now carry `uid`; new codes `TAG_MISMATCH` and `TAG_NOT_NAMED`, and a
+  per-request `allowUntargeted` for a client that cannot name its tag
+- A write through the client library could not succeed: it named no tag, which
+  the agent refuses with `TAG_NOT_NAMED`
+- A write to a phone reports what it did. The device route returned a bare map
+  where the client server reads an `*nfc.WriteResult`, so the response carried
+  none of the documented fields
+- Restarting the servers no longer doubles the reader. `startServers` called
+  `NFCReader.Start` every time while `RestartServers` leaves the reader running,
+  so each reissue or rotation left another worker polling it
+- A restarted agent serves again. `Agent.Stop` dropped the server it was given
+  and `unifiedserver.Server` refused to start once stopped, so a stop-and-start
+  left a dead port
+- A port already in use fails the start. `unifiedserver.Start` ran on a goroutine
+  whose error was dropped, so `Start` returned nil with nothing listening
+- `Start` and `Stop` no longer race. Only `RestartServers` took a lock, while the
+  tray, console and network watcher reach all three from different goroutines
+- A quick stop could crash the agent: a goroutine read the `UnifiedServer` field
+  rather than a captured value, so a `Stop` landing first left it starting nil
+- The card-type filter no longer races. It was a bare map handed to the device
+  server and mutated in place by the console and the tray
+- Package `agent` no longer writes to process-wide state: `flag.BoolVar`,
+  `flag.Parse` and `log.SetOutput` belong to a program, not a library
+- A hand-built `nfc.Card` reports an error instead of faulting. `Read` assumed
+  the unexported tag that `NewCard` sets
+- The agent starts without auto-TLS again: `-auto-tls=false` and an externally
+  provisioned `-cert`/`-key` both panicked before the tray appeared
+- A phone's device reports the tag it is holding. `remotenfc.Device.GetTags`
+  waited and returned nothing, so held tags were tracked a second time on the
+  manager
+- A tag that declared nothing is unknown, not incapable. `remotenfc.Tag` refused
+  writes, locks and exchanges whenever a scan carried no per-tag capabilities,
+  which is every tag a v0 device holds
+- A device that said nothing about itself no longer refuses for its tags.
+  `capabilities` on `hello` was a value on the wire, so an omitted block and one
+  of all falses arrived alike. It is a pointer now
+- A device is no longer refused for what it calls itself. Registration required
+  `platform` to be `ios`, `android` or `web`, which the bundled client's own
+  default of `unknown` and its Node example both failed
+- A phone is no longer offered as the agent's own reader
+- A reader that will not open is reported once, not on every poll
+- The tray's dynamic menus receive their clicks. The tray library drops a click
+  when nobody is receiving, and the card filters, readers, origins and paired
+  devices were polled between other events, so those clicks were lost
+- Copying a device URL from the tray hands out a device URL, not the client one
+- The offer to trust this agent in browsers returns if the certificate authority
+  goes away. `CAInstalled` reads the filesystem on every call, but the tray only
+  looked at startup
+- All Types accepts a card type the agent has never heard of. It filled the
+  filter with the eight types this agent enumerates instead of emptying it
+- The control center's capability panel was blank on every tag: it read five
+  fields the agent does not send
+- The console shows what an NDEF record says. The record tables read `r.text` and
+  `r.uri`; the agent sends one `content` field
+- A deliberately disconnected client auto-reconnects again: `connect()` did not
+  clear the flag `disconnect()` sets
+- The protocol reference described NDEF records the agent never sent
+
+### Removed
+
+- The settings file and everything that arbitrated with it. Preferences were
+  persisted to `settings.json` and read back at startup, which is what made three
+  shapes necessary for six values. The agent holds them now and nothing writes
+  them anywhere: `agent.Config` goes in, and a change made from the console or a
+  tray menu lasts as long as the agent runs. Gone with it: `settings.Store`,
+  `settings.Explicit`, `ApplySettings`, `SetExplicit`, `Runtime.Settings` and
+  `AgentContext.Settings`. `agent.Config` gains `Mode`, `CardTypes` and
+  `DevicePath`, which it could never carry
+- Package `settings`. `ParseMode` and `FormatMode` are `nfc.ParseReaderMode` and
+  `ReaderMode.String`; the console keeps its own `webui.Preferences`
+- Dead code in `deviceserver`: `Handle` had no callers, the `devices` map was
+  never read, and the fallback WebSocket loop ran only with no driver configured
 
 ## [1.1.2] - 2026-08-15
 
@@ -341,12 +252,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A smartphone disconnecting no longer floods the log.** `GetTags` reported a
-  closed device as `fmt.Errorf("device is closed")` — its own phrase, matching
+  closed device as `fmt.Errorf("device is closed")`, its own phrase, matching
   no sentinel. `IsDeviceClosedError` looks for the typed `ErrDeviceClosed` or,
   failing that, the string `device closed`, so it declined every one of them:
   two spellings that read identically to a person and not at all to
   `strings.Contains`. Nothing downstream handled a phone disconnecting as a
-  result — the reader still had a device, so it polled straight back into the
+  result: the reader still had a device, so it polled straight back into the
   closed one, a loop with no delay and a log line every turn, and a reconnection
   never once attempted. The three returns are now `nfc.ErrDeviceClosed`, which
   survives the `%w` wrapping `getTags` adds; the string fallback accepts both
@@ -362,14 +273,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line a millisecond
 - **A standing device fault is reported once, not on every poll.** `HandleError`
   is reached from the poll loop, so an error that persisted was logged as often
-  as the device was polled — and the reason a line is worth reading is that the
+  as the device was polled, and the reason a line is worth reading is that the
   condition changed. It now reports a fault the first time, again when the
   reason changes, and again when one returns after the device has worked,
   matching what `ListDevices` was given in 1.1.1 against the same log buffer
 - **The control center no longer discards tags scanned by a phone.** A tag
   tapped on a paired phone reached the frontend and never appeared in the
   console, which reads the same broadcast on the same endpoint. The console
-  cleared its tag whenever a `deviceStatus` reported no card — and that status
+  cleared its tag whenever a `deviceStatus` reported no card, and that status
   describes the agent's own reader, whose `cardPresent` is false for the entire
   life of every phone scan. The tag was received, displayed, and wiped by the
   next status message. No other consumer reads tag presence out of reader
@@ -377,7 +288,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tag the reader itself produced; a tag from a device is cleared by the device
   saying so
 - **A tag leaving a phone's field is recorded as a removal.** A device reports it
-  as a `tagData` with no UID, which the console treated as a scan — rendering a
+  as a `tagData` with no UID, which the console treated as a scan, rendering a
   blank tag over the real one and logging a scan of nothing
 
 ## [1.1.1] - 2026-08-15
@@ -386,7 +297,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Trust this agent in browsers, without a terminal.** A browser cannot open a
   `wss://` connection to an untrusted certificate, and unlike a page visit there
-  is no warning to click through — the page simply never connects, and nothing
+  is no warning to click through: the page simply never connects, and nothing
   on either side says why. The only remedy was `-install-ca`, a launch flag, so
   a non-technical operator could not get a web page talking to the reader at
   all. The tray gains **Trust This Agent in Browsers** and the Control Center
@@ -403,7 +314,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signs, and that is what `/pair` hands a device. The CA route did not use it:
   truststore's `MakeCert` generates a key of its own, which was then installed
   as the server key. So an agent with a CA advertised a pin its handshake could
-  never present, and a device that paired with one was locked out permanently —
+  never present, and a device that paired with one was locked out permanently.
   re-pairing returned the same unusable pin. The CA route now signs the same
   persistent key, so the pin holds across adopting a CA and devices paired
   before **Trust This Agent in Browsers** keep working after it. An install
@@ -411,15 +322,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reissuing a certificate no longer installs a certificate authority.**
   `RegenerateCertificates` called the CA routine directly instead of going
   through the routing that picks self-signed or CA, so the Control Center's
-  **regenerate** action — labelled as nothing more than reissuing a certificate
-  — created a local CA, installed it in the system trust store and prompted for
+  **regenerate** action, labelled as nothing more than reissuing a certificate,
+  created a local CA, installed it in the system trust store and prompted for
   a password, on an agent that had deliberately never had one. That defeated
   1.1.0's own change to stop installing a CA by default. Reissuing now keeps
   whichever route the install already uses, and putting a CA in the trust store
   happens only when explicitly asked for
 - **A missing reader no longer floods the log.** `ListDevices` is polled
   continuously by the tray, the console and the device watcher, and every failed
-  poll logged. With no reader attached that was 85 of 108 lines — one repeating
+  poll logged. With no reader attached that was 85 of 108 lines, one repeating
   message, drowning anything else that happened, including the certificate
   errors the log was added to surface. A failure is now reported once, again if
   the reason changes, and a recovery gets a line of its own. Same conditions
@@ -431,13 +342,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Control Center.** A web console served by the agent itself at its own root,
   covering what neither the tray nor the flags could do. Four tabs: Overview,
-  Tag, Activity and Security. The reader controls — start/stop, device,
-  mode, card filter, port — sit on Overview rather than behind a settings tab,
+  Tag, Activity and Security. The reader controls (start/stop, device,
+  mode, card filter, port) sit on Overview rather than behind a settings tab,
   so the page an operator lands on is the page they work from. Opened from the
   tray's
   **Open Control Center**, which mints a single-use token and hands it to the
   browser. Being same-origin, it is also the one browser client that works on a
-  fresh install without `-install-ca` — a page visit can be accepted manually,
+  fresh install without `-install-ca`: a page visit can be accepted manually,
   where a bare `wss://` to an untrusted certificate fails outright. Built with
   Vite and React; `webui/frontend/dist` is committed and embedded, so
   `go build .` still needs nothing but Go.
@@ -458,13 +369,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filterable, pausable and exportable as NDJSON. The tray only ever showed the
   card currently on the reader, so a tag presented and taken away left no trace
 - **The control center is a removable module.** Everything it needs lives in
-  `webui/` — the gate, the routes, the state snapshot, the dispatcher and the
-  frontend it embeds — and none of it imports the agent. It declares what it
+  `webui/`: the gate, the routes, the state snapshot, the dispatcher and the
+  frontend it embeds. None of it imports the agent. It declares what it
   needs of the agent as `webui.Host`, implemented by a single adapter in
   `package main`, which both keeps the console's whole reach into the agent
   readable in one file and lets its tests run against a fake host with no
   hardware. `go build -tags nowebui .` then drops it: no `/control` routes, no
-  privileged API, no tray entry and no embedded console — about 820 KB smaller,
+  privileged API, no tray entry and no embedded console, about 820 KB smaller,
   with none of the console's strings present. Only three files in `package main`
   carry the constraint; the call sites tolerate a nil console, so no shared file
   needs a tag of its own. The agent's own protocol is unaffected: raw tag
@@ -474,7 +385,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could already transceive with a tag, but only agent-to-device: no client
   could ask for one, so DESFire, ISO-DEP applets and capability probing meant
   writing a program. `transceiveRequest`/`transceiveResponse` open that channel
-  to clients, routed like a write — to the device holding a tag, otherwise to
+  to clients, routed like a write: to the device holding a tag, otherwise to
   the hardware reader. The console gains an APDU panel with hex in, hex and
   ASCII out, decoded ISO 7816 status words, per-exchange timing, and presets
   built from the commands `nfc/apdu.go` already constructs.
@@ -485,7 +396,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracked its connections but exposed only a count, so "something is writing to
   my tags" had no answer. Each connection now reports its origin, address, user
   agent, how long it has been connected, and how many writes and locks it has
-  issued — counted per connection, so a client that is only listening is
+  issued, counted per connection, so a client that is only listening is
   distinguishable from one changing tags. Any one of them can be disconnected;
   it is free to reconnect, so revoking its origin remains what bars it
 - **Per-device revocation.** Paired devices are listed with platform, pairing
@@ -500,7 +411,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag still wins, and no file is written until something is deliberately saved
 - **Certificate and origin diagnostics.** The console reports certificate
   expiry, issuer and the names it actually covers, and warns when the agent is
-  reachable on an address the certificate omits — previously indistinguishable
+  reachable on an address the certificate omits, previously indistinguishable
   from the agent being down, since a browser reports both as a failed
   connection. Origins refused since startup accumulate with a one-click
   **allow**, where the tray offered a blocked origin only while its menu was open
@@ -533,8 +444,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transceive command channel.** `deviceTransceiveRequest`/`Response` let the
   agent exchange raw data with a tag a device is holding, with separate
   declarations for APDU-level and framing-level exchange. Costs one network
-  round trip per command, so it is for what genuinely needs it — DESFire,
-  ISO-DEP applets, capability probing — not as a general read path
+  round trip per command, so it is for what genuinely needs it (DESFire,
+  ISO-DEP applets, capability probing) and not as a general read path
 - **Origin allowlist with first-party defaults**, persisted to
   `allowed-origins.json` and managed from the tray. A refused origin is offered
   as a one-click *"Allow …"*, which persists without a restart. Preload with
@@ -583,7 +494,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A hosted web console could not connect at all.** The WebSocket origin guard
   rejects any `Origin` that is not the agent's own `host:port`, and
-  `AllowedOrigins` — the escape hatch built alongside it — was never populated:
+  `AllowedOrigins`, the escape hatch built alongside it, was never populated:
   no flag, no environment variable, and `agent.go` left it nil on both servers.
   Every browser console was affected, since a page is by construction served
   from somewhere other than the agent's port. The REST endpoints meanwhile
@@ -591,7 +502,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disagreed about who may call them
 - Pairing required auto-TLS. The endpoint lived on a server that only ran when
   the agent managed its own certificates, so the deployment using an externally
-  provisioned certificate — the one that most needs per-device credentials —
+  provisioned certificate, the one that most needs per-device credentials,
   had no way to pair
 - `ServerBridge.Close` closed channels that producers could still be sending
   on, which panics the losing goroutine. Only the done channel is closed now;
@@ -599,7 +510,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A tag scan was published to clients before the route a write needs was
   registered, so a client reacting to `tagData` with an immediate write could
   be told no device held a tag it had just been told about
-- Tag scans that fail to parse — a malformed UID, an undecodable NDEF message —
+- Tag scans that fail to parse (a malformed UID, an undecodable NDEF message)
   were reported as the transient `TAG_SEND_FAILED`, inviting a device to resend
   a payload that can never be accepted. They are now `INVALID_DATA` and marked
   permanent
@@ -619,7 +530,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoints. Every request must arrive over loopback, declare the agent's own
   origin, and carry a session cookie minted by the tray; the routes are served
   without the permissive CORS headers the client endpoints carry. The origin
-  allowlist is deliberately not consulted — an entry there authorises a console
+  allowlist is deliberately not consulted: an entry there authorises a console
   to read tags and must never confer the ability to revoke a device or rotate
   the secret. Loopback is determined from `RemoteAddr`, never from a forwarding
   header
@@ -679,7 +590,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message. Backed by `NFCReader.GetCapabilities` and `Card.Capabilities`
 - Erase/format support: `NFCReader.EraseCard` and an `empty` write record type
   overwrite a tag with an empty NDEF message (verified like any write, and
-  composable with `lock`). Reversible — the tag can be rewritten afterward
+  composable with `lock`). Reversible: the tag can be rewritten afterward
 - Password-protection capability reporting (`TagCapabilities.SupportsPassword`,
   true for NTAG21x) and the reader API contract (`SetCardPassword`,
   `RemoveCardPassword`, `PasswordOptions`). The destructive NTAG config writes

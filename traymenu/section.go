@@ -17,6 +17,10 @@ import "sync"
 //
 // Keys are the caller's own. Setting one that is already there replaces its
 // item rather than adding a second, which makes registration safe to repeat.
+//
+// A Section is itself a [Container], so it can be handed to something that adds
+// items of its own: a plugin, or a [List], [Radio] or [Checklist]. Entries added
+// that way are not keyed, so Remove, Clear and Keys do not account for them.
 type Section struct {
 	item *Item
 
@@ -24,6 +28,8 @@ type Section struct {
 	entries map[string]*Item
 	order   []string
 }
+
+var _ Container = (*Section)(nil)
 
 // NewSection adds a submenu to parent and returns the section that fills it.
 func NewSection(parent Container, title string, opts ...Option) *Section {
@@ -124,3 +130,31 @@ func (s *Section) dropKeyLocked(key string) {
 		}
 	}
 }
+
+// Add appends an unkeyed item to the section. Use Set for an entry that may be
+// registered again later.
+func (s *Section) Add(title string, opts ...Option) *Item {
+	return s.item.Add(title, opts...)
+}
+
+// AddCheckbox appends an unkeyed checkbox to the section.
+func (s *Section) AddCheckbox(title string, checked bool, opts ...Option) *Item {
+	return s.item.AddCheckbox(title, checked, opts...)
+}
+
+// AddSubmenu appends an unkeyed submenu to the section.
+func (s *Section) AddSubmenu(title string, opts ...Option) *Item {
+	return s.item.AddSubmenu(title, opts...)
+}
+
+// AddSeparator appends a divider to the section.
+func (s *Section) AddSeparator() { s.item.AddSeparator() }
+
+// Section appends a nested section, which is how one plugin groups its own
+// entries inside the section it was given.
+func (s *Section) Section(title string, opts ...Option) *Section {
+	return NewSection(s.item, title, opts...)
+}
+
+func (s *Section) menu() *Menu    { return s.item.menu() }
+func (s *Section) native() Native { return s.item.native() }

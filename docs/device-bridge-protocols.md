@@ -12,25 +12,26 @@ The bridge is a hand-rolled JSON-over-WebSocket protocol:
 |---|---|
 | Transport | WebSocket on the agent port (`/ws?mode=device`), WSS by default |
 | Envelope | `{type, id, payload}` (`protocol.WebSocketRequest`) |
-| Handshake | First frame must be `registerDevice`; server replies with a `deviceID` |
-| Events | `tagScanned`, `tagRemoved`, `deviceHeartbeat` (10s, 30s timeout) |
-| Commands | `deviceWriteRequest` / `writeResponse`, correlated by `requestID` |
-| Data model | NDEF records + optional `rawData`, plus UID/technology/type/ATR |
-| Auth | One shared API secret for every device (query param or Bearer), loopback exempt |
-| Trust | Self-signed CA, bootstrap server on :9472 serves the root cert |
+| Handshake | `hello` carries a protocol version and the device's capabilities; `registerDevice` remains as the unversioned legacy path. Server replies with a `deviceID` |
+| Events | `tagScanned`, `tagRemoved`, `goodbye`, `deviceHeartbeat` (30s interval, 90s timeout) |
+| Commands | `deviceWriteRequest` (lock included) and `deviceTransceiveRequest`, correlated by `requestID` |
+| Data model | NDEF records + optional `rawData`, plus UID/technology/type/ATR and the tag capabilities the device declares |
+| Auth | A per-device credential issued at pairing, or one shared API secret (query param or Bearer); loopback exempt unless `-require-paired-devices` |
+| Trust | Self-signed certificate, pinned by public key; pairing server on :9472 hands out a local CA where one is in use |
 | Discovery | mDNS `_nfc-device._tcp` |
 
-Two structural limits follow from this, and they're what most of the options
-below are evaluated against:
+Two structural limits shaped the survey below, and most of the options in §2
+are evaluated against them. Both have since been closed; they are stated here as
+written, because the reasoning that follows depends on them:
 
-1. **No command channel to the tag.** `remotenfc.Tag` reports
-   `CanWrite: false`, `CanTransceive: false`, `CanLock: false`
-   (`nfc/remotenfc/tag.go`). A phone can report what it read; the agent cannot
-   drive an exchange with the tag the phone is holding. Everything that needs a
-   round trip (DESFire, ISO-DEP applets, real capability probing, password/auth
-   flows, read-after-write verification) is hardware-reader-only.
+1. **No command channel to the tag.** `remotenfc.Tag` reported `CanWrite`,
+   `CanTransceive` and `CanLock` as false. A phone could report what it read;
+   the agent could not drive an exchange with the tag the phone was holding.
+   Everything that needs a round trip (DESFire, ISO-DEP applets, real capability
+   probing, password/auth flows, read-after-write verification) was
+   hardware-reader-only. Closed by T1.
 2. **No device identity.** One secret shared by all devices, no pairing, no
-   per-device revocation, no protocol version negotiation.
+   per-device revocation, no protocol version negotiation. Closed by T2.
 
 ## 2. Candidate protocols
 
@@ -163,20 +164,22 @@ Build on **PC/SC verb semantics** for capability, **TR-03112-6's handshake
 shape** for session setup, and keep our own JSON/WebSocket carrier. Concretely,
 in dependency order:
 
-**T0: protocol hygiene (small, no behavior change).**
-Negotiate a subprotocol string on upgrade; make the first frame a
-version/capability exchange rather than `registerDevice` alone; publish version
-and capabilities in the mDNS TXT record; align our NDEF record JSON with the Web
-NFC vocabulary (accepting both spellings).
+**T0: protocol hygiene (small, no behavior change).** Partly done.
+Negotiate a subprotocol string on upgrade (`davi-nfc-device.v1`, done); make the
+first frame a version/capability exchange rather than `registerDevice` alone
+(`hello`, done); publish version and capabilities in the mDNS TXT record (not
+done); align our NDEF record JSON with the Web NFC vocabulary, accepting both
+spellings (not done).
 
-**T1: the command channel.** Add `deviceTransceiveRequest` /
+**T1: the command channel.** Done. Add `deviceTransceiveRequest` /
 `deviceTransceiveResponse` carrying base64 APDUs plus an explicit timeout, and
 `deviceConnect`/`deviceDisconnect` with the tag's ATR/ATQA/SAK. Then implement
 `Transceive`, `Capabilities`, `Write`, and `Lock` on `remotenfc.Tag` on top of
 it, so a phone stops being a second-class device. This is the change that
 unlocks everything else; the rest are conveniences.
 
-**T2: per-device pairing.** Replace the single shared secret with: short OOB
+**T2: per-device pairing.** Done, except that the PIN exchange is not a PAKE.
+Replace the single shared secret with: short OOB
 code (shown in the systray, or a QR carrying host/port/code) → PAKE → durable
 per-device credential; a device list in the tray with revoke. Keep the shared
 secret as a legacy path.
@@ -356,21 +359,28 @@ translation layer, it would add one.
 None of the real defects are consequences of being custom. They are the boring
 things mature protocols specify and we skipped:
 
-- **Version negotiation**: none at all. Add it first; everything else needs it.
-- **Capability declaration**: three booleans on the wire against a much richer
-  internal model (§4.2).
-- **A command channel**: the T1 omission. Note this is a *missing layer*, not a
-  wrong one: an optional sub-channel for devices that can do more, not a
-  replacement for NDEF-level messages.
-- **Device identity**: a shared bearer secret in a query string, no per-device
-  credential, no revocation.
-- **Error taxonomy**: ad-hoc string codes, no distinction between "retry this",
-  "the tag left the field", and "this device will never support that".
-- **Liveness**: a 10s/30s heartbeat where MQTT's Last Will gives immediate
-  death detection. Worth implementing the idea, not adopting the broker.
+Four of these have since been addressed; the rest are still open.
+
+- **Version negotiation**: was none at all. Now a subprotocol string and a
+  versioned `hello`. Done.
+- **Capability declaration**: was three booleans on the wire against a much
+  richer internal model (§4.2). The device now declares a capability set, with
+  undeclared distinguished from declared-false. Done.
+- **A command channel**: the T1 omission, now filled. Note this was a *missing
+  layer*, not a wrong one: an optional sub-channel for devices that can do more,
+  not a replacement for NDEF-level messages.
+- **Device identity**: was a shared bearer secret in a query string, with no
+  per-device credential and no revocation. Pairing now issues one per device,
+  revocable. Done.
+- **Error taxonomy**: `protocol.ErrorCode` carries a `retryable` flag and
+  separates "the tag left the field" (`TAG_REMOVED`) from "this device will
+  never support that" (`NOT_SUPPORTED`). Done.
+- **Liveness**: a 30s/90s heartbeat where MQTT's Last Will gives immediate
+  death detection. Worth implementing the idea, not adopting the broker. Open.
 - **Reconnect/resume**: undefined. A phone whose radio drops mid-write leaves
-  the request in limbo; there is no idempotency key and no replay.
-- **Backpressure**: `TagChannelBuffer = 10` and then behavior is unspecified.
+  the request in limbo; there is no idempotency key and no replay. Open.
+- **Backpressure**: the device manager's tag channel is buffered to 10 and
+  behavior past that is unspecified. Open.
 
 ### 5.3 The rule to follow
 
@@ -389,7 +399,7 @@ not a migration.
 Custom protocols rediscover other people's mistakes, and we already have: no
 versioning, weak auth, no resume are exactly the classics. The mitigation is not
 to abandon ours but to stop improvising the parts that are already specified
-elsewhere; §5.3 is that list. It is worth re-testing the assumption if the
+elsewhere; §5.2 is that list. It is worth re-testing the assumption if the
 product ever centres on ISO-DEP applet transactions rather than NDEF payloads,
 because that is the workload the APDU-level protocols are actually shaped for.
 

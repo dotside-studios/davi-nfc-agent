@@ -279,7 +279,9 @@ package main
 import (
     "fmt"
     "io"
+
     "github.com/dotside-studios/davi-nfc-agent/nfc"
+    "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 )
 
 func main() {

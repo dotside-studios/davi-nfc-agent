@@ -22,8 +22,8 @@ func TestMDNSServiceNameFallback(t *testing.T) {
 	}
 }
 
-// TestMDNSServiceNameOverride is the point of the field: a program built on the
-// agent announces itself under its own name.
+// TestMDNSServiceNameOverride covers the field: a program built on the agent
+// announces itself under its own name.
 func TestMDNSServiceNameOverride(t *testing.T) {
 	c := Config{MDNSServiceName: "Gate Reader Device"}
 	if got := c.mdnsServiceName(); got != "Gate Reader Device" {

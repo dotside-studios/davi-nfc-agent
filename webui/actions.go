@@ -162,7 +162,7 @@ func (c *Server) dispatch(req action) (any, error) {
 		return nil, c.host.RegenerateCertificate()
 
 	case "security.revokeControlSessions":
-		// Includes the caller's own session, which is the point.
+		// Includes the caller's own session.
 		c.auth.RevokeAll()
 		return nil, nil
 

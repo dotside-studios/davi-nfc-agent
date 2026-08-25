@@ -174,7 +174,7 @@ func (r *DeviceRegistry) Count() int {
 }
 
 // Revoke removes a device. Its token stops working immediately; every other
-// device is unaffected, which is the point of the registry.
+// device is unaffected.
 func (r *DeviceRegistry) Revoke(id string) error {
 	r.mu.Lock()
 	_, existed := r.devices[id]

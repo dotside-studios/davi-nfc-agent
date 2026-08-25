@@ -9,9 +9,8 @@ import (
 // allows every type.
 //
 // It guards itself because it is read on the goroutine draining the reader and
-// written by the console and the tray. It used to be a bare map shared between
-// them, which raced, and a map is not merely racy under concurrent read and
-// write but liable to abort the process.
+// written by the console and the tray. A bare map here would not merely race
+// under concurrent read and write, it would abort the process.
 type cardTypeFilter struct {
 	mu      sync.RWMutex
 	allowed map[string]bool

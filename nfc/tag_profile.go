@@ -3,14 +3,12 @@ package nfc
 // tagProfile is what this package knows about one kind of tag: how it is
 // named, and what the driver backing it can actually do.
 //
-// It is the single source for Type(), NumericType() and Capabilities(), which
-// is the point. Capabilities used to be recovered from the tag's display name
-// by substring match, so a driver could report a name that implied one thing
-// and behaviour that did another, and the two could drift apart without
-// anything noticing. Every Ultralight variant shares one display name, a Type 4
-// tag advertised a lock no driver implemented, and a DESFire hid the raw
-// exchange its driver performs. A profile is declared next to the driver that
-// has to honour it.
+// It is the single source for Type(), NumericType() and Capabilities(), so a
+// driver cannot report a name implying one thing and behaviour doing another.
+// Recovering capabilities from a display name cannot work: every Ultralight
+// variant shares one name, and a name says nothing about whether the driver
+// implements a lock or a raw exchange. A profile is declared next to the driver
+// that has to honour it.
 //
 // A kind with no driver has no profile. Capabilities for a tag this package
 // did not build come from the tag itself; see InferTagCapabilities for the one

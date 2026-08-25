@@ -117,8 +117,7 @@ type Config struct {
 
 	// Devices routes operations to paired devices, and DeviceScans carries what
 	// they scan. Both come from a driver the caller built, because the caller
-	// is what knows one is wanted: an agent with neither serves its own reader
-	// and nothing else.
+	// is what knows one is wanted: an agent with neither serves its own reader.
 	//
 	// The agent takes them as an interface and a channel rather than a driver,
 	// so it names no device protocol and cannot reach past what it was given.

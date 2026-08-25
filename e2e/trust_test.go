@@ -97,7 +97,7 @@ func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 	}
 }
 
-// A revoked device is refused, which is the point of per-device credentials.
+// A revoked device is refused.
 func TestARevokedDeviceIsRefused(t *testing.T) {
 	h := start(t, options{Pairing: true})
 

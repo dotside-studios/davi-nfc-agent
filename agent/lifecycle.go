@@ -92,8 +92,7 @@ func (a *Agent) OnStateChange(fn func(State)) {
 
 // Use registers a component to run alongside the agent. Components must be
 // registered before Start; registering while the agent is running returns an
-// error rather than silently never starting, which is the trap the console's
-// old attach mechanism fell into.
+// error rather than silently never starting.
 func (a *Agent) Use(c Component) error {
 	a.lifecycleMu.Lock()
 	defer a.lifecycleMu.Unlock()

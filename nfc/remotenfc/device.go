@@ -135,10 +135,9 @@ func (d *Device) Transceive(txData []byte) ([]byte, error) {
 
 // GetTags satisfies nfc.Device and never returns a tag.
 //
-// A phone is not polled the way a reader is: it pushes its scans, which reach
-// the agent through Manager.Data, which is the scan notification. This is the
-// other question: what is it holding right now. It used to answer nothing,
-// which is why a registry of held tags grew on the manager beside it.
+// A phone is not polled the way a reader is: it pushes its scans, and those
+// reach the agent through Manager.Data. What a device is holding right now is a
+// separate question, answered by the registry of held tags on the manager.
 func (d *Device) GetTags() ([]nfc.Tag, error) {
 	d.mu.RLock()
 	active, tag := d.isActive, d.tag

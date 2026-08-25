@@ -29,7 +29,7 @@ func refuse(code protocol.ErrorCode, format string, args ...any) error {
 // resolveRoute decides which tag source an operation applies to, by looking up
 // the tag it names rather than preferring one source over another. A preference
 // is re-evaluated when the request arrives, so a card lifted since the scan
-// used to move the request to whichever phone had scanned last.
+// would move the request to whichever phone had scanned last.
 func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route, error) {
 	reader := s.config.Reader
 

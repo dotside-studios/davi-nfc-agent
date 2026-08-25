@@ -103,9 +103,8 @@ func (p *PairingServer) Port() int {
 
 // PIN is the code a phone must present to pair, empty on a nil server.
 //
-// The nil receiver is deliberate: a build without pairing holds a nil
-// *PairingServer, and every caller asking for the PIN would otherwise check
-// first.
+// A build without pairing holds a nil *PairingServer, so the nil receiver
+// saves every caller a check.
 func (p *PairingServer) PIN() string {
 	if p == nil {
 		return ""

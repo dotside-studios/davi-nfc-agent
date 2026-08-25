@@ -7,7 +7,6 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 )
 
 // host adapts the agent to Host. Every reach the console makes into the agent
@@ -24,7 +23,7 @@ type host struct {
 
 var _ Host = (*host)(nil)
 
-func (h *host) Running() bool     { return h.agent.Reader() != nil }
+func (h *host) Running() bool     { return h.agent.Running() }
 func (h *host) ConfigDir() string { return h.agent.ConfigDir() }
 
 func (h *host) StartAgent() error {
@@ -45,27 +44,15 @@ func (h *host) QuitAgent() {
 
 func (h *host) RestartServers() error { return h.agent.RestartServers() }
 
-func (h *host) AvailableDevices() []string {
-	if h.agent.Manager() == nil {
-		return nil
-	}
-	// The reader picker, so it offers only what can actually be one. A phone
-	// appearing here reads as a reader to choose, and choosing it pins the
-	// reader to a device that is never opened.
-	devices, err := nfc.ListReaders(h.agent.Manager())
-	if err != nil {
-		return nil
-	}
-	return devices
-}
+// AvailableDevices is the reader picker, so it offers only what can actually be
+// one. A phone appearing here reads as a reader to choose, and choosing it pins
+// the reader to a device that is never opened.
+func (h *host) AvailableDevices() []string { return h.agent.Readers() }
 
 func (h *host) AllCardTypes() []string { return nfc.GetAllCardTypes() }
 
 func (h *host) CurrentCard() (uid, cardType string, present bool) {
-	if h.agent.ClientServer == nil {
-		return "", "", false
-	}
-	card := h.agent.ClientServer.GetLastCard()
+	card := h.agent.LastCard()
 	if card == nil {
 		return "", "", false
 	}
@@ -73,11 +60,7 @@ func (h *host) CurrentCard() (uid, cardType string, present bool) {
 }
 
 func (h *host) RemoteDevices() (total, active int) {
-	mgr := h.remoteManager()
-	if mgr == nil {
-		return 0, 0
-	}
-	return mgr.GetDeviceCount(), mgr.GetActiveDeviceCount()
+	return h.agent.RemoteDevices()
 }
 
 // SelectDevice restarts the reader on the chosen device. Whatever follows the
@@ -86,7 +69,7 @@ func (h *host) SelectDevice(devicePath string) error {
 	// Refused rather than accepted and quietly ignored: the picker does not
 	// offer a phone, so one arriving here came from somewhere that should hear
 	// why it cannot be the reader.
-	if nfc.IsRemoteDevice(h.agent.Manager(), devicePath) {
+	if !h.agent.IsReader(devicePath) {
 		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
 	}
 
@@ -103,18 +86,11 @@ func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
-func (h *host) ClientCount() int {
-	if h.agent.ClientServer == nil {
-		return 0
-	}
-	return h.agent.ClientServer.ClientCount()
-}
+func (h *host) ClientCount() int { return h.agent.ClientCount() }
 
 func (h *host) Clients() []Client {
-	if h.agent.ClientServer == nil {
-		return nil
-	}
-	live := h.agent.ClientServer.Clients()
+	live := h.agent.Clients()
+
 	out := make([]Client, 0, len(live))
 	for _, c := range live {
 		out = append(out, Client{
@@ -130,15 +106,7 @@ func (h *host) Clients() []Client {
 	return out
 }
 
-func (h *host) DisconnectClient(id string) error {
-	if h.agent.ClientServer == nil {
-		return errors.New("agent is not running")
-	}
-	if !h.agent.ClientServer.Disconnect(id) {
-		return errors.New("no such client: it may have already disconnected")
-	}
-	return nil
-}
+func (h *host) DisconnectClient(id string) error { return h.agent.DisconnectClient(id) }
 
 func (h *host) APISecret() string    { return h.agent.APISecret() }
 func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
@@ -194,12 +162,8 @@ func (h *host) PairedDevices() []PairedDevice {
 	// Paired is a stored credential; online is a live session. The console
 	// shows both so an absent device reads as absent rather than broken.
 	online := make(map[string]bool)
-	if mgr := h.remoteManager(); mgr != nil {
-		if ids, err := mgr.ListDevices(); err == nil {
-			for _, id := range ids {
-				online[id] = true
-			}
-		}
+	for _, id := range h.agent.OnlineDevices() {
+		online[id] = true
 	}
 
 	paired := h.agent.Devices().List()
@@ -290,25 +254,4 @@ func (h *host) ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferenc
 	h.agent.SetReaderFeedback(next.ReaderFeedback)
 
 	return h.agent.Preferences()
-}
-
-// remoteManager returns the remote device manager, held either directly or
-// behind the multi-manager.
-func (h *host) remoteManager() *remotenfc.Manager {
-	if h.agent.Manager() == nil {
-		return nil
-	}
-	if m, ok := h.agent.Manager().(*remotenfc.Manager); ok {
-		return m
-	}
-	if mm, ok := h.agent.Manager().(interface {
-		GetManager(string) (nfc.Manager, bool)
-	}); ok {
-		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {
-			if m, ok := mgr.(*remotenfc.Manager); ok {
-				return m
-			}
-		}
-	}
-	return nil
 }

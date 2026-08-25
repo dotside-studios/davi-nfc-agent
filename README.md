@@ -242,34 +242,14 @@ ws.send(JSON.stringify({
 
 The agent is a Go module, and the binary is an ordinary program built from the
 packages it exports. Leaving out the tray, the control center or the hardware
-backend is a matter of which packages you import.
+backend is a matter of which packages you import. The listener, the pairing
+server and the certificate are plugins a program registers, so a build that
+registers none drives the reader and serves no HTTP at all.
 See [Custom Builds](docs/custom-builds.md).
 
 ```bash
 go get github.com/dotside-studios/davi-nfc-agent
 ```
-
-### Plugins
-
-An agent is made of what its program registers. A plugin is a value with one
-method, handed everything it needs once, before the agent starts:
-
-```go
-type BackupPlugin struct {
-	Every time.Duration
-}
-
-func (p *BackupPlugin) Activate(ctx agent.AgentContext) error {
-	backups := &backupWorker{every: p.Every, dir: ctx.ConfigDir()}
-
-	ctx.Systray.Add("Back Up Now", traymenu.OnClick(backups.Run))
-	return ctx.Use(backups)
-}
-```
-
-The listener, the pairing server and the certificate are plugins too, so a build
-that registers none drives the reader and serves no HTTP at all. See
-[Plugins](docs/custom-builds.md#plugins).
 
 ### NFC backends
 

@@ -59,12 +59,11 @@ type Options struct {
 	InstallCA           bool
 	RequirePairedDevice bool
 
-	// RemoteOps and RemoteScans connect a driver of paired devices, and
-	// DeviceEndpoint serves their connections. All three come from a driver the
-	// caller built; leaving them nil is an agent that serves its own reader
-	// only. See agent.Config.
+	// RemoteOps routes operations to paired devices and DeviceEndpoint serves
+	// their connections. Both come from a driver the caller built; leaving them
+	// nil is an agent that serves its own reader only. What those devices scan
+	// comes from the manager. See agent.Config.
 	RemoteOps      server.DeviceOps
-	RemoteScans    <-chan nfc.NFCData
 	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
@@ -242,7 +241,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	a := New(Config{
 		RemoteOps:           opts.RemoteOps,
-		RemoteScans:         opts.RemoteScans,
 		DeviceEndpoint:      opts.DeviceEndpoint,
 		Manager:             manager,
 		Info:                info,

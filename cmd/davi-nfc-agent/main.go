@@ -52,7 +52,6 @@ func main() {
 	// channel of scans and a handler, so the agent names no device protocol.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
 	opts.RemoteOps = devices
-	opts.RemoteScans = devices.Data()
 	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
 		return devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         o.Authenticate,

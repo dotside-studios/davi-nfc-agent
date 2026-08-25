@@ -31,23 +31,6 @@ func (a *Agent) pumpReader(ctx context.Context, reader *nfc.NFCReader, sink tagS
 	}
 }
 
-// pumpDevices forwards what paired devices scan. Their scans carry no reader
-// status and are not filtered by card type: the filter is the agent's policy
-// for its own reader, and a device reports what its user tapped.
-func pumpDevices(ctx context.Context, src <-chan nfc.NFCData, sink tagSink) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-src:
-			if !ok {
-				return
-			}
-			sink.Broadcast(data)
-		}
-	}
-}
-
 // forwardScan applies the card-type filter and hands the scan on.
 func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
 	if data.Err != nil {

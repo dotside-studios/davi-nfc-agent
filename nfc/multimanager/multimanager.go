@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -21,6 +22,10 @@ type MultiManager struct {
 	deviceChangeChan chan struct{}          // Aggregated device change channel
 	stopForward      chan struct{}          // Stop channel forwarding
 	closeOnce        sync.Once              // Close is idempotent
+
+	// scans is every child's scans as one signal, so whatever consumes them
+	// subscribes here rather than to each manager it happens to know about.
+	scans event.Signal[nfc.NFCData]
 
 	// listErrMu guards lastListErr, which holds the last ListDevices error
 	// reported per manager so a persistent one is logged once rather than on
@@ -73,6 +78,10 @@ func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 		if notifier, ok := entry.Manager.(nfc.DeviceChangeNotifier); ok {
 			go mm.forwardDeviceChanges(notifier.DeviceChanges())
 		}
+
+		// A child that reports scans reports them through here. No goroutine:
+		// the child publishes on its own, and this passes it on.
+		nfc.OnScan(entry.Manager, mm.scans.Emit)
 	}
 
 	return mm
@@ -222,6 +231,9 @@ func (mm *MultiManager) Close() {
 		}
 	})
 }
+
+// Scans carries what every child manager's devices report.
+func (mm *MultiManager) Scans() *event.Signal[nfc.NFCData] { return &mm.scans }
 
 // DeviceChanges returns a channel that signals when devices are registered or unregistered
 // in any of the child managers.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -115,14 +116,13 @@ type Config struct {
 	CardTypes  []string
 	DevicePath string
 
-	// Devices routes operations to paired devices, and DeviceScans carries what
-	// they scan. Both come from a driver the caller built, because the caller
-	// is what knows one is wanted: an agent with neither serves its own reader.
+	// RemoteOps routes operations to paired devices. It comes from a driver the
+	// caller built, taken as an interface so the agent names no device
+	// protocol. Nil serves the agent's own reader only.
 	//
-	// The agent takes them as an interface and a channel rather than a driver,
-	// so it names no device protocol and cannot reach past what it was given.
-	RemoteOps   server.DeviceOps
-	RemoteScans <-chan nfc.NFCData
+	// What those devices scan is not here: a manager reports its own, and the
+	// agent subscribes to the one it was given. See [nfc.TagReporter].
+	RemoteOps server.DeviceOps
 
 	// DeviceEndpoint builds the handler serving device connections on the
 	// shared /ws path.
@@ -169,7 +169,6 @@ type Agent struct {
 	manager             nfc.Manager
 	deviceEndpoint      http.Handler
 	remoteOps           server.DeviceOps
-	remoteScans         <-chan nfc.NFCData
 	apiSecret           string
 	configDir           string
 	allowedOrigins      []string
@@ -197,6 +196,10 @@ type Agent struct {
 	// registered components; every transition below runs under its lock.
 	lifecycle
 	cardTypes *cardTypeFilter
+
+	// managerScans is the agent's subscription to what the manager's devices
+	// report, held so a stop ends it.
+	managerScans *event.Connection
 
 	// pumpCtx bounds the goroutines draining the reader and the paired devices
 	// onto the bridge. Cancelled by stopServers, so they end with the bridge
@@ -246,7 +249,6 @@ func New(cfg Config) *Agent {
 		logger:              logger,
 		manager:             cfg.Manager,
 		remoteOps:           cfg.RemoteOps,
-		remoteScans:         cfg.RemoteScans,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
 		allowedOrigins:      cfg.AllowedOrigins,
@@ -485,6 +487,8 @@ func (a *Agent) stopServers() {
 		a.pumpCancel()
 		a.pumpCtx, a.pumpCancel = nil, nil
 	}
+	a.managerScans.Disconnect()
+	a.managerScans = nil
 
 	a.ClientServer = nil
 	a.Router = nil
@@ -522,9 +526,11 @@ func (a *Agent) startServers() error {
 	// startLocked, which starts the one it opened.
 	a.pumpCtx, a.pumpCancel = context.WithCancel(context.Background())
 	go a.pumpReader(a.pumpCtx, reader, a.ClientServer)
-	if a.remoteScans != nil {
-		go pumpDevices(a.pumpCtx, a.remoteScans, a.ClientServer)
-	}
+
+	// What the manager's own devices report goes to the same place. Connected
+	// to the server being built rather than read from a field, so a restart
+	// leaves nothing feeding the one it replaced.
+	a.managerScans = nfc.OnScan(a.manager, a.ClientServer.Broadcast)
 
 	// Published as a pair, so a request never sees a client from one start
 	// beside a device from the next.

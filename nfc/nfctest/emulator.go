@@ -105,7 +105,7 @@ func newUltralightEmulator() *memEmulator {
 }
 
 // newUltralightEV1Emulator builds an MF0UL21: 41 pages, user memory 4-35. Its
-// dynamic lock page is deliberately left unset -- the driver refuses to lock
+// dynamic lock page is deliberately left unset, since the driver refuses to lock
 // this variant rather than set only the static lock bytes, which would leave
 // pages 16-35 writable for good.
 func newUltralightEV1Emulator() *memEmulator {

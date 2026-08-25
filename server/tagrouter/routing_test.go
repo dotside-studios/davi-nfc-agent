@@ -92,7 +92,7 @@ func TestWriteReachesTheNamedDevice(t *testing.T) {
 // Without a target the most recent scan still wins, which is what a client
 // watching a single phone expects.
 // Two devices hold tags at once. The UID picks between them, so which scan was
-// most recent does not matter -- that used to be the tie-break, and it meant a
+// most recent does not matter. It was once the tie-break, which meant a
 // client acting on the tag it could see depended on nothing else having been
 // scanned since.
 func TestWriteFollowsTheUIDNotTheLatestScan(t *testing.T) {

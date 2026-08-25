@@ -1060,7 +1060,7 @@ func (r *NFCReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) 
 // others return a not-supported error.
 //
 // It locks whatever tag is present. Prefer LockCardExpecting, which refuses
-// unless the tag present is the one you meant -- for an operation that cannot
+// unless the tag present is the one you meant. For an operation that cannot
 // be undone, "whatever is on the reader now" is rarely what the caller means.
 func (r *NFCReader) LockCard() (*LockResult, error) {
 	return r.LockCardExpecting("")
@@ -1176,7 +1176,7 @@ func (r *NFCReader) GetCapabilities() (*TagCapabilities, error) {
 
 // GetCapabilitiesExpecting reports the presented tag's capabilities only if it
 // carries expectUID, so a client is never told about a different tag than the
-// one it asked about -- and then writes to it on that answer. An empty
+// one it asked about, and then writes to it on that answer. An empty
 // expectUID reports whatever is present, as GetCapabilities does.
 func (r *NFCReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities, error) {
 	var caps TagCapabilities

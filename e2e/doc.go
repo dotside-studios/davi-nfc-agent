@@ -3,8 +3,8 @@
 // from outside over the two WebSocket protocols it publishes.
 //
 // The wiring in these tests is the wiring in docs/custom-builds.md, deliberately
-// -- a driver for phones handed over as an interface, a channel and a handler
-// builder, an NFC backend passed to Setup, and nothing reached into afterwards.
+// (a driver for phones handed over as an interface, a channel and a handler
+// builder, an NFC backend passed to Setup, and nothing reached into afterwards).
 // What that documents is what breaks here when it stops being true.
 //
 // Everything under the tests is the shipped code path. The one stand-in is the

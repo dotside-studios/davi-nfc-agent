@@ -55,7 +55,7 @@ func TestSetupCarriesTheSuppliedLogRing(t *testing.T) {
 	}
 }
 
-// TestSetupWithoutLogRing confirms the ring is optional -- an embedder that
+// TestSetupWithoutLogRing confirms the ring is optional: an embedder that
 // wants none says nothing and gets none.
 func TestSetupWithoutLogRing(t *testing.T) {
 	rt, err := Setup(testOptions(t), nfc.NewMockManager())

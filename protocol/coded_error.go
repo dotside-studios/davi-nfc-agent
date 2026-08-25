@@ -6,8 +6,8 @@ import "fmt"
 //
 // Failures reach a client two ways: from the tag, as an *nfc.NFCError carrying
 // an nfc code, and from the agent itself, as a refusal that never touched a tag
-// -- no source is holding it, the reader is in read-only mode, the request
-// named no tag. The second kind had no way to carry a code through an ordinary
+// (no source is holding it, the reader is in read-only mode, the request
+// named no tag). The second kind had no way to carry a code through an ordinary
 // error, so it travelled beside one in a response struct, which is why an
 // operation could only be reported across a channel rather than returned.
 type CodedError struct {

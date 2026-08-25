@@ -39,7 +39,7 @@ func GetCardTypeFilterTooltip(cardType string) string {
 // Agent, so a caller holding a running agent cannot rebind its port, swap its
 // origin allowlist or withdraw its pairing requirement behind the servers'
 // backs. The few settings that may legitimately change while running have
-// methods of their own -- SetRequirePairedDevice, SetAllowCardType.
+// methods of their own: SetRequirePairedDevice, SetAllowCardType.
 type Config struct {
 	// Manager supplies the readers. Required; New panics without one, because
 	// an agent with no way to enumerate a reader cannot be started later.
@@ -47,7 +47,7 @@ type Config struct {
 
 	// Info is what this build calls itself. Blank fields fall back to the
 	// agent's own identity, so a program embedding it can rename just the
-	// parts it cares about -- and should at least set DirName, or its
+	// parts it cares about, and should at least set DirName, or its
 	// configuration lands in this agent's directory.
 	Info buildinfo.Info
 
@@ -68,7 +68,7 @@ type Config struct {
 
 	// AllowedOrigins extends the same-origin policy on both WebSocket
 	// endpoints. A browser page served from anywhere other than the agent's
-	// own host:port -- which is every hosted console -- needs its origin listed
+	// own host:port, which is every hosted console, needs its origin listed
 	// here, or the upgrade is rejected as cross-site.
 	//
 	// Ignored when Origins is set, which is the normal path.
@@ -665,7 +665,7 @@ func (a *Agent) OnTag(fn func(nfc.NFCData)) {
 }
 
 // tagObserver folds the registered observers into one callback, or nil when
-// there are none -- the client server checks for nil, and a non-nil func
+// there are none: the client server checks for nil, and a non-nil func
 // calling an empty slice would defeat that.
 func (a *Agent) tagObserver() func(nfc.NFCData) {
 	if len(a.onTag) == 0 {

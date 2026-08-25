@@ -291,7 +291,7 @@ func (s *Server) startMDNS() error {
 
 	// Registration happens on the Start goroutine, which overlaps Stop. Publish
 	// the handle under the lock, and withdraw it immediately if Stop already
-	// ran -- otherwise the advertisement outlives the listener it points at.
+	// ran, or the advertisement outlives the listener it points at.
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()

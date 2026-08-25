@@ -57,7 +57,7 @@ type Component interface {
 	Name() string
 
 	// Start begins the component's work. It should not block for the
-	// component's lifetime -- start goroutines and return. Returning an error
+	// component's lifetime: start goroutines and return. Returning an error
 	// aborts the agent's start.
 	Start(ctx context.Context) error
 
@@ -79,7 +79,7 @@ func (a *Agent) Running() bool { return a.State() == StateRunning }
 // registration order.
 //
 // Hooks run after the transition completes and outside the lifecycle lock, so a
-// hook may call State, and may call Start or Stop without deadlocking -- though
+// hook may call State, and may call Start or Stop without deadlocking, though
 // doing so from a hook is a good way to write a loop.
 func (a *Agent) OnStateChange(fn func(State)) {
 	if fn == nil {

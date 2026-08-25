@@ -42,7 +42,7 @@ Content-Type: application/json
 
 Store all three. `deviceToken` is presented on every later connection, as
 `?secret=` or `Authorization: Bearer`. `publicKeyPin` is how the device
-recognizes this agent again — see
+recognizes this agent again. See
 [How devices trust the agent](../README.md#how-devices-trust-the-agent).
 
 **The token is shown once.** The agent keeps only its hash, so a lost token
@@ -63,8 +63,8 @@ upgrading strands nothing.
 
 `-require-paired-devices` (or **Require pairing** in the tray, or
 `DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws both: only a credential issued at
-pairing admits a device. Turn it on once the devices you care about have paired
-— with none paired, every device connection is refused.
+pairing admits a device. Turn it on once the devices you care about have
+paired. With none paired, every device connection is refused.
 
 **Browser consoles are unaffected.** A browser has no way to pair, and is gated
 by the origin allowlist instead. This setting governs the device endpoint only.
@@ -82,7 +82,7 @@ wss://[host]:9470/ws?mode=device
 
 Offer the `davi-nfc-device.v1` subprotocol during the upgrade. If the agent
 echoes it back, it supports the `hello` handshake below. If it echoes nothing,
-it predates versioning — fall back to [Legacy Registration](#legacy-registration-v0).
+it predates versioning: fall back to [Legacy Registration](#legacy-registration-v0).
 
 ```javascript
 const ws = new WebSocket('wss://host:9470/ws?mode=device', ['davi-nfc-device.v1']);
@@ -123,7 +123,7 @@ registration fields, so setup costs one round trip:
 #### Device Capabilities
 
 `canRead`, `canWrite`, and `nfcType` are the original v0 declaration and are
-always sent. The rest are v1 additions — omit any that do not apply, and a
+always sent. The rest are v1 additions: omit any that do not apply, and a
 device declaring nothing extra sends exactly the v0 object.
 
 The `capabilities` object itself is optional, and omitting it is not the same as
@@ -140,8 +140,8 @@ for the tag they describe. See [Tag Capabilities](#tag-capabilities).
 |-------|---------|
 | `canRead` / `canWrite` | Device can read / write NDEF |
 | `nfcType` | Radio technology or library: `nfca`, `isodep`, `corenfc`, `webnfc`, … |
-| `canTransceive` | APDU-level exchange — Android `IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange` |
-| `canTransceiveRaw` | Framing-level exchange — Android `NfcA.transceive`, PN532 `InCommunicateThru` |
+| `canTransceive` | APDU-level exchange: Android `IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange` |
+| `canTransceiveRaw` | Framing-level exchange: Android `NfcA.transceive`, PN532 `InCommunicateThru` |
 | `canLock` | Device can make a tag read-only |
 | `deviceType` | Free-form kind, e.g. `smartphone`, `pn532-serial`. Defaults to `smartphone` |
 | `supportedTagTypes` | Tag families this device handles, e.g. `["MIFARE Classic", "NTAG"]` |
@@ -157,10 +157,10 @@ so an iOS device declares `"maxHoldMs": 20000` and everything the agent wants
 done must fit inside it.
 
 The deadline for a particular tag is the arrival of its `tagScanned` plus
-`maxHoldMs`. That sum is optimistic — the tag was already connected when the
-message was sent — so leave margin rather than treating it as exact. A hold that
-ends early, because the tag was pulled or the session was invalidated, arrives as
-`tagRemoved` like any other departure.
+`maxHoldMs`. That sum is optimistic, since the tag was already connected when
+the message was sent, so leave margin rather than treating it as exact. A hold
+that ends early, because the tag was pulled or the session was invalidated,
+arrives as `tagRemoved` like any other departure.
 
 **It is advice, not permission.** A device that declares nothing is open-ended,
 which is how every device behaved before this field existed. Use it to decide
@@ -219,7 +219,7 @@ the payload is identical to `hello` minus `protocolVersion`.
 ```
 
 The first frame's type selects the dialect, so the subprotocol offer is a hint
-rather than a commitment — a device that offers nothing but sends `hello` is
+rather than a commitment: a device that offers nothing but sends `hello` is
 still served at v1.
 
 ### Messages from Device
@@ -257,7 +257,7 @@ Send when a tag is detected:
 ```
 
 `capabilities` (v1, optional) is what the device determined about this specific
-tag — see [Tag Capabilities](#tag-capabilities) for the field list. Omit it and
+tag. See [Tag Capabilities](#tag-capabilities) for the field list. Omit it and
 the agent infers them from `type`, which is all a v0 device allows. Declared
 values win over inference, except that operations the bridge cannot yet route
 (`canWrite`, `canTransceive`, `canLock`) are reported as false whatever the
@@ -280,8 +280,8 @@ normal WebSocket close and records a departure rather than a lost device:
 
 `reason` is optional and only reaches the agent's logs. Without a goodbye the
 agent classifies the disconnect from the close handshake: a normal or
-going-away close is still a clean departure, and anything else — an abrupt
-reset, a dead radio — is reported as a dropped device.
+going-away close is still a clean departure. Anything else, an abrupt reset or
+a dead radio, is reported as a dropped device.
 
 #### Tag Removed
 
@@ -314,7 +314,7 @@ Keep connection alive:
 
 #### Write Response
 
-Respond to a write request from the server. Required — the agent holds the
+Respond to a write request from the server. Required: the agent holds the
 client's request open until this arrives, the device disconnects, or 20 seconds
 pass:
 
@@ -330,7 +330,7 @@ pass:
 }
 ```
 
-`errorCode` is optional but preferred — it lets the agent classify the failure
+`errorCode` is optional but preferred: it lets the agent classify the failure
 instead of parsing `error`. Use any code from [NFC errors](#nfc-errors).
 
 ### Messages to Device
@@ -366,7 +366,7 @@ reported the most recent scan.
 
 | Field | Description |
 |-------|-------------|
-| `ndefBytes` | The encoded NDEF message, base64 in transit. **Authoritative** where it and `ndefMessage` disagree — prefer it if the device can write raw NDEF |
+| `ndefBytes` | The encoded NDEF message, base64 in transit. **Authoritative** where it and `ndefMessage` disagree: prefer it if the device can write raw NDEF |
 | `ndefMessage` | The same message as records, for APIs like Web NFC that only accept records. Cannot express every record type faithfully |
 | `tagUID` | UID the agent expects to be in the field. Report `TAG_REMOVED` if a different tag is present |
 | `lock` | Make the tag permanently read-only after a successful write. Irreversible |
@@ -374,11 +374,11 @@ reported the most recent scan.
 
 **On `idempotencyKey`:** a device that has already applied a given key must
 report the previous outcome rather than write again. The same request can arrive
-twice — the agent sends a write, the device applies it, and the response is lost
+twice: the agent sends a write, the device applies it, and the response is lost
 to a dropped connection. Without the check, the retry writes a second time.
 
 **Lock-only requests.** A client `lockRequest` arrives as the same frame with
-`lock: true` and no `ndefBytes` or `ndefMessage` — the protocol has one
+`lock: true` and no `ndefBytes` or `ndefMessage`, since the protocol has one
 tag-modifying frame, not two. Lock the tag as it stands and write nothing.
 Answer with `deviceWriteResponse` as for any other write.
 
@@ -386,7 +386,7 @@ Answer with `deviceWriteResponse` as for any other write.
 
 The agent asks the device to exchange raw data with the tag it is holding. Sent
 only to devices that declared `canTransceive`, and only for tags that support
-it — the NDEF path handles ordinary reads and writes.
+it: the NDEF path handles ordinary reads and writes.
 
 ```json
 {
@@ -427,7 +427,7 @@ already delimited by `tagScanned` and `tagRemoved`, and on phones the OS owns
 the session.
 
 **This costs one network round trip per command.** Reading NDEF off a MIFARE
-Classic 1K is ~60 exchanges — seconds of tag-in-field time over WiFi, against a
+Classic 1K is ~60 exchanges, seconds of tag-in-field time over WiFi, against a
 single message on the NDEF path. Use the command channel for what genuinely
 needs it (DESFire, ISO-DEP applets, capability probing), not as a general read
 path. iOS also enforces its own session timeouts, so long sequences are more
@@ -532,8 +532,8 @@ When a card is detected and read:
 | `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental) |
 | `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.) |
 | `scannedAt` | ISO 8601 timestamp |
-| `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it — which is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
-| `capabilities` | What the tag supports — see [Tag Capabilities](#tag-capabilities) |
+| `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it. That is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
+| `capabilities` | What the tag supports. See [Tag Capabilities](#tag-capabilities) |
 | `message` | Structured NDEF message data |
 | `text` | Quick access to first text record |
 | `err` | Error message or `null` on success |
@@ -556,21 +556,21 @@ When a card is detected and read:
 ```
 
 - `tnf`: Type Name Format (0x01 = Well Known)
-- `type`: Record type, human-readable — `text`, `uri`, `mime`, `smartposter`,
-  `aar`, `external`, and so on. Not the raw NFC Forum type byte
-- `content`: the record's decoded value, whatever its type — the text of a text
+- `type`: record type, human-readable. One of `text`, `uri`, `mime`,
+  `smartposter`, `aar`, `external`, and so on. Not the raw NFC Forum type byte
+- `content`: the record's decoded value, whatever its type. The text of a text
   record, the URI of a URI record. One field rather than one per type, since a
   record carries a single value and `type` beside it already says which kind.
   Omitted for a record with nothing decodable
 - `language`: language code, text records only
 - `id`: record ID, when the record carries one
 - `payload`: the raw record payload, base64-encoded. This is the record's bytes
-  as they sit on the tag, not the decoded value — a text record's payload leads
+  as they sit on the tag, not the decoded value. A text record's payload leads
   with a status byte and the language code, which is why it does not simply
   base64-decode to `content`
 
-The write direction uses these same names — see
-[Write Request](#write-request) — so a record read from one tag can be written
+The write direction uses these same names (see
+[Write Request](#write-request)), so a record read from one tag can be written
 back to another unchanged.
 
 ### Messages to Server
@@ -640,12 +640,12 @@ Write NDEF data to a card (complete overwrite):
 | `text` | `content`, `language` | Default when `type` omitted |
 | `uri` / `url` | `content` | Prefix is auto-abbreviated to save tag space |
 | `mailto` / `email`, `tel`, `sms`, `geo` | `content` | URI shortcut; scheme prepended if absent |
-| `smartposter` | `content` (URI), `title`, `language` | "Tap to open *title*" — URI + label |
+| `smartposter` | `content` (URI), `title`, `language` | "Tap to open *title*": URI + label |
 | `mime` | `mimeType`, `payload` (or `content`) | Arbitrary MIME media record |
 | `vcard` | `content` or `payload` | Contact card (`text/vcard` MIME) |
 | `external` | `content` (`domain:type`), `payload` | NFC Forum external type |
 | `aar` | `content` (package name) | Android Application Record (app launch) |
-| `empty` / `erase` | — | Empty record — blanks/formats the tag (reversible) |
+| `empty` / `erase` | none | Empty record: blanks/formats the tag (reversible) |
 | `raw` | `tnf`, `typeBytes`, `id`, `payload` | Fully custom record |
 
 WiFi credentials can be written as a `mime` record with `mimeType` set to
@@ -688,7 +688,7 @@ data back to verify it landed.
 | `locked` | bool | `true` when the tag was made read-only (see below) |
 
 A write that cannot be confirmed (verification mismatch after retries) returns an
-error response rather than a success — `success: true` means the data is on the
+error response rather than a success: `success: true` means the data is on the
 tag. A response with `verified: false` only occurs if verification was explicitly
 disabled by the agent.
 
@@ -727,7 +727,7 @@ base64 in transit, matching how the device protocol carries byte slices.
 The request is routed like a write: to the remote device holding a tag when no
 hardware reader has a card present, otherwise to the reader.
 
-A tag answering with an error status word is still `success: true` — the
+A tag answering with an error status word is still `success: true`, because the
 exchange happened, and interpreting SW1SW2 is the caller's job. `success` is
 false only when the exchange itself could not be performed.
 
@@ -774,11 +774,11 @@ when supported, render a capacity meter, etc.) without a round-trip.
 
 `canWrite`, `canLock` and `canTransceive` describe what the agent will actually
 do, not just what the tag is built for: they are reported false while the agent
-is in read-only mode, and — for a tag held by a remote device — false unless
+is in read-only mode, and, for a tag held by a remote device, false unless
 that device declared the operation and is still connected. A capability the
 agent would refuse is never advertised.
 
-**Query on demand** — to fetch capabilities without waiting for the next scan,
+**Query on demand**: to fetch capabilities without waiting for the next scan,
 send a `capabilitiesRequest`:
 
 ```json
@@ -811,11 +811,11 @@ If nothing is holding a tag, `success` is `false` with `NO_CARD`.
 
 ### Locking Tags (Make Read-Only)
 
-Locking is **irreversible** — once a tag is made read-only it can never be
+Locking is **irreversible**: once a tag is made read-only it can never be
 written again. Only tags that support locking (e.g. NTAG, MIFARE Ultralight)
 can be locked; others return an error.
 
-**Write and lock in one step** — add `"lock": true` to a write request:
+**Write and lock in one step**: add `"lock": true` to a write request:
 
 ```json
 {
@@ -830,7 +830,7 @@ can be locked; others return an error.
 
 The write response then includes `"locked": true`.
 
-**Lock an already-written tag** — send a `lockRequest`:
+**Lock an already-written tag**: send a `lockRequest`:
 
 ```json
 {
@@ -867,7 +867,7 @@ cannot be undone, so it is refused rather than redirected when the tag named is
 not the tag present.
 
 > **Refused in read-only mode.** Locking is irreversible, so the agent's
-> read-only mode refuses it with `READ_ONLY` on every route — a tag held by a
+> read-only mode refuses it with `READ_ONLY` on every route. A tag held by a
 > phone included. Writes are refused the same way.
 
 ### Naming the Tag
@@ -943,7 +943,7 @@ a retry has the same effect.
 Password protection (NTAG `PWD`/`PACK`/`AUTH0`) is **not yet available**. The
 per-tag capability is reported (`supportsPassword`, true for NTAG21x) and the
 API contract below is fixed, but the destructive configuration writes are gated
-off pending validation on real hardware — a wrong `AUTH0`/`ACCESS` value can
+off pending validation on real hardware: a wrong `AUTH0`/`ACCESS` value can
 permanently lock a tag. Calls currently return a not-supported error.
 
 Planned request shape (subject to change until enabled):
@@ -1035,7 +1035,7 @@ the Control Center is served from it.
 The agent serves `wss://` with a self-signed certificate generated from a key it
 creates once and keeps. Nothing is installed into any trust store by default.
 
-### Native devices — pin the key
+### Native devices: pin the key
 
 Phones, readers and other native clients **should not install a certificate
 authority**. They verify the agent by pinning its public key, reported as
@@ -1046,21 +1046,21 @@ change.
 See [Setting up an iOS or Android device](device-setup.md) for the pairing flow
 and the trust-evaluation code, including the two ways it commonly goes wrong.
 
-### Browsers — provide a certificate, or install a CA
+### Browsers: provide a certificate, or install a CA
 
 A browser cannot pin, so it needs a certificate it already trusts:
 
-1. **Provide one** — point `-cert` / `-key` at a certificate for a name you
+1. **Provide one**: point `-cert` / `-key` at a certificate for a name you
    control that resolves to the agent. Nothing is installed, and the browser
    trusts it because a public CA issued it.
-2. **`-install-ca`** — creates a local certificate authority and installs it in
+2. **`-install-ca`**: creates a local certificate authority and installs it in
    the system trust store. A CA there can sign for **any** name, not just this
    agent, so prefer option 1 where you can arrange it.
 
 With `-install-ca`, the bootstrap server on port 9472 serves the root
 certificate for installation, PIN-gated.
 
-Browsers also need their origin allowed — see
+Browsers also need their origin allowed. See
 [Connecting from a web console](../README.md#connecting-from-a-web-console). A
 trusted certificate and an allowed origin are separate requirements, and a
 failure of either looks the same from the page.
@@ -1088,7 +1088,7 @@ string, and a structured payload:
 ```
 
 `code` has always been present and its strings are stable. `retryable`, `op`,
-and `tagUID` are additive — a client reading only `code` is unaffected.
+and `tagUID` are additive: a client reading only `code` is unaffected.
 
 **`retryable` is the field worth acting on.** It answers whether repeating the
 identical request could plausibly succeed. Combined with `code` it gives three
@@ -1096,7 +1096,7 @@ distinct outcomes:
 
 | Condition | Meaning | What a client should do |
 |-----------|---------|-------------------------|
-| `retryable: true`, code ≠ `TAG_REMOVED` | Transient — I/O glitch, full queue, timeout | Retry, with backoff |
+| `retryable: true`, code ≠ `TAG_REMOVED` | Transient: I/O glitch, full queue, timeout | Retry, with backoff |
 | `retryable: true`, code = `TAG_REMOVED` | The tag left the field mid-operation | Ask the user to present the tag again |
 | `retryable: false` | Refused on its merits | Do not retry; surface it |
 
@@ -1121,7 +1121,7 @@ Raised by the bridge itself, before reaching a tag.
 | `TIMEOUT` | yes | Operation timed out |
 | `DEVICE_GONE` | no | Target device disconnected |
 | `INTERNAL_ERROR` | yes | Unexpected agent-side failure |
-| `UNKNOWN_ERROR` | no | Unclassified — never advertised as retryable |
+| `UNKNOWN_ERROR` | no | Unclassified: never advertised as retryable |
 
 ### NFC errors
 
@@ -1131,7 +1131,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 |------|-----------|-------------|
 | `NOT_SUPPORTED` | no | Tag or device does not support the operation |
 | `TAG_REMOVED` | yes | Tag left the field mid-operation |
-| `AUTH_FAILED` | no | Authentication failed — the same key will fail again |
+| `AUTH_FAILED` | no | Authentication failed: the same key will fail again |
 | `READ_FAILED` | yes | Read failed |
 | `WRITE_FAILED` | yes | Write failed |
 | `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
@@ -1145,8 +1145,8 @@ Something happened at the tag. These mirror the agent's internal error codes.
 
 ## Related documentation
 
-- [Custom Builds](custom-builds.md) — the Go API: embedding the agent, and the plugins a build is assembled from
-- [JavaScript client](javascript-client.md) — the browser and Node.js client library
-- [Device setup](device-setup.md) — pairing a phone or a reader
-- [Control Center](control-center.md) — the built-in web console
-- [Device bridge protocols](device-bridge-protocols.md) — what a phone or browser implements
+- [Custom Builds](custom-builds.md): the Go API for embedding the agent, and the plugins a build is assembled from
+- [JavaScript client](javascript-client.md): the browser and Node.js client library
+- [Device setup](device-setup.md): pairing a phone or a reader
+- [Control Center](control-center.md): the built-in web console
+- [Device bridge protocols](device-bridge-protocols.md): what a phone or browser implements

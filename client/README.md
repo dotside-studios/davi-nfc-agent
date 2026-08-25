@@ -3,10 +3,8 @@
 The client library for the Davi NFC Agent. Docs in
 [docs/client/](../docs/client).
 
-`src/` is the one implementation of the client protocol. The agent's own
-control center (`webui/frontend`) imports it, so a change that breaks a
-consumer breaks a build here. `dist/` is the same code built for a page with no
-build step, and is committed for that reason.
+`src/` is the one implementation of the client protocol. `dist/` is the same
+code built for a page with no build step, and is committed for that reason.
 
 `nfc-device-client.js` is the other role — a phone or Node process acting as a
 reader for the agent. Different protocol.

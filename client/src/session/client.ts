@@ -238,9 +238,8 @@ export class NFCClient {
       return;
     }
 
-    // A short first delay catches the common case -- the agent rebinding its
-    // listeners, over in about a second -- without polling an absent one
-    // forever.
+    // A short first delay reconnects quickly through a brief drop, without
+    // polling an unreachable agent forever.
     const delay = Math.min(
       this.maxReconnectDelay,
       this.reconnectDelay * 2 ** this.reconnectAttempts,

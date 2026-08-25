@@ -8,10 +8,15 @@ in, and one writable tag — NTAG213/215/216 is ideal. No Node or bundler.
 ## 1. Start the agent
 
 ```bash
-./davi-nfc-agent
+./davi-nfc-agent -allowed-origins "localhost:8000"
 ```
 
-It puts an icon in the system tray and listens on port 9470. Leave it running.
+It listens on port 9470. Leave it running.
+
+The flag allows the origin the page will be served from. Without it the agent
+refuses the connection, which is what stops a random site from driving the
+reader — see
+[Connecting from a web console](../../README.md#connecting-from-a-web-console).
 
 Check <http://localhost:9470/api/v1/health>:
 
@@ -65,35 +70,17 @@ cp client/dist/nfc-client.js ~/nfc-tutorial/
     }
   };
 
-  // Refused until step 3.
-  client.connect().catch(() => {});
+  client.connect().catch((err) => (out.textContent = err.message));
 </script>
 ```
 
-## 3. Allow the origin
+## 3. Serve it
 
 ```bash
 cd ~/nfc-tutorial && python3 -m http.server 8000
 ```
 
-Open <http://localhost:8000>. It stays on "not connected": the agent refuses
-pages it has not been told about, so a random site cannot drive the reader.
-
-That refusal registers the page. In the tray, under **Allowed Origins**:
-
-```
-Allow localhost:8000
-```
-
-Click it and reload. The page reads "waiting for a tag…".
-
-To skip the round trip next time:
-
-```bash
-./davi-nfc-agent -allowed-origins "localhost:8000"
-```
-
-See [Connecting from a web console](../../README.md#connecting-from-a-web-console).
+Open <http://localhost:8000>. It reads "waiting for a tag…".
 
 ## 4. Read a tag
 

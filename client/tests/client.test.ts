@@ -255,8 +255,7 @@ describe("capability and error surface", () => {
     expect(tag.capabilities?.tagFamily).toBe("NTAG");
   });
 
-  // Agents predating the capability wire send no such field; consumers must be
-  // able to tell "cannot write" from "did not say".
+  // A consumer must be able to tell "cannot write" from "did not say".
   it("leaves capabilities undefined when the agent sends none", () => {
     const tag = parseTagData({ uid: "04:A1:B2:C3", type: "NTAG215" });
     expect(tag.capabilities).toBeUndefined();

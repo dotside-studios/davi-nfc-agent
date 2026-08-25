@@ -62,7 +62,7 @@ export async function diagnoseAgent(serverUrl: string): Promise<AgentDiagnosis> 
       detail:
         `The NFC agent answered at ${base}, so it is running and trusted. It rejected the ` +
         `connection from this site, which means this site is not on its allowed-origins list. ` +
-        `Open the agent's tray menu → Allowed Origins, and allow ${location.host}.`,
+        `Allow ${location.host} on the agent.`,
     };
   }
 
@@ -74,7 +74,7 @@ export async function diagnoseAgent(serverUrl: string): Promise<AgentDiagnosis> 
       title: "The agent refused this page",
       detail:
         `The NFC agent answered with ${health.status}. If that is 403, this site is not on its ` +
-        `allowed-origins list — open the tray menu → Allowed Origins and allow ${location.host}.`,
+        `allowed-origins list — allow ${location.host} on the agent.`,
     };
   }
 
@@ -89,7 +89,7 @@ export async function diagnoseAgent(serverUrl: string): Promise<AgentDiagnosis> 
         title: "The agent is running without encryption",
         detail:
           `This site is configured for ${base}, but the agent is answering over http on the same ` +
-          `port. Point VITE_NFC_SERVER_URL at the http address, or start the agent with TLS.`,
+          `port. Point this site at the http address, or start the agent with TLS.`,
       };
     }
   }
@@ -103,8 +103,8 @@ export async function diagnoseAgent(serverUrl: string): Promise<AgentDiagnosis> 
     detail:
       "The agent runs on this computer. Either it isn't running, or this browser doesn't trust " +
       "its certificate yet — which looks identical from here. Open it directly to find out: a " +
-      "certificate warning means it's running and needs to be trusted (use “Trust This Agent " +
-      "in Browsers” in its tray menu), and a connection error means it isn't running.",
+      "certificate warning means it's running and its certificate needs trusting, and a " +
+      "connection error means it isn't running.",
     openUrl: base,
   };
 }

@@ -24,7 +24,7 @@ describe("diagnoseAgent", () => {
     expect(d.kind).toBe("origin-blocked");
     // Names the exact origin to add, so nobody has to work it out.
     expect(d.detail).toContain("shop.davi.social");
-    expect(d.detail).toContain("Allowed Origins");
+    expect(d.detail).toContain("allowed-origins");
   });
 
   it("reports the status when the agent answers unhealthily", async () => {
@@ -49,7 +49,7 @@ describe("diagnoseAgent", () => {
     const d = await diagnoseAgent("https://localhost:9470");
 
     expect(d.kind).toBe("wrong-scheme");
-    expect(d.detail).toContain("VITE_NFC_SERVER_URL");
+    expect(d.detail).toContain("http address");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:9470/api/v1/health");
   });
 

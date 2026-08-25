@@ -42,7 +42,7 @@ export interface WriteRecord {
   id?: string;
 }
 
-/** The name this had when only text and uri records were reachable. */
+/** Deprecated alias for `WriteRecord`. */
 export type NDEFRecordWrite = WriteRecord;
 
 export interface NDEFRecord {
@@ -64,8 +64,8 @@ export interface TagMessage {
 }
 
 /**
- * What a scanned tag supports. Absent from agents older than the capability
- * wire, so an undefined field means "did not say", not "cannot".
+ * What a scanned tag supports. An undefined field means the agent did not say,
+ * which is not the same as "cannot".
  */
 export interface TagCapabilities {
   canRead?: boolean;
@@ -125,10 +125,7 @@ export interface DeviceStatus {
 export interface NFCErrorEvent {
   error: Error;
   code?: string;
-  /**
-   * Whether repeating the identical request could plausibly succeed. Undefined
-   * from agents predating the error taxonomy.
-   */
+  /** Whether repeating the identical request could plausibly succeed. */
   retryable?: boolean;
   op?: string;
   tagUID?: string;

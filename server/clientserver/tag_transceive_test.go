@@ -1,4 +1,4 @@
-package tagrouter
+package clientserver
 
 import (
 	"context"
@@ -57,7 +57,7 @@ func supervisorOf(t *testing.T, manager nfc.Manager, mode nfc.ReaderMode) *nfc.S
 // A raw exchange can write to a config page or burn an OTP bit, and the agent
 // cannot tell that from a SELECT, so read-only mode has to refuse it.
 func TestTransceiveRefusedInReadOnlyMode(t *testing.T) {
-	s := New(configInMode(t, nfc.ModeReadOnly))
+	s := newTagOps(configInMode(t, nfc.ModeReadOnly))
 
 	_, err := s.Transceive(context.Background(), server.TransceiveOp{
 		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},
@@ -71,7 +71,7 @@ func TestTransceiveRefusedInReadOnlyMode(t *testing.T) {
 }
 
 func TestTransceiveWithoutReaderOrDevice(t *testing.T) {
-	s := New(Config{})
+	s := newTagOps(Config{})
 
 	_, err := s.Transceive(context.Background(), server.TransceiveOp{
 		Target: server.Target{TagUID: "04:A1:B2:C3"},
@@ -88,7 +88,7 @@ func TestTransceiveWithoutReaderOrDevice(t *testing.T) {
 // Read/write mode must not refuse on mode grounds; it should get as far as
 // looking for a tag and fail on that instead.
 func TestTransceiveAllowedInReadWriteMode(t *testing.T) {
-	s := New(configInMode(t, nfc.ModeReadWrite))
+	s := newTagOps(configInMode(t, nfc.ModeReadWrite))
 
 	_, err := s.Transceive(context.Background(), server.TransceiveOp{
 		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},
@@ -105,9 +105,9 @@ func TestTransceiveAllowedInReadWriteMode(t *testing.T) {
 func TestUntargetedWriteReachesAReaderHoldingATagItCouldNotRead(t *testing.T) {
 	m := nfc.NewMockManager()
 	m.MockDevice.SetTags([]nfc.Tag{nfc.NewMockTag("04A1B2C3")}) // never connected, so reads fail
-	s := New(configOver(t, m, nfc.ModeReadWrite))
+	s := newTagOps(configOver(t, m, nfc.ModeReadWrite))
 
-	awaitCardOnReader(t, s.config.Tags, "mock:usb:001")
+	awaitCardOnReader(t, s.tags, "mock:usb:001")
 
 	_, err := s.Write(context.Background(), server.WriteOp{
 		Target:  server.Target{AllowUntargeted: true},
@@ -127,7 +127,7 @@ func TestUntargetedWriteReachesAReaderHoldingATagItCouldNotRead(t *testing.T) {
 // With nothing on any reader there is nothing to guess at, and saying so is a
 // better answer than a reader's own complaint about a card it does not have.
 func TestUntargetedExchangeIsRefusedWhenNothingHoldsATag(t *testing.T) {
-	s := New(configInMode(t, nfc.ModeReadWrite))
+	s := newTagOps(configInMode(t, nfc.ModeReadWrite))
 
 	_, err := s.Transceive(context.Background(), server.TransceiveOp{
 		Target: server.Target{AllowUntargeted: true},
@@ -177,9 +177,9 @@ func awaitCardOnReader(t *testing.T, tags nfc.TagHolder, device string) {
 func TestANamedTagIsEnforcedOnASourceThatCannotNameItsOwn(t *testing.T) {
 	m := nfc.NewMockManager()
 	m.MockDevice.SetTags([]nfc.Tag{nfc.NewMockTag("04A1B2C3")}) // never connected, so reads fail
-	s := New(configOver(t, m, nfc.ModeReadWrite))
+	s := newTagOps(configOver(t, m, nfc.ModeReadWrite))
 
-	awaitCardOnReader(t, s.config.Tags, "mock:usb:001")
+	awaitCardOnReader(t, s.tags, "mock:usb:001")
 
 	_, err := s.Write(context.Background(), server.WriteOp{
 		Target:  server.Target{DeviceID: "mock:usb:001", TagUID: "04FFFFFF"},

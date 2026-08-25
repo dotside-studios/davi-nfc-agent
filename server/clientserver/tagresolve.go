@@ -1,4 +1,4 @@
-package tagrouter
+package clientserver
 
 import (
 	"strings"
@@ -30,7 +30,7 @@ func refuse(code protocol.ErrorCode, format string, args ...any) error {
 // tag it names rather than preferring one source over another. A preference is
 // re-evaluated when the request arrives, so a card lifted since the scan would
 // move the request to whichever source is holding it now.
-func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route, error) {
+func (s *tagOps) resolveRoute(uid, deviceID string, allowUntargeted bool) (route, error) {
 	// A named device is held to the UID too, when one is given.
 	if deviceID != "" {
 		rt, ok := s.holding(deviceID)
@@ -65,8 +65,8 @@ func (s *Router) resolveRoute(uid, deviceID string, allowUntargeted bool) (route
 
 // holding asks what the named device is holding. An empty deviceID asks for
 // whatever is holding a tag.
-func (s *Router) holding(deviceID string) (route, bool) {
-	holder := s.config.Tags
+func (s *tagOps) holding(deviceID string) (route, bool) {
+	holder := s.tags
 	if holder == nil {
 		return route{}, false
 	}
@@ -78,8 +78,8 @@ func (s *Router) holding(deviceID string) (route, bool) {
 }
 
 // holdingUID finds the device holding a tag by UID.
-func (s *Router) holdingUID(uid string) (route, bool) {
-	holder := s.config.Tags
+func (s *tagOps) holdingUID(uid string) (route, bool) {
+	holder := s.tags
 	if holder == nil {
 		return route{}, false
 	}
@@ -93,7 +93,7 @@ func (s *Router) holdingUID(uid string) (route, bool) {
 }
 
 // guessRoute is what allowUntargeted opts into: whatever is holding a tag.
-func (s *Router) guessRoute() (route, error) {
+func (s *tagOps) guessRoute() (route, error) {
 	if rt, ok := s.holding(""); ok {
 		return rt, nil
 	}

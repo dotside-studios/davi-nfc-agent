@@ -1,4 +1,4 @@
-package tagrouter_test
+package clientserver
 
 import (
 	"testing"

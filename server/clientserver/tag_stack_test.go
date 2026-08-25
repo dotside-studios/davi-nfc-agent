@@ -1,4 +1,4 @@
-package tagrouter_test
+package clientserver
 
 import (
 	"net/http"
@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/gorilla/websocket"
 )
 
@@ -22,7 +21,7 @@ import (
 // build it the same way so they exercise the composition, not a stand-in.
 type stack struct {
 	URL     string
-	Router  *tagrouter.Router
+	Router  *tagOps
 	Client  *fakeClient
 	Auth    *server.DeviceAuth
 	Remote  *remotenfc.Manager
@@ -106,7 +105,7 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	// driver behind the same supervisor.
 	readers := supervisorOver(t, cfg.Hardware, remote, cfg.Mode)
 
-	router := tagrouter.New(tagrouter.Config{
+	router := newTagOps(Config{
 		Tags:                 readers,
 		AllowTagModification: func() bool { return readers.Mode() != nfc.ModeReadOnly },
 	})
@@ -216,7 +215,7 @@ func registerDevice(t *testing.T, url, name string, capabilities map[string]any)
 		t.Fatalf("write hello: %v", err)
 	}
 
-	_, payload := readResponse(t, conn)
+	_, payload := readDeviceResponse(t, conn)
 	deviceID, _ := payload["deviceID"].(string)
 	if deviceID == "" {
 		t.Fatal("registration returned no deviceID")
@@ -224,8 +223,8 @@ func registerDevice(t *testing.T, url, name string, capabilities map[string]any)
 	return conn, deviceID
 }
 
-// readResponse reads one response from a device connection.
-func readResponse(t *testing.T, conn *websocket.Conn) (protocol.WebSocketResponse, map[string]any) {
+// readDeviceResponse reads one response from a device connection.
+func readDeviceResponse(t *testing.T, conn *websocket.Conn) (protocol.WebSocketResponse, map[string]any) {
 	t.Helper()
 
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))

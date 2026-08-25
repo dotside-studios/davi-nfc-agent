@@ -1,4 +1,4 @@
-package tagrouter_test
+package clientserver
 
 import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"

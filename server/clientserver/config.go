@@ -26,8 +26,19 @@ type Config struct {
 	// secret.
 	TokenVerifier server.TokenVerifier
 
-	// Ops performs the tag operations a client asks for. Nil refuses them,
-	// which is what an agent that is not running does.
+	// Tags answers for every tag the agent can reach, which is the supervisor:
+	// the readers it polls and the devices that report their own scans. The
+	// server resolves the tag a request names against it.
+	Tags nfc.TagHolder
+
+	// AllowTagModification reports whether writes, locks and raw exchanges are
+	// allowed, which is the agent's mode rather than any one source's. Nil
+	// allows them, and the source enforces its own policy either way.
+	AllowTagModification func() bool
+
+	// Ops replaces the operations the server would perform over Tags, for a
+	// build that has its own. Nil uses Tags; with neither, operations are
+	// refused, which is what an agent that is not running does.
 	Ops server.TagOps
 
 	// OnChange, when set, is called with the number of connected clients

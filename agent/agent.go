@@ -15,7 +15,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/tagrouter"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -133,9 +132,9 @@ type Config struct {
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// ClientServer fans a scan out to every connected client. Router decides
-	// which tag source a client request applies to, and DeviceAuth gates the
-	// device endpoint. All three are nil until Start.
+	// ClientServer fans a scan out to every connected client and performs what
+	// clients ask of a tag, and DeviceAuth gates the device endpoint. Both are
+	// nil until Start.
 	ClientServer *clientserver.Server
 
 	// serving is what the mounted routes dispatch to, replaced on every start
@@ -146,7 +145,6 @@ type Agent struct {
 	// Atomic because the handlers read it from their own goroutines, and Stop
 	// holds the lifecycle lock while the server waits for them to finish.
 	supervisor atomic.Pointer[nfc.Supervisor]
-	Router     *tagrouter.Router
 	DeviceAuth *server.DeviceAuth
 
 	// Plugins is the plugin list, added to before the agent starts and
@@ -486,7 +484,6 @@ func (a *Agent) stopServers() {
 	a.readerScans, a.readerStatus = nil, nil
 
 	a.ClientServer = nil
-	a.Router = nil
 
 	a.serving.Store(nil)
 }
@@ -498,21 +495,18 @@ func (a *Agent) startServers() error {
 		return errors.New("the readers are not initialized")
 	}
 
-	// Resolves each client request to the tag it names, which the supervisor
-	// answers for wherever it is.
-	a.Router = tagrouter.New(tagrouter.Config{
+	// A client request resolves to the tag it names, which the supervisor
+	// answers for wherever it is: on a reader it polls, or on a device that
+	// reported it.
+	a.ClientServer = clientserver.New(clientserver.Config{
+		APISecret:            a.apiSecret,
+		AllowedOrigins:       a.allowedOrigins,
+		OriginPolicy:         a.originPolicy(),
+		TokenVerifier:        a.tokenVerifier(),
 		Tags:                 readers,
 		AllowTagModification: a.TagModificationAllowed,
-	})
-
-	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret:      a.apiSecret,
-		AllowedOrigins: a.allowedOrigins,
-		OriginPolicy:   a.originPolicy(),
-		TokenVerifier:  a.tokenVerifier(),
-		Ops:            a.Router,
-		OnChange:       a.fireClientsChanged,
-		OnTag:          a.events.Tag.Emit,
+		OnChange:             a.fireClientsChanged,
+		OnTag:                a.events.Tag.Emit,
 	})
 
 	// The agent's tag sources feed the client server directly. Connected to the

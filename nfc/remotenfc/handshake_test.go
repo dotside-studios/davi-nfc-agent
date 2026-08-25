@@ -343,35 +343,6 @@ func TestDisconnectReasonExpected(t *testing.T) {
 }
 
 // registerCapableV1 registers a device declaring write and transceive support.
-func registerCapableV1(t *testing.T, url string) (*websocket.Conn, string) {
-	t.Helper()
-
-	conn, _ := dialOffering(t, url, []string{SubprotocolDeviceV1})
-	if err := conn.WriteJSON(protocol.WebSocketRequest{
-		Type: WSTypeHello,
-		Payload: map[string]any{
-			"protocolVersion": DeviceProtocolV1,
-			"deviceName":      "Capable Device",
-			"platform":        "android",
-			"capabilities": map[string]any{
-				"canRead":       true,
-				"canWrite":      true,
-				"canTransceive": true,
-				"canLock":       true,
-				"nfcType":       "nfca",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("write hello: %v", err)
-	}
-
-	_, payload := readResponse(t, conn)
-	deviceID, _ := payload["deviceID"].(string)
-	if deviceID == "" {
-		t.Fatal("registration returned no deviceID")
-	}
-	return conn, deviceID
-}
 
 // A device learns the agent's key pin during the handshake it already performs,
 // so it can recognize the same agent later without a certificate authority.

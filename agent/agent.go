@@ -427,7 +427,11 @@ func (a *Agent) stopLocked() {
 // Closing it belongs here, on the way out.
 func (a *Agent) Shutdown() {
 	a.Stop()
-	a.doneOnce.Do(func() { close(a.done) })
+	a.doneOnce.Do(func() {
+		if a.done != nil {
+			close(a.done)
+		}
+	})
 
 	if closer, ok := a.manager.(interface{ Close() }); ok {
 		closer.Close()

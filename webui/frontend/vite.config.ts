@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -8,6 +9,18 @@ const agent = process.env.VITE_AGENT ?? 'http://localhost:9470'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+
+  resolve: {
+    alias: {
+      // The console is a consumer of the agent's own client library, under the
+      // same name the production apps import it by. Aliased to the source in
+      // this repo rather than an installed copy, so a protocol change that
+      // breaks a consumer breaks the console's build in the same commit.
+      '@davi/nfc-agent-client': fileURLToPath(
+        new URL('../../client/src/index.ts', import.meta.url),
+      ),
+    },
+  },
 
   // Relative asset URLs. The console is embedded in the agent binary and served
   // from its root, but a relative base also survives being mounted somewhere

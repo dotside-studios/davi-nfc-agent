@@ -122,7 +122,7 @@ davi-nfc-agent/
 ├── traymenu/            # Declarative tray menus over fyne.io/systray
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
-├── client/              # JavaScript client library
+├── client/              # TypeScript client library (src/), plus its built dist/
 ├── scripts/             # Build scripts
 └── docs/                # Documentation
 ```

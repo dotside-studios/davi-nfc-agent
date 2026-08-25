@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The client library speaks the whole client protocol, and every operation
+  names its tag.** `lockRequest`, `transceiveRequest` and `capabilitiesRequest`
+  had been on the wire and in `docs/api.md` for releases without ever reaching
+  the library, so a consumer that wanted to lock a tag or exchange an APDU had
+  to open its own socket and correlate its own requests. `NFCClient` now has
+  `lock()`, `transceive()` and `getCapabilities()` beside `write()`.
+
+  All four name the tag they apply to. The client remembers the tag the agent
+  last reported and names that one, so a caller acting on what is in front of
+  the operator needs to do nothing; `uid`, `deviceID` and `allowUntargeted` are
+  there for a caller that means something else. Without this the library sent
+  no `uid` at all, which the agent refuses with `TAG_NOT_NAMED` — a write
+  through the shipped library could not succeed against a current agent.
+
+  Also new: `tagRemoved`, so a tag leaving the field is an event rather than a
+  broadcast with an empty UID that reads as a blank tag; `deviceID` on a scan,
+  so a consumer can tell the agent's own reader from a paired phone and know
+  whether `deviceStatus` has anything to say about the tag it is showing; and
+  `NFCRequestError`, carrying the agent's error code and whether repeating the
+  request could plausibly succeed, which the library had been flattening to a
+  message string.
+
 - **The reader can say what it just did.** Someone holding a card at the reader
   had no way to tell a completed scan from one that never happened: the agent
   said so on a screen they were not looking at. **Flash and Beep on Scan** in
@@ -27,6 +49,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remembered per connection, and a reader that answers on neither is left alone
 
 ### Changed
+
+- **The control center consumes the client library instead of reimplementing
+  it.** The console had its own WebSocket, its own reconnect, its own request
+  correlation and its own copy of every wire type — three hundred lines that
+  answered the same questions `NFCClient` answers, and answered two of them
+  differently. Its `TagCapabilities` named fields the agent has never sent
+  (`usableCapacity`, `writable`, `lockable`, `passwordProtectable`,
+  `readOnly`), so the Capabilities panel and the composer's capacity meter read
+  `undefined` on every tag and reported "no" for every tag that could in fact
+  be written; and `capabilitiesResponse` was read one level too high, so
+  **re-read** replaced the capabilities with a wrapper around them.
+
+  `webui/frontend` now imports `@davi/nfc-agent-client` under the name the Davi
+  apps import it by, aliased to `client/src` in this repository. Nothing about
+  the protocol lives in the console any more: what is left is the live event
+  feed and the scan history, which are the console's own. A protocol change
+  that breaks a consumer now breaks the console's build in the same commit.
+
+- **`client/` is TypeScript, and `client/nfc-client.js` is generated from it.**
+  The library existed twice — hand-maintained JavaScript here, a TypeScript
+  port in the Davi monorepo — and the two had drifted: the port carried fixes
+  this copy lacked, this copy tracked a `lastTag` the port did not, and neither
+  had the operations the wire had grown. `client/src` is now the one
+  implementation; `client/dist/nfc-client.js` is built from it with
+  `make client` and committed, so a `<script>` tag and a copy-and-paste
+  integration still work without Node.
+
+  `getStatus()` and `getLastTag()` are gone. They called `/api/v1/status` and
+  `/api/v1/tags/last`, which this agent does not serve and has not for some
+  time; both were a 404 parsed as JSON. `healthCheck()` is unaffected.
+
+  Reconnection backs off from 250ms to 5s instead of retrying every 3s, which
+  is what the console had settled on: a drop on loopback usually means the
+  agent is rebinding its listeners and is over in about a second, while an
+  agent that is genuinely absent should not be polled forever. A client that
+  was deliberately disconnected also reconnects again afterwards — `connect()`
+  now clears the flag `disconnect()` sets, which it never did.
 
 - **What the launcher set, the run keeps.** Three surfaces configure this agent
   and each had invented its own precedence: the port came with a lock flag, the

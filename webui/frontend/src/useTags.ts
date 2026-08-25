@@ -1,11 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { wsURL } from './api'
-import type { LiveEvent, ScanRecord, TagCapabilities, TagData, WriteRecord } from './types'
+import {
+  NFCClient,
+  type LockResponse,
+  type NFCErrorEvent,
+  type TagCapabilities,
+  type TagData,
+  type WriteRecord,
+  type WriteResponse,
+} from '@davi/nfc-agent-client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { LiveEvent, ScanRecord } from './types'
 
 /**
- * The console's connection to the ordinary client endpoint. It speaks the same
- * protocol as any other client rather than taking a private path through the
- * control API, so there is one implementation of write, lock and capabilities.
+ * The console's connection to the ordinary client endpoint, over the same
+ * client library every other consumer uses. It holds no protocol of its own:
+ * the socket, the reconnect, the request correlation and which tag an operation
+ * applies to all belong to `NFCClient`, so a change to any of them reaches the
+ * console and the apps together.
+ *
+ * What is left here is what the console alone wants — a feed of everything that
+ * happened, and the tags seen during a run.
  */
 
 const EVENT_LIMIT = 2000
@@ -13,17 +26,7 @@ const EVENT_LIMIT = 2000
 /** Distinct tags remembered. A provisioning run works through many. */
 const HISTORY_LIMIT = 100
 
-/** Bounds a tag operation, so a lost response cannot leave the composer
- *  disabled with no indication of why. */
-const REQUEST_TIMEOUT_MS = 30_000
-
 export type TagLink = 'connecting' | 'open' | 'closed'
-
-interface Pending {
-  resolve: (payload: Record<string, unknown>) => void
-  reject: (err: Error) => void
-  timer: number
-}
 
 export interface Tags {
   link: TagLink
@@ -32,10 +35,10 @@ export interface Tags {
   events: LiveEvent[]
   history: ScanRecord[]
   clearEvents: () => void
-  write: (records: WriteRecord[], lock?: boolean) => Promise<Record<string, unknown>>
-  lock: () => Promise<Record<string, unknown>>
-  refreshCapabilities: () => Promise<Record<string, unknown>>
-  transceive: (data: string, raw: boolean) => Promise<Record<string, unknown>>
+  write: (records: WriteRecord[], lock?: boolean) => Promise<WriteResponse>
+  lock: () => Promise<LockResponse>
+  refreshCapabilities: () => Promise<TagCapabilities>
+  transceive: (data: Uint8Array, raw: boolean) => Promise<Uint8Array>
 }
 
 export function useTags(secret?: string): Tags {
@@ -45,19 +48,8 @@ export function useTags(secret?: string): Tags {
   const [events, setEvents] = useState<LiveEvent[]>([])
   const [history, setHistory] = useState<ScanRecord[]>([])
 
-  const socket = useRef<WebSocket | null>(null)
-  const pending = useRef(new Map<string, Pending>())
-  const retry = useRef(0)
-  const timer = useRef<number | undefined>(undefined)
-  const stopped = useRef(false)
+  const client = useRef<NFCClient | null>(null)
   const eventSeq = useRef(0)
-
-  // Whether the tag on screen came from a paired device rather than the agent's
-  // own reader. deviceStatus only ever describes the latter.
-  const fromDevice = useRef(false)
-  // The tag a request applies to. Requests name it, so the agent can refuse
-  // rather than act on whichever tag happens to be present instead.
-  const target = useRef<{ uid: string; deviceID?: string } | null>(null)
 
   const push = useCallback((e: Omit<LiveEvent, 'id' | 'at'>) => {
     eventSeq.current += 1
@@ -73,6 +65,7 @@ export function useTags(secret?: string): Tags {
   // one tag is tapped repeatedly.
   const remember = useCallback((data: TagData) => {
     if (!data.uid) return
+    const at = (data.scannedAt ?? new Date()).toISOString()
     setHistory((prev) => {
       const rest = prev.filter((r) => r.uid !== data.uid)
       const existing = prev.find((r) => r.uid === data.uid)
@@ -81,239 +74,158 @@ export function useTags(secret?: string): Tags {
         type: data.type || existing?.type || '',
         text: data.text || existing?.text || '',
         count: (existing?.count ?? 0) + 1,
-        firstAt: existing?.firstAt ?? data.scannedAt,
-        lastAt: data.scannedAt,
+        firstAt: existing?.firstAt ?? at,
+        lastAt: at,
       }
       return [record, ...rest].slice(0, HISTORY_LIMIT)
     })
   }, [])
 
-  const connect = useCallback(() => {
-    if (stopped.current) return
-
+  useEffect(() => {
     // Loopback is exempt from the secret; sent anyway in case that narrows.
-    const path = secret ? `/ws?secret=${encodeURIComponent(secret)}` : '/ws'
+    // The console watches its agent for as long as it is open, so it retries
+    // for as long as it is open rather than giving up after a fixed count.
+    const nfc = new NFCClient(location.origin, {
+      apiSecret: secret,
+      maxReconnectAttempts: 0,
+    })
+    client.current = nfc
 
-    let ws: WebSocket
-    try {
-      ws = new WebSocket(wsURL(path))
-    } catch {
-      schedule()
-      return
-    }
-    socket.current = ws
+    const onConnected = () => setLink('open')
+    const onDisconnected = () => setLink('closed')
 
-    ws.onopen = () => {
-      retry.current = 0
-      setLink('open')
-    }
-
-    ws.onmessage = (ev) => {
-      let msg: {
-        id?: string
-        type?: string
-        success?: boolean
-        error?: string
-        payload?: Record<string, unknown>
-      }
-      try {
-        msg = JSON.parse(ev.data as string)
-      } catch {
+    const onTag = (data: TagData) => {
+      setTag(data)
+      if (data.capabilities) setCapabilities(data.capabilities)
+      if (data.error) {
+        push({ kind: 'error', summary: `Read failed: ${data.error}`, detail: data.uid, ok: false })
         return
       }
-
-      // Settled first: a response carries an id, and treating it as a
-      // broadcast would leave the caller hanging.
-      if (msg.id && pending.current.has(msg.id)) {
-        const p = pending.current.get(msg.id)!
-        pending.current.delete(msg.id)
-        window.clearTimeout(p.timer)
-        if (msg.success) p.resolve(msg.payload ?? {})
-        else p.reject(new Error(msg.error ?? 'operation failed'))
-      }
-
-      switch (msg.type) {
-        case 'tagData': {
-          const data = msg.payload as unknown as TagData
-          if (!data) break
-          if (data.err) {
-            setTag(data)
-            push({ kind: 'error', summary: `Read failed: ${data.err}`, detail: data.uid, ok: false })
-            break
-          }
-          // A tag with no UID is how a device reports the one it was holding
-          // has left its field. Showing it as a scan would render a blank tag
-          // over the real one.
-          if (!data.uid) {
-            fromDevice.current = false
-            target.current = null
-            setTag(null)
-            setCapabilities(null)
-            push({ kind: 'status', summary: 'Tag removed', ok: true })
-            break
-          }
-          fromDevice.current = Boolean(data.deviceID)
-          target.current = { uid: data.uid, deviceID: data.deviceID || undefined }
-          setTag(data)
-          if (data.capabilities) setCapabilities(data.capabilities)
-          remember(data)
-          push({
-            kind: 'scan',
-            summary: `${data.type || 'tag'} ${data.uid}`,
-            detail: data.text || undefined,
-            ok: true,
-          })
-          break
-        }
-
-        case 'deviceStatus': {
-          const p = (msg.payload ?? {}) as { connected?: boolean; message?: string; cardPresent?: boolean }
-          // deviceStatus describes the agent's own reader and nothing else, so
-          // its cardPresent says nothing about a tag a phone is holding — and
-          // is always false while one is, because the local reader has no card.
-          // Clearing on it discarded every phone scan at the next status
-          // message, which is why they reached other consumers and not here.
-          if (p.cardPresent === false && !fromDevice.current) {
-            target.current = null
-            setTag(null)
-            setCapabilities(null)
-          }
-          push({ kind: 'status', summary: p.message ?? 'device status', ok: p.connected })
-          break
-        }
-
-        case 'writeResponse': {
-          const p = (msg.payload ?? {}) as { message?: string }
-          push({
-            kind: 'write',
-            summary: msg.success ? (p.message ?? 'Write succeeded') : `Write failed: ${msg.error ?? 'unknown'}`,
-            ok: msg.success,
-          })
-          break
-        }
-
-        case 'lockResponse': {
-          push({
-            kind: 'lock',
-            summary: msg.success ? 'Tag locked (permanent)' : `Lock failed: ${msg.error ?? 'unknown'}`,
-            ok: msg.success,
-          })
-          break
-        }
-
-        case 'transceiveResponse': {
-          push({
-            kind: 'apdu',
-            summary: msg.success ? 'Raw exchange completed' : `Raw exchange failed: ${msg.error ?? 'unknown'}`,
-            ok: msg.success,
-          })
-          break
-        }
-
-        case 'capabilitiesResponse': {
-          if (msg.success && msg.payload) {
-            setCapabilities(msg.payload as TagCapabilities)
-          }
-          break
-        }
-
-        case 'error': {
-          const p = (msg.payload ?? {}) as { message?: string; code?: string }
-          push({ kind: 'error', summary: p.message ?? msg.error ?? 'agent error', detail: p.code, ok: false })
-          break
-        }
-      }
+      remember(data)
+      push({
+        kind: 'scan',
+        summary: `${data.type || 'tag'} ${data.uid}`,
+        detail: data.text || undefined,
+        ok: true,
+      })
     }
 
-    ws.onclose = () => {
-      if (stopped.current) return
-      socket.current = null
-      setLink('closed')
-
-      for (const [, p] of pending.current) {
-        window.clearTimeout(p.timer)
-        p.reject(new Error('connection closed'))
-      }
-      pending.current.clear()
-
-      schedule()
+    const onRemoved = ({ uid }: { uid: string }) => {
+      setTag(null)
+      setCapabilities(null)
+      push({ kind: 'removed', summary: 'Tag removed', detail: uid || undefined, ok: true })
     }
 
-    function schedule() {
-      if (stopped.current) return
-      const delay = Math.min(5000, 250 * 2 ** retry.current)
-      retry.current += 1
-      window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(connect, delay)
+    const onStatus = (status: { connected: boolean; message?: string }) => {
+      push({ kind: 'status', summary: status.message ?? 'device status', ok: status.connected })
+    }
+
+    const onError = (e: NFCErrorEvent) => {
+      // A socket that dropped is already reported by the link indicator; the
+      // feed is for what the agent said, not for every retry behind it.
+      if (e.phase) return
+      push({ kind: 'error', summary: e.error.message, detail: e.code, ok: false })
+    }
+
+    nfc.on('connected', onConnected)
+    nfc.on('disconnected', onDisconnected)
+    nfc.on('tagData', onTag)
+    nfc.on('tagRemoved', onRemoved)
+    nfc.on('deviceStatus', onStatus)
+    nfc.on('error', onError)
+
+    setLink('connecting')
+    void nfc.connect().catch(() => {
+      // The client retries on its own; the link indicator is the report.
+    })
+
+    return () => {
+      nfc.off('connected', onConnected)
+      nfc.off('disconnected', onDisconnected)
+      nfc.off('tagData', onTag)
+      nfc.off('tagRemoved', onRemoved)
+      nfc.off('deviceStatus', onStatus)
+      nfc.off('error', onError)
+      void nfc.disconnect()
+      client.current = null
     }
   }, [secret, push, remember])
 
-  useEffect(() => {
-    stopped.current = false
-    connect()
-    return () => {
-      stopped.current = true
-      window.clearTimeout(timer.current)
-      socket.current?.close()
-      socket.current = null
-    }
-  }, [connect])
-
-  /** Sends a correlated request and resolves with the matching response. */
-  const send = useCallback(
-    (type: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> => {
-      const ws = socket.current
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        return Promise.reject(new Error('not connected to the agent'))
-      }
-
-      const id = `console_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-
-      return new Promise((resolve, reject) => {
-        const t = window.setTimeout(() => {
-          pending.current.delete(id)
-          reject(new Error('the agent did not respond in time'))
-        }, REQUEST_TIMEOUT_MS)
-
-        pending.current.set(id, { resolve, reject, timer: t })
-        ws.send(JSON.stringify({ id, type, payload }))
-      })
-    },
-    [],
-  )
-
-  /** Names the tag on a request payload. */
-  const forTag = useCallback((payload: Record<string, unknown>) => {
-    const t = target.current
-    return t ? { ...payload, uid: t.uid, ...(t.deviceID ? { deviceID: t.deviceID } : {}) } : payload
+  /** The connected client, or a rejection a caller can show. */
+  const connected = useCallback((): NFCClient => {
+    const nfc = client.current
+    if (!nfc?.isConnected()) throw new Error('not connected to the agent')
+    return nfc
   }, [])
 
   const write = useCallback(
-    (records: WriteRecord[], lock = false) =>
-      send('writeRequest', forTag(lock ? { records, lock } : { records })),
-    [send, forTag],
+    async (records: WriteRecord[], lock = false) => {
+      try {
+        const res = await connected().write({ records, lock })
+        push({ kind: 'write', summary: res.message || 'Write succeeded', ok: true })
+        if (res.locked) push({ kind: 'lock', summary: 'Tag locked (permanent)', ok: true })
+        return res
+      } catch (err) {
+        push({ kind: 'write', summary: `Write failed: ${describe(err)}`, ok: false })
+        throw err
+      }
+    },
+    [connected, push],
   )
-  const lock = useCallback(() => send('lockRequest', forTag({})), [send, forTag])
+
+  const lock = useCallback(async () => {
+    try {
+      const res = await connected().lock()
+      push({ kind: 'lock', summary: 'Tag locked (permanent)', ok: true })
+      return res
+    } catch (err) {
+      push({ kind: 'lock', summary: `Lock failed: ${describe(err)}`, ok: false })
+      throw err
+    }
+  }, [connected, push])
+
   const transceive = useCallback(
-    (data: string, raw: boolean) => send('transceiveRequest', forTag({ data, raw })),
-    [send, forTag],
+    async (data: Uint8Array, raw: boolean) => {
+      try {
+        const res = await connected().transceive({ data, raw })
+        push({ kind: 'apdu', summary: 'Raw exchange completed', ok: true })
+        return res
+      } catch (err) {
+        push({ kind: 'apdu', summary: `Raw exchange failed: ${describe(err)}`, ok: false })
+        throw err
+      }
+    },
+    [connected, push],
   )
-  const refreshCapabilities = useCallback(() => send('capabilitiesRequest', forTag({})), [send, forTag])
+
+  const refreshCapabilities = useCallback(async () => {
+    const caps = await connected().getCapabilities()
+    setCapabilities(caps)
+    return caps
+  }, [connected])
+
   const clearEvents = useCallback(() => {
     setEvents([])
     setHistory([])
   }, [])
 
-  return {
-    link,
-    tag,
-    capabilities,
-    events,
-    history,
-    clearEvents,
-    write,
-    lock,
-    refreshCapabilities,
-    transceive,
-  }
+  return useMemo(
+    () => ({
+      link,
+      tag,
+      capabilities,
+      events,
+      history,
+      clearEvents,
+      write,
+      lock,
+      refreshCapabilities,
+      transceive,
+    }),
+    [link, tag, capabilities, events, history, clearEvents, write, lock, refreshCapabilities, transceive],
+  )
+}
+
+function describe(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }

@@ -130,8 +130,8 @@ davi-nfc-agent/
 ├── server/              # The bridge between tag sources and clients, and the
 │   │                    #   device credential check
 │   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
-│   ├── tagrouter/       # Picks the reader or a device for each client request
-│   ├── clientserver/    # Client connection handling logic
+│   ├── clientserver/    # Client connections, and the tag operations they ask
+│   │                    #   for, resolved against whatever holds the tag
 │   └── wsconn/          # Write-safe WebSocket wrapper shared by the above
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
 │   └── fynetray/        # The real tray, on fyne.io/systray

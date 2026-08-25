@@ -12,7 +12,9 @@ import (
 
 // Supervisor operates every reader a manager offers, rather than one chosen at
 // startup. It opens each, polls it, and publishes what they scan on one signal,
-// with each scan naming the reader it came from.
+// with each scan naming the reader it came from. A device that reports its own
+// scans rather than being polled, such as a phone, reaches consumers through
+// the same signal and is operated through the same methods.
 //
 // A reader plugged in while it runs is picked up; one unplugged is dropped.
 // Operations name the reader they apply to, so two of them do not queue behind
@@ -23,6 +25,11 @@ import (
 type Supervisor struct {
 	manager Manager
 	timeout time.Duration
+
+	// devices holds the tags the manager's own devices report, which are not
+	// read here and not opened here. Nil for a manager whose devices are all
+	// polled through a reader.
+	devices TagHolder
 
 	mu      sync.Mutex
 	readers map[string]*deviceReader
@@ -52,6 +59,7 @@ func NewSupervisor(manager Manager, opTimeout time.Duration) (*Supervisor, error
 
 	return &Supervisor{
 		manager: manager,
+		devices: TagsHeldBy(manager),
 		timeout: opTimeout,
 		readers: make(map[string]*deviceReader),
 		mode:    ModeReadWrite,

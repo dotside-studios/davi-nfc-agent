@@ -1,4 +1,4 @@
-package tagrouter_test
+package clientserver
 
 import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
@@ -17,16 +17,7 @@ import (
 func newModedTestServer(t *testing.T, mode nfc.ReaderMode) (string, *stack) {
 	t.Helper()
 
-	readers, err := nfc.NewSupervisor(nfc.NewMockManager(), time.Second)
-	if err != nil {
-		t.Fatalf("NewSupervisor: %v", err)
-	}
-	if err := readers.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	readers.SetMode(mode)
-
-	st := newStack(t, stackConfig{Readers: readers})
+	st := newStack(t, stackConfig{Hardware: nfc.NewMockManager(), Mode: mode})
 	return st.URL, st
 }
 

@@ -15,10 +15,13 @@ import (
 // agent is not running. A client asking for a write before the agent starts
 // gets an answer rather than a panic.
 func (s *Server) ops() server.TagOps {
-	if s.config.Ops == nil {
+	if s.config.Ops != nil {
+		return s.config.Ops
+	}
+	if s.config.Tags == nil {
 		return stoppedOps{}
 	}
-	return s.config.Ops
+	return newTagOps(s.config)
 }
 
 // stoppedOps answers every operation with the same refusal.

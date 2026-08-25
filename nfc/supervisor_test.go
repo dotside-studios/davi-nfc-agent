@@ -233,3 +233,144 @@ func TestASupervisorHoldsAnOperationToTheTagItNamed(t *testing.T) {
 		t.Errorf("TagCapabilities err = %v, want ErrTagUIDMismatch", err)
 	}
 }
+
+// The supervisor answers for the tags the manager's own devices hold as well as
+// the ones on its readers. A phone's scan already arrives on the supervisor's
+// signal, so what can be done to it is asked in the same place rather than
+// through a second route the caller has to know about.
+func TestASupervisorAnswersForTheManagersDevices(t *testing.T) {
+	m := &holdingManager{Manager: NewMockManager(), held: map[string]string{"phone-9f2a": "04DEADBEEF"}}
+	s := startedSupervisor(t, m)
+
+	device, uid, ok := s.TagOn("phone-9f2a")
+	if !ok || device != "phone-9f2a" || uid != "04DEADBEEF" {
+		t.Errorf("TagOn = %q, %q, %v; want the phone and the tag it holds", device, uid, ok)
+	}
+	if got := s.DevicesHoldingTags(); len(got) != 1 || got[0] != "phone-9f2a" {
+		t.Errorf("DevicesHoldingTags = %v, want the phone", got)
+	}
+	if s.Operates("phone-9f2a") {
+		t.Error("a device that reports its own scans was reported as a reader the supervisor opened")
+	}
+
+	if _, err := s.WriteTag("phone-9f2a", "04DEADBEEF", NewNDEFMessage(), false, "key-1"); err != nil {
+		t.Fatalf("WriteTag: %v", err)
+	}
+	if !m.wrote["phone-9f2a"] {
+		t.Error("the write did not reach the device holding the tag")
+	}
+}
+
+// A reader holding a tag it could not read still has a tag to operate on: a
+// blank or damaged one never reaches the last scan, and refusing it would
+// refuse exactly the tag a client asks to write.
+func TestASupervisorNamesAReaderHoldingATagItCouldNotRead(t *testing.T) {
+	m := NewMockManager()
+	m.MockDevice.SetTags([]Tag{NewMockTag("04A1B2C3")}) // never connected, so reads fail
+
+	s := startedSupervisor(t, m)
+
+	awaitHeld(t, s, "mock:usb:001")
+
+	if device, uid, ok := s.TagOn(""); !ok || device != "mock:usb:001" || uid != "" {
+		t.Errorf("TagOn = %q, %q, %v; want the reader holding a tag it cannot name", device, uid, ok)
+	}
+}
+
+// holdingManager is a manager whose devices hold tags of their own, which is
+// what the phone driver is.
+type holdingManager struct {
+	Manager
+	held  map[string]string // device -> tag UID
+	wrote map[string]bool
+
+	// opensReaders lets a test give the supervisor a reader to poll as well,
+	// which is what a build with a phone driver beside a reader has.
+	opensReaders bool
+}
+
+func (m *holdingManager) RemoteDevices() bool { return !m.opensReaders }
+
+func (m *holdingManager) TagOn(device string) (string, string, bool) {
+	if device == "" {
+		for id, uid := range m.held {
+			return id, uid, true
+		}
+		return "", "", false
+	}
+	uid, ok := m.held[device]
+	return device, uid, ok
+}
+
+func (m *holdingManager) DevicesHoldingTags() []string {
+	out := make([]string, 0, len(m.held))
+	for id := range m.held {
+		out = append(out, id)
+	}
+	return out
+}
+
+func (m *holdingManager) WriteTag(device, uid string, _ *NDEFMessage, lock bool, _ string) (*WriteResult, error) {
+	if _, ok := m.held[device]; !ok {
+		return nil, errors.New("device is not holding a tag")
+	}
+	if m.wrote == nil {
+		m.wrote = map[string]bool{}
+	}
+	m.wrote[device] = true
+	return &WriteResult{UID: uid, Locked: lock}, nil
+}
+
+func (m *holdingManager) LockTag(device, uid, _ string) (*LockResult, error) {
+	return &LockResult{UID: uid, Locked: true}, nil
+}
+
+func (m *holdingManager) TransceiveTag(_, _ string, data []byte, _ bool) ([]byte, error) {
+	return data, nil
+}
+
+func (m *holdingManager) TagCapabilities(device, _ string) (*TagCapabilities, error) {
+	uid, ok := m.held[device]
+	if !ok {
+		return nil, errors.New("device is not holding a tag")
+	}
+	caps := GetTagCapabilities(NewMockTag(uid))
+	return &caps, nil
+}
+
+// An unnamed request prefers a tag that can be named over one a reader is
+// holding but could not read: naming it is the only thing that tells a client
+// which tag the operation reached.
+func TestAnUnnamedRequestPrefersATagThatCanBeNamed(t *testing.T) {
+	mock := NewMockManager()
+	mock.MockDevice.SetTags([]Tag{NewMockTag("04A1B2C3")}) // never connected, so reads fail
+
+	m := &holdingManager{
+		Manager:      mock,
+		held:         map[string]string{"phone-9f2a": "04DEADBEEF"},
+		opensReaders: true,
+	}
+	s := startedSupervisor(t, m)
+
+	awaitHeld(t, s, "mock:usb:001")
+
+	device, uid, ok := s.TagOn("")
+	if !ok || device != "phone-9f2a" || uid != "04DEADBEEF" {
+		t.Errorf("TagOn = %q, %q, %v; want the tag the device could name", device, uid, ok)
+	}
+}
+
+// awaitHeld waits for a device to report the tag on it, so a question does not
+// overtake the poll it depends on.
+func awaitHeld(t *testing.T, s *Supervisor, device string) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, ok := s.TagOn(device); ok {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s never reported the tag on it", device)
+}

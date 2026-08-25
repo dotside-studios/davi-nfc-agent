@@ -1,22 +1,63 @@
-package tagrouter
+package clientserver
 
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
-var _ server.TagOps = (*Router)(nil)
+// tagOps performs a client's tag operations by resolving the tag the request
+// names against whatever is holding one, and reporting the outcome in the codes
+// a client understands.
+//
+// It is what the server does when it was given tags rather than an operation
+// layer of its own. Neither the resolution nor the wire vocabulary belongs to a
+// source: a reader and a phone both answer for a tag, and neither knows what a
+// client calls a failure.
+type tagOps struct {
+	// tags answers for every tag the agent can reach, which is the supervisor:
+	// the readers it polls and the devices that report their own scans.
+	tags nfc.TagHolder
+
+	// allowModification reports whether writes, locks and raw exchanges are
+	// allowed, which is the agent's mode rather than any one source's. Nil
+	// allows them, and the source enforces its own policy either way.
+	allowModification func() bool
+}
+
+var _ server.TagOps = (*tagOps)(nil)
+
+// modificationAllowed reports whether the agent permits a write, a lock or a
+// raw exchange. It governs tags held by devices as well as those on a reader:
+// the mode is the agent's.
+func (s *tagOps) modificationAllowed() bool {
+	return s.allowModification == nil || s.allowModification()
+}
+
+// readOnlyModeMessage explains a mode refusal for the named operation.
+func readOnlyModeMessage(operations string) string {
+	return fmt.Sprintf("Agent is in read-only mode; %s are refused", operations)
+}
+
+// operationErrorCode classifies a source failure, falling back to the
+// operation's own label when the error carries no code of its own.
+func operationErrorCode(err error, fallback protocol.ErrorCode) protocol.ErrorCode {
+	if payload := protocol.ErrorPayloadFor(err); payload.Code != protocol.ErrCodeUnknownError {
+		return payload.Code
+	}
+	return fallback
+}
 
 // Write encodes a message onto the tag the request names.
-func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResult, error) {
+func (s *tagOps) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResult, error) {
 	// The mode gates every route to a tag, not just the one on a reader. What
 	// performs the write enforces it too, which a write routed to a device
 	// never reaches.
-	if !modeAllowsTagModification(s.config.Readers) {
+	if !s.modificationAllowed() {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly, "%s", readOnlyModeMessage("writes"))
 	}
 
@@ -38,8 +79,8 @@ func (s *Router) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 }
 
 // Lock makes the named tag permanently read-only.
-func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, error) {
-	if !modeAllowsTagModification(s.config.Readers) {
+func (s *tagOps) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, error) {
+	if !s.modificationAllowed() {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly, "%s", readOnlyModeMessage("locks"))
 	}
 
@@ -58,10 +99,10 @@ func (s *Router) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, 
 }
 
 // Transceive exchanges raw bytes with the named tag.
-func (s *Router) Transceive(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
+func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
 	// A raw exchange cannot be assumed harmless: the same call carries a SELECT
 	// and a write to a configuration page, so the mode treats it as a write.
-	if !modeAllowsTagModification(s.config.Readers) {
+	if !s.modificationAllowed() {
 		return nil, protocol.Errorf(protocol.ErrCodeReadOnly,
 			"Reader is in read-only mode; raw exchanges are refused because they can write")
 	}
@@ -79,7 +120,7 @@ func (s *Router) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 }
 
 // Capabilities reports what the named tag supports.
-func (s *Router) Capabilities(ctx context.Context, req server.CapabilitiesOp) (*nfc.TagCapabilities, error) {
+func (s *tagOps) Capabilities(ctx context.Context, req server.CapabilitiesOp) (*nfc.TagCapabilities, error) {
 	rt, err := s.resolveRoute(req.TagUID, req.DeviceID, req.AllowUntargeted)
 	if err != nil {
 		return nil, err
@@ -106,4 +147,10 @@ func sourceFailure(err error, device, op string, failed protocol.ErrorCode) erro
 	}
 	return protocol.WrapError(operationErrorCode(err, failed), err,
 		"device %s did not complete the %s", device, op)
+}
+
+// newTagOps is what the server performs a client's operations with when it was
+// given tags rather than an operation layer of its own.
+func newTagOps(config Config) *tagOps {
+	return &tagOps{tags: config.Tags, allowModification: config.AllowTagModification}
 }

@@ -59,28 +59,59 @@ func (s *Supervisor) SetClassicKeys(keys [][]byte) {
 	}
 }
 
-// Tag on a reader.
+// Tags, wherever they are.
 
-// The supervisor answers what the tag router asks of any source. A reader holds
-// the tag on it, as a phone holds the one its user tapped, so an operation
-// routes to either without the caller learning which. See [TagHolder].
+// The supervisor answers for every tag the agent can reach: the one on a reader
+// it polls, and the one a device holds and reported for itself. What both scan
+// already arrives on one signal, so what can be done to either is asked in one
+// place too. See [TagHolder].
 
 var _ TagHolder = (*Supervisor)(nil)
 
-// TagOn reports the tag a reader is holding, by UID. An empty device asks a
-// reader with a card on it.
+// TagOn reports the tag a device is holding, by UID. An empty device asks a
+// reader with a card on it, and failing that the most recent scan a device
+// reported.
 //
-// The answer is the reader's last scan rather than a fresh read: it selects the
-// reader, and the reader checks the tag it actually has when it performs the
+// A reader answers from its last scan rather than a fresh read: the answer
+// selects the reader, which checks the tag it actually has when it performs the
 // operation.
 func (s *Supervisor) TagOn(device string) (holder, uid string, ok bool) {
-	if device == "" {
-		device, ok = s.Present()
+	if device != "" {
+		if s.Operates(device) {
+			return s.tagOnReader(device)
+		}
+		return s.tagOnDevice(device)
+	}
+
+	// A reader whose tag can be named is preferred over one holding a tag it
+	// could not read, which is all an unnamed request has to choose by.
+	unnamed := ""
+	for _, name := range s.readerNames() {
+		holder, uid, ok := s.tagOnReader(name)
 		if !ok {
-			return "", "", false
+			continue
+		}
+		if uid != "" {
+			return holder, uid, true
+		}
+		if unnamed == "" {
+			unnamed = holder
 		}
 	}
 
+	if holder, uid, ok := s.tagOnDevice(""); ok {
+		return holder, uid, true
+	}
+	if unnamed != "" {
+		return unnamed, "", true
+	}
+	return "", "", false
+}
+
+// tagOnReader is the tag a reader last scanned, or the one it has on it that it
+// could not read: a blank or damaged tag is still a tag to write to, and the
+// reader checks what it has when the operation runs.
+func (s *Supervisor) tagOnReader(device string) (string, string, bool) {
 	s.mu.Lock()
 	reader, known := s.readers[device]
 	s.mu.Unlock()
@@ -88,32 +119,68 @@ func (s *Supervisor) TagOn(device string) (holder, uid string, ok bool) {
 		return "", "", false
 	}
 
-	uid = reader.GetLastScannedData()
-	if uid == "" {
-		return "", "", false
+	if uid := reader.GetLastScannedData(); uid != "" {
+		return device, uid, true
 	}
-	return device, uid, true
+	if reader.GetDeviceStatus().CardPresent {
+		return device, "", true
+	}
+	return "", "", false
 }
 
-// DevicesHoldingTags lists the readers that have a tag to name. A reader's last
-// scan stands until it reports another, so a route picked from it is confirmed
-// by the reader when the operation runs.
+// tagOnDevice is the tag one of the manager's own devices reported.
+func (s *Supervisor) tagOnDevice(device string) (string, string, bool) {
+	if s.devices == nil {
+		return "", "", false
+	}
+	return s.devices.TagOn(device)
+}
+
+// DevicesHoldingTags lists what has a tag to name, readers first: an operation
+// for a tag on a reader should not wait on a device holding one too.
+//
+// A reader's last scan stands until it reports another, so a route picked from
+// it is confirmed by the reader when the operation runs.
 func (s *Supervisor) DevicesHoldingTags() []string {
 	var holding []string
 	for _, name := range s.readerNames() {
-		if _, _, ok := s.TagOn(name); ok {
+		if _, _, ok := s.tagOnReader(name); ok {
 			holding = append(holding, name)
 		}
+	}
+	if s.devices != nil {
+		holding = append(holding, s.devices.DevicesHoldingTags()...)
 	}
 	return holding
 }
 
-// WriteTag encodes msg onto the tag on the named reader. The reader reads it
-// back where the tag allows, so the result says whether it was confirmed.
+// heldElsewhere names what performs an operation when the tag is not on a
+// reader this opened. Nil means the readers take it.
+func (s *Supervisor) heldElsewhere(device string) TagHolder {
+	if s.devices == nil {
+		return nil
+	}
+	if device == "" {
+		if len(s.readerNames()) > 0 {
+			return nil
+		}
+		return s.devices
+	}
+	if s.Operates(device) {
+		return nil
+	}
+	return s.devices
+}
+
+// WriteTag encodes msg onto the tag the named device is holding. A reader reads
+// it back where the tag allows, so the result says whether it was confirmed.
 //
-// The idempotency key is a device's, not a reader's: a reader is asked once and
-// answers for what it did.
-func (s *Supervisor) WriteTag(device, tagUID string, msg *NDEFMessage, lock bool, _ string) (*WriteResult, error) {
+// The idempotency key is a device's: a reader is asked once and answers for
+// what it did, where a device may have applied the write already.
+func (s *Supervisor) WriteTag(device, tagUID string, msg *NDEFMessage, lock bool, idempotencyKey string) (*WriteResult, error) {
+	if holder := s.heldElsewhere(device); holder != nil {
+		return holder.WriteTag(device, tagUID, msg, lock, idempotencyKey)
+	}
 	return s.WriteMessage(device, msg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
@@ -122,19 +189,28 @@ func (s *Supervisor) WriteTag(device, tagUID string, msg *NDEFMessage, lock bool
 	})
 }
 
-// LockTag makes the tag on the named reader permanently read-only.
-func (s *Supervisor) LockTag(device, tagUID, _ string) (*LockResult, error) {
+// LockTag makes the tag the named device is holding permanently read-only.
+func (s *Supervisor) LockTag(device, tagUID, idempotencyKey string) (*LockResult, error) {
+	if holder := s.heldElsewhere(device); holder != nil {
+		return holder.LockTag(device, tagUID, idempotencyKey)
+	}
 	return s.Lock(device, tagUID)
 }
 
-// TransceiveTag exchanges raw bytes with the tag on the named reader. A reader
-// speaks to the tag directly, so raw is what it always is here.
-func (s *Supervisor) TransceiveTag(device, tagUID string, data []byte, _ bool) ([]byte, error) {
+// TransceiveTag exchanges raw bytes with the tag the named device is holding. A
+// reader speaks to the tag directly, so raw is what it always is there.
+func (s *Supervisor) TransceiveTag(device, tagUID string, data []byte, raw bool) ([]byte, error) {
+	if holder := s.heldElsewhere(device); holder != nil {
+		return holder.TransceiveTag(device, tagUID, data, raw)
+	}
 	return s.Transceive(device, data, tagUID)
 }
 
-// TagCapabilities reports what the tag on the named reader supports.
+// TagCapabilities reports what the tag the named device is holding supports.
 func (s *Supervisor) TagCapabilities(device, tagUID string) (*TagCapabilities, error) {
+	if holder := s.heldElsewhere(device); holder != nil {
+		return holder.TagCapabilities(device, tagUID)
+	}
 	return s.Capabilities(device, tagUID)
 }
 
@@ -146,30 +222,6 @@ func (s *Supervisor) Operates(device string) bool {
 
 	_, ok := s.readers[device]
 	return ok
-}
-
-// Present reports a reader with a card on it, for a request that named no tag.
-func (s *Supervisor) Present() (device string, ok bool) {
-	for _, name := range s.readerNames() {
-		s.mu.Lock()
-		reader := s.readers[name]
-		s.mu.Unlock()
-		if reader != nil && reader.GetDeviceStatus().CardPresent {
-			return name, true
-		}
-	}
-	return "", false
-}
-
-// Any names a reader to fall back on when none is holding a card, so a request
-// that has to go somewhere reaches one rather than being refused for having no
-// route.
-func (s *Supervisor) Any() (device string, ok bool) {
-	names := s.readerNames()
-	if len(names) == 0 {
-		return "", false
-	}
-	return names[0], true
 }
 
 // Operations. Each names the reader it applies to, so one reader's operation

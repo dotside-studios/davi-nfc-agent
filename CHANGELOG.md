@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened
-  later too. `tagrouter` routes to the reader holding the tag rather than to
-  the reader
+  later too. A client operation reaches the reader holding the tag rather than
+  the one reader there used to be
 - `nfc.Supervisor` operates every reader a manager offers rather than one chosen
   at startup. It opens each, polls it, and publishes what they scan on one
   signal, with each scan naming the reader it came from. A reader plugged in
@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The supervisor answers for every tag the agent can reach, the ones on its
+  readers and the ones the manager's own devices hold. A phone's scan already
+  arrived on its signal, so what can be done to that tag is now asked in the
+  same place, so what resolves a client request needs one holder and the
+  agent's mode rather than a source per kind
 - One interface answers for a tag wherever it is. `nfc.TagHolder` names the tag
   a device holds and performs the write, lock, raw exchange and capability
   report on it, and `nfc.Supervisor` implements it for the readers the agent
@@ -182,8 +187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kind. `TagCapabilities.ReadsAreSnapshot` says a read answers from the scan, so
   the write skips a confirmation it cannot trust
 - The agent no longer searches its manager for a device driver.
-  `server.DeviceOps` and a scan channel are handed in, so `agent` and
-  `server/tagrouter` import `nfc/remotenfc` nowhere
+  `server.DeviceOps` and a scan channel are handed in, so nothing above the
+  manager imports `nfc/remotenfc`
 - `Agent.Shutdown` is the way out; `Stop` pauses. `Stop` no longer closes the NFC
   manager, which is built once for the process
 - The control center consumes the client library instead of reimplementing it.
@@ -286,6 +291,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `server/tagrouter`. Resolving a client request to the tag it names is what the
+  client server does with the holder it was given, and the wire vocabulary it
+  answers in was never a source's to speak. `clientserver.Config` takes `Tags`
+  and `AllowTagModification`; `Config.Ops` still replaces the lot for a build
+  with its own. `Agent.Router` is gone with it
 - `tray.App.AttachConsole`, `console.Server.AttachTray` and the `console.Tray`
   interface. The tray held a console it never read, and the console acted
   through the tray so its menu would follow; the tray follows the agent's

@@ -362,8 +362,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `nfc/remotenfc` | Phones and WebNFC browsers: the device protocol, its WebSocket endpoint, the sessions and the tags behind them |
 | `nfc/multimanager` | Several backends behind one `nfc.Manager` |
 | `server` | The bridge between tag sources and clients, and the device credential check |
-| `server/clientserver` | The client WebSocket endpoint |
-| `server/tagrouter` | Picks the reader or the device holding the tag a client request names |
+| `server/clientserver` | The client WebSocket endpoint, and what it performs on the tag a request names |
 | `server/listener` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
 | `server/wsconn` | Write-safe WebSocket wrapper shared by the servers and the device driver |
 | `protocol` | The wire vocabulary both protocols share: the message envelope, the error taxonomy, NDEF input |

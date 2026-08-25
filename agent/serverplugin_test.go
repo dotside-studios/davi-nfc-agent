@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
+	"github.com/gorilla/websocket"
 )
 
 // serverAgent is an agent whose listener comes from the plugin under test.
@@ -605,4 +607,41 @@ func TestAnUnmanagedCertificateDoesNotStartAWatch(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(rt.Agent.Shutdown)
+}
+
+// A device that connects to an agent built with no device driver has no device
+// protocol to speak to. The connection used to be accepted and then ignored:
+// the device registered, got "no handler for message type" logged at it, and
+// waited for a reply that could never come. It reaches the client server now,
+// which answers it.
+func TestADeviceConnectingWithoutADriverIsAnswered(t *testing.T) {
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	ts := httptest.NewServer(p.Listener().Handler())
+	defer ts.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws?mode=device", nil)
+	if err != nil {
+		t.Fatalf("a device connection was refused with no driver to serve it: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: "registerDevice"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var out protocol.WebSocketResponse
+	if err := conn.ReadJSON(&out); err != nil {
+		t.Fatalf("the device was left waiting for an answer: %v", err)
+	}
+	if out.Success {
+		t.Errorf("registering a device succeeded with no driver: %+v", out)
+	}
 }

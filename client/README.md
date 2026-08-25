@@ -1,7 +1,7 @@
 # @davi/nfc-agent-client
 
 The client library for the Davi NFC Agent. Docs in
-[docs/client/](../docs/client).
+[docs/javascript-client.md](../docs/javascript-client.md).
 
 `dist/` is generated from `src/` — don't hand-edit it.
 

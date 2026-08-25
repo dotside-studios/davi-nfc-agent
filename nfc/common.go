@@ -7,6 +7,20 @@ import (
 )
 
 // NFCData represents the data read from an NFC tag including any potential errors.
+// ScannedTag is a tag as a source reported it, before anything has been read
+// off it. It is what a manager publishes; what consumers get is [NFCData],
+// which the supervisor makes from this.
+type ScannedTag struct {
+	// Device names what reported the tag.
+	Device string
+
+	// Tag is what was scanned, nil for a tag that has left.
+	Tag Tag
+
+	// Err is what went wrong instead, if anything.
+	Err error
+}
+
 type NFCData struct {
 	// Device names what produced the scan: the reader it was presented to, or
 	// the phone that reported it. Empty for a scan from a source that does not

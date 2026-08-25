@@ -25,7 +25,8 @@ type MultiManager struct {
 
 	// scans is every child's scans as one signal, so whatever consumes them
 	// subscribes here rather than to each manager it happens to know about.
-	scans event.Signal[nfc.NFCData]
+	// Raw, as the children report them: reading the tag is the supervisor's.
+	scans event.Signal[nfc.ScannedTag]
 
 	// listErrMu guards lastListErr, which holds the last ListDevices error
 	// reported per manager so a persistent one is logged once rather than on
@@ -305,8 +306,8 @@ func (mm *MultiManager) holderFor(deviceID string) (nfc.TagHolder, error) {
 	return nil, fmt.Errorf("no device %s is holding a tag", deviceID)
 }
 
-// Scans carries what every child manager's devices report.
-func (mm *MultiManager) Scans() *event.Signal[nfc.NFCData] { return &mm.scans }
+// Scans carries what every child manager's devices report, as reported.
+func (mm *MultiManager) Scans() *event.Signal[nfc.ScannedTag] { return &mm.scans }
 
 // DeviceChanges returns a channel that signals when devices are registered or unregistered
 // in any of the child managers.

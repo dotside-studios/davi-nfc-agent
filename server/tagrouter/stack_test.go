@@ -94,7 +94,15 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	router := tagrouter.New(tagrouter.Config{Readers: cfg.Readers, Devices: remote})
 
 	if remote != nil {
-		remote.Scans().Connect(client.Broadcast)
+		remote.Scans().Connect(func(scan nfc.ScannedTag) {
+			// What the supervisor does with a raw scan, which is what
+			// stands between the driver and the clients in a real agent.
+			data := nfc.NFCData{Device: scan.Device, Err: scan.Err}
+			if scan.Tag != nil {
+				data.Card = nfc.NewCard(scan.Tag)
+			}
+			client.Broadcast(data)
+		})
 	}
 
 	ts := httptest.NewServer(endpoint)

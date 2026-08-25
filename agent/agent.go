@@ -192,10 +192,9 @@ type Agent struct {
 	lifecycle
 	cardTypes *cardTypeFilter
 
-	// The agent's subscriptions to what its sources report, held so a stop ends
-	// them. managerScans is what the manager's own devices report; the other
-	// two are what the readers do.
-	managerScans *event.Connection
+	// The agent's subscriptions to what the supervisor reports, held so a stop
+	// ends them. Every scan arrives here, whether a reader was polled for it or
+	// a device reported it.
 	readerScans  *event.Connection
 	readerStatus *event.Connection
 
@@ -482,10 +481,9 @@ func (a *Agent) RestartServers() error {
 
 // stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
 func (a *Agent) stopServers() {
-	a.managerScans.Disconnect()
 	a.readerScans.Disconnect()
 	a.readerStatus.Disconnect()
-	a.managerScans, a.readerScans, a.readerStatus = nil, nil, nil
+	a.readerScans, a.readerStatus = nil, nil
 
 	a.ClientServer = nil
 	a.Router = nil
@@ -527,11 +525,6 @@ func (a *Agent) startServers() error {
 		a.fireReaderStatus(status)
 		sink.BroadcastDeviceStatus(status)
 	})
-
-	// What the manager's own devices report goes to the same place. Connected
-	// to the server being built rather than read from a field, so a restart
-	// leaves nothing feeding the one it replaced.
-	a.managerScans = nfc.OnScan(a.manager, a.ClientServer.Broadcast)
 
 	// Published as a pair, so a request never sees a client from one start
 	// beside a device from the next.

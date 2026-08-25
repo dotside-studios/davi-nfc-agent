@@ -38,8 +38,9 @@ type Supervisor struct {
 	scans  event.Signal[NFCData]
 	status event.Signal[DeviceStatus]
 
-	stopped chan struct{}
-	wg      sync.WaitGroup
+	stopped  chan struct{}
+	reported *event.Connection
+	wg       sync.WaitGroup
 }
 
 // NewSupervisor returns a supervisor over the readers manager offers. opTimeout
@@ -86,6 +87,7 @@ func (s *Supervisor) Start() error {
 
 	s.reconcile()
 	s.watchDevices()
+	s.watchReported()
 	return nil
 }
 
@@ -104,6 +106,7 @@ func (s *Supervisor) Stop() {
 	s.mu.Unlock()
 
 	close(s.stopped)
+	s.reported.Disconnect()
 	for _, reader := range readers {
 		reader.Stop()
 		reader.Close()
@@ -205,6 +208,26 @@ func (s *Supervisor) publish(reader *deviceReader) {
 			s.status.Emit(status)
 		}
 	}
+}
+
+// watchReported publishes what the manager's own devices report. They are not
+// polled and not opened here, but what they scan is a scan like any other, so
+// it reaches consumers through the same signal, processed the same way.
+func (s *Supervisor) watchReported() {
+	s.reported = OnScan(s.manager, func(scan ScannedTag) {
+		s.scans.Emit(process(scan))
+	})
+}
+
+// process turns a tag as a device reported it into what consumers get. A device
+// that reports its own scans has already read the tag, so this is where the two
+// paths meet rather than where one of them does its reading.
+func process(scan ScannedTag) NFCData {
+	data := NFCData{Device: scan.Device, Err: scan.Err}
+	if scan.Tag != nil {
+		data.Card = NewCard(scan.Tag)
+	}
+	return data
 }
 
 // watchDevices reconciles whenever the manager reports its device set changed.

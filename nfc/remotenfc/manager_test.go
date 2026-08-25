@@ -478,10 +478,10 @@ func TestAPhoneScanNamesItsDevice(t *testing.T) {
 		t.Fatalf("RegisterDevice: %v", err)
 	}
 
-	seen := make(chan nfc.NFCData, 4)
-	m.Scans().Connect(func(data nfc.NFCData) {
+	seen := make(chan nfc.ScannedTag, 4)
+	m.Scans().Connect(func(scan nfc.ScannedTag) {
 		select {
-		case seen <- data:
+		case seen <- scan:
 		default:
 		}
 	})
@@ -500,6 +500,12 @@ func TestAPhoneScanNamesItsDevice(t *testing.T) {
 	case got := <-seen:
 		if got.Device != device.DeviceID() {
 			t.Errorf("the scan names device %q, want %q", got.Device, device.DeviceID())
+		}
+		if got.Tag == nil {
+			t.Fatal("the scan carries no tag, want the one the device reported")
+		}
+		if uid := got.Tag.UID(); uid != "04:A1:B2:C3" {
+			t.Errorf("the scan carries tag %q, want the reported UID normalized", uid)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the scan never reached a subscriber")

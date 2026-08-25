@@ -49,6 +49,19 @@ func awaitScan(t *testing.T, sink *recordingSink) nfc.NFCData {
 	}
 }
 
+// startedPumpAgent is an agent whose readers are running, which is when the pin
+// can name a reader other than the one being read.
+func startedPumpAgent(t *testing.T) *Agent {
+	t.Helper()
+
+	a := newPumpAgent(t)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(a.Stop)
+	return a
+}
+
 func newPumpAgent(t *testing.T) *Agent {
 	t.Helper()
 
@@ -193,10 +206,15 @@ func TestReaderStatusReachesSubscribersAndClients(t *testing.T) {
 // which is what the phone driver is.
 type reportingManager struct {
 	nfc.Manager
-	scans event.Signal[nfc.NFCData]
+	scans event.Signal[nfc.ScannedTag]
 }
 
-func (m *reportingManager) Scans() *event.Signal[nfc.NFCData] { return &m.scans }
+func (m *reportingManager) Scans() *event.Signal[nfc.ScannedTag] { return &m.scans }
+
+// report is a device reporting a tag, as the driver would.
+func (m *reportingManager) report(device, uid string) {
+	m.scans.Emit(nfc.ScannedTag{Device: device, Tag: nfc.NewMockTag(uid)})
+}
 
 // What a manager reports reaches the clients while the agent is serving, and
 // stops reaching them once it is not: the subscription belongs to the run, not
@@ -223,7 +241,7 @@ func TestManagerScansReachTheClientsWhileServing(t *testing.T) {
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	m.scans.Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04ABCDEF"))})
+	m.report("phone-9f2a", "04ABCDEF")
 
 	select {
 	case uid := <-seen:
@@ -235,7 +253,7 @@ func TestManagerScansReachTheClientsWhileServing(t *testing.T) {
 	}
 
 	a.Stop()
-	m.scans.Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04EEEEEE"))})
+	m.report("phone-9f2a", "04EEEEEE")
 
 	select {
 	case uid := <-seen:
@@ -270,7 +288,7 @@ func TestARefusedScanKeepsItsDevice(t *testing.T) {
 // does, the reader is still on the old device: those scans used to reach every
 // client as though nothing had been asked for.
 func TestScansFromAnUnselectedReaderAreDropped(t *testing.T) {
-	a := newPumpAgent(t)
+	a := startedPumpAgent(t)
 	sink := newSink()
 
 	a.SetPinnedDevice("ACS ACR122U 00")
@@ -289,7 +307,7 @@ func TestScansFromAnUnselectedReaderAreDropped(t *testing.T) {
 // The selected reader's own scans pass, and so does every scan when nothing is
 // pinned, which is auto-detect.
 func TestTheSelectedReaderIsForwarded(t *testing.T) {
-	a := newPumpAgent(t)
+	a := startedPumpAgent(t)
 	sink := newSink()
 
 	a.SetPinnedDevice("mock:usb:001")
@@ -314,7 +332,7 @@ func TestTheSelectedReaderIsForwarded(t *testing.T) {
 // A scan from a source that does not say which device it came from is not
 // something the reader filter can judge, so it passes rather than vanishing.
 func TestAScanWithNoDeviceIsNotFiltered(t *testing.T) {
-	a := newPumpAgent(t)
+	a := startedPumpAgent(t)
 	sink := newSink()
 
 	a.SetPinnedDevice("ACS ACR122U 00")
@@ -325,8 +343,9 @@ func TestAScanWithNoDeviceIsNotFiltered(t *testing.T) {
 	}
 }
 
-// A phone reports its own scans and is not a reader, so pinning one has nothing
-// to say about it.
+// A phone reports its own scans and is not a reader the agent chose to read
+// from, so pinning a reader has nothing to say about it. Both arrive on one
+// signal now, so the distinction has to be made rather than fallen into.
 func TestAPinnedReaderDoesNotFilterDevices(t *testing.T) {
 	m := &reportingManager{Manager: nfc.NewMockManager()}
 	rt, err := Setup(testOptions(t), m)
@@ -352,10 +371,7 @@ func TestAPinnedReaderDoesNotFilterDevices(t *testing.T) {
 	}
 	defer a.Stop()
 
-	m.scans.Emit(nfc.NFCData{
-		Device: "phone-9f2a",
-		Card:   nfc.NewCard(nfc.NewMockTag("04ABCDEF")),
-	})
+	m.report("phone-9f2a", "04ABCDEF")
 
 	select {
 	case uid := <-seen:

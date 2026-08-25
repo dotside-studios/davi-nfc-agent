@@ -77,6 +77,16 @@ func (s *Supervisor) TagOn(device string) (holder string, tag Tag, ok bool) {
 	return name, tags[0], true
 }
 
+// Operates reports whether this is a reader the supervisor opened, as opposed
+// to a device that reports its own scans.
+func (s *Supervisor) Operates(device string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, ok := s.readers[device]
+	return ok
+}
+
 // Holding reports which reader last scanned a tag with this UID. It is a cached
 // view and only picks the reader: the reader re-checks the tag it is holding
 // when it performs the operation.

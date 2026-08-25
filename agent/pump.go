@@ -14,18 +14,21 @@ type tagSink interface {
 	BroadcastDeviceStatus(nfc.DeviceStatus)
 }
 
-// readerSelected reports whether a reader's scans are wanted. The pinned device
+// readerSelected reports whether a scan's source is wanted. The pinned device
 // is a filter rather than a lock: a scan from a reader the operator is not
 // asking for is dropped here, wherever it was read.
 //
-// Scans a device reports for itself do not come through here, so a phone is
-// unaffected by which reader is pinned.
+// Only readers are filtered. A device that reports its own scans, such as a
+// phone, is not one the agent chose to read from, so pinning a reader says
+// nothing about it.
 func (a *Agent) readerSelected(device string) bool {
 	pinned := a.CurrentPinnedDevice()
-	if pinned == "" || device == "" {
+	if pinned == "" || device == "" || device == pinned {
 		return true
 	}
-	return device == pinned
+
+	readers := a.supervisor.Load()
+	return readers == nil || !readers.Operates(device)
 }
 
 // forwardScan applies the agent's filters and hands the scan on.

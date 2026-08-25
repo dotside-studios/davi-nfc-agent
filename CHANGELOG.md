@@ -36,9 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   produced it. Filled by the reader and by the phone driver; the wire is
   unchanged
 - A manager reports what its devices scan and answers for the tags they hold:
-  `nfc.TagReporter` carries an `event.Signal` of scans, `nfc.TagHolder` is what
-  the tag router asks, and `multimanager` implements both by fanning its
-  children in. The agent subscribes to the manager it was given
+  `nfc.TagReporter` carries an `event.Signal` of `nfc.ScannedTag`, the tag as
+  the device reported it, `nfc.TagHolder` is what the tag router asks, and
+  `multimanager` implements both by fanning its children in. What is read off a
+  tag is the supervisor's, so every scan is processed in one place however it
+  arrived, and the agent subscribes to the supervisor alone
 - Plugin API: `agent.Plugin` is one method, `Activate(agent.AgentContext) error`,
   run before the agent starts. A plugin registers a `Component` with `ctx.Use`, a
   route with `ctx.Mount` and a tray entry with `ctx.Systray`. Plugins are Go

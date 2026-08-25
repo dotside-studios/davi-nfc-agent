@@ -27,7 +27,7 @@ platform.
   read and write, once the operator turns it on
 - **System tray**: Reader selection, status, and device management
 - **Control Center**: A built-in web console for the log, tag inspection, NDEF
-  writing, device revocation and the agent's settings
+  writing, device revocation and the reader's preferences
 - **Buildable as a library**: Import the agent and write your own `main.go`, in
   any shape from the full tray application to a headless service
 - **Assembled from plugins**: One method registers a background component, a
@@ -58,16 +58,9 @@ go build ./cmd/davi-nfc-agent
 ```
 
 See the [Installation Guide](docs/installation.md) for platform-specific setup
-and troubleshooting, and [Setting up an iOS or Android device](docs/device-setup.md)
-for pairing a phone.
-
-### Control Center
-
-Choose **Open Control Center** from the tray to manage the agent in a browser:
-read its log, inspect and write tags, revoke a paired device, edit the origin
-allowlist, and change the agent's settings. It is reachable from loopback only,
-through a session the tray opens. Build with `-tags nowebui` to leave it out of
-the binary. See [Control Center](docs/control-center.md).
+and troubleshooting, [Setting up an iOS or Android device](docs/device-setup.md)
+for pairing a phone, and [Control Center](docs/control-center.md) for the
+built-in web console.
 
 ### Command-line Options
 
@@ -85,72 +78,13 @@ the binary. See [Control Center](docs/control-center.md).
 ./davi-nfc-agent -config-dir ./config  # Override the config directory
 ```
 
-### Connecting from a web console
-
-The agent only accepts WebSocket upgrades whose `Origin` matches its own
-host:port. Otherwise any site the operator visits could drive the reader,
-including permanently locking cards. A console served from anywhere else, which
-includes every hosted one, must be allowed. The Davi consoles already are.
-
-When a page is refused, the tray offers it as *"Allow example.com"*, and one
-click admits it. To preload one instead, at first run or for an unattended
-install:
-
-```bash
-./davi-nfc-agent -allowed-origins "console.example.com,localhost:3002"
-# or
-DAVI_NFC_ALLOWED_ORIGINS="console.example.com" ./davi-nfc-agent
-```
-
-The allowlist lives in `allowed-origins.json` in the config directory and is
-managed from the tray under **Allowed Origins**. A trusted certificate is a
-separate requirement, and a failure of either looks the same from the page. See
-[Control Center](docs/control-center.md) and
-[API reference](docs/api.md#tls--certificates).
-
-### How devices trust the agent
-
-By default the agent serves a **self-signed certificate** using a key it
-generates once and keeps. Nothing is added to any trust store.
-
-Phones, readers and other native clients authenticate the agent by **pinning its
-public key** rather than by trusting an authority. The pin is reported at
-registration, logged at startup, and takes the form `sha256/<base64>` over the
-SubjectPublicKeyInfo:
-
-```
-Agent public key pin: sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
-```
-
-It survives certificate reissues, so a device that pins it keeps working when
-the machine moves network. Pin this value, never the certificate.
-
-Browsers cannot pin, so they need a certificate they already trust: point
-`-cert` / `-key` at one you control, or use **Trust This Agent in Browsers** in
-the tray (`-install-ca` on the command line) to create a local authority and
-install it. A local authority can sign for any name, so prefer your own
-certificate where you can arrange it.
-
-The agent persists its certificate and API secret under a platform-specific
-config directory, so paired devices keep working across restarts. Run
-`./davi-nfc-agent -help` for the full list of flags. See
-[Setting up an iOS or Android device](docs/device-setup.md) and
-[API reference](docs/api.md#tls--certificates).
-
-## Ports
-
-The shipped agent listens on two ports, both configurable. Each is a plugin the
-program registers, so a build can move either, or leave one out:
-
-- **9470, agent server** (`-device-port`): One listener for both roles. NFC
-  devices connect to `/ws?mode=device`, client applications to `/ws`, and the
-  Control Center is served from the same port
-- **9472, pairing server** (`-bootstrap-port`, `0` disables it): Serves the
-  page a phone opens to pair, and issues each device its own credential against
-  the PIN printed at startup. Where a local CA is in use, it hands that out too,
-  to a request carrying the PIN
-
 ## Usage Examples
+
+The agent listens on two ports, both configurable:
+- **Agent server** (port 9470): NFC devices connect to `/ws?mode=device`, client
+  applications to `/ws`, and the Control Center is served from the same port
+- **Pairing server** (port 9472): serves the page a phone opens to pair, and
+  issues each device its own credential
 
 ### JavaScript / TypeScript
 
@@ -242,16 +176,13 @@ ws.send(JSON.stringify({
 
 The agent is a Go module, and the binary is an ordinary program built from the
 packages it exports. Leaving out the tray, the control center or the hardware
-backend is a matter of which packages you import. The listener, the pairing
-server and the certificate are plugins a program registers, so a build that
-registers none drives the reader and serves no HTTP at all.
-See [Custom Builds](docs/custom-builds.md).
+backend is a matter of which packages you import, and the listener, the pairing
+server and the certificate are plugins a program registers. See
+[Custom Builds](docs/custom-builds.md).
 
 ```bash
 go get github.com/dotside-studios/davi-nfc-agent
 ```
-
-### NFC backends
 
 The NFC layer takes custom readers and tag types beyond the built-in PC/SC and
 smartphone backends. See [Extending NFC Support](docs/extending-nfc-support.md)

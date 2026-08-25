@@ -42,8 +42,7 @@ Content-Type: application/json
 
 Store all three. `deviceToken` is presented on every later connection, as
 `?secret=` or `Authorization: Bearer`. `publicKeyPin` is how the device
-recognizes this agent again. See
-[How devices trust the agent](../README.md#how-devices-trust-the-agent).
+recognizes this agent again. See [TLS & Certificates](#tls--certificates).
 
 **The token is shown once.** The agent keeps only its hash, so a lost token
 means pairing again rather than looking it up.
@@ -1061,9 +1060,9 @@ With `-install-ca`, the bootstrap server on port 9472 serves the root
 certificate for installation, PIN-gated.
 
 Browsers also need their origin allowed. See
-[Connecting from a web console](../README.md#connecting-from-a-web-console). A
-trusted certificate and an allowed origin are separate requirements, and a
-failure of either looks the same from the page.
+[Browser origins](control-center.md#browser-origins). A trusted certificate and
+an allowed origin are separate requirements, and a failure of either looks the
+same from the page.
 
 ---
 

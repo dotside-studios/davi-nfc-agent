@@ -112,6 +112,40 @@ on otherwise.
 
 Nothing is written to disk. The buffer is lost when the agent exits.
 
+## Browser origins
+
+The agent only accepts WebSocket upgrades whose `Origin` matches its own
+host:port. Otherwise any site the operator visits could drive the reader,
+including permanently locking cards. A console served from anywhere else, which
+includes every hosted one, must be allowed. The Davi consoles already are.
+
+When a page is refused, the tray offers it as *"Allow example.com"*, and one
+click admits it and persists the choice, with no restart. **Browser origins** in
+the console lists the allowlist, every origin refused since startup, and the
+session override. To preload one instead, at first run or for an unattended
+install:
+
+```bash
+./davi-nfc-agent -allowed-origins "console.example.com,localhost:3002"
+# or
+DAVI_NFC_ALLOWED_ORIGINS="console.example.com" ./davi-nfc-agent
+```
+
+Entries are matched on host:port. Full URLs are accepted and reduced, so
+`https://console.example.com` and `console.example.com` are equivalent. The
+allowlist lives in `allowed-origins.json` in the config directory.
+
+**Allow any origin (this session)** turns the check off until the agent
+restarts. It is never persisted, and it is not a way to skip configuring an
+origin: while it is on, any page the operator opens can read, write and
+permanently lock cards.
+
+A trusted certificate is a separate requirement. The allowlist decides *who may
+connect*; TLS decides whether the browser will open the connection at all. A
+`wss://` connection to an untrusted certificate fails outright, and unlike a
+page visit there is no warning to click through. See
+[TLS & Certificates](api.md#tls--certificates).
+
 ## Where a preference lives
 
 The agent holds every preference and nothing writes them anywhere. A change made

@@ -256,3 +256,59 @@ func TestManagerScansReachTheClientsWhileServing(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// Every scan says where it came from. Nothing reads it yet, but it is what the
+// device filter and the supervisor's per-device routing will both ask, so a
+// producer that leaves it blank breaks them later rather than here.
+func TestAScanSaysWhichDeviceItCameFrom(t *testing.T) {
+	a := newPumpAgent(t)
+
+	reader, err := nfc.NewNFCReader("mock:usb:001", nfc.NewMockManager(), time.Second)
+	if err != nil {
+		t.Fatalf("NewNFCReader: %v", err)
+	}
+	reader.Start()
+	defer reader.Close()
+
+	status := make(chan nfc.DeviceStatus, 4)
+	a.Events().Reader.Connect(func(s nfc.DeviceStatus) {
+		select {
+		case status <- s:
+		default:
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.pumpReader(ctx, reader, newSink())
+
+	select {
+	case got := <-status:
+		if got.Device != "mock:usb:001" {
+			t.Errorf("the reader's status names device %q, want mock:usb:001", got.Device)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no reader status arrived")
+	}
+}
+
+// A scan the card-type filter refuses still says which device presented it.
+func TestARefusedScanKeepsItsDevice(t *testing.T) {
+	a := newPumpAgent(t)
+	sink := newSink()
+
+	named := nfc.GetAllCardTypes()[0]
+	a.AllowCardType(named)
+
+	tag := nfc.NewMockTag("04A1B2C3")
+	tag.TagType = "some-other-type"
+	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Card: nfc.NewCard(tag)}, sink)
+
+	got := awaitScan(t, sink)
+	if got.Err == nil {
+		t.Fatal("the refusal did not reach the bridge")
+	}
+	if got.Device != "mock:usb:001" {
+		t.Errorf("the refusal names device %q, want the one that presented the card", got.Device)
+	}
+}

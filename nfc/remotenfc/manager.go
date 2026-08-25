@@ -205,7 +205,7 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	// Create Card and broadcast via data channel
 	card := nfc.NewCard(tag)
 	select {
-	case m.dataChan <- nfc.NFCData{Card: card, Err: nil}:
+	case m.dataChan <- nfc.NFCData{Device: deviceID, Card: card, Err: nil}:
 	default:
 		log.Printf("[smartphone] Data channel full, dropping tag data for device %s", deviceID)
 	}
@@ -245,7 +245,7 @@ func (m *Manager) SendTagRemoved(deviceID string, data TagRemovedData) error {
 
 	// Broadcast removal via data channel (Card: nil signals removal)
 	select {
-	case m.dataChan <- nfc.NFCData{Card: nil, Err: nil}:
+	case m.dataChan <- nfc.NFCData{Device: deviceID, Card: nil, Err: nil}:
 		log.Printf("[smartphone] Tag removed: device=%s, UID=%s", deviceID, data.UID)
 	default:
 		log.Printf("[smartphone] Data channel full, dropping tag removal for device %s", deviceID)

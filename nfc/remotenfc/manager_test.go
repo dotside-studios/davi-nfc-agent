@@ -462,3 +462,46 @@ func TestPlatformDescribesTheDeviceRatherThanAdmittingIt(t *testing.T) {
 		t.Error("RegisterDevice with no device name was admitted, want an error")
 	}
 }
+
+// A phone's scan names the phone, so a consumer knows which device presented
+// the tag without asking the tag what it came from.
+func TestAPhoneScanNamesItsDevice(t *testing.T) {
+	m := NewManager(time.Minute)
+	defer m.Close()
+
+	device, err := m.RegisterDevice(DeviceRegistrationRequest{
+		DeviceName: "Phone",
+		Platform:   "android",
+		AppVersion: "1.0.0",
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
+	}
+
+	seen := make(chan nfc.NFCData, 4)
+	m.Scans().Connect(func(data nfc.NFCData) {
+		select {
+		case seen <- data:
+		default:
+		}
+	})
+
+	if err := m.SendTagData(device.DeviceID(), TagData{
+		DeviceID:   device.DeviceID(),
+		UID:        "04A1B2C3",
+		Technology: "ISO14443A",
+		Type:       "NTAG215",
+		ScannedAt:  time.Now(),
+	}); err != nil {
+		t.Fatalf("SendTagData: %v", err)
+	}
+
+	select {
+	case got := <-seen:
+		if got.Device != device.DeviceID() {
+			t.Errorf("the scan names device %q, want %q", got.Device, device.DeviceID())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the scan never reached a subscriber")
+	}
+}

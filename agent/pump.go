@@ -46,7 +46,8 @@ func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
 	if !a.cardTypes.isAllowed(data.Card.Type) {
 		log.Printf("Card type '%s' not in allowed list, ignoring", data.Card.Type)
 		sink.Broadcast(nfc.NFCData{
-			Err: fmt.Errorf("card type '%s' not allowed by filter", data.Card.Type),
+			Device: data.Device,
+			Err:    fmt.Errorf("card type '%s' not allowed by filter", data.Card.Type),
 		})
 		return
 	}

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `nfc.NFCData` and `nfc.DeviceStatus` carry the device they came from, so a
+  consumer knows which reader presented a tag rather than asking the tag what
+  produced it. Filled by the reader and by the phone driver; the wire is
+  unchanged
 - A manager reports what its devices scan and answers for the tags they hold:
   `nfc.TagReporter` carries an `event.Signal` of scans, `nfc.TagHolder` is what
   the tag router asks, and `multimanager` implements both by fanning its

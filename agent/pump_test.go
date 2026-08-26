@@ -382,3 +382,55 @@ func TestAPinnedReaderDoesNotFilterDevices(t *testing.T) {
 		t.Fatal("a phone's scan was filtered by the pinned reader")
 	}
 }
+
+// Starting without naming a device is auto-detect, and stays that way. It used
+// to pin whichever reader was listed first, so an agent that polls every reader
+// dropped the scans of all but one of them.
+func TestStartingWithNoDeviceServesEveryReader(t *testing.T) {
+	m := nfc.NewMockManager()
+	m.DevicesList = []string{"mock:usb:001", "mock:usb:002"}
+
+	rt, err := Setup(testOptions(t), m)
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	a := rt.Agent
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if pinned := a.CurrentPinnedDevice(); pinned != "" {
+		t.Errorf("a start that named no device pinned %q", pinned)
+	}
+
+	sink := newSink()
+	for _, device := range []string{"mock:usb:001", "mock:usb:002"} {
+		a.forwardScan(nfc.NFCData{Device: device, Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))}, sink)
+		if got := awaitScan(t, sink); got.Device != device {
+			t.Errorf("got a scan from %q, want the one from %q", got.Device, device)
+		}
+	}
+}
+
+// A start that names a device is a choice, and the preferences report it.
+func TestStartingWithADevicePinsIt(t *testing.T) {
+	m := nfc.NewMockManager()
+	m.DevicesList = []string{"mock:usb:001", "mock:usb:002"}
+
+	rt, err := Setup(testOptions(t), m)
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	a := rt.Agent
+
+	if err := a.Start("mock:usb:002"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if pinned := a.CurrentPinnedDevice(); pinned != "mock:usb:002" {
+		t.Errorf("CurrentPinnedDevice = %q, want the device the start named", pinned)
+	}
+}

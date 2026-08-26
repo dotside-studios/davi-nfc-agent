@@ -211,6 +211,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Starting without naming a device is auto-detect again. It pinned whichever
+  reader was listed first, so an agent that polls every reader dropped the scans
+  of all but one of them, and the preferences reported a choice nobody made
 - The tray follows the agent rather than only its own clicks. A mode, filter or
   feedback setting changed from the console left the tray's menu showing the old
   value, a device paired elsewhere did not appear, and an agent that stopped on

@@ -349,35 +349,15 @@ func (a *Agent) ReaderFeedback() bool {
 // startLocked opens the reader and brings the servers up. The caller holds the
 // lifecycle lock and owns the state transition; see Start.
 func (a *Agent) startLocked(devicePath string) error {
-	// A pinned phone is not a reader that has gone missing, it is one that
-	// never existed: a phone reports its scans over the device bridge and is
-	// never opened here. Left in place it becomes a connection retried for as
-	// long as the agent runs.
-	if nfc.IsRemoteDevice(a.manager, devicePath) {
-		a.logger.Printf("Ignoring pinned reader %s: a phone reports its scans over the device bridge rather than being read from", devicePath)
-		devicePath = ""
-	}
-
-	// If no device path specified, discover available devices
-	if devicePath == "" {
-		devices, err := nfc.ListReaders(a.manager)
-		if err != nil {
-			a.logger.Printf("Error listing NFC devices: %v", err)
-			// Continue without a device - one may connect later
-		} else if len(devices) == 0 {
-			a.logger.Println("No NFC devices found - waiting for device connection")
-		} else {
-			devicePath = devices[0]
-			a.logger.Printf("Auto-selected NFC device: %s", devicePath)
-		}
-	}
-
-	// Store device path for potential restarts
 	a.devicePath.Store(&devicePath)
 
-	// A start that names a reader is a choice, so it is what the agent is set
+	// A start that names a device is a choice, so it is what the agent is set
 	// to: the filter and the preferences agree afterwards rather than the
-	// preference reporting one reader while the scans come from another.
+	// preference reporting one device while the scans come from another.
+	//
+	// Naming none is auto-detect, which stays auto-detect. It used to pin
+	// whichever reader was listed first, so a second one was polled and then
+	// filtered out of everything the clients saw.
 	if devicePath != "" {
 		a.SetPinnedDevice(devicePath)
 	}

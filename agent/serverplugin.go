@@ -576,20 +576,6 @@ func (p *ServerPlugin) OnClientsChange(fn func(int)) *event.Connection {
 	return p.clientChanges.Connect(fn)
 }
 
-// CheckOrigin admits or rejects an upgrade by Origin, for whatever else this
-// build serves on the agent's behalf, such as a device driver's endpoint.
-//
-// It reads the allowlist per request, so it can be handed over before the
-// plugin has one and follows an origin allowed while the agent runs.
-func (p *ServerPlugin) CheckOrigin() func(r *http.Request) bool {
-	return func(r *http.Request) bool {
-		if p.Origins == nil {
-			return server.CheckOrigin(nil)(r)
-		}
-		return server.CheckOriginPolicy(p.Origins)(r)
-	}
-}
-
 // wsHandler routes a connection to the handler for the mode it declares. A
 // connection arriving before the agent is serving is told so rather than left
 // waiting on a handler that does not exist yet.
@@ -649,7 +635,7 @@ func (c *clientsComponent) Name() string { return "clients" }
 func (c *clientsComponent) Start(context.Context) error {
 	srv := clientserver.New(clientserver.Config{
 		APISecret:            c.agent.APISecret,
-		OriginPolicy:         c.plugin.Origins,
+		OriginPolicy:         c.plugin.OriginPolicy(),
 		TokenVerifier:        c.agent.tokenVerifier(),
 		Tags:                 c.agent,
 		AllowTagModification: c.agent.TagModificationAllowed,

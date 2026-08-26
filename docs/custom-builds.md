@@ -300,9 +300,11 @@ servers.ServeMode = map[string]http.Handler{
 
 The allowlist of browser origins is the plugin's too, since it decides which
 upgrades it admits. `AllowedOrigins` seeds it and the store persists under the
-config directory; `Origins` supplies one built elsewhere. `servers.CheckOrigin()`
-is the same decision for a handler mounted beside it, read per request rather
-than fixed when the handler was built.
+config directory; `Origins` supplies one built elsewhere. `servers.CheckOrigin()` is the
+same decision for a handler mounted beside it, and `servers.OriginPolicy()` the
+same for anything taking a `server.OriginPolicy`. Both resolve per request, so
+they can be handed over before the plugin has a store and follow an origin
+allowed while the agent runs.
 
 The clients connected right now are the plugin's for the same reason:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`

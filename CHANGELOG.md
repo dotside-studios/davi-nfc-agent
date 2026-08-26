@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `ServerPlugin.CheckOrigin` reports the origin check the listener applies, for
-  whatever serves a WebSocket endpoint beside it. `ServerPlugin.OnOriginsChange`
+- `ServerPlugin.CheckOrigin` reports the origin check the listener applies, and
+  `ServerPlugin.OriginPolicy` the same allowlist as a `server.OriginPolicy`, for
+  whatever serves a WebSocket endpoint beside it. Both resolve per request, so
+  they can be handed to something built before the plugin activates. `ServerPlugin.OnOriginsChange`
   follows the allowlist from something built before the plugin activates
 - `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
   `OnClientsChange` report on and act on the clients connected right now. A

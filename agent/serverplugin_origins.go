@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"net/http"
+
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -60,6 +62,38 @@ func (p *ServerPlugin) OnOriginsChange(fn func()) {
 func (p *ServerPlugin) connectOrigins(fn func()) {
 	p.Origins.OnChange(fn)
 	p.Origins.OnBlocked(func(string) { fn() })
+}
+
+// OriginPolicy is the allowlist as something serving connections reads it,
+// resolved per call rather than when it is handed over. That is what lets a
+// server built before this plugin activates be given it, and what makes an
+// origin allowed while the agent runs take effect without anything being
+// rebuilt.
+//
+// Give it to whatever else on this build admits a browser connection, so one
+// allowlist answers for all of them.
+func (p *ServerPlugin) OriginPolicy() server.OriginPolicy { return pluginOrigins{plugin: p} }
+
+// CheckOrigin admits or rejects an upgrade by Origin, for whatever serves a
+// WebSocket endpoint beside this plugin, such as a device driver's.
+func (p *ServerPlugin) CheckOrigin() func(r *http.Request) bool {
+	return server.CheckOriginPolicy(p.OriginPolicy())
+}
+
+// pluginOrigins reads the plugin's store when it is asked rather than when it
+// is handed over. Before there is one nothing is on the list, which is what an
+// agent that has not activated should answer.
+type pluginOrigins struct{ plugin *ServerPlugin }
+
+func (o pluginOrigins) Allowed(origin string) bool {
+	store := o.plugin.Origins
+	return store != nil && store.Allowed(origin)
+}
+
+func (o pluginOrigins) RecordBlocked(origin string) {
+	if store := o.plugin.Origins; store != nil {
+		store.RecordBlocked(origin)
+	}
 }
 
 // originsMenu builds the Allowed Origins section: what is permitted now, and

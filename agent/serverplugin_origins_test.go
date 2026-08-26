@@ -215,6 +215,33 @@ func TestAClientFromAnUnlistedOriginIsRefused(t *testing.T) {
 	}
 }
 
+// The policy is handed over before the plugin has a store, since what serves a
+// connection is built beside this plugin rather than after it. It answers from
+// whatever store the plugin ends up with.
+func TestTheOriginPolicyCanBeHandedOverBeforeThereIsAStore(t *testing.T) {
+	p := &ServerPlugin{}
+
+	policy := p.OriginPolicy()
+	if policy.Allowed("console.example") {
+		t.Error("an origin was allowed before there was an allowlist")
+	}
+	policy.RecordBlocked("evil.example") // must not panic with no store
+
+	originsTray(t, p)
+
+	if err := p.Origins.Allow("console.example"); err != nil {
+		t.Fatalf("Allow: %v", err)
+	}
+	if !policy.Allowed("console.example") {
+		t.Error("the policy did not follow the store the plugin loaded")
+	}
+
+	policy.RecordBlocked("evil.example")
+	if blocked := p.Origins.Blocked(); len(blocked) != 1 || blocked[0] != "evil.example" {
+		t.Errorf("the store recorded %v, want the refusal the policy was told about", blocked)
+	}
+}
+
 // findOriginRow returns the visible origin row with the given label.
 func findOriginRow(t *testing.T, p *ServerPlugin, title string) *traymenu.Item {
 	t.Helper()

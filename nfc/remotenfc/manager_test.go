@@ -208,17 +208,17 @@ func TestManagerOpenDevice(t *testing.T) {
 	}
 }
 
-func TestManagerListDevices(t *testing.T) {
+func TestManagerDevices(t *testing.T) {
 	m := NewManager(30 * time.Second)
 	defer m.Close()
 
 	// Initially empty
-	devices, err := m.ListDevices()
+	devices, err := m.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() failed: %v", err)
+		t.Errorf("Devices() failed: %v", err)
 	}
 	if len(devices) != 0 {
-		t.Errorf("ListDevices() should return empty list, got %d devices", len(devices))
+		t.Errorf("Devices() should return empty list, got %d devices", len(devices))
 	}
 
 	// Register multiple devices
@@ -234,18 +234,22 @@ func TestManagerListDevices(t *testing.T) {
 		}
 	}
 
-	devices, err = m.ListDevices()
+	devices, err = m.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() failed: %v", err)
+		t.Errorf("Devices() failed: %v", err)
 	}
 	if len(devices) != 3 {
-		t.Errorf("ListDevices() should return 3 devices, got %d", len(devices))
+		t.Errorf("Devices() should return 3 devices, got %d", len(devices))
 	}
 
-	// Check format
+	// A device is named by the identity it holds, and is not one this agent
+	// opens and reads from.
 	for _, device := range devices {
-		if len(device) < len("smartphone:") {
-			t.Errorf("Device string should have 'smartphone:' prefix, got: %s", device)
+		if device.Path == "" {
+			t.Error("a device was listed with no identity")
+		}
+		if device.Capabilities.CanPoll {
+			t.Errorf("device %s was offered as a reader to open", device.Path)
 		}
 	}
 }

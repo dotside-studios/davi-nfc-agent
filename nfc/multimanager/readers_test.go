@@ -12,22 +12,35 @@ type remoteManager struct {
 	devices []string
 }
 
-func (m *remoteManager) ListDevices() ([]string, error) { return m.devices, nil }
+func (m *remoteManager) Devices() ([]nfc.DeviceListing, error) {
+	return listings(m.devices, nfc.DeviceCapabilities{SupportsEvents: true}), nil
+}
 func (m *remoteManager) OpenDevice(string) (nfc.Device, error) {
 	return nil, nil
 }
-func (m *remoteManager) Close() error        { return nil }
-func (m *remoteManager) RemoteDevices() bool { return true }
+func (m *remoteManager) Close() error { return nil }
 
 type localManager struct {
 	devices []string
 }
 
-func (m *localManager) ListDevices() ([]string, error) { return m.devices, nil }
+func (m *localManager) Devices() ([]nfc.DeviceListing, error) {
+	return listings(m.devices, nfc.DeviceCapabilities{CanPoll: true}), nil
+}
 func (m *localManager) OpenDevice(string) (nfc.Device, error) {
 	return nil, nil
 }
 func (m *localManager) Close() error { return nil }
+
+// listings describes each path the same way, which is what a driver whose
+// transport is fixed does.
+func listings(paths []string, caps nfc.DeviceCapabilities) []nfc.DeviceListing {
+	out := make([]nfc.DeviceListing, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, nfc.DeviceListing{Path: path, Capabilities: caps})
+	}
+	return out
+}
 
 func newMixed(t *testing.T) *MultiManager {
 	t.Helper()
@@ -42,7 +55,7 @@ func newMixed(t *testing.T) *MultiManager {
 // reader, so offering one as a candidate pins the reader to a device that can
 // never connect, which is what filled the log with failed connection attempts.
 func TestListReaders_LeavesOutPhones(t *testing.T) {
-	readers, err := newMixed(t).ListReaders()
+	readers, err := nfc.ListReaders(newMixed(t))
 	if err != nil {
 		t.Fatalf("ListReaders: %v", err)
 	}
@@ -59,12 +72,12 @@ func TestListReaders_LeavesOutPhones(t *testing.T) {
 
 // The full list is what the device panel and the pairing views are built from,
 // so narrowing it to readers would hide the phones an operator has paired.
-func TestListDevices_StillReportsPhones(t *testing.T) {
-	devices, err := newMixed(t).ListDevices()
+func TestDevices_StillReportsPhones(t *testing.T) {
+	devices, err := newMixed(t).Devices()
 	if err != nil {
-		t.Fatalf("ListDevices: %v", err)
+		t.Fatalf("Devices: %v", err)
 	}
 	if len(devices) != 2 {
-		t.Fatalf("ListDevices = %v, want both the reader and the phone", devices)
+		t.Fatalf("Devices() = %v, want both the reader and the phone", devices)
 	}
 }

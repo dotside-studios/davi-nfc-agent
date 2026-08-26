@@ -58,7 +58,7 @@ func (a *Agent) reportTag(data nfc.NFCData) {
 type deviceRoster interface {
 	GetDeviceCount() int
 	GetActiveDeviceCount() int
-	ListDevices() ([]string, error)
+	nfc.Manager
 }
 
 // RemoteDevices counts the devices registered with the agent and how many of
@@ -104,7 +104,7 @@ func (a *Agent) OnlineDevices() []string {
 	if roster == nil {
 		return nil
 	}
-	ids, err := roster.ListDevices()
+	ids, err := nfc.DevicePaths(roster)
 	if err != nil {
 		return nil
 	}

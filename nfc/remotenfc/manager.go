@@ -102,21 +102,31 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return device, nil
 }
 
-// ListDevices names the devices connected right now, by the identity each
-// holds: for one that paired, the identity it paired with. An aggregate adds
-// the prefix naming the manager it came from.
-func (m *Manager) ListDevices() ([]string, error) {
+// deviceTransport is what a device on the bridge can do: it reports what it
+// scans and is asked to act on the tag it holds, rather than being opened and
+// polled from here.
+//
+// What one declares when it registers refines this; see [Device.PhoneCapabilities].
+var deviceTransport = nfc.DeviceCapabilities{
+	SupportsEvents: true,
+	DeviceType:     "smartphone",
+}
+
+// Devices names the devices connected right now, by the identity each holds:
+// for one that paired, the identity it paired with. An aggregate adds the
+// prefix naming the manager it came from.
+func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	devices := make([]string, 0, len(m.devices))
+	listings := make([]nfc.DeviceListing, 0, len(m.devices))
 	for deviceID, device := range m.devices {
 		if device.IsActive() {
-			devices = append(devices, deviceID)
+			listings = append(listings, nfc.DeviceListing{Path: deviceID, Capabilities: deviceTransport})
 		}
 	}
 
-	return devices, nil
+	return listings, nil
 }
 
 // RegisterDevice registers a device under an identity of this manager's own.
@@ -411,8 +421,3 @@ func (m *Manager) notifyDeviceChange() {
 		// Channel full, skip (previous notification not yet consumed)
 	}
 }
-
-// RemoteDevices reports that this manager's devices are phones rather than
-// readers attached to this machine, so none of them is a candidate to be the
-// agent's own reader.
-func (m *Manager) RemoteDevices() bool { return true }

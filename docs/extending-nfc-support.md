@@ -45,11 +45,17 @@ func NewManager() *MyManager {
     return &MyManager{}
 }
 
-// ListDevices returns available device identifiers
-func (m *MyManager) ListDevices() ([]string, error) {
-    // Enumerate connected devices
-    // Return identifiers like "myreader:usb:001" or "myreader:192.168.1.100"
-    return []string{"myreader:default"}, nil
+// Devices lists what this manager offers, and what is known of each before it
+// is opened. Capabilities.CanPoll says the agent may open it and read from it;
+// a device that reports its own scans declares SupportsEvents instead and is
+// left out of every reader list.
+func (m *MyManager) Devices() ([]nfc.DeviceListing, error) {
+    // Enumerate connected devices, naming them "myreader:usb:001" or
+    // "myreader:192.168.1.100".
+    return []nfc.DeviceListing{{
+        Path:         "myreader:default",
+        Capabilities: nfc.DeviceCapabilities{CanPoll: true, CanTransceive: true},
+    }}, nil
 }
 
 // OpenDevice opens a device by its identifier

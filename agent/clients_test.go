@@ -16,9 +16,15 @@ type rosterManager struct {
 func (m *rosterManager) OpenDevice(string) (nfc.Device, error) {
 	return nil, errors.New("rosterManager opens nothing")
 }
-func (m *rosterManager) ListDevices() ([]string, error) { return m.devices, nil }
-func (m *rosterManager) GetDeviceCount() int            { return len(m.devices) }
-func (m *rosterManager) GetActiveDeviceCount() int      { return m.active }
+func (m *rosterManager) Devices() ([]nfc.DeviceListing, error) {
+	out := make([]nfc.DeviceListing, 0, len(m.devices))
+	for _, path := range m.devices {
+		out = append(out, nfc.DeviceListing{Path: path, Capabilities: nfc.DeviceCapabilities{SupportsEvents: true}})
+	}
+	return out, nil
+}
+func (m *rosterManager) GetDeviceCount() int       { return len(m.devices) }
+func (m *rosterManager) GetActiveDeviceCount() int { return m.active }
 
 // A surface asks the agent, and the agent answers whether or not it is running.
 // These used to be five nil checks on Agent.ClientServer in the console, which

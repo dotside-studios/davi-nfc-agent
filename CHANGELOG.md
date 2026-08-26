@@ -96,9 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paired device they admitted, and `remotenfc.ServerOptions.Authenticate` and
   `agent.DeviceEndpointOptions.Authenticate` take that shape. A device admitted
   under a name registers under it; an empty name identifies nobody
-- `remotenfc.Manager.ListDevices` names its devices by identity rather than
-  prefixing them. An aggregate adds the prefix naming the manager, so a caller
-  asking the driver had to know to strip one
+- `nfc.Manager.ListDevices` is `Devices`, returning `nfc.DeviceListing`: the
+  path, and what the driver knows the device can do before anything opens it.
+  `Capabilities.CanPoll` is what a reader list is built from, so a device that
+  reports its own scans is left out by declaring itself rather than by the
+  agent asking whether it is a phone. `nfc.DevicePaths` lists paths alone
+- `remotenfc` names its devices by identity rather than prefixing them. An
+  aggregate adds the prefix naming the manager, so a caller asking the driver
+  had to know to strip one
 - Choosing a device is a preference, not a restart. The pin filters what the
   agent serves, so the console and the tray set it rather than stopping and
   starting the agent, which dropped every connected client to change a
@@ -319,6 +324,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `nfc.RemoteManager`, `nfc.ReaderLister` and `MultiManager.ListReaders`. Which
+  devices this agent can read from is what a driver declares about each of them,
+  rather than three interfaces asking whether a manager holds phones
 - `nfc.IsRemoteDevice`, `nfc.RemoteDeviceChecker`, `MultiManager.RemoteDevice`
   and `Agent.IsReader`. They kept a phone from being pinned, back when the pin
   named the device the agent opened and polled: a phone there became a

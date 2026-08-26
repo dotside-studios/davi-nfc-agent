@@ -16,13 +16,13 @@ import (
 //	    DevicesList: []string{"mock:usb:001", "mock:usb:002"},
 //	    MockDevice: NewMockDevice(),
 //	}
-//	devices, _ := manager.ListDevices()
+//	devices, _ := manager.Devices()
 type MockManager struct {
-	// DevicesList is the list of device strings returned by ListDevices()
+	// DevicesList is the list of device strings returned by Devices()
 	DevicesList []string
 
-	// ListDevicesError, if set, will be returned by ListDevices()
-	ListDevicesError error
+	// DevicesError, if set, will be returned by Devices()
+	DevicesError error
 
 	// MockDevice is the device returned by OpenDevice()
 	// If nil, a new MockDevice will be created
@@ -65,21 +65,26 @@ func (m *MockManager) OpenDevice(deviceStr string) (Device, error) {
 	return m.MockDevice, nil
 }
 
-// ListDevices simulates listing available NFC devices.
-func (m *MockManager) ListDevices() ([]string, error) {
+// Devices simulates listing available NFC devices. They are readers: a mock
+// manager stands in for hardware.
+func (m *MockManager) Devices() ([]DeviceListing, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.CallLog = append(m.CallLog, "ListDevices")
+	m.CallLog = append(m.CallLog, "Devices")
 
-	if m.ListDevicesError != nil {
-		return nil, m.ListDevicesError
+	if m.DevicesError != nil {
+		return nil, m.DevicesError
 	}
 
-	// Return a copy to prevent external modification
-	devicesCopy := make([]string, len(m.DevicesList))
-	copy(devicesCopy, m.DevicesList)
-	return devicesCopy, nil
+	listings := make([]DeviceListing, 0, len(m.DevicesList))
+	for _, path := range m.DevicesList {
+		listings = append(listings, DeviceListing{
+			Path:         path,
+			Capabilities: DeviceCapabilities{CanPoll: true, CanTransceive: true, DeviceType: "mock"},
+		})
+	}
+	return listings, nil
 }
 
 // GetCallLog returns a copy of the call log for verification.

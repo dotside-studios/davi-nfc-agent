@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever serves a WebSocket endpoint beside it. Both resolve per request, so
   they can be handed to something built before the plugin activates. `ServerPlugin.OnOriginsChange`
   follows the allowlist from something built before the plugin activates
+- `clientserver.Server` is an `http.Handler`: `ServeWS` is `ServeHTTP`, so it is
+  mounted as `ServeMode[server.ModeClient]` the way a device endpoint is mounted
+  under `server.ModeDevice`
 - `Agent.TokenVerifier` reports the per-device credentials the agent issued at
   pairing, for whatever admits a connection presenting one
 - `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
@@ -124,11 +127,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every upgrade and owns the tray's **Allowed Origins** section. `Setup` parses
   what the flags named onto `Runtime.AllowedOrigins` for the plugin to serve
   behind. An agent serving nothing holds no allowlist
-- `agent.ServerPlugin` serves the clients. It runs the client server, mounts
-  `/ws` and the health checks itself, and routes a connection by the mode it
-  declares; `ServeMode` names a handler for either mode, such as a device
-  driver's endpoint. An agent with no server plugin registered runs no client
-  server and serves no HTTP, and still reports every scan through `Events()`
+- `agent.ServerPlugin` serves the clients. It mounts `/ws` and the health checks
+  itself and routes a connection by the mode it declares; `ServeMode` names what
+  serves each, browser clients included. A build declares its own client server,
+  as it already declared its device endpoint, and one that declares neither
+  serves no HTTP and still reports every scan through `Events()`
+- The client server lives as long as the server plugin rather than as long as a
+  run. It was rebuilt by every start, which left a connected client holding a
+  server nothing reported to; a client now stays connected across a stop and
+  start and receives again once the agent runs
 - The agent reports what its readers scan and what serves clients subscribes,
   rather than the agent pushing scans into a server it built. `Events().Tag`
   fires from the agent's own path now, so a plugin following the agent sees the

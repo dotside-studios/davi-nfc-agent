@@ -167,12 +167,16 @@ func TestRotatingTheSecretReachesTheDeviceEndpoint(t *testing.T) {
 func TestRotatingTheSecretNeedsNoRestart(t *testing.T) {
 	p := &ServerPlugin{}
 	a := New(Config{
-		Manager:   nfc.NewMockManager(),
-		Logger:    log.New(io.Discard, "", 0),
-		APISecret: "old-secret",
-		ConfigDir: t.TempDir(),
-		Plugins:   []Plugin{p},
+		Manager:    nfc.NewMockManager(),
+		Logger:     log.New(io.Discard, "", 0),
+		APISecret:  "old-secret",
+		ConfigDir:  t.TempDir(),
+		DevicePort: freePort(t),
 	})
+	serveClients(p, a)
+	if err := a.Plugins.Add(p); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

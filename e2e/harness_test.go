@@ -19,6 +19,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
@@ -103,6 +104,15 @@ func start(t *testing.T, opts options) *harness {
 		AllowedOrigins: rt.AllowedOrigins,
 	}
 	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
 		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         rt.Agent.DeviceAuth.Check,
 			CheckOrigin:          servers.CheckOrigin(),
@@ -110,6 +120,7 @@ func start(t *testing.T, opts options) *harness {
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
 		}),
 	}
+
 	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}

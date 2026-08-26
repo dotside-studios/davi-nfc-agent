@@ -14,7 +14,7 @@ import (
 func dial(t *testing.T, s *Server, origin string) *websocket.Conn {
 	t.Helper()
 
-	ts := httptest.NewServer(http.HandlerFunc(s.ServeWS))
+	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
 
 	header := http.Header{}

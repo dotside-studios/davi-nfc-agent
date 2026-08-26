@@ -15,23 +15,53 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/gorilla/websocket"
 )
 
-// serverAgent is an agent whose listener comes from the plugin under test.
+// serverAgent is an agent whose listener comes from the plugin under test, with
+// the client server declared on it the way a build declares one.
+//
 // Most tests here reach the routes through the mux and bind nothing, but a
 // started agent binds for real, so the port is one nothing else holds: package
 // test binaries run beside each other and the default port is one address.
 func serverAgent(t *testing.T, p *ServerPlugin, extra ...Plugin) *Agent {
 	t.Helper()
 
-	return New(Config{
+	a := New(Config{
 		Manager:    nfc.NewMockManager(),
 		Logger:     log.New(io.Discard, "", 0),
 		DevicePort: freePort(t),
-		Plugins:    append([]Plugin{p}, extra...),
+	})
+	serveClients(p, a)
+
+	if err := a.Plugins.Add(append([]Plugin{p}, extra...)...); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	return a
+}
+
+// serveClients declares the client server on the plugin, as cmd does. Nothing
+// mounts one for a build that does not ask for it, so a test that wants clients
+// served says so.
+func serveClients(p *ServerPlugin, a *Agent) {
+	if p.ServeMode == nil {
+		p.ServeMode = map[string]http.Handler{}
+	}
+	if p.ServeMode[server.ModeClient] != nil {
+		return
+	}
+
+	p.ServeMode[server.ModeClient] = clientserver.New(clientserver.Config{
+		APISecret:            a.APISecret,
+		OriginPolicy:         p.OriginPolicy(),
+		TokenVerifier:        a.TokenVerifier(),
+		Tags:                 a,
+		AllowTagModification: a.TagModificationAllowed,
+		Scans:                &a.events.Tag,
+		ReaderStatus:         &a.events.Reader,
 	})
 }
 
@@ -337,6 +367,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 	servers := &ServerPlugin{}
+	serveClients(servers, rt.Agent)
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -667,16 +698,19 @@ func TestTheClientServerBelongsToThePlugin(t *testing.T) {
 	}
 	defer a.Stop()
 
-	if p.serving() == nil {
+	serving := p.serving()
+	if serving == nil {
 		t.Error("the plugin is running no client server")
 	}
 	if code := get(t, p.Listener(), "/health"); code != http.StatusOK {
 		t.Errorf("GET /health = %d, want 200", code)
 	}
 
+	// It belongs to the plugin, not the run: a client stays connected across a
+	// stop rather than being left holding a server nothing reports to.
 	a.Stop()
-	if p.serving() != nil {
-		t.Error("the client server outlived the run")
+	if p.serving() != serving {
+		t.Error("stopping the agent replaced the client server")
 	}
 }
 
@@ -731,7 +765,7 @@ func health(t *testing.T, p *ServerPlugin) struct {
 }
 
 // ServeMode is what a build names its own handlers with. What it names replaces
-// what the plugin would have mounted.
+// what the plugin would have mounted, clients included.
 func TestServeModeReplacesWhatThePluginWouldMount(t *testing.T) {
 	p := &ServerPlugin{ServeMode: map[string]http.Handler{
 		server.ModeClient: mark(http.StatusTeapot),

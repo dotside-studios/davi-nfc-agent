@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -440,7 +439,7 @@ func TestStartingWithADevicePinsIt(t *testing.T) {
 func clientOf(t *testing.T, srv *clientserver.Server) chan string {
 	t.Helper()
 
-	ts := httptest.NewServer(http.HandlerFunc(srv.ServeWS))
+	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
@@ -495,9 +494,10 @@ func await(t *testing.T, seen chan string, want string) bool {
 }
 
 // What the agent reports reaches the clients, scans and reader status alike,
-// and stops reaching the server a restart replaced: the subscriptions belong to
-// the run, so a scan after one used to reach both servers.
-func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
+// and keeps reaching them across a stop and start: the server is the plugin's
+// rather than the run's, so a client is not silently cut off by a restart it
+// cannot see.
+func TestWhatTheAgentReportsReachesTheClients(t *testing.T) {
 	// Serving clients is the plugin's, so an agent with none has nobody to
 	// report to.
 	p := &ServerPlugin{}
@@ -506,15 +506,15 @@ func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	replaced := p.serving()
-	stale := clientOf(t, replaced)
+	serving := p.serving()
+	client := clientOf(t, serving)
 
 	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
-	if !await(t, stale, "tagData") {
+	if !await(t, client, "tagData") {
 		t.Fatal("a scan the agent reported never reached the clients")
 	}
 	a.fireReaderStatus(nfc.DeviceStatus{Device: "mock:usb:001", Connected: true})
-	if !await(t, stale, "deviceStatus") {
+	if !await(t, client, "deviceStatus") {
 		t.Fatal("the readers' status never reached the clients")
 	}
 
@@ -524,12 +524,12 @@ func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
 	}
 	defer a.Stop()
 
-	if p.serving() == replaced {
-		t.Fatal("the restart kept the server it was meant to replace")
+	if p.serving() != serving {
+		t.Fatal("the restart replaced the server the clients are connected to")
 	}
 
 	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Card: nfc.NewCard(nfc.NewMockTag("04FFFFFF"))})
-	if await(t, stale, "tagData") {
-		t.Error("a scan reached the server the restart replaced")
+	if !await(t, client, "tagData") {
+		t.Error("a scan after the restart never reached the client that stayed connected")
 	}
 }

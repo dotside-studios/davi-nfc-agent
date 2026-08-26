@@ -34,6 +34,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -76,10 +77,19 @@ func main() {
 		AllowedOrigins: rt.AllowedOrigins,
 	}
 
-	// The driver's wire behind the agent's policy: the agent decides who is
-	// admitted and what is allowed, the server which origins may connect, the
-	// driver what a device says.
+	// The two halves of /ws, both declared here. The agent decides who is
+	// admitted and what is allowed; each protocol decides what its own side
+	// may say.
 	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
 		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         rt.Agent.DeviceAuth.Check,
 			CheckOrigin:          servers.CheckOrigin(),
@@ -289,28 +299,36 @@ where devices and clients both connect, and `/health` with `/api/v1/health`
 beside it. An endpoint on one of those paths fails the start, as two endpoints
 on one path do, rather than leaving the mux to decide.
 
-The plugin runs the client server behind `/ws` and routes a connection by the
-mode it declares. `ServeMode` replaces either handler:
+`/ws` routes a connection by the mode it declares, and `ServeMode` is the whole
+answer to what a connection reaches. Nothing is mounted for you: a build
+declares what it serves, browser clients included.
 
 ```go
 servers.ServeMode = map[string]http.Handler{
+	server.ModeClient: clientserver.New(clientserver.Config{ ... }),
 	server.ModeDevice: devices.Handler(remotenfc.ServerOptions{ ... }),
 }
 ```
 
+A build that names no client server serves no clients, the same way one that
+names no device endpoint serves no devices. What is named lives as long as the
+plugin rather than as long as a run, so a client stays connected across a stop
+and start of the agent and receives again once it runs.
+
 The allowlist of browser origins is the plugin's too, since it decides which
 upgrades it admits. `AllowedOrigins` seeds it and the store persists under the
-config directory; `Origins` supplies one built elsewhere. `servers.CheckOrigin()` is the
+config directory; `Origins` supplies one loaded elsewhere. `servers.CheckOrigin()` is the
 same decision for a handler mounted beside it, and `servers.OriginPolicy()` the
 same for anything taking a `server.OriginPolicy`. Both resolve per request, so
 they can be handed over before the plugin has a store and follow an origin
 allowed while the agent runs.
 
-The clients connected right now are the plugin's for the same reason:
+The clients connected right now are reported through the plugin:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
-answer from whatever is serving, and report nothing when nothing is.
-`servers.OnClientsChange(fn)` follows the count, and the subscription survives
-the restarts that rebuild the server behind it.
+answer from whatever is under `server.ModeClient`, when it is a
+`*clientserver.Server`, and report nothing when it is not.
+`servers.OnClientsChange(fn)` follows the count and takes a subscriber before
+the plugin activates, which is when a console is built.
 
 A build that registers no server plugin serves no HTTP and runs no client
 server, which is what a program driving the readers directly wants. It still
@@ -436,6 +454,8 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -451,24 +471,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// The listener, with nothing on it but the agent's own routes. Leave it
-	// out for a service that reads cards and serves no HTTP. Setup resolved
-	// the certificate; blank leaves the listener serving plain HTTP.
+	// The listener, serving browser clients on /ws and the health checks beside
+	// it. Leave it out for a service that reads cards and serves no HTTP. Setup
+	// resolved the certificate; blank leaves the listener serving plain HTTP.
 	servers := &agent.ServerPlugin{
 		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates:   rt.Certificates,
 		AllowedOrigins: rt.AllowedOrigins,
 	}
-
-	// The driver's wire behind the agent's policy: the agent decides who is
-	// admitted and what is allowed, the server which origins may connect, the
-	// driver what a device says.
 	servers.ServeMode = map[string]http.Handler{
-		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         rt.Agent.DeviceAuth.Check,
-			CheckOrigin:          servers.CheckOrigin(),
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
-			PublicKeyPin:         rt.Agent.PublicKeyPin,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
 	}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {

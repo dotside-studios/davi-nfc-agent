@@ -24,6 +24,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -70,10 +71,18 @@ func main() {
 		AllowedOrigins: rt.AllowedOrigins,
 	}
 
-	// The device endpoint is the driver's wire behind this build's policy: who
-	// is admitted and what is allowed is decided here, what a device may say is
-	// the driver's.
+	// The two halves of /ws, both built here. The agent decides who is admitted
+	// and what is allowed; each protocol decides what its own side may say.
 	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
 		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
 			Authenticate:         rt.Agent.DeviceAuth.Check,
 			CheckOrigin:          servers.CheckOrigin(),

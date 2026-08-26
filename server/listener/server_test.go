@@ -33,7 +33,7 @@ func newTestServer(t *testing.T) (string, *clientserver.Server) {
 
 	u := listener.New(listener.Config{})
 	if err := u.Mount("/ws", server.CORS(server.RouteByMode(
-		http.HandlerFunc(client.ServeWS),
+		client,
 		map[string]http.Handler{server.ModeDevice: device},
 	))); err != nil {
 		t.Fatalf("mount /ws: %v", err)

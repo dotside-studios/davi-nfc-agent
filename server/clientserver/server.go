@@ -82,12 +82,13 @@ func (s *Server) apiSecret() string {
 	return s.config.APISecret()
 }
 
-// ServeWS handles a WebSocket connection request for a client. It performs its
-// own API-secret check and origin validation, so it is safe to call directly
-// from a shared listener (unified single-port mode).
-func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP upgrades a client connection. The server checks the API secret and
+// the origin itself, so it is safe to mount directly on a shared listener.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handleWebSocket(w, r)
 }
+
+var _ http.Handler = (*Server)(nil)
 
 // ClientCount returns the number of currently connected clients.
 func (s *Server) ClientCount() int {
@@ -573,8 +574,9 @@ func errorPayloadOrDefault(code, fallback protocol.ErrorCode) protocol.ErrorPayl
 	return protocol.NewErrorPayload(code)
 }
 
-// originChecker prefers an explicit policy over the static allowlist, so the
-// tray can admit an origin without restarting the listener.
+// originChecker prefers an explicit policy over the static allowlist, so an
+// origin allowed while the agent runs is admitted without anything being
+// rebuilt.
 func originChecker(config Config) func(r *http.Request) bool {
 	if config.OriginPolicy != nil {
 		return server.CheckOriginPolicy(config.OriginPolicy)

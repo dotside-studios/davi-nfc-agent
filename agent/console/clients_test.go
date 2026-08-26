@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/gorilla/websocket"
 )
@@ -61,7 +64,19 @@ func servedConsole(t *testing.T) served {
 		// others, so the default port is not this test's to take.
 		DevicePort: freePort(t),
 	})
+	// The client server is the build's to declare, as it is in cmd.
 	servers := &agent.ServerPlugin{}
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            a.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        a.TokenVerifier(),
+			Tags:                 a,
+			AllowTagModification: a.TagModificationAllowed,
+			Scans:                &a.Events().Tag,
+			ReaderStatus:         &a.Events().Reader,
+		}),
+	}
 	c := New(Config{Agent: a, Servers: servers})
 
 	if err := a.Plugins.Add(servers); err != nil {

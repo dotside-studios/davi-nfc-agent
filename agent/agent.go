@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"io"
 	"log"
 	"os"
 	"sync"
@@ -52,8 +53,12 @@ type Config struct {
 	// configuration lands in this agent's directory.
 	Info buildinfo.Info
 
-	// Logger receives the agent's diagnostics. Nil installs one writing to
-	// stderr with an [agent] prefix.
+	// Logger receives the agent's diagnostics, and is what the plugins log
+	// through, each under its own name. Nil installs one writing to stderr, and
+	// to Logs when there is one, with an [agent] prefix.
+	//
+	// A logger supplied here is used as it is: where it writes, and whether the
+	// console can read it back, is then the caller's to arrange.
 	Logger *log.Logger
 
 	// DevicePort is the single listener serving both devices and clients.
@@ -201,7 +206,7 @@ func New(cfg Config) *Agent {
 
 	logger := cfg.Logger
 	if logger == nil {
-		logger = log.New(os.Stderr, "[agent] ", log.LstdFlags)
+		logger = log.New(logSink(cfg.Logs), "[agent] ", log.LstdFlags)
 	}
 
 	port := cfg.DevicePort
@@ -241,6 +246,18 @@ func New(cfg Config) *Agent {
 	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.TokenVerifier(), a.requirePairedDevice)
 
 	return a
+}
+
+// logSink is where a logger the agent builds for itself writes: the process's
+// stderr, and the ring the console reads back, when the caller supplied one.
+//
+// Without this the agent's own diagnostics, and every plugin's, reach stderr
+// alone, which a program started from a desktop launcher has nowhere to show.
+func logSink(logs *logbuf.Ring) io.Writer {
+	if logs == nil {
+		return os.Stderr
+	}
+	return io.MultiWriter(os.Stderr, logs)
 }
 
 // Configuration readers. These exist because the tray and the console display

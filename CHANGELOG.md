@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- What the agent logs reaches the console. `Config.Logs` was held on the agent
+  and connected to nothing, so `Agent.Logger` wrote to stderr alone: an agent
+  started from a desktop launcher had nowhere to show its own diagnostics, and
+  the console's log tail carried the drivers' output and none of the agent's. A
+  logger supplied through `Config.Logger` is still used as it is
+
+### Fixed
+
 - Stopping a listener no longer races the mDNS advertiser it is taking down.
   `grandcat/zeroconf` called `WaitGroup.Add` inside the goroutine its own
   `mainloop` had already started, so `Shutdown` could pass `Wait` while a

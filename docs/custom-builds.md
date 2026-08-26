@@ -228,6 +228,13 @@ A plugin has no `Deactivate`. Anything with a lifetime is a `Component`, which
 the agent starts once the reader and the servers are up and stops before taking
 them down again.
 
+A component that captured its configuration when it was built, rather than
+reading it as it runs, also implements `agent.Rebuildable`. `Agent.RestartServers`
+stops and starts those and leaves the rest running, which is what rotating the
+API secret needs: the client server admits clients by the secret it held when it
+was built. The interface declares the property and nothing more, so there is one
+teardown path rather than two.
+
 ### Activation
 
 Plugins are activated once, in the order they were added, before anything is

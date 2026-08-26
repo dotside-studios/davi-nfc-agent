@@ -66,6 +66,23 @@ type Component interface {
 	Stop() error
 }
 
+// Rebuildable is a component that captured configuration when it was built, so
+// a change to that configuration takes effect only once the component has been
+// stopped and started again. The client server is one: it admits clients by the
+// API secret it held when it was built.
+//
+// [Agent.RestartServers] stops and starts every registered component that is
+// one, in registration order, and leaves the rest running. A component that
+// follows its configuration while it runs implements only [Component].
+type Rebuildable interface {
+	Component
+
+	// CapturedConfiguration declares the component one of these. It is never
+	// called: the agent stops and starts the component through Component, so
+	// there is one teardown path rather than two.
+	CapturedConfiguration()
+}
+
 // State reports where the agent is. Safe from any goroutine, including from a
 // state hook.
 func (a *Agent) State() State { return State(a.state.Load()) }
@@ -114,23 +131,22 @@ func (a *Agent) Components() []Component {
 	return out
 }
 
-// restartClients stops and starts whatever is serving clients, leaving the
-// readers and the listener alone. A component that serves them registers
-// itself; with none, there is nothing to rebuild.
+// rebuildComponents stops and starts every [Rebuildable] component, leaving the
+// readers, the listener and everything else running. With none registered there
+// is nothing to rebuild.
 //
 // The caller holds the lifecycle lock.
-func (a *Agent) restartClients() error {
+func (a *Agent) rebuildComponents() error {
 	for _, c := range a.components {
-		clients, ok := c.(*clientsComponent)
-		if !ok {
+		if _, ok := c.(Rebuildable); !ok {
 			continue
 		}
 
-		if err := clients.Stop(); err != nil {
-			return err
+		if err := c.Stop(); err != nil {
+			return fmt.Errorf("stopping %q to rebuild it: %w", c.Name(), err)
 		}
-		if err := clients.Start(a.runCtx); err != nil {
-			return err
+		if err := c.Start(a.runCtx); err != nil {
+			return fmt.Errorf("rebuilding %q: %w", c.Name(), err)
 		}
 	}
 	return nil

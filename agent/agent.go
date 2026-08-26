@@ -392,16 +392,16 @@ func (a *Agent) Shutdown() {
 	}
 }
 
-// RestartServers rebuilds the client server, for a change it captured when it
-// was built, such as the API secret it holds. The readers and the listener
-// carry on, and a certificate reissued on disk is not one of those: the
-// listener binds again on its own.
+// RestartServers rebuilds every [Rebuildable] component, for a change one
+// captured when it was built, such as the API secret the client server holds.
+// The readers and the listener carry on, and a certificate reissued on disk is
+// not one of these: the listener binds again on its own.
 func (a *Agent) RestartServers() error {
 	a.lifecycleMu.Lock()
 
 	a.logger.Println("Restarting servers...")
 
-	err := a.restartClients()
+	err := a.rebuildComponents()
 
 	// Released before the listeners are told, as the state hooks are: a hook
 	// that touched the agent would otherwise wait for a lock its own caller

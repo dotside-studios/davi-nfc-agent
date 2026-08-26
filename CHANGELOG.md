@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
   `OnClientsChange` report on and act on the clients connected right now. A
   subscription outlives the server behind it, so it survives a restart
+- `agent.Rebuildable` marks a component that captured its configuration when it
+  was built. `Agent.RestartServers` stops and starts those and leaves the rest
+  running, rather than reaching for the one component it knew by name
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened

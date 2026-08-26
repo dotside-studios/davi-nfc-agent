@@ -775,7 +775,7 @@ func (r *deviceReader) prepareCardForWrite(expectUID string) (*Card, error) {
 
 	// Multi-card guard: require exactly one tag
 	if len(tags) > 1 {
-		return nil, fmt.Errorf("multiple cards detected (%d tags), please present only one card for writing", len(tags))
+		return nil, NewMultipleTagsError("WriteData", len(tags))
 	}
 
 	tag := tags[0] // Safe because we checked len(tags) == 1
@@ -1154,7 +1154,7 @@ func (r *deviceReader) soleTag(expectUID string) (Tag, error) {
 		return nil, fmt.Errorf("no card detected")
 	}
 	if len(tags) > 1 {
-		return nil, fmt.Errorf("multiple cards detected (%d tags), please present only one card", len(tags))
+		return nil, NewMultipleTagsError("", len(tags))
 	}
 
 	tag := tags[0]

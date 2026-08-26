@@ -332,8 +332,8 @@ func (m *Manager) SendTagRemoved(deviceID string, data TagRemovedData) error {
 
 	device.UpdateLastSeen()
 
-	// A nil Tag signals removal.
-	if err := m.publish(nfc.ScannedTag{Device: deviceID, Tag: nil}); err != nil {
+	// A nil Tag signals removal; the UID says which tag it was.
+	if err := m.publish(nfc.ScannedTag{Device: deviceID, Tag: nil, RemovedUID: data.UID}); err != nil {
 		return err
 	}
 

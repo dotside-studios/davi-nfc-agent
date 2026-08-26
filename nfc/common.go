@@ -17,6 +17,10 @@ type ScannedTag struct {
 	// Tag is what was scanned, nil for a tag that has left.
 	Tag Tag
 
+	// RemovedUID names the tag that left, where the reporter knows it. Only
+	// meaningful when Tag is nil, and empty for a source that does not say.
+	RemovedUID string
+
 	// Err is what went wrong instead, if anything.
 	Err error
 }
@@ -29,6 +33,11 @@ type NFCData struct {
 
 	Card *Card // The detected card, nil if no card is present
 	Err  error // Error that occurred during detection/reading
+
+	// RemovedUID names the tag that left, where the source knows it. Only
+	// meaningful when Card is nil. Without it a consumer watching several
+	// devices knows a tag went but not which one.
+	RemovedUID string
 }
 
 // DeviceStatus represents the status of the NFC device.

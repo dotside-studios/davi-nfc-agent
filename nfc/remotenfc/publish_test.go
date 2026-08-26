@@ -181,3 +181,34 @@ func TestPublishReleasedByClose(t *testing.T) {
 		t.Fatal("Close did not release the waiting publisher")
 	}
 }
+
+// A removal used to name the device and not the tag, so a consumer watching
+// several devices knew a tag had gone but not which one.
+func TestRemovalNamesTheTag(t *testing.T) {
+	m, url := serveManager(t, time.Minute)
+
+	_, deviceID := connectDevice(t, url)
+
+	scans := make(chan nfc.ScannedTag, 1)
+	conn := m.Scans().Connect(func(scan nfc.ScannedTag) { scans <- scan })
+	defer conn.Disconnect()
+
+	if err := m.SendTagRemoved(deviceID, TagRemovedData{UID: "04A1B2C3D4E5F6"}); err != nil {
+		t.Fatalf("SendTagRemoved: %v", err)
+	}
+
+	select {
+	case scan := <-scans:
+		if scan.Tag != nil {
+			t.Error("a removal carried a tag")
+		}
+		if scan.RemovedUID != "04A1B2C3D4E5F6" {
+			t.Errorf("RemovedUID = %q, want the UID that left", scan.RemovedUID)
+		}
+		if scan.Device != deviceID {
+			t.Errorf("Device = %q, want %q", scan.Device, deviceID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the removal was never published")
+	}
+}

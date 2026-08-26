@@ -122,12 +122,12 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 		caps.SupportedTagTypes = info.SupportedTagTypes()
 	}
 
-	// Check for event-based device (smartphone-style)
-	// Event-based devices typically don't poll and don't support raw transceive
+	// How a device reports a scan says nothing about whether it can exchange
+	// bytes with the tag, so events do not imply anything about CanTransceive.
+	// Only DeviceTransceiver, below, decides that.
 	if emitter, ok := device.(DeviceEventEmitter); ok && emitter.SupportsEvents() {
 		caps.SupportsEvents = true
-		caps.CanPoll = false       // Event-driven, not polling
-		caps.CanTransceive = false // Usually no raw transceive for event-based
+		caps.CanPoll = false // Event-driven, not polling
 	}
 
 	// An explicit DeviceTransceiver declaration overrides the defaults above.

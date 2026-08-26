@@ -1145,6 +1145,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
+| `MULTIPLE_TAGS` | no | More than one tag in the field; separate them and try again |
 | `NO_CARD` | yes | Nothing is holding the tag the request named |
 
 ---

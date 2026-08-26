@@ -553,6 +553,16 @@ func TestReader_MultipleCardsGuard(t *testing.T) {
 	if !contains(err.Error(), "multiple cards") {
 		t.Errorf("Expected error message to mention 'multiple cards', got: %v", err)
 	}
+
+	// Two cards in the field is a distinct, user-actionable condition, so it
+	// carries a code a client can switch on rather than an opaque string.
+	var nfcErr *NFCError
+	if !errors.As(err, &nfcErr) {
+		t.Fatalf("error is not an *NFCError: %v", err)
+	}
+	if nfcErr.Code != ErrCodeMultipleTags {
+		t.Errorf("Code = %d, want ErrCodeMultipleTags (%d)", nfcErr.Code, ErrCodeMultipleTags)
+	}
 	t.Logf("Write correctly blocked with error: %v", err)
 }
 

@@ -110,10 +110,3 @@ func (a *Agent) OnlineDevices() []string {
 	}
 	return ids
 }
-
-// IsReader reports whether a device path names something that can be the
-// agent's reader. A phone reports its scans over the device bridge and is never
-// opened as one.
-func (a *Agent) IsReader(devicePath string) bool {
-	return !nfc.IsRemoteDevice(a.manager, devicePath)
-}

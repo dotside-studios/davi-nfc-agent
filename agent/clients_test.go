@@ -19,7 +19,6 @@ func (m *rosterManager) OpenDevice(string) (nfc.Device, error) {
 func (m *rosterManager) ListDevices() ([]string, error) { return m.devices, nil }
 func (m *rosterManager) GetDeviceCount() int            { return len(m.devices) }
 func (m *rosterManager) GetActiveDeviceCount() int      { return m.active }
-func (m *rosterManager) RemoteDevice(string) bool       { return true }
 
 // A surface asks the agent, and the agent answers whether or not it is running.
 // These used to be five nil checks on Agent.ClientServer in the console, which
@@ -67,19 +66,5 @@ func TestRemoteDevicesAreNoneWithoutADriver(t *testing.T) {
 	}
 	if got := a.OnlineDevices(); got != nil {
 		t.Errorf("OnlineDevices() = %v, want nil", got)
-	}
-}
-
-// The reader picker asks the agent whether a path can be one, so a phone is
-// refused before it becomes a connection retried forever.
-func TestIsReaderRefusesAPhone(t *testing.T) {
-	phones := New(Config{Manager: &rosterManager{devices: []string{"phone-1"}}})
-	if phones.IsReader("phone-1") {
-		t.Error("a phone was accepted as the agent's reader")
-	}
-
-	readers := New(Config{Manager: nfc.NewMockManager()})
-	if !readers.IsReader("mock:usb:001") {
-		t.Error("a reader was refused as the agent's reader")
 	}
 }

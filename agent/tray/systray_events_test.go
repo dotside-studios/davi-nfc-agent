@@ -126,3 +126,31 @@ func TestAReaderPickedElsewhereMovesTheTick(t *testing.T) {
 		}
 	}
 }
+
+// Picking a reader from the tray narrows what the agent serves to it. The pin
+// is a filter, so nothing is restarted for it: the tray used to stop and start
+// the agent, dropping every connected client to change a preference.
+func TestPickingAReaderFromTheTrayDoesNotRestartTheAgent(t *testing.T) {
+	agent := newTestAgent()
+	app, _ := newTestTray(t, agent)
+	app.applyReaders([]string{"mock:usb:001", "ACS ACR122U 00"})
+
+	if err := agent.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(agent.Stop)
+
+	serving := agent.Supervisor()
+
+	app.SwitchDevice("ACS ACR122U 00")
+
+	if got := agent.CurrentPinnedDevice(); got != "ACS ACR122U 00" {
+		t.Errorf("the agent is pinned to %q, want the reader that was picked", got)
+	}
+	if agent.Supervisor() != serving {
+		t.Error("the agent was restarted to change which reader it serves")
+	}
+	if !agent.Running() {
+		t.Error("the agent stopped when a reader was picked")
+	}
+}

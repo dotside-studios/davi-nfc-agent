@@ -44,9 +44,9 @@ func (h *host) QuitAgent() {
 
 func (h *host) RestartServers() error { return h.agent.RestartServers() }
 
-// AvailableDevices is the reader picker, so it offers only what can actually be
-// one. A phone appearing here reads as a reader to choose, and choosing it pins
-// the reader to a device that is never opened.
+// AvailableDevices is the reader picker, so it lists what the agent reads from.
+// A phone reports what it scans for itself and is never read from here, so it
+// belongs in the paired devices rather than among the readers.
 func (h *host) AvailableDevices() []string { return h.agent.Readers() }
 
 func (h *host) AllCardTypes() []string { return nfc.GetAllCardTypes() }
@@ -61,20 +61,6 @@ func (h *host) CurrentCard() (uid, cardType string, present bool) {
 
 func (h *host) RemoteDevices() (total, active int) {
 	return h.agent.RemoteDevices()
-}
-
-// SelectDevice restarts the reader on the chosen device. Whatever follows the
-// agent redraws from the transition, so this tells nothing else about it.
-func (h *host) SelectDevice(devicePath string) error {
-	// Refused rather than accepted and quietly ignored: the picker does not
-	// offer a phone, so one arriving here came from somewhere that should hear
-	// why it cannot be the reader.
-	if !h.agent.IsReader(devicePath) {
-		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
-	}
-
-	h.agent.Stop()
-	return h.agent.Start(devicePath)
 }
 
 // Port is the port being served, not the one configured. A port saved in the

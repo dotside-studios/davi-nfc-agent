@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Choosing a device is a preference, not a restart. The pin filters what the
+  agent serves, so the console and the tray set it rather than stopping and
+  starting the agent, which dropped every connected client to change a
+  preference. A phone can be chosen like any other device: filtering to one is
+  the same operation whatever is holding the tag
 - The agent remembers the last scan rather than reading it back out of the
   client server, which kept it for nobody else. It survives a restart now: the
   servers are rebuilt, and the card on the reader is still there.
@@ -303,6 +308,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `nfc.IsRemoteDevice`, `nfc.RemoteDeviceChecker`, `MultiManager.RemoteDevice`
+  and `Agent.IsReader`. They kept a phone from being pinned, back when the pin
+  named the device the agent opened and polled: a phone there became a
+  connection retried for the life of the process. Nothing opens the pin now
 - `server/tagrouter`. Resolving a client request to the tag it names is what the
   client server does with the holder it was given, and the wire vocabulary it
   answers in was never a source's to speak. `clientserver.Config` takes `Tags`

@@ -3,6 +3,7 @@
 package console
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -22,19 +23,32 @@ func TestTheConsoleQuitsThroughTheProgram(t *testing.T) {
 	}
 }
 
-// Selecting a reader restarts the agent on it. It used to be refused without a
-// tray attached, which left a headless console unable to pick one.
-func TestSelectingAReaderRestartsTheAgentOnIt(t *testing.T) {
+// Choosing a device narrows what the agent serves to it. The pin is a filter,
+// so the agent is not restarted for it: a page that picks a reader used to
+// disconnect every client, including its own connection, on the way.
+func TestChoosingADeviceIsAPreferenceNotARestart(t *testing.T) {
 	a := quietAgent(t)
 	c := New(Config{Agent: a})
 
-	if err := c.host.SelectDevice("ACS ACR122U 00"); err != nil {
-		t.Fatalf("SelectDevice: %v", err)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(a.Stop)
 
+	serving := a.Supervisor()
+
+	if _, err := c.dispatch(action{
+		Action: "reader.selectDevice",
+		Params: json.RawMessage(`{"devicePath": "ACS ACR122U 00"}`),
+	}); err != nil {
+		t.Fatalf("reader.selectDevice: %v", err)
+	}
+
 	if got := a.CurrentDevicePath(); got != "ACS ACR122U 00" {
-		t.Errorf("the agent is on %q, want the reader that was chosen", got)
+		t.Errorf("the agent is on %q, want the device that was chosen", got)
+	}
+	if a.Supervisor() != serving {
+		t.Error("the agent was restarted to change which device it serves")
 	}
 }
 

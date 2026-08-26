@@ -108,13 +108,6 @@ func (h *fakeHost) AllCardTypes() []string     { return h.cardTypes }
 func (h *fakeHost) CurrentCard() (string, string, bool) { return h.cardUID, h.cardType, h.cardOn }
 func (h *fakeHost) RemoteDevices() (int, int)           { return 0, 0 }
 
-func (h *fakeHost) SelectDevice(path string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.settings.DevicePath = path
-	return nil
-}
-
 func (h *fakeHost) Port() int          { return h.port }
 func (h *fakeHost) BootstrapPort() int { return h.bootstrapPort }
 func (h *fakeHost) CertFile() string   { return h.certFile }

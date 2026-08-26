@@ -37,9 +37,9 @@ func (c *Server) dispatch(req action) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if err := c.host.SelectDevice(params.DevicePath); err != nil {
-			return nil, err
-		}
+		// The pin is a filter, so choosing a device is a preference change
+		// rather than a restart: the clients connected stay connected, and a
+		// device that is not here yet matches nothing until it is.
 		c.host.ApplyPreferences(func(s *agent.Preferences) { s.DevicePath = params.DevicePath })
 		return nil, nil
 

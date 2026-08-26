@@ -97,14 +97,19 @@ it is still CA-or-hosted-cert, gated only by the origin allowlist.
 ### 1.1 Pairing, as it actually shipped
 
 Per-device revocation is the right requirement and a shared secret cannot serve
-it. The mechanism has five gaps worth recording before v2 touches any of it:
+it. The mechanism had five gaps. Three have since been fixed on master and are
+kept here because the reasoning still explains the shape of what replaced them;
+two remain open:
 
-1. **`/pair` is plain HTTP.** `tls/bootstrap.go` starts the bootstrap server
-   with `ListenAndServe` on 9472. The PIN travels in the query string, and the
-   response carries both the device token and the `publicKeyPin`. The pin is
-   the anti-MITM measure and it is delivered over the channel it exists to
-   protect. The QR — a genuine out-of-band channel, since it is shown on the
-   kiosk — currently encodes `http://host/install?pin=…` and no key hash.
+1. **`/pair` ran over plain HTTP** — the PIN in a query string and the response
+   carrying both the device token and the `publicKeyPin`, on the cleartext
+   bootstrap listener. The pin is the anti-MITM measure and it was delivered
+   over the channel it exists to protect. **Fixed in `#46`**: `/pair` mounts on
+   the agent's own TLS listener, `handlePair` refuses a cleartext connection
+   from anything but loopback, and the startup QR encodes a
+   `davi-pair://host:port/?spki=…&code=…` URI (`tls/pairinguri.go:13`), so the
+   key hash reaches the device off the network. The bootstrap listener keeps
+   its port and stays cleartext for the CA-install page alone.
 2. **The credential is a bearer token, not a key.** Nothing binds it to a
    device. The survey recommended TR-03112-6's OOB-code → PAKE → per-device
    credential; what shipped went straight to a shared-secret-per-device.
@@ -113,8 +118,13 @@ it. The mechanism has five gaps worth recording before v2 touches any of it:
    minted a fresh UUID per connection, so the tray's paired list and the
    connected-device list were separate identity spaces. **Fixed on master in
    `#40`**; see §14 item 3.
-4. **Revocation is not immediate.** Auth is checked once at upgrade; `Revoke`
-   does not close live sessions.
+4. **Revocation was not immediate.** Auth is checked once at upgrade, so
+   revoking a device did nothing to the session it already held and a
+   heartbeating device kept working indefinitely. **Fixed in `#46`**: the
+   registry reports revoked credentials, the driver subscribes through
+   `ServerOptions.Revocations` (`nfc/remotenfc/server.go:61`), and the matching
+   session closes with a policy-violation reason, so the device can tell being
+   turned away from losing its radio.
 5. **Headless devices cannot pair** without an operator relaying a PIN. See
    §7.4 — OSDP's install mode is the standard's answer to this.
 
@@ -123,16 +133,17 @@ it. The mechanism has five gaps worth recording before v2 touches any of it:
 | | Local reader | Device bridge | Client API |
 |---|---|---|---|
 | Arrival | poll ~100 ms, `HasChanged(uid)` — "UID differs from last" | explicit `tagScanned` | `tagData` broadcast |
-| Removal | **inferred**: last seen >1 s ago (`nfc/cache.go:57`) | explicit `tagRemoved`, **with UID** | a nil tag — names the *holder*, not the tag |
-| Concurrency | `soleTag` refuses >1 tag (`nfc/reader.go:1144`) | one tag per device; `setActiveTag` replaces | n/a |
+| Removal | **inferred**: last seen >1 s ago (`nfc/cache.go:57`) | explicit `tagRemoved`, **with UID** | never delivered at all (`agent/pump.go:23`) |
+| Concurrency | `soleTag` refuses >1 tag, now as `MULTIPLE_TAGS` | one tag per device; `setActiveTag` replaces | n/a |
 | Presence | `deviceStatus.cardPresent` | none — device-level only | the reader's only |
 
 The bridge has the better lifecycle — it is the only source that knows a tag
-left, and which one — and the agent narrows it on the way out:
-`SendTagRemoved` receives `data.UID` and broadcasts a nil tag
-(`nfc/remotenfc/manager.go:259`). Master's `ScannedTag` now carries a `Device`,
-so a removal says which holder it came from — but still not which tag left, so
-a client watching a phone cannot tell whether the departed tag was its own.
+left, and which one. `#46` carried that through the internal model: `ScannedTag`
+and `NFCData` gained `RemovedUID` (`nfc/common.go:20`), so a removal now names
+both the holder and the tag. It still does not reach a client — the pump returns
+early on a nil card (`agent/pump.go:23`), so removals are dropped before the
+client broadcast. The information now exists and is simply not forwarded, which
+is a smaller gap than the one this section originally described.
 
 ### 2.1 Where this is going: edges at the device, state at the agent
 
@@ -179,16 +190,12 @@ Hold mode stays advisory and never a gate.
 
 Recorded because they are cheap to trip over:
 
-- **`SupportsEvents` carries a coupling.** A PC/SC device that starts declaring
-  events makes `BuildDeviceCapabilities` (`nfc/capabilities.go:127`) set
-  `CanPoll = false` *and* `CanTransceive = false`, and the PC/SC device
-  implements neither `DeviceEventEmitter` nor `DeviceTransceiver` today.
-  `CanPoll` has no readers, so that half is inert; the other half would have
-  hardware readers declaring they cannot transceive. `BuildDeviceCapabilities`
-  has no internal consumer at present, so it is wrong on paper immediately and
-  wrong in practice as soon as something reads it — and it is a documented
-  extension surface. A one-line `SupportsTransceive()` in the same change
-  closes it.
+- **`SupportsEvents` carried a coupling — resolved in `#46`.** Declaring events
+  used to force `CanTransceive = false`, so a PC/SC device that began reporting
+  events would have declared it could not exchange bytes with a tag. The
+  inference is gone — only `DeviceTransceiver` decides that now
+  (`nfc/capabilities.go:128`) — and the PC/SC device declares
+  `SupportsTransceive`. `CanPoll` still follows from events, which is right.
 - **Order matters.** `HasChanged` is what gates the broadcast
   (`nfc/reader.go:456`). Removing `TagCache` before the trigger is edge-driven
   leaves the reader broadcasting on every poll.
@@ -374,8 +381,12 @@ express intents.
 - **Outputs are first-class**: `CMD_LED`, `CMD_BUZ`, `CMD_TEXT`, `CMD_OUT`
   (relay/strike). The reader is an actuator, not only a sensor.
 - **`REPLY_BUSY` and `REPLY_NAK`** — explicit backpressure and negative ack.
-  We have a 10-deep channel (`nfc/remotenfc/manager.go:66`) and then
-  unspecified behaviour.
+  The agent-side half of this landed in `#46`: publishing waits
+  `ScanPublishTimeout` for room in a 256-deep queue and returns an error rather
+  than discarding, which the session turns into a retryable `TAG_SEND_FAILED`
+  (`nfc/remotenfc/constants.go:36`). What is still missing is the protocol
+  half — a reply that tells a device to *hold* rather than to retry, which is
+  a different instruction and belongs on the wire.
 - **`CMD_MFG` / `REPLY_MFGREP`** — a sanctioned vendor-extension channel, so
   proprietary features do not fork the protocol.
 - Card data is a **raw bit array of declared length** — not a UID, not NDEF.
@@ -517,7 +528,8 @@ Checkable rules, each traceable to something above.
 13. Freshness is a property of the read, not of the tag (§4).
 14. Errors carry a class, not just a code: permanent / retry-now /
     retry-after-re-present / session-ended (§5).
-15. Backpressure is a protocol element (§7.3).
+15. Backpressure is a protocol element: a device must be able to be told to
+    hold, not merely to fail and retry (§7.3).
 16. Outputs are peers of inputs — LED, buzzer, text/alert, vibrate. This is
     what makes a phone a *good* device rather than a degraded reader, and it is
     available on every tier.
@@ -733,22 +745,20 @@ path's answer rather than one of this API's (§0).
 
 ### What gets built
 
-**1. The QR is the root of trust.** It carries `{host, port, spkiHash, code}`,
-and the device pairs **over TLS pinned to that hash**. This closes the
-cleartext hand-off (§1.1, gap 1) with no new cryptography, because the channel
-is authenticated by something that never crossed the network — the SSH and
-CTAP-hybrid model.
+**1. The QR is the root of trust — landed.** It carries
+`davi-pair://host:port/?spki=…&code=…`, and the device pairs **over TLS pinned
+to that hash**, so the channel is authenticated by a value that never crossed
+the network — the SSH and CTAP-hybrid model, and no new cryptography.
 
-The condition that makes it true: the QR must be **rendered on the kiosk** —
-tray or Control Center — and read off the screen. It is currently fetched from
-`/qr.png` over HTTP, and a phone fetching it over the network destroys the
-out-of-band property the whole design rests on.
+The condition that makes it true held: the QR is **rendered on the kiosk** and
+read off the screen. `/qr.png` still serves only the CA-install page, so
+nothing invites a phone to fetch the pairing QR over the network, which would
+have destroyed the out-of-band property the design rests on.
 
-**2. `/pair` moves to the agent port.** 9470 already carries TLS with the
-certificate the pin covers. The bootstrap server then serves only the
-human-facing setup page, and could eventually become a Control Center route.
-Fewer ports, one certificate, and the pairing endpoint sits where the device is
-about to connect anyway.
+**2. `/pair` moves to the agent port — landed.** It mounts on the agent's
+listener, which already carries the certificate the pin covers. The bootstrap
+listener keeps its port and stays cleartext for one job: handing the CA to a
+device that does not trust the agent's certificate yet.
 
 **3. Session identity is paired identity — landed.** The agent resolves the
 presented credential to the paired device ID and registers the device under it
@@ -757,9 +767,9 @@ its own previous session and the console stops showing paired devices offline
 while they are connected. Implemented on master in `#40`: `CheckPairedDevice`
 now returns the identity it admitted (`server/auth.go:92`). Gap 3 is closed.
 
-**4. Revocation closes live sessions.** The registry's `OnChange` already
-exists; wiring it to drop sessions whose device was revoked closes gap 4.
-Without it, "revoked" means "revoked at next connect".
+**4. Revocation closes live sessions — landed.** The driver subscribes to the
+registry through `ServerOptions.Revocations` and closes the matching session
+with a policy-violation reason.
 
 **5. Credential type is declared, not assumed.** A bearer token is the floor; a
 proven-possession keypair is preferred where the platform has somewhere safe to
@@ -792,9 +802,8 @@ stale entries, which is the shape already there.
 Most of this does not need the protocol rewrite, and holding security fixes for
 one would be the wrong trade:
 
-- **Now, independent of v2:** the QR carries the SPKI hash and pairing moves to
-  pinned TLS on the agent port, and revocation closes live sessions. Session
-  identity has already landed (item 3).
+- **Now, independent of v2:** complete. Items 1, 2, 3 and 4 all landed, in
+  `#40` and `#46`.
 - **With v2:** `pairing=required` in the mDNS TXT record, the informative
   refusal (§12), and the device declaring its credential type in the handshake.
 - **Demand-driven:** keypair possession proof, and the operator-gated install

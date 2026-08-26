@@ -374,17 +374,9 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// Broadcast hands a scan to the in-process observer and then to every
-// connected client.
-//
-// Called by whatever produced the scan.
+// Broadcast serves a scan to every connected client. Called by whatever
+// produced it, which decides what is worth serving.
 func (s *Server) Broadcast(data nfc.NFCData) {
-	// The observer sees it before the clients do. This is the supported way to
-	// read tags from Go.
-	if s.config.OnTag != nil {
-		s.config.OnTag(data)
-	}
-
 	s.broadcastTagData(data)
 }
 

@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The agent reports what its readers scan and what serves clients subscribes,
+  rather than the agent pushing scans into a server it built. `Events().Tag`
+  fires from the agent's own path now, so a plugin following the agent sees the
+  same stream a client does, and the card-type filter and the pinned device
+  still decide what passes
 - `server.CheckAuth`, `server.CheckPairedDevice` and `DeviceAuth.Check` name the
   paired device they admitted, and `remotenfc.ServerOptions.Authenticate` and
   `agent.DeviceEndpointOptions.Authenticate` take that shape. A device admitted
@@ -329,6 +334,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `clientserver.Config.OnTag`. It let an embedder observe a scan before the
+  clients saw it, which is what the agent used it for; the agent reports the
+  scan before handing it over now, so nothing sets it
 - `Agent.RemoteDevices` and `console.Host.RemoteDevices`. The agent reached past
   its manager into the child holding phones for a count the console can take
   from the devices it already lists. `Agent.OnlineDevices` answers from what the

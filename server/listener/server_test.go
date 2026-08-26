@@ -17,8 +17,10 @@ import (
 )
 
 // newTestServer wires a unified server with its background workers running and
-// exposes it over an httptest listener. It returns the ws:// base URL.
-func newTestServer(t *testing.T) string {
+// exposes it over an httptest listener. It returns the ws:// base URL and the
+// client server behind it, so a test can wait for its own connection to be
+// registered before expecting a broadcast.
+func newTestServer(t *testing.T) (string, *clientserver.Server) {
 	t.Helper()
 
 	deviceMgr := remotenfc.NewManager(30 * time.Second)
@@ -56,7 +58,7 @@ func newTestServer(t *testing.T) string {
 		deviceMgr.Close()
 	})
 
-	return "ws" + strings.TrimPrefix(ts.URL, "http")
+	return "ws" + strings.TrimPrefix(ts.URL, "http"), client
 }
 
 // dialAndProbe connects to the given ws URL, sends a bogus-typed message, and
@@ -98,7 +100,7 @@ func dialAndProbe(t *testing.T, wsURL string) string {
 // (?mode=device) to the device handler and everything else to the client
 // handler, using the handler-specific error codes as the signal.
 func TestWSDispatch(t *testing.T) {
-	base := newTestServer(t)
+	base, _ := newTestServer(t)
 
 	// Client connection: unknown message type -> client handler's UNKNOWN_TYPE.
 	if code := dialAndProbe(t, base+"/ws"); code != "UNKNOWN_TYPE" {

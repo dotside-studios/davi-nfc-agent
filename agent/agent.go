@@ -201,6 +201,11 @@ type Agent struct {
 	readerScans  *event.Connection
 	readerStatus *event.Connection
 
+	// The client server's subscriptions to what the agent reports, held for the
+	// same reason: they belong to the run, not to the agent.
+	clientTags   *event.Connection
+	clientStatus *event.Connection
+
 	// events is the subscription surface, published by Events. Signals are
 	// safe from any goroutine, so it needs no lock of its own.
 	events Events
@@ -470,7 +475,10 @@ func (a *Agent) RestartServers() error {
 func (a *Agent) stopServers() {
 	a.readerScans.Disconnect()
 	a.readerStatus.Disconnect()
+	a.clientTags.Disconnect()
+	a.clientStatus.Disconnect()
 	a.readerScans, a.readerStatus = nil, nil
+	a.clientTags, a.clientStatus = nil, nil
 
 	a.ClientServer = nil
 
@@ -496,23 +504,24 @@ func (a *Agent) startServers() error {
 		Tags:                 a,
 		AllowTagModification: a.TagModificationAllowed,
 		OnChange:             a.fireClientsChanged,
-		OnTag:                a.reportTag,
 	})
 
-	// The agent's tag sources feed the client server directly. Connected to the
-	// server being built rather than read from a field, so a restart leaves
-	// nothing feeding the one it replaced.
+	// The agent reports what its readers scan, and what serves clients
+	// subscribes to that rather than being fed: a plugin following the agent
+	// sees the same stream a client does.
 	//
 	// The readers are not started here. Their lifetime is the agent's, not the
 	// servers': starting them on every restart left a second worker polling the
 	// same reader, racing the first and scanning every card twice. See
 	// startLocked, which starts the ones it opened.
+	a.readerScans = readers.Scans().Connect(a.forwardScan)
+	a.readerStatus = readers.Status().Connect(a.fireReaderStatus)
+
+	// Connected to the server being built rather than read from a field, so a
+	// restart leaves nothing feeding the one it replaced.
 	sink := a.ClientServer
-	a.readerScans = readers.Scans().Connect(func(data nfc.NFCData) { a.forwardScan(data, sink) })
-	a.readerStatus = readers.Status().Connect(func(status nfc.DeviceStatus) {
-		a.fireReaderStatus(status)
-		sink.BroadcastDeviceStatus(status)
-	})
+	a.clientTags = a.events.Tag.Connect(sink.Broadcast)
+	a.clientStatus = a.events.Reader.Connect(sink.BroadcastDeviceStatus)
 
 	// Published as a pair, so a request never sees a client from one start
 	// beside a device from the next.

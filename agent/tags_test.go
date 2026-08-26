@@ -106,13 +106,13 @@ func TestTheAgentRemembersTheLastScanAcrossARestart(t *testing.T) {
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	a.ClientServer.Broadcast(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04DEADBE"))})
+	a.forwardScan(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04DEADBE"))})
 
 	awaitLastCard(t, a, "04DEADBE")
 
 	// A scan that carries no card is a refusal or a read failure. It reaches
 	// the clients as one, and leaves the card the agent last saw alone.
-	a.ClientServer.Broadcast(nfc.NFCData{Device: "mock:usb:001", Err: context.DeadlineExceeded})
+	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Err: context.DeadlineExceeded})
 	if card := a.LastCard(); card == nil || card.UID != "04DEADBE" {
 		t.Errorf("LastCard = %+v after a scan with no card, want the card that was scanned", card)
 	}

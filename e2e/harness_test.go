@@ -156,7 +156,7 @@ func (h *harness) reopenHardware() {
 	h.Hardware.IsOpen = true
 }
 
-// observed waits for the next scan to reach an OnTag observer.
+// observed waits for the next scan the agent reports.
 func (h *harness) observed(t *testing.T) nfc.NFCData {
 	t.Helper()
 

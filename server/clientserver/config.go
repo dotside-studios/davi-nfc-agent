@@ -46,13 +46,4 @@ type Config struct {
 	// polling. Called off the hot path but on the connection's own goroutine,
 	// so it must not block.
 	OnChange func(clients int)
-
-	// OnTag, when set, is called for every scan before it is broadcast, so a
-	// program embedding the agent can act on cards without pretending to be a
-	// WebSocket client. It observes rather than intercepts: the scan is
-	// broadcast either way, and returning changes nothing.
-	//
-	// Called on the goroutine draining the bridge, so it must not block --
-	// that goroutine also feeds every connected client.
-	OnTag func(nfc.NFCData)
 }

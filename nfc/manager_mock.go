@@ -61,7 +61,7 @@ func (m *MockManager) OpenDevice(deviceStr string) (Device, error) {
 		m.MockDevice = NewMockDevice()
 	}
 
-	m.MockDevice.DeviceConnection = deviceStr
+	m.MockDevice.SetConnection(deviceStr)
 	return m.MockDevice, nil
 }
 

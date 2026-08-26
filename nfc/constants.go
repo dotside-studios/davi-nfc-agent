@@ -68,29 +68,6 @@ type ReaderLister interface {
 	ListReaders() ([]string, error)
 }
 
-// RemoteDeviceChecker is implemented by a manager that can recognize a device
-// path as naming a remote device without connecting to it.
-//
-// Optional: a manager that does not implement it is asked whether all of its
-// devices are remote instead.
-type RemoteDeviceChecker interface {
-	RemoteDevice(devicePath string) bool
-}
-
-// IsRemoteDevice reports whether a device path names a phone rather than a
-// reader. A pinned path that does can never be opened as a reader, so it is
-// worth recognizing before it becomes a connection retried forever.
-func IsRemoteDevice(m Manager, devicePath string) bool {
-	if m == nil || devicePath == "" {
-		return false
-	}
-	if checker, ok := m.(RemoteDeviceChecker); ok {
-		return checker.RemoteDevice(devicePath)
-	}
-	remote, ok := m.(RemoteManager)
-	return ok && remote.RemoteDevices()
-}
-
 // ListReaders returns the devices that can serve as this agent's reader,
 // falling back to every device a manager knows for one that draws no
 // distinction.

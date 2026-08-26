@@ -132,6 +132,16 @@ func (m *MockDevice) Connection() string {
 	return m.DeviceConnection
 }
 
+// SetConnection changes the simulated connection string. Taken under the
+// device's own lock: a manager that hands the same device to a second reader
+// writes this while the first one is polling it.
+func (m *MockDevice) SetConnection(connection string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.DeviceConnection = connection
+}
+
 // DeviceType returns the device type (implements DeviceInfoProvider).
 func (m *MockDevice) DeviceType() string {
 	m.mu.Lock()

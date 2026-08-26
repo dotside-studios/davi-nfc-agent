@@ -68,25 +68,3 @@ func TestListDevices_StillReportsPhones(t *testing.T) {
 		t.Fatalf("ListDevices = %v, want both the reader and the phone", devices)
 	}
 }
-
-// Recognized from the path alone, because the case that matters is a phone
-// pinned in settings and no longer connected.
-func TestRemoteDevice_RecognizesAPinnedPhone(t *testing.T) {
-	mm := newMixed(t)
-
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{"smartphone:85bacf02-3188-4167-9936-c870a5b87679", true},
-		{"hardware:ACS ACR122U", false},
-		{"acr122_usb:001:003", false},
-		{"", false},
-	}
-
-	for _, c := range cases {
-		if got := nfc.IsRemoteDevice(mm, c.path); got != c.want {
-			t.Errorf("IsRemoteDevice(%q) = %v, want %v", c.path, got, c.want)
-		}
-	}
-}

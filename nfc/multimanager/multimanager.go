@@ -94,25 +94,6 @@ func (mm *MultiManager) GetManager(name string) (nfc.Manager, bool) {
 	return manager, exists
 }
 
-// RemoteDevice reports whether a device path names one held by a manager whose
-// devices are remote, meaning a phone rather than a reader attached to this
-// machine. It answers from the path's manager prefix, so a device that is not
-// currently connected is still recognized for what it is.
-func (mm *MultiManager) RemoteDevice(devicePath string) bool {
-	name, _, found := strings.Cut(devicePath, ":")
-	if !found {
-		return false
-	}
-
-	manager, exists := mm.managers[name]
-	if !exists {
-		return false
-	}
-
-	remote, ok := manager.(nfc.RemoteManager)
-	return ok && remote.RemoteDevices()
-}
-
 // OpenDevice opens a device using the appropriate manager.
 // Device string format:
 //   - "manager:deviceID" - explicit manager (e.g., "smartphone:abc123", "hardware:pn532")

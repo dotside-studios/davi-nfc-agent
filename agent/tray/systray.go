@@ -305,12 +305,10 @@ func (s *App) applyCardTypes(types []string) {
 
 // SwitchDevice switches to a different NFC device
 func (s *App) SwitchDevice(deviceName string) {
-	// Restart agent with new device
-	s.agent.Stop()
-	if err := s.agent.Start(deviceName); err != nil {
-		s.showStopped("Failed to Start")
-	}
-
+	// The pin is a filter, so this is a preference change rather than a
+	// restart: every reader goes on being read, and the clients connected stay
+	// connected while the operator changes their mind.
+	s.agent.SetPinnedDevice(deviceName)
 	s.markCurrentReader()
 }
 

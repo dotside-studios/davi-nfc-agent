@@ -18,6 +18,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
@@ -70,18 +71,10 @@ func start(t *testing.T, opts options) *harness {
 	// running on this machine.
 	o.DevicePort = freePort(t)
 
-	// The agent receives a handler builder rather than the driver itself, so it
-	// names no device protocol. What the devices scan and what they hold reach
-	// it through the manager below.
+	// The agent names no device protocol: what the devices scan and what they
+	// hold reach it through the manager below, and their endpoint is mounted
+	// alongside the clients.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	o.DeviceEndpoint = func(d agent.DeviceEndpointOptions) http.Handler {
-		return devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         d.Authenticate,
-			CheckOrigin:          d.CheckOrigin,
-			AllowTagModification: d.AllowTagModification,
-			PublicKeyPin:         d.PublicKeyPin,
-		})
-	}
 
 	// Stands in for nfc/pcsc, the one part a test cannot supply.
 	hardware := nfc.NewMockManager()
@@ -102,7 +95,19 @@ func start(t *testing.T, opts options) *harness {
 	// serves and the authority pairing hands out are the trust plugin's, not
 	// the agent's.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Config: listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile}, Certificates: rt.Certificates}, trust); err != nil {
+	servers := &agent.ServerPlugin{
+		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates: rt.Certificates,
+		ServeMode: map[string]http.Handler{
+			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+				Authenticate:         rt.Agent.DeviceAuth.Check,
+				CheckOrigin:          rt.Agent.CheckOrigin(),
+				AllowTagModification: rt.Agent.TagModificationAllowed,
+				PublicKeyPin:         rt.Agent.PublicKeyPin,
+			}),
+		},
+	}
+	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 

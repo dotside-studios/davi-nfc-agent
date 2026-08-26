@@ -33,6 +33,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -46,17 +47,9 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
 	// The driver serving phones. What it scans and what its devices hold reach
-	// the agent through the manager below; only its handler is handed over, so
-	// the agent names no device protocol itself.
+	// the agent through the manager below; its endpoint is mounted with the
+	// server plugin, so the agent names no device protocol itself.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
-		return devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         o.Authenticate,
-			CheckOrigin:          o.CheckOrigin,
-			AllowTagModification: o.AllowTagModification,
-			PublicKeyPin:         o.PublicKeyPin,
-		})
-	}
 
 	// Hardware readers and phones behind one manager, which the agent opens
 	// its reader from.
@@ -80,6 +73,17 @@ func main() {
 	servers := &agent.ServerPlugin{
 		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates: rt.Certificates,
+
+		// The driver's wire behind the agent's policy: the agent decides who is
+		// admitted and what is allowed, the driver decides what a device says.
+		ServeMode: map[string]http.Handler{
+			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+				Authenticate:         rt.Agent.DeviceAuth.Check,
+				CheckOrigin:          rt.Agent.CheckOrigin(),
+				AllowTagModification: rt.Agent.TagModificationAllowed,
+				PublicKeyPin:         rt.Agent.PublicKeyPin,
+			}),
+		},
 	}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
@@ -151,9 +155,9 @@ The NFC backend is `Setup`'s second argument, which is why every package beneath
 `nfc.TagReporter` and answers for the tags they hold through `nfc.TagHolder`,
 both optional, so the agent subscribes to the manager it was given rather than
 being handed the driver. `multimanager` implements both by fanning its children
-in. The one value left is `DeviceEndpoint`, which builds the handler serving
-those devices, since a route is not the manager's business. Supply none and the
-agent serves its own reader.
+in. Serving those devices is not the manager's business: the driver's endpoint
+goes on the server plugin as `ServeMode[server.ModeDevice]`, built from what the
+agent answers, and a build that mounts none serves its own readers alone.
 
 Flags and the standard logger belong to the program. Registering flags writes to
 `flag.CommandLine`, which would collide with the flags of anything embedding the
@@ -436,6 +440,17 @@ func main() {
 	servers := &agent.ServerPlugin{
 		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates: rt.Certificates,
+
+		// The driver's wire behind the agent's policy: the agent decides who is
+		// admitted and what is allowed, the driver decides what a device says.
+		ServeMode: map[string]http.Handler{
+			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+				Authenticate:         rt.Agent.DeviceAuth.Check,
+				CheckOrigin:          rt.Agent.CheckOrigin(),
+				AllowTagModification: rt.Agent.TagModificationAllowed,
+				PublicKeyPin:         rt.Agent.PublicKeyPin,
+			}),
+		},
 	}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		log.Fatal(err)

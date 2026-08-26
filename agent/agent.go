@@ -118,14 +118,6 @@ type Config struct {
 	Mode       nfc.ReaderMode
 	CardTypes  []string
 	DevicePath string
-
-	// DeviceEndpoint builds the handler serving device connections on the
-	// shared /ws path.
-	//
-	// A function, because the policies are the agent's and the wire is the
-	// driver's: the agent hands over what it decides and the caller builds the
-	// handler, so neither names the other's types. Nil serves clients only.
-	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 }
 
 // Agent runs the NFC reader and the servers in front of it. Build one with New;
@@ -164,7 +156,6 @@ type Agent struct {
 	info                buildinfo.Info
 	logger              *log.Logger
 	manager             nfc.Manager
-	deviceEndpoint      http.Handler
 	apiSecret           string
 	configDir           string
 	allowedOrigins      []string
@@ -268,14 +259,6 @@ func New(cfg Config) *Agent {
 	// Built here rather than at start, so a caller can put its device endpoint
 	// behind it before anything runs.
 	a.DeviceAuth = server.NewDeviceAuth(cfg.APISecret, a.tokenVerifier(), a.requirePairedDevice)
-	if cfg.DeviceEndpoint != nil {
-		a.deviceEndpoint = cfg.DeviceEndpoint(DeviceEndpointOptions{
-			Authenticate:         a.DeviceAuth.Check,
-			CheckOrigin:          a.checkOrigin(),
-			AllowTagModification: a.TagModificationAllowed,
-			PublicKeyPin:         a.PublicKeyPin,
-		})
-	}
 
 	return a
 }
@@ -534,10 +517,13 @@ func (a *Agent) CurrentDevicePath() string {
 	return ""
 }
 
-// checkOrigin admits or rejects a device upgrade by Origin, preferring the
-// live policy over the static allowlist so the tray can admit one without
-// restarting the listener.
-func (a *Agent) checkOrigin() func(r *http.Request) bool {
+// CheckOrigin admits or rejects an upgrade by Origin, preferring the live
+// policy over the static allowlist so the tray can admit one without restarting
+// the listener.
+//
+// Handed to whatever serves a WebSocket endpoint for the agent, such as a
+// device driver's.
+func (a *Agent) CheckOrigin() func(r *http.Request) bool {
 	if policy := a.originPolicy(); policy != nil {
 		return server.CheckOriginPolicy(policy)
 	}

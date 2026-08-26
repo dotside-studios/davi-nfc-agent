@@ -23,6 +23,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -42,16 +43,9 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
 	// The driver serving phones. What it scans and what it holds reach the
-	// agent through the manager below; only its endpoint is handed over.
+	// agent through the manager below; its endpoint is served alongside the
+	// clients, below.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
-		return devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         o.Authenticate,
-			CheckOrigin:          o.CheckOrigin,
-			AllowTagModification: o.AllowTagModification,
-			PublicKeyPin:         o.PublicKeyPin,
-		})
-	}
 
 	// Hardware readers and phones behind one manager.
 	manager := multimanager.NewMultiManager(
@@ -73,6 +67,18 @@ func main() {
 	servers := &agent.ServerPlugin{
 		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates: rt.Certificates,
+
+		// The device endpoint is the driver's wire behind the agent's policy.
+		// Neither names the other's types: the agent decides who is admitted
+		// and what is allowed, the driver decides what a device may say.
+		ServeMode: map[string]http.Handler{
+			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+				Authenticate:         rt.Agent.DeviceAuth.Check,
+				CheckOrigin:          rt.Agent.CheckOrigin(),
+				AllowTagModification: rt.Agent.TagModificationAllowed,
+				PublicKeyPin:         rt.Agent.PublicKeyPin,
+			}),
+		},
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that

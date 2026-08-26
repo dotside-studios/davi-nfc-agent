@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"net/http"
-
 	"log"
 	"net/url"
 	"os"
@@ -57,12 +55,6 @@ type Options struct {
 	AllowedOrigins      string
 	InstallCA           bool
 	RequirePairedDevice bool
-
-	// DeviceEndpoint serves the connections of a driver the caller built.
-	// Leaving it nil is an agent that serves its own reader only. What those
-	// devices scan and what they are holding come from the manager, which is
-	// where the driver is registered. See agent.Config.
-	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
 	// may carry, and ReaderFeedback has the reader announce what it does. They
@@ -238,7 +230,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}
 
 	a := New(Config{
-		DeviceEndpoint:      opts.DeviceEndpoint,
 		Manager:             manager,
 		Info:                info,
 		DevicePort:          devicePort,

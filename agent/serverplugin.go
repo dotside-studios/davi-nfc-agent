@@ -187,7 +187,7 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	// What the agent is reached on goes first, so an endpoint cannot displace
 	// /ws or the health checks.
 	routes := map[string]http.Handler{
-		"/ws":            p.wsHandler(ctx.Agent),
+		"/ws":            p.wsHandler(),
 		"/health":        p.healthHandler(),
 		"/api/v1/health": p.healthHandler(),
 	}
@@ -498,14 +498,11 @@ func (p *ServerPlugin) menuTitle() string {
 // wsHandler routes a connection to the handler for the mode it declares. A
 // connection arriving before the agent is serving is told so rather than left
 // waiting on a handler that does not exist yet.
-func (p *ServerPlugin) wsHandler(a *Agent) http.Handler {
+func (p *ServerPlugin) wsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		byMode := map[string]http.Handler{}
 		for mode, handler := range p.ServeMode {
 			byMode[mode] = handler
-		}
-		if _, named := byMode[server.ModeDevice]; !named && a.deviceEndpoint != nil {
-			byMode[server.ModeDevice] = a.deviceEndpoint
 		}
 
 		clients := byMode[server.ModeClient]

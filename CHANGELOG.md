@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Agent.CheckOrigin` reports the origin check the agent applies, for whatever
+  serves a WebSocket endpoint on its behalf
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened
@@ -339,6 +341,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Config.DeviceEndpoint`, `Options.DeviceEndpoint` and
+  `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
+  the agent answers, `DeviceAuth.Check`, `CheckOrigin`, `TagModificationAllowed`
+  and `PublicKeyPin`, and mounts it as `ServerPlugin.ServeMode[server.ModeDevice]`
+  rather than handing the agent a builder to call
 - `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
   is the server plugin's, so the agent holds no server and hands over no routes.
   `Agent.ClientCount`, `Clients` and `DisconnectClient` answer from whatever is

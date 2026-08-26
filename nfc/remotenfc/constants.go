@@ -27,3 +27,17 @@ const (
 // The console endpoint sets 4 KB, which is right for a link that carries no
 // tag payloads and wrong here.
 const MaxDeviceMessageSize = 256 << 10
+
+// Scan publishing.
+//
+// ScanQueueDepth buffers scans and removals between the sessions reporting them
+// and the goroutine broadcasting them. It absorbs a burst; it does not absorb a
+// subscriber that is permanently behind.
+//
+// ScanPublishTimeout is how long a session waits for room in that queue before
+// giving up. Waiting applies backpressure to the one device whose scan it is,
+// which is why it can be this long: the other sessions are unaffected.
+const (
+	ScanQueueDepth     = 256
+	ScanPublishTimeout = 2 * time.Second
+)

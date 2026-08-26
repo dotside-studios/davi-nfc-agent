@@ -29,6 +29,9 @@ type Manager struct {
 	dataChan          chan nfc.ScannedTag // Scans, drained onto scans
 	deviceChangeChan  chan struct{}       // Signals registration and unregistration
 
+	dropped        atomic.Uint64 // Scans and removals the queue could not take
+	publishTimeout time.Duration // How long publish waits for room; ScanPublishTimeout
+
 	// Policy supplied by the agent through Handler.
 	publicKeyPin         func() string
 	allowTagModification func() bool
@@ -65,8 +68,9 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 		devices:           make(map[string]*Device),
 		inactivityTimeout: inactivityTimeout,
 		stopped:           make(chan struct{}),
-		dataChan:          make(chan nfc.ScannedTag, 10), // Buffered to prevent blocking
-		deviceChangeChan:  make(chan struct{}, 1),        // Buffered to prevent blocking
+		dataChan:          make(chan nfc.ScannedTag, ScanQueueDepth),
+		deviceChangeChan:  make(chan struct{}, 1), // Buffered to prevent blocking
+		publishTimeout:    ScanPublishTimeout,
 		sessions:          make(map[string]*wsconn.SafeConn),
 		sessionConn:       make(map[*wsconn.SafeConn]string),
 		pending:           make(map[string]pendingRequest),
@@ -254,17 +258,49 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	// immediate write must find the device already holding the tag.
 	m.setActiveTag(deviceID, tag.UID(), tag)
 
-	select {
-	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: tag}:
-	default:
-		managerWarn.Printf("Data channel full, dropping tag data for device %s", deviceID)
-	}
-
-	// Update heartbeat
+	// The device is heard from whether or not the scan can be published: it
+	// reported, and dropping it for a queue it cannot see would be wrong.
 	device.UpdateLastSeen()
 
-	return nil
+	return m.publish(nfc.ScannedTag{Device: deviceID, Tag: tag})
 }
+
+// publish hands a scan or a removal to the broadcast loop, waiting up to
+// ScanPublishTimeout for room in the queue and returning an error if none
+// comes.
+//
+// It used to discard on a full queue and return nil, so a scan the agent could
+// not accept was reported to nobody: the device was told it succeeded, and the
+// only trace was a log line. That is the wrong default at a door with a queue,
+// where the queue fills exactly when the taps matter most. The device is now
+// told, and the caller gets a retryable error to send on.
+func (m *Manager) publish(scanned nfc.ScannedTag) error {
+	select {
+	case m.dataChan <- scanned:
+		return nil
+	default:
+	}
+
+	timer := time.NewTimer(m.publishTimeout)
+	defer timer.Stop()
+
+	select {
+	case m.dataChan <- scanned:
+		return nil
+	case <-m.stopped:
+		return fmt.Errorf("manager closed")
+	case <-timer.C:
+		dropped := m.dropped.Add(1)
+		managerWarn.Printf("Scan queue full for %s after %s, dropped (%d dropped since start)",
+			scanned.Device, m.publishTimeout, dropped)
+		return fmt.Errorf("scan queue full after %s: subscribers are not keeping up", m.publishTimeout)
+	}
+}
+
+// Dropped counts the scans and removals that could not be published within
+// ScanPublishTimeout since the manager started. A number that climbs means
+// subscribers are not keeping up and taps are being lost.
+func (m *Manager) Dropped() uint64 { return m.dropped.Load() }
 
 // Scans carries every tag the registered devices report, as reported. What is
 // read off the tag is the supervisor's, not this driver's.
@@ -294,17 +330,14 @@ func (m *Manager) SendTagRemoved(deviceID string, data TagRemovedData) error {
 		return fmt.Errorf("device not found: %s", deviceID)
 	}
 
-	// Broadcast removal via data channel (Card: nil signals removal)
-	select {
-	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: nil}:
-		managerLog.Printf("Tag removed: device=%s, UID=%s", deviceID, data.UID)
-	default:
-		managerWarn.Printf("Data channel full, dropping tag removal for device %s", deviceID)
-	}
-
-	// Update heartbeat
 	device.UpdateLastSeen()
 
+	// A nil Tag signals removal.
+	if err := m.publish(nfc.ScannedTag{Device: deviceID, Tag: nil}); err != nil {
+		return err
+	}
+
+	managerLog.Printf("Tag removed: device=%s, UID=%s", deviceID, data.UID)
 	return nil
 }
 

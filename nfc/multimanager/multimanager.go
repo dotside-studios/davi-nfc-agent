@@ -3,7 +3,6 @@ package multimanager
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
@@ -60,18 +59,18 @@ func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 
 	for _, entry := range entries {
 		if entry.Name == "" || entry.Manager == nil {
-			log.Printf("[multi] Skipping invalid manager entry: name=%s, manager=%v", entry.Name, entry.Manager)
+			multiWarn.Printf("Skipping invalid manager entry: name=%s, manager=%v", entry.Name, entry.Manager)
 			continue
 		}
 
 		if _, exists := mm.managers[entry.Name]; exists {
-			log.Printf("[multi] Skipping duplicate manager: %s", entry.Name)
+			multiWarn.Printf("Skipping duplicate manager: %s", entry.Name)
 			continue
 		}
 
 		mm.managers[entry.Name] = entry.Manager
 		mm.managerOrder = append(mm.managerOrder, entry.Name)
-		log.Printf("[multi] Manager registered: %s", entry.Name)
+		multiLog.Printf("Manager registered: %s", entry.Name)
 
 		// Start forwarding device changes from child managers
 		if notifier, ok := entry.Manager.(nfc.DeviceChangeNotifier); ok {
@@ -189,7 +188,7 @@ func (mm *MultiManager) Close() {
 
 		for name, manager := range mm.managers {
 			if closer, ok := manager.(interface{ Close() }); ok {
-				log.Printf("[multi] Closing manager: %s", name)
+				multiLog.Printf("Closing manager: %s", name)
 				closer.Close()
 			}
 		}
@@ -333,7 +332,7 @@ func (mm *MultiManager) logListError(name string, err error) bool {
 	if repeat {
 		return false
 	}
-	log.Printf("[multi] manager '%s' failed to list devices: %v", name, err)
+	multiWarn.Printf("manager '%s' failed to list devices: %v", name, err)
 	return true
 }
 
@@ -347,6 +346,6 @@ func (mm *MultiManager) clearListError(name string) {
 	mm.listErrMu.Unlock()
 
 	if wasFailing {
-		log.Printf("[multi] manager '%s' is listing devices again", name)
+		multiLog.Printf("manager '%s' is listing devices again", name)
 	}
 }

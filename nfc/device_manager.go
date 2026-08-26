@@ -2,7 +2,6 @@ package nfc
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"sync"
 	"time"
@@ -151,9 +150,9 @@ func (dm *DeviceManager) emitEvent(eventType DeviceEventType, message string, er
 
 	select {
 	case eventChan <- event:
-		log.Printf("Device event emitted: %s - %s", eventType, message)
+		readerLog.Printf("Device event emitted: %s - %s", eventType, message)
 	default:
-		log.Printf("Warning: Device event channel full, dropping event: %s", eventType)
+		readerWarn.Printf("Warning: Device event channel full, dropping event: %s", eventType)
 	}
 }
 
@@ -209,14 +208,14 @@ func (dm *DeviceManager) TryConnect() error {
 		// Quick check if device is responsive (if it supports health checking)
 		if checker, ok := currentDevice.(DeviceHealthChecker); ok {
 			if healthErr := checker.IsHealthy(); healthErr == nil {
-				log.Println("Device already connected and responsive.")
+				readerLog.Println("Device already connected and responsive.")
 				return nil
 			} else {
-				log.Printf("Device was marked connected, but health check failed: %v. Attempting full reconnect.", healthErr)
+				readerWarn.Printf("Device was marked connected, but health check failed: %v. Attempting full reconnect.", healthErr)
 			}
 		} else {
 			// Device doesn't support health checking, assume it's still good
-			log.Println("Device already connected (no health check available).")
+			readerLog.Println("Device already connected (no health check available).")
 			return nil
 		}
 		dm.mu.Lock()
@@ -246,7 +245,7 @@ func (dm *DeviceManager) TryConnect() error {
 	dm.lastErr = ""
 	dm.mu.Unlock()
 
-	log.Printf("Successfully connected to device: %s", newDevice.String())
+	readerLog.Printf("Successfully connected to device: %s", newDevice.String())
 	dm.emitEvent(DeviceConnected, fmt.Sprintf("Connected to %s", newDevice.String()), nil)
 	return nil
 }
@@ -310,12 +309,12 @@ func (dm *DeviceManager) reconnectDevice(forceMode bool, stopChan <-chan struct{
 		maxAttempts = 3
 	}
 
-	log.Printf("%s: Attempting to reconnect device (path hint: %s)...", logPrefix, dm.devicePath)
+	readerLog.Printf("%s: Attempting to reconnect device (path hint: %s)...", logPrefix, dm.devicePath)
 
 	// Close existing device
 	dm.mu.Lock()
 	if dm.hasDevice && dm.device != nil {
-		log.Printf("%s: Closing existing device connection.", logPrefix)
+		readerLog.Printf("%s: Closing existing device connection.", logPrefix)
 		_ = dm.device.Close()
 		dm.device = nil
 		dm.hasDevice = false
@@ -324,11 +323,11 @@ func (dm *DeviceManager) reconnectDevice(forceMode bool, stopChan <-chan struct{
 
 	// For force mode, wait for device reset
 	if forceMode {
-		log.Println("Waiting for device to reset after close...")
+		readerLog.Println("Waiting for device to reset after close...")
 		select {
 		case <-dm.clock.After(DeviceResetWaitTime):
 		case <-stopChan:
-			log.Printf("%s: Stop signal received during wait, aborting.", logPrefix)
+			readerLog.Printf("%s: Stop signal received during wait, aborting.", logPrefix)
 			return fmt.Errorf("reconnection aborted by stop signal")
 		}
 	}
@@ -337,12 +336,12 @@ func (dm *DeviceManager) reconnectDevice(forceMode bool, stopChan <-chan struct{
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		connectErr := dm.TryConnect()
 		if connectErr == nil {
-			log.Printf("%s: Attempt %d successful.", logPrefix, attempt)
+			readerLog.Printf("%s: Attempt %d successful.", logPrefix, attempt)
 			return nil
 		}
 
 		lastErr = connectErr
-		log.Printf("%s: Attempt %d failed: %v", logPrefix, attempt, connectErr)
+		readerWarn.Printf("%s: Attempt %d failed: %v", logPrefix, attempt, connectErr)
 
 		// Calculate backoff delay
 		var backoffDelay time.Duration
@@ -354,14 +353,14 @@ func (dm *DeviceManager) reconnectDevice(forceMode bool, stopChan <-chan struct{
 
 		select {
 		case <-stopChan:
-			log.Printf("%s: Stop signal received, aborting reconnection.", logPrefix)
+			readerLog.Printf("%s: Stop signal received, aborting reconnection.", logPrefix)
 			return fmt.Errorf("reconnection aborted by stop signal")
 		case <-dm.clock.After(backoffDelay):
 		}
 	}
 
 	errMsg := fmt.Sprintf("%s failed after %d attempts: %v", logPrefix, maxAttempts, lastErr)
-	log.Println(errMsg)
+	readerFail.Println(errMsg)
 	return fmt.Errorf("%s", errMsg)
 }
 
@@ -370,9 +369,9 @@ func (dm *DeviceManager) Close() {
 	dm.mu.Lock()
 	shouldEmit := dm.hasDevice && dm.device != nil
 	if shouldEmit {
-		log.Println("Closing device in DeviceManager.")
+		readerLog.Println("Closing device in DeviceManager.")
 		if err := dm.device.Close(); err != nil {
-			log.Printf("Error closing device: %v", err)
+			readerFail.Printf("Error closing device: %v", err)
 		}
 		dm.device = nil
 		dm.hasDevice = false
@@ -418,13 +417,13 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 
 	repeat := dm.recordError(err)
 	if !repeat {
-		log.Printf("Device error: %v", err)
+		readerFail.Printf("Device error: %v", err)
 	}
 
 	// Handle IO/Config errors
 	if IsIOError(err) || IsDeviceConfigError(err) {
 		if !repeat {
-			log.Printf("Device error detected (IO/Config): %v. Closing device.", err)
+			readerFail.Printf("Device error detected (IO/Config): %v. Closing device.", err)
 		}
 		dm.mu.Lock()
 		if dm.hasDevice && dm.device != nil {
@@ -441,7 +440,7 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			dm.mu.Lock()
 			if !dm.inCooldown {
 				dm.inCooldown = true
-				log.Printf("ACR122-like error. Entering cooldown for %v", DeviceErrorCooldownPeriod)
+				readerWarn.Printf("ACR122-like error. Entering cooldown for %v", DeviceErrorCooldownPeriod)
 				dm.cooldownTimer.Reset(DeviceErrorCooldownPeriod)
 			}
 			dm.mu.Unlock()
@@ -449,15 +448,15 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			return true
 		}
 
-		log.Println("Attempting force reconnect after IO/Config error...")
+		readerLog.Println("Attempting force reconnect after IO/Config error...")
 		dm.clock.Sleep(PostErrorPauseTime)
 		if errReconnect := dm.ForceReconnect(stopChan); errReconnect != nil {
-			log.Printf("Force reconnection failed after IO/Config error: %v", errReconnect)
+			readerFail.Printf("Force reconnection failed after IO/Config error: %v", errReconnect)
 			// Clear device path to enable auto-discovery of new devices
 			dm.mu.Lock()
 			dm.devicePath = ""
 			dm.mu.Unlock()
-			log.Println("Device path cleared, waiting for device connection...")
+			readerLog.Println("Device path cleared, waiting for device connection...")
 		}
 		return false
 	}
@@ -465,7 +464,7 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 	// Handle Timeout/Closed errors with retry logic using internal retry count
 	if IsTimeoutError(err) || IsDeviceClosedError(err) {
 		if !repeat {
-			log.Printf("Device error (Timeout/Closed): %v", err)
+			readerFail.Printf("Device error (Timeout/Closed): %v", err)
 		}
 
 		dm.mu.Lock()
@@ -479,7 +478,7 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			newRetry := dm.retryCount
 			dm.mu.Unlock()
 
-			log.Printf("Retrying connection (attempt %d/%d) in %v...", newRetry, MaxRetries, delay)
+			readerWarn.Printf("Retrying connection (attempt %d/%d) in %v...", newRetry, MaxRetries, delay)
 			dm.emitEvent(DeviceReconnecting, fmt.Sprintf("Retry attempt %d/%d", newRetry, MaxRetries), nil)
 
 			select {
@@ -488,17 +487,17 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 				return false
 			}
 			if errReconnect := dm.Reconnect(stopChan); errReconnect != nil {
-				log.Printf("Device reconnection failed: %v", errReconnect)
+				readerFail.Printf("Device reconnection failed: %v", errReconnect)
 				dm.emitEvent(DeviceReconnectFailed, fmt.Sprintf("Reconnection attempt %d failed", newRetry), errReconnect)
 			} else {
-				log.Println("Reconnected successfully.")
+				readerLog.Println("Reconnected successfully.")
 				dm.mu.Lock()
 				dm.retryCount = 0
 				dm.lastErr = ""
 				dm.mu.Unlock()
 			}
 		} else {
-			log.Printf("Max retries reached for Timeout/Closed error: %v. Closing device.", err)
+			readerFail.Printf("Max retries reached for Timeout/Closed error: %v. Closing device.", err)
 			dm.mu.Lock()
 			if dm.hasDevice && dm.device != nil {
 				_ = dm.device.Close()
@@ -510,10 +509,10 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			if !dm.inCooldown {
 				dm.inCooldown = true
 				dm.cooldownTimer.Reset(MaxRetriesCooldownPeriod)
-				log.Println("Entering long cooldown after max retries for Timeout/Closed error.")
+				readerWarn.Println("Entering long cooldown after max retries for Timeout/Closed error.")
 			}
 			dm.mu.Unlock()
-			log.Println("Device path cleared, waiting for device connection...")
+			readerLog.Println("Device path cleared, waiting for device connection...")
 			dm.emitEvent(CooldownStarted, "Max retries reached, entering cooldown", err)
 			return true
 		}
@@ -526,13 +525,13 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 
 // EndCooldown ends the current cooldown period and attempts to reconnect.
 func (dm *DeviceManager) EndCooldown(stopChan <-chan struct{}) {
-	log.Println("Device cooldown period ended.")
+	readerLog.Println("Device cooldown period ended.")
 	dm.mu.Lock()
 	dm.inCooldown = false
 	dm.mu.Unlock()
 	dm.emitEvent(CooldownEnded, "Cooldown period ended, attempting reconnect", nil)
 	if err := dm.ForceReconnect(stopChan); err != nil {
-		log.Printf("Reconnection after cooldown failed: %v.", err)
+		readerFail.Printf("Reconnection after cooldown failed: %v.", err)
 	}
 }
 

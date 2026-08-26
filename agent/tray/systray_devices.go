@@ -2,7 +2,6 @@ package tray
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -60,7 +59,7 @@ func (s *App) refreshDevicesMenu() {
 	}
 
 	if dropped := s.pairedDevices.Set(rows); dropped > 0 {
-		log.Printf("[systray] %d more devices are paired than the menu can show; revoke from the control center", dropped)
+		trayWarn.Printf("%d more devices are paired than the menu can show; revoke from the control center", dropped)
 	}
 
 	if len(devices) == 0 {
@@ -82,7 +81,7 @@ func (s *App) handleRequirePaired() {
 	if on && s.agent.Devices() != nil && s.agent.Devices().Count() == 0 {
 		// Turning this on with nothing paired locks out every device, which is
 		// unlikely to be what the operator meant from this menu.
-		log.Printf("[systray] Not requiring pairing: no devices are paired, so every device would be refused")
+		trayWarn.Printf("Not requiring pairing: no devices are paired, so every device would be refused")
 		s.mRequirePaired.SetChecked(false)
 		return
 	}
@@ -90,9 +89,9 @@ func (s *App) handleRequirePaired() {
 	s.agent.SetRequirePairedDevice(on)
 
 	if s.agent.RequirePairedDevice() {
-		log.Printf("[systray] Requiring paired devices; the shared secret no longer admits one")
+		trayLog.Printf("Requiring paired devices; the shared secret no longer admits one")
 	} else {
-		log.Printf("[systray] No longer requiring paired devices")
+		trayLog.Printf("No longer requiring paired devices")
 	}
 
 	s.refreshDevicesMenu()
@@ -105,11 +104,11 @@ func (s *App) revokeDevice(id string) {
 	}
 
 	if err := s.agent.Devices().Revoke(id); err != nil {
-		log.Printf("[systray] Failed to revoke device %s: %v", id, err)
+		trayFail.Printf("Failed to revoke device %s: %v", id, err)
 		return
 	}
 
-	log.Printf("[systray] Revoked device %s", id)
+	trayLog.Printf("Revoked device %s", id)
 	s.refreshDevicesMenu()
 }
 
@@ -120,10 +119,10 @@ func (s *App) handleRevokeAllDevices() {
 	}
 
 	if err := s.agent.Devices().RevokeAll(); err != nil {
-		log.Printf("[systray] Failed to revoke devices: %v", err)
+		trayFail.Printf("Failed to revoke devices: %v", err)
 		return
 	}
 
-	log.Printf("[systray] Revoked all paired devices")
+	trayLog.Printf("Revoked all paired devices")
 	s.refreshDevicesMenu()
 }

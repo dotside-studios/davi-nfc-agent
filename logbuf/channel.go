@@ -3,7 +3,6 @@ package logbuf
 import (
 	"io"
 	"log"
-	"os"
 	"sync/atomic"
 )
 
@@ -14,15 +13,15 @@ var installed atomic.Pointer[sinks]
 
 type sinks struct{ info, warn, errors io.Writer }
 
-// Install makes r the ring that [Channel] loggers write into, alongside the
-// process's stderr. A program showing its log in a console installs the ring
+// Install makes r the ring that [Channel] loggers write into, besides wherever
+// the standard logger's output goes. A program showing its log in a console installs the ring
 // the console reads:
 //
 //	logs := logbuf.New(logbuf.DefaultCapacity)
 //	logbuf.Install(logs)
 //
 // A program that shows its log nowhere never calls it, and the channels write
-// to stderr alone. Installing nil goes back to that.
+// only where the standard logger writes. Installing nil goes back to that.
 //
 // It is process-wide, as the standard logger's own output is. Call it before
 // the parts that log start running.
@@ -54,13 +53,13 @@ func Channel(name string, level Level) *log.Logger {
 	return log.New(channelWriter{level: level}, "["+name+"] ", log.LstdFlags)
 }
 
-// channelWriter sends a line to stderr and to the installed ring at its level.
-// The ring is read per write, so a channel built before Install still lands in
-// it, which is what a package-level channel needs.
+// channelWriter sends a line where the program's log goes, and to the installed
+// ring at its level. Both are read per write, so a channel built at package
+// load follows a later [log.SetOutput] and lands in a ring installed after it.
 type channelWriter struct{ level Level }
 
 func (w channelWriter) Write(p []byte) (int, error) {
-	n, err := os.Stderr.Write(p)
+	n, err := log.Default().Writer().Write(p)
 
 	if s := installed.Load(); s != nil {
 		if to := s.at(w.level); to != nil {

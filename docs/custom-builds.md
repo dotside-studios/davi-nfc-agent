@@ -41,11 +41,11 @@ import (
 func main() {
 	opts := agent.DefaultOptions()
 
-	// The console reads its log from this ring. Installing it as the log sink
-	// before Setup is what captures the startup sequence; the agent never
-	// touches the process logger itself.
+	// The console reads its log from this ring. Install names it to the
+	// packages that report on their own channels, and Options hands the same
+	// ring to the agent, for its own log and its plugins'.
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
-	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
+	logbuf.Install(opts.Logs)
 
 	// The driver serving phones. What it scans and what its devices hold reach
 	// the agent through the manager below; its endpoint is mounted with the
@@ -422,7 +422,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `event` | The signal the agent and the menus publish their callbacks on |
 | `clipboard` | Copying text to the system clipboard |
 | `traymenu/fynetray` | The real tray, on `fyne.io/systray` |
-| `tls`, `logbuf` | Certificates, the log ring |
+| `tls`, `logbuf` | Certificates, and the log ring with the named channels that write into it |
 | `e2e` | Tests only: an agent wired as on this page, driven over its protocols |
 
 Dependencies run in one direction. `agent/console` and `agent/tray` import

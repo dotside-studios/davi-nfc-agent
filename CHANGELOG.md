@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `logbuf.Channel` gives a package a logger under a name at a level, and
+  `logbuf.Install` names the ring those write into. `nfc`, `nfc/remotenfc`,
+  `nfc/multimanager`, `nfc/pcsc`, `server`, `server/clientserver`,
+  `server/listener`, `agent` and the tray and console report on channels
+  rather than writing a prefix into each call, so what the console shows as a
+  source is declared once and what it shows as a failure is what the caller
+  called one
 - `AgentContext.LoggerAt` and `Agent.LoggerAt` write on a channel at a stated
   level, and `logbuf.Ring.At` is the writer behind them. A line is a failure
   because the caller said so

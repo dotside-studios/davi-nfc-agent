@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 	"sync"
@@ -161,7 +160,7 @@ func (s *Server) Disconnect(clientID string) bool {
 		return false
 	}
 
-	log.Printf("[client] Disconnecting client %s at an operator's request", clientID[:8])
+	clientLog.Printf("Disconnecting client %s at an operator's request", clientID[:8])
 	_ = target.Close()
 	return true
 }
@@ -209,13 +208,13 @@ func (s *Server) clientCount() int {
 // handleWebSocket handles WebSocket connections from clients.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if _, ok := server.CheckAuth(w, r, s.apiSecret(), s.config.TokenVerifier); !ok {
-		log.Printf("[client] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
+		clientWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}
 
 	wsConn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[client] WebSocket upgrade error: %v", err)
+		clientFail.Printf("WebSocket upgrade error: %v", err)
 		return
 	}
 
@@ -234,14 +233,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clientsMux.Unlock()
 	s.notifyChange()
 
-	log.Printf("[client] Client connected: %s (total: %d)", clientID[:8], s.clientCount())
+	clientLog.Printf("Client connected: %s (total: %d)", clientID[:8], s.clientCount())
 
 	defer func() {
 		_ = conn.Close()
 		s.clientsMux.Lock()
 		delete(s.clients, conn)
 		s.clientsMux.Unlock()
-		log.Printf("[client] Client disconnected: %s (total: %d)", clientID[:8], s.clientCount())
+		clientLog.Printf("Client disconnected: %s (total: %d)", clientID[:8], s.clientCount())
 		s.notifyChange()
 	}()
 
@@ -250,14 +249,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("[client] WebSocket read error: %v", err)
+				clientWarn.Printf("WebSocket read error: %v", err)
 			}
 			break
 		}
 
 		var req protocol.WebSocketRequest
 		if err := json.Unmarshal(message, &req); err != nil {
-			log.Printf("[client] Failed to parse message: %v", err)
+			clientWarn.Printf("Failed to parse message: %v", err)
 			s.sendErrorResponse(conn, "", protocol.ErrCodeParse, "Invalid message format")
 			continue
 		}
@@ -276,7 +275,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.countOperation(conn, "transceive")
 			s.handleTransceiveRequest(conn, clientID, req)
 		default:
-			log.Printf("[client] Unknown message type: %s", req.Type)
+			clientWarn.Printf("Unknown message type: %s", req.Type)
 			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
 		}
 	}
@@ -506,7 +505,7 @@ func (s *Server) sendTagDataToClient(conn *wsconn.SafeConn, data nfc.NFCData) {
 	}
 
 	if err := conn.WriteJSON(message); err != nil {
-		log.Printf("[client] Failed to send tag data: %v", err)
+		clientFail.Printf("Failed to send tag data: %v", err)
 	}
 }
 
@@ -522,7 +521,7 @@ func (s *Server) broadcastDeviceStatus(status nfc.DeviceStatus) {
 
 	for conn := range s.clients {
 		if err := conn.WriteJSON(message); err != nil {
-			log.Printf("[client] Failed to send device status: %v", err)
+			clientFail.Printf("Failed to send device status: %v", err)
 		}
 	}
 }
@@ -538,7 +537,7 @@ func (s *Server) sendErrorResponse(conn *wsconn.SafeConn, requestID string, erro
 	}
 
 	if err := conn.WriteJSON(response); err != nil {
-		log.Printf("[client] Failed to send error response: %v", err)
+		clientFail.Printf("Failed to send error response: %v", err)
 	}
 }
 
@@ -561,7 +560,7 @@ func (s *Server) sendOperationError(conn *wsconn.SafeConn, requestID string, fal
 	}
 
 	if writeErr := conn.WriteJSON(response); writeErr != nil {
-		log.Printf("[client] Failed to send error response: %v", writeErr)
+		clientFail.Printf("Failed to send error response: %v", writeErr)
 	}
 }
 

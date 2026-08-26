@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"log"
 )
 
 // dispatch routes a console action to the code that performs it. Named actions
@@ -133,7 +132,7 @@ func (c *Server) dispatch(req action) (any, error) {
 		}
 		if params.Enabled {
 			// Never persisted, matching the tray.
-			log.Printf("Warning: origin checking disabled for this session from the control center; any site the operator visits can drive the reader")
+			consoleWarn.Printf("Origin checking disabled for this session from the control center; any site the operator visits can drive the reader")
 		}
 		c.host.SetOriginCheckDisabled(params.Enabled)
 		return nil, nil

@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -99,7 +98,7 @@ func BuildNDEFMessage(writeReq WriteRequest) (*nfc.NDEFMessage, error) {
 		return nil, fmt.Errorf("failed to build NDEF message: %w", err)
 	}
 
-	log.Printf("WriteRequest: Writing %d NDEF record(s) (complete overwrite)", len(recordBuilders))
+	deviceLog.Printf("WriteRequest: Writing %d NDEF record(s) (complete overwrite)", len(recordBuilders))
 	return ndefMsg, nil
 }
 

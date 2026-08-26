@@ -2,7 +2,6 @@ package remotenfc
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -164,7 +163,7 @@ func (m *Manager) registerDevice(deviceID string, req DeviceRegistrationRequest)
 	m.devices[deviceID] = device
 	m.mu.Unlock()
 
-	log.Printf("[smartphone] Device registered: %s (%s, %s)", device.String(), req.Platform, req.AppVersion)
+	managerLog.Printf("Device registered: %s (%s, %s)", device.String(), req.Platform, req.AppVersion)
 
 	// Notify listeners
 	m.notifyDeviceChange()
@@ -187,10 +186,10 @@ func (m *Manager) UnregisterDevice(deviceID string) error {
 
 	// Close the device
 	if err := device.Close(); err != nil {
-		log.Printf("[smartphone] Error closing device %s: %v", deviceID, err)
+		managerFail.Printf("Error closing device %s: %v", deviceID, err)
 	}
 
-	log.Printf("[smartphone] Device unregistered: %s", device.String())
+	managerLog.Printf("Device unregistered: %s", device.String())
 
 	// Notify listeners
 	m.notifyDeviceChange()
@@ -229,7 +228,7 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	select {
 	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: tag}:
 	default:
-		log.Printf("[smartphone] Data channel full, dropping tag data for device %s", deviceID)
+		managerWarn.Printf("Data channel full, dropping tag data for device %s", deviceID)
 	}
 
 	// Update heartbeat
@@ -269,9 +268,9 @@ func (m *Manager) SendTagRemoved(deviceID string, data TagRemovedData) error {
 	// Broadcast removal via data channel (Card: nil signals removal)
 	select {
 	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: nil}:
-		log.Printf("[smartphone] Tag removed: device=%s, UID=%s", deviceID, data.UID)
+		managerLog.Printf("Tag removed: device=%s, UID=%s", deviceID, data.UID)
 	default:
-		log.Printf("[smartphone] Data channel full, dropping tag removal for device %s", deviceID)
+		managerWarn.Printf("Data channel full, dropping tag removal for device %s", deviceID)
 	}
 
 	// Update heartbeat
@@ -326,13 +325,13 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	for deviceID, device := range m.devices {
 		if err := device.Close(); err != nil {
-			log.Printf("[smartphone] Error closing device %s: %v", deviceID, err)
+			managerFail.Printf("Error closing device %s: %v", deviceID, err)
 		}
 	}
 	m.devices = make(map[string]*Device)
 	m.mu.Unlock()
 
-	log.Printf("[smartphone] Manager closed")
+	managerLog.Printf("Manager closed")
 }
 
 // startCleanupRoutine starts a background goroutine to cleanup inactive devices.
@@ -364,7 +363,7 @@ func (m *Manager) cleanupInactiveDevices() {
 	var stale []string
 	for deviceID, device := range m.devices {
 		if since := now.Sub(device.LastSeen()); since > m.inactivityTimeout {
-			log.Printf("[smartphone] Device silent for %v, dropping: %s", since, device.String())
+			managerWarn.Printf("Device silent for %v, dropping: %s", since, device.String())
 			stale = append(stale, deviceID)
 		}
 	}
@@ -377,7 +376,7 @@ func (m *Manager) cleanupInactiveDevices() {
 			continue
 		}
 		if err := m.UnregisterDevice(deviceID); err != nil {
-			log.Printf("[smartphone] Failed to unregister silent device %s: %v", deviceID, err)
+			managerFail.Printf("Failed to unregister silent device %s: %v", deviceID, err)
 		}
 	}
 }

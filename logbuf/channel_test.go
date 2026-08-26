@@ -1,6 +1,9 @@
 package logbuf
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 )
 
@@ -57,5 +60,25 @@ func TestAChannelWithNoRingInstalledStillWrites(t *testing.T) {
 
 	if _, err := Channel("device", LevelError).Writer().Write([]byte("a line\n")); err != nil {
 		t.Errorf("writing with no ring installed: %v", err)
+	}
+}
+
+// A channel follows the standard logger's output, so a test or a program that
+// redirects the process log gets the channels with it.
+func TestAChannelFollowsTheStandardLoggersOutput(t *testing.T) {
+	Install(nil)
+
+	var buf bytes.Buffer
+	was := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(was) })
+
+	Channel("device", LevelError).Print("a redirected failure")
+
+	if !strings.Contains(buf.String(), "a redirected failure") {
+		t.Errorf("the redirected log holds %q, want the channel's line", buf.String())
+	}
+	if !strings.Contains(buf.String(), "[device]") {
+		t.Errorf("the redirected line %q does not carry the channel's name", buf.String())
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -311,7 +310,7 @@ func (m *Manager) handleDeviceResponse(deviceID string, req protocol.WebSocketRe
 	m.pendingMu.Unlock()
 
 	if !ok {
-		log.Printf("[device] Unmatched %s from %s: %s", req.Type, deviceID, requestID)
+		deviceWarn.Printf("Unmatched %s from %s: %s", req.Type, deviceID, requestID)
 		return nil
 	}
 

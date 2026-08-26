@@ -30,7 +30,7 @@ func copyValue(logger *log.Logger, what, value string) {
 		return
 	}
 
-	logf := log.Printf
+	logf := agentLog.Printf
 	if logger != nil {
 		logf = logger.Printf
 	}

@@ -110,8 +110,8 @@ func (a *Agent) Events() *Events { return &a.events }
 // agent is handed out.
 func (a *Agent) watchStores() {
 	if a.origins != nil {
-		a.origins.changed.Connect(a.fireOriginsChanged)
-		a.origins.rejected.Connect(a.fireOriginBlocked)
+		a.origins.OnChange(func() { a.fireOriginsChanged(a.origins.List()) })
+		a.origins.OnBlocked(a.fireOriginBlocked)
 	}
 	if a.devices != nil {
 		a.devices.changed.Connect(a.fireDevicesChanged)

@@ -2,14 +2,13 @@ package agent
 
 import (
 	"log"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -179,12 +178,12 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// The allowlist persists in the config dir and starts with the first-party
 	// consoles, so the shipped console connects on a fresh install. Anything
 	// passed on the command line is added to it.
-	origins, err := NewOriginStore(configDir)
+	origins, err := server.NewOriginStore(configDir)
 	if err != nil {
 		log.Printf("Warning: failed to load origin allowlist: %v", err)
-		origins, _ = NewOriginStore("")
+		origins, _ = server.NewOriginStore("")
 	}
-	for _, origin := range ParseAllowedOrigins(opts.AllowedOrigins) {
+	for _, origin := range server.ParseAllowedOrigins(opts.AllowedOrigins) {
 		if origin == "*" {
 			log.Printf("Warning: -allowed-origins \"*\" disables the origin check; any site the operator visits can drive the reader")
 			origins.SessionAllowAny(true)
@@ -267,39 +266,4 @@ func DefaultConfigDir(dirName string) string {
 		configDir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(configDir, dirName)
-}
-
-// ParseAllowedOrigins turns the comma-separated flag (or DAVI_NFC_ALLOWED_ORIGINS)
-// into the host:port list CheckOrigin matches against.
-//
-// Full URLs are accepted and reduced to their host:port, because that is what
-// people paste and the alternative is a silently ignored entry: an origin that
-// does not match is indistinguishable from one that was never configured.
-func ParseAllowedOrigins(flagValue string) []string {
-	raw := flagValue
-	if raw == "" {
-		raw = os.Getenv("DAVI_NFC_ALLOWED_ORIGINS")
-	}
-	if raw == "" {
-		return nil
-	}
-
-	var origins []string
-	for _, entry := range strings.Split(raw, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		if entry == "*" {
-			origins = append(origins, entry)
-			continue
-		}
-		if strings.Contains(entry, "://") {
-			if u, err := url.Parse(entry); err == nil && u.Host != "" {
-				entry = u.Host
-			}
-		}
-		origins = append(origins, strings.TrimSuffix(entry, "/"))
-	}
-	return origins
 }

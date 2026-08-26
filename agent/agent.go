@@ -81,7 +81,7 @@ type Config struct {
 	// Origins is the live allowlist. Unlike AllowedOrigins its contents can
 	// change while the agent runs, and it reports rejections so they can be
 	// surfaced. The store is mutable; which store is in use is not.
-	Origins *OriginStore
+	Origins *server.OriginStore
 
 	// Devices holds the paired devices and their per-device credentials.
 	Devices *DeviceRegistry
@@ -159,7 +159,7 @@ type Agent struct {
 	apiSecret           string
 	configDir           string
 	allowedOrigins      []string
-	origins             *OriginStore
+	origins             *server.OriginStore
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
@@ -282,11 +282,11 @@ func (a *Agent) Readers() []string {
 	}
 	return readers
 }
-func (a *Agent) Logger() *log.Logger      { return a.logger }
-func (a *Agent) APISecret() string        { return a.apiSecret }
-func (a *Agent) ConfigDir() string        { return a.configDir }
-func (a *Agent) Origins() *OriginStore    { return a.origins }
-func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+func (a *Agent) Logger() *log.Logger          { return a.logger }
+func (a *Agent) APISecret() string            { return a.apiSecret }
+func (a *Agent) ConfigDir() string            { return a.configDir }
+func (a *Agent) Origins() *server.OriginStore { return a.origins }
+func (a *Agent) Devices() *DeviceRegistry     { return a.devices }
 
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none.

@@ -1,8 +1,9 @@
-package agent
+package server
 
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,8 +29,9 @@ var defaultAllowedOrigins = []string{
 	"localhost:3002",
 }
 
-// OriginStore is the agent's allowlist: the persisted set, plus any origin
-// allowed for this run only, plus the rejections the tray offers to allow.
+// OriginStore is the allowlist of pages permitted to use this agent: the
+// persisted set, plus any origin allowed for this run only, plus the rejections
+// a menu offers to allow.
 //
 // It is consulted on every upgrade, so reads are cheap and writes are rare.
 type OriginStore struct {
@@ -271,4 +273,39 @@ func normalizeOrigin(origin string) string {
 		origin = origin[:i]
 	}
 	return strings.ToLower(origin)
+}
+
+// ParseAllowedOrigins turns the comma-separated flag (or DAVI_NFC_ALLOWED_ORIGINS)
+// into the host:port list CheckOrigin matches against.
+//
+// Full URLs are accepted and reduced to their host:port, because that is what
+// people paste and the alternative is a silently ignored entry: an origin that
+// does not match is indistinguishable from one that was never configured.
+func ParseAllowedOrigins(flagValue string) []string {
+	raw := flagValue
+	if raw == "" {
+		raw = os.Getenv("DAVI_NFC_ALLOWED_ORIGINS")
+	}
+	if raw == "" {
+		return nil
+	}
+
+	var origins []string
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if entry == "*" {
+			origins = append(origins, entry)
+			continue
+		}
+		if strings.Contains(entry, "://") {
+			if u, err := url.Parse(entry); err == nil && u.Host != "" {
+				entry = u.Host
+			}
+		}
+		origins = append(origins, strings.TrimSuffix(entry, "/"))
+	}
+	return origins
 }

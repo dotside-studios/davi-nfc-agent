@@ -8,6 +8,7 @@ import (
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -254,7 +255,7 @@ func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 }
 
 func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
-	store, err := nfcagent.NewOriginStore(t.TempDir())
+	store, err := server.NewOriginStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewOriginStore: %v", err)
 	}
@@ -287,7 +288,7 @@ func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
 }
 
 func TestOriginsAllowAnyToggle(t *testing.T) {
-	store, err := nfcagent.NewOriginStore(t.TempDir())
+	store, err := server.NewOriginStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewOriginStore: %v", err)
 	}

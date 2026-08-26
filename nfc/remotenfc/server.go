@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/gorilla/websocket"
@@ -31,7 +32,8 @@ type ServerOptions struct {
 	// Authenticate admits or rejects a device before the upgrade, writing its
 	// own response when it rejects, and names the device it admitted. This
 	// driver speaks the device protocol and has no idea what a credential is
-	// here, so the check is supplied; see server.DeviceAuth for the agent's.
+	// here, so the check is supplied; see agent.ServerPlugin.Authenticate for
+	// the agent's.
 	//
 	// A device admitted under a name registers under it. An empty name
 	// identifies nobody, and the device is given one for the connection.
@@ -44,6 +46,25 @@ type ServerOptions struct {
 	// AllowUnauthenticated serves devices with no check at all. For a driver
 	// reached only over a trusted transport, and for tests.
 	AllowUnauthenticated bool
+
+	// Revocations reports credentials that have stopped being valid, so the
+	// sessions holding them can be ended.
+	//
+	// Authenticate runs once, at the upgrade. Without this, a device revoked
+	// while connected keeps streaming scans and accepting writes until it
+	// reconnects, which for a heartbeating device is never. It sits beside
+	// Authenticate because a missing subscription is otherwise invisible:
+	// everything works and revocation quietly does not.
+	//
+	// Nil where credentials cannot be revoked one at a time, such as a single
+	// shared secret.
+	Revocations RevocationSource
+}
+
+// RevocationSource is the part of a credential store this driver needs: which
+// devices have just lost their credential. See agent.DeviceRegistry.
+type RevocationSource interface {
+	OnRevoke(fn func(ids []string)) *event.Connection
 }
 
 // Handler returns the HTTP handler serving device connections.
@@ -56,9 +77,19 @@ type ServerOptions struct {
 // an open device endpoint. Forgetting the check is otherwise silent: the
 // upgrade succeeds and the device registers.
 func (m *Manager) Handler(opts ServerOptions) http.Handler {
+	var revocations *event.Connection
+	if opts.Revocations != nil {
+		revocations = opts.Revocations.OnRevoke(func(ids []string) {
+			for _, id := range ids {
+				m.DisconnectDevice(id, "device revoked")
+			}
+		})
+	}
+
 	m.mu.Lock()
 	m.publicKeyPin = opts.PublicKeyPin
 	m.allowTagModification = opts.AllowTagModification
+	m.revocations = revocations
 	m.mu.Unlock()
 
 	if opts.Authenticate == nil && !opts.AllowUnauthenticated {
@@ -117,6 +148,8 @@ func (e *deviceEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) serveSession(conn *wsconn.SafeConn, admitted string) {
 	var deviceID string
 	reason := DisconnectDropped
+
+	conn.SetReadLimit(MaxDeviceMessageSize)
 
 	defer func() {
 		_ = conn.Close()

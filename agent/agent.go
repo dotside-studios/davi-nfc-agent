@@ -90,7 +90,7 @@ type Config struct {
 	// RequirePairedDevice admits only devices holding a paired credential,
 	// withdrawing the shared secret and loopback bypass for device
 	// connections. Browser clients are unaffected. Changeable at runtime
-	// through SetRequirePairedDevice, which also tells the running server.
+	// through SetRequirePairedDevice.
 	RequirePairedDevice bool
 
 	// ReaderFeedback has the reader flash its LED and sound its buzzer at what
@@ -113,10 +113,6 @@ type Config struct {
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// DeviceAuth gates the device endpoint. Built with the agent, so a caller
-	// can put its device endpoint behind it before anything runs.
-	DeviceAuth *server.DeviceAuth
-
 	// lastCard is the most recent scan the agent reported, kept here rather
 	// than in whatever it was reported to: the readers a run opens are rebuilt
 	// by every start, and the card on one is still there afterwards.
@@ -243,10 +239,6 @@ func New(cfg Config) *Agent {
 		// Only a nil entry can fail here: the set is new, so nothing is sealed.
 		logger.Printf("Ignoring a plugin: %v", err)
 	}
-
-	// Built here rather than at start, so a caller can put its device endpoint
-	// behind it before anything runs.
-	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.TokenVerifier(), a.requirePairedDevice)
 
 	return a
 }
@@ -517,8 +509,8 @@ func (a *Agent) CurrentDevicePath() string {
 	return ""
 }
 
-// SetRequirePairedDevice changes the paired-device requirement on the running
-// device server, so the policy can be tried without a restart.
+// SetRequirePairedDevice changes the paired-device requirement. The device
+// endpoint's check reads it per connection, so this takes effect immediately.
 func (a *Agent) SetRequirePairedDevice(on bool) {
 	if a.RequirePairedDevice() == on {
 		return
@@ -528,9 +520,6 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 	a.requirePairedDevice = on
 	a.settingsMu.Unlock()
 
-	if a.DeviceAuth != nil {
-		a.DeviceAuth.SetRequirePaired(on)
-	}
 	a.firePreferencesChanged()
 }
 

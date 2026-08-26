@@ -7,8 +7,10 @@ import (
 )
 
 // What a device endpoint is built from is the agent's to answer, whoever
-// mounts it: who is admitted, what the mode allows, and the pin a device
-// recognises this agent by later.
+// mounts it: the credentials that admit a device, what the mode allows, and
+// the pin a device recognises this agent by later.
+//
+// The check built from them is [ServerPlugin.Authenticate].
 func TestTheAgentAnswersWhatADeviceEndpointNeeds(t *testing.T) {
 	rt, err := Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
@@ -16,8 +18,11 @@ func TestTheAgentAnswersWhatADeviceEndpointNeeds(t *testing.T) {
 	}
 	a := rt.Agent
 
-	if a.DeviceAuth == nil {
-		t.Error("no credential check: an endpoint built from this would serve anyone")
+	if a.APISecret() == "" {
+		t.Error("no shared secret: a device endpoint built from this would admit anyone")
+	}
+	if a.TokenVerifier() == nil {
+		t.Error("no token verifier: a paired device could not be recognised")
 	}
 	if !a.TagModificationAllowed() {
 		t.Error("no mode gate: read-only would not reach a device")

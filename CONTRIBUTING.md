@@ -128,7 +128,7 @@ davi-nfc-agent/
 │   │                    #   WebSocket endpoint they connect to
 │   └── multimanager/    # Multiple manager aggregation
 ├── server/              # The bridge between tag sources and clients, and the
-│   │                    #   device credential check
+│   │                    #   credential checks both endpoints are gated by
 │   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
 │   ├── clientserver/    # Client connections, and the tag operations they ask
 │   │                    #   for, resolved against whatever holds the tag

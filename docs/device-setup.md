@@ -27,12 +27,35 @@ whatever network the device is on.
 Pairing exchanges the PIN shown on the kiosk for a credential belonging to this
 device. Do it once.
 
+### Read the pairing QR off the kiosk screen
+
+The agent prints a QR at startup, next to the PIN, encoding:
+
 ```
-POST http://<agent-host>:9472/pair?pin=123456
+davi-pair://<agent-host>:9470/?spki=sha256%2F47DE…&code=123456&name=Davi%20NFC%20Agent
+```
+
+`spki` is the agent's public key pin and `code` is the pairing PIN. Read this
+off the screen. A QR fetched over the network carries no more authority than the
+connection that served it, and the pin is the value that authenticates that
+connection.
+
+### Post to /pair over TLS pinned to `spki`
+
+Pairing is served from the agent's own port, which serves the certificate
+`spki` covers. Pin the connection to `spki` before sending anything.
+
+```
+POST https://<agent-host>:9470/pair?pin=123456
 Content-Type: application/json
 
 {"deviceName": "Warehouse iPhone", "platform": "ios"}
 ```
+
+Pairing over a cleartext connection is refused (`426 Upgrade Required`) from
+anything but loopback: the response carries a durable token and the key pin, so
+issuing it in the clear hands both to an observer and lets an active attacker
+substitute a pin of their own.
 
 ```json
 {
@@ -47,9 +70,17 @@ Store `deviceToken` and `publicKeyPin` in the keychain / keystore. **The token
 is shown once**, since the agent keeps only a hash of it, so losing it means
 pairing again.
 
+`publicKeyPin` in the response repeats the `spki` the QR carried. They must
+match; a mismatch means the QR did not come from this agent.
+
 The PIN is on the kiosk: system tray, agent logs, and the pairing page at
 `http://<agent-host>:9472`. Five wrong attempts lock pairing until the agent
 restarts.
+
+Port 9472 is the cleartext bootstrap listener. It serves the setup page and
+hands out the local certificate authority to a device that does not trust the
+agent's certificate yet, which is why it is not TLS. Pairing is not served from
+it.
 
 ## 2. Connect
 

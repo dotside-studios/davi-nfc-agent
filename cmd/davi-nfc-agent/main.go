@@ -88,18 +88,30 @@ func main() {
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
 		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         rt.Agent.DeviceAuth.Check,
+			Authenticate:         servers.Authenticate(),
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
+			Revocations:          rt.Agent.Devices(),
 		}),
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that
 	// hand out its address and PIN.
+	//
+	// That listener is cleartext: it hands out the certificate authority to a
+	// device that does not trust the agent's certificate yet. Pairing issues a
+	// durable credential and the key pin a device recognises this agent by, so
+	// it mounts on the listener already serving the certificate that pin
+	// covers.
 	var pairing *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
 		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
+		servers.Add(agent.Endpoint{
+			Name:    "pairing",
+			Pattern: "/pair",
+			Handler: pairing.Server.Server().PairHandler(),
+		})
 	}
 
 	app := tray.New(rt)

@@ -91,7 +91,7 @@ func main() {
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
 		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         rt.Agent.DeviceAuth.Check,
+			Authenticate:         servers.Authenticate(),
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
@@ -279,6 +279,16 @@ servers := &agent.ServerPlugin{
 }
 pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
 
+// Pairing issues a durable credential and the key pin a device recognises this
+// agent by, so it is served from the listener that already serves the
+// certificate that pin covers. Port 9472 stays cleartext: it hands out the
+// certificate authority to a device that does not trust that certificate yet.
+servers.Add(agent.Endpoint{
+	Name:    "pairing",
+	Pattern: "/pair",
+	Handler: pairing.Server.Server().PairHandler(),
+})
+
 rt.Agent.Plugins.Add(servers, pairing, trust)
 ```
 
@@ -322,6 +332,14 @@ same decision for a handler mounted beside it, and `servers.OriginPolicy()` the
 same for anything taking a `server.OriginPolicy`. Both resolve per request, so
 they can be handed over before the plugin has a store and follow an origin
 allowed while the agent runs.
+
+The credential check for a device endpoint is the plugin's too.
+`servers.Authenticate()` is what a build passes as
+`remotenfc.ServerOptions.Authenticate`. It reads `RequirePairedDevice()`,
+`APISecret()` and `TokenVerifier()` off the agent per request, so rotating the
+secret or requiring pairing needs nothing rebuilt, and it can be handed over
+before the plugin activates. One taken from a plugin that never activates
+admits nobody.
 
 The clients connected right now are reported through the plugin:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
@@ -413,7 +431,7 @@ overriding only `DirName` is enough to stop two builds colliding on disk.
 | `nfc/pcsc` | The PC/SC hardware backend |
 | `nfc/remotenfc` | Phones and WebNFC browsers: the device protocol, its WebSocket endpoint, the sessions and the tags behind them |
 | `nfc/multimanager` | Several backends behind one `nfc.Manager` |
-| `server` | The bridge between tag sources and clients, and the device credential check |
+| `server` | The bridge between tag sources and clients, and the credential checks both endpoints are gated by |
 | `server/clientserver` | The client WebSocket endpoint, and what it performs on the tag a request names |
 | `server/listener` | One HTTP listener: a port, a mux of what was mounted on it, TLS and mDNS |
 | `server/wsconn` | Write-safe WebSocket wrapper shared by the servers and the device driver |

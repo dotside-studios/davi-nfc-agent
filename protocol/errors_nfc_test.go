@@ -64,3 +64,23 @@ func TestErrorPayloadUnclassified(t *testing.T) {
 		t.Error("an unclassified error should not be retryable")
 	}
 }
+
+// Two cards in the field is user-actionable and distinct from "no card": it
+// reaches the client as a code it can switch on, not retryable, because the
+// user has to separate them first.
+func TestErrorPayloadMultipleTags(t *testing.T) {
+	payload := ErrorPayloadFor(nfc.NewMultipleTagsError("WriteData", 2))
+
+	if payload.Code != ErrCodeMultipleTags {
+		t.Errorf("Code = %s, want MULTIPLE_TAGS", payload.Code)
+	}
+	if payload.Retryable {
+		t.Error("MULTIPLE_TAGS should not be retryable: the same request fails the same way")
+	}
+	if payload.Op != "WriteData" {
+		t.Errorf("Op = %q, want WriteData", payload.Op)
+	}
+	if got := InternalErrorCode(ErrCodeMultipleTags, nfc.ErrCodeWriteFailed); got != nfc.ErrCodeMultipleTags {
+		t.Errorf("InternalErrorCode = %d, want ErrCodeMultipleTags", got)
+	}
+}

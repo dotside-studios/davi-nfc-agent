@@ -249,14 +249,43 @@ func TestGetDeviceCapabilities_EventBasedDevice(t *testing.T) {
 	if !caps.SupportsEvents {
 		t.Error("Expected SupportsEvents to be true")
 	}
-	// Event-based devices don't poll or transceive directly
-	if caps.CanTransceive {
-		t.Error("Expected CanTransceive to be false for event-based device")
-	}
 	if caps.CanPoll {
 		t.Error("Expected CanPoll to be false for event-based device")
 	}
+	// Reporting scans as events says nothing about whether the device can
+	// exchange bytes with the tag. Only DeviceTransceiver answers that, and this
+	// device does not implement it, so the default stands.
+	if !caps.CanTransceive {
+		t.Error("SupportsEvents overrode CanTransceive; only DeviceTransceiver decides it")
+	}
 }
+
+// A device that reports events and declares DeviceTransceiver is taken at its
+// word, in both directions.
+func TestGetDeviceCapabilities_EventBasedDeviceDeclaringTransceive(t *testing.T) {
+	for _, supports := range []bool{true, false} {
+		device := &mockDeviceWithTransceive{
+			mockDeviceWithInfo: mockDeviceWithInfo{
+				deviceType:        "smartphone",
+				supportedTagTypes: []string{"ISO-DEP"},
+				supportsEvents:    true,
+			},
+			supportsTransceive: supports,
+		}
+
+		if caps := GetDeviceCapabilities(device); caps.CanTransceive != supports {
+			t.Errorf("CanTransceive = %v, want %v", caps.CanTransceive, supports)
+		}
+	}
+}
+
+// mockDeviceWithTransceive declares transceive support explicitly.
+type mockDeviceWithTransceive struct {
+	mockDeviceWithInfo
+	supportsTransceive bool
+}
+
+func (m *mockDeviceWithTransceive) SupportsTransceive() bool { return m.supportsTransceive }
 
 func TestGetDeviceCapabilities_Fallback(t *testing.T) {
 	// MockDevice implements DeviceInfoProvider

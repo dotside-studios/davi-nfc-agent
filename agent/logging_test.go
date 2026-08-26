@@ -157,6 +157,44 @@ func TestAPluginChannelWritesToTheSuppliedLogger(t *testing.T) {
 	}
 }
 
+// leveling is a plugin that writes one line on each channel it was given.
+type leveling struct{ note, failure string }
+
+func (p *leveling) Name() string { return "leveling" }
+
+func (p *leveling) Activate(ctx AgentContext) error {
+	ctx.Logger().Print(p.note)
+	ctx.LoggerAt(logbuf.LevelError).Print(p.failure)
+	return nil
+}
+
+// A plugin states the severity of what it reports. It used to be read off the
+// words of the formatted line, so a device or directory carrying one decided
+// it, and a failure phrased without one did not.
+func TestAPluginStatesTheSeverityOfWhatItReports(t *testing.T) {
+	a, ring := ringAgent(t, &leveling{
+		note:    "the store is reachable at ErrorProneHost7",
+		failure: "could not reach the store",
+	})
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	note := find(t, ring, "the store is reachable")
+	if note.Level != logbuf.LevelInfo {
+		t.Errorf("a note naming ErrorProneHost7 is %q, want info", note.Level)
+	}
+	failure := find(t, ring, "could not reach the store")
+	if failure.Level != logbuf.LevelError {
+		t.Errorf("a failure phrased without the word is %q, want error", failure.Level)
+	}
+
+	// Both are still the plugin's channel.
+	if note.Source != "[leveling]" || failure.Source != "[leveling]" {
+		t.Errorf("sources are %q and %q, want the plugin's name", note.Source, failure.Source)
+	}
+}
+
 // writerFunc adapts a function to io.Writer.
 type writerFunc func(p []byte) (int, error)
 

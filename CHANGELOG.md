@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `AgentContext.LoggerAt` and `Agent.LoggerAt` write on a channel at a stated
+  level, and `logbuf.Ring.At` is the writer behind them. A line is a failure
+  because the caller said so
+
 ### Changed
 
+- `logbuf` records a line at the level it was written at rather than guessing
+  one from the text. It matched words like "failed" anywhere in the formatted
+  line, so a config directory or device name carrying one read as an error, and
+  a failure phrased without one did not. Unmarked lines are info
 - `AgentContext.Logger` is the plugin's own log channel: the agent's log,
   written under the plugin's name, so the console tells one plugin's
   diagnostics from another's and from the agent's. `Plugin.Name` decides it,

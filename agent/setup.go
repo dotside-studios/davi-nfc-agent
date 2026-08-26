@@ -28,8 +28,8 @@ const (
 // which would ask for no TLS and port 0.
 //
 // Setup resolves what it can: a blank ConfigDir becomes the platform default, a
-// blank APISecret is loaded or generated, and the origin allowlist and paired
-// devices are read from disk. What it cannot resolve it passes through, so a
+// blank APISecret is loaded or generated, and the paired devices are read from
+// disk. What it cannot resolve it passes through, so a
 // field here that names an agent setting arrives on the agent unchanged.
 type Options struct {
 	DevicePath string
@@ -184,8 +184,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// remembered from a previous run. The distinction matters below: a stored
 	// preference may raise the requirement but not withdraw one set here.
 	askedForPairing := opts.RequirePairedDevice || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
-
-	// Load persisted preferences. Explicit flags still win: something that
 
 	devicePort := opts.DevicePort
 	if devicePort == 0 {

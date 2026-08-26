@@ -127,8 +127,8 @@ func (p *PairingPlugin) Activate(ctx AgentContext) error {
 		}),
 	)
 
-	// The address follows the machine's own, so it is redrawn whenever the
-	// listeners are rebuilt as well as when the agent starts and stops.
+	// The address follows the machine's own, so it is redrawn whenever a
+	// listener binds again as well as when the agent starts and stops.
 	p.refresh()
 	ctx.Events.State.Connect(func(State) { p.refresh() })
 	ctx.Events.Servers.Connect(func(int) { p.refresh() })

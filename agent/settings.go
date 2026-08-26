@@ -26,7 +26,7 @@ type Preferences struct {
 	DevicePath string
 
 	// Port is the port the agent is set to serve on. A listener keeps the one
-	// it is bound on until it is restarted.
+	// it was built with.
 	Port int
 
 	RequirePairedDevice bool
@@ -141,8 +141,8 @@ func (a *Agent) SetCardTypeFilter(cardTypes []string) {
 func (a *Agent) CardTypeFilter() []string { return a.cardTypes.list() }
 
 // SetPinnedDevice records the reader the operator chose, empty for auto-detect.
-// Recording the choice does not start that reader: selecting one restarts it,
-// which is the explicit action's job.
+// It filters what the agent reports rather than choosing what is opened: every
+// reader the manager offers stays open.
 func (a *Agent) SetPinnedDevice(devicePath string) {
 	if a.CurrentPinnedDevice() == devicePath {
 		return
@@ -162,8 +162,8 @@ func (a *Agent) CurrentPinnedDevice() string {
 	return a.pinnedDevice
 }
 
-// SetDevicePort records the port to serve on. The listener keeps the port it is
-// bound on until it is rebound, which ServingPort reports.
+// SetDevicePort records the port to serve on. A listener keeps the port it was
+// built with, so what is being served on is [ServerPlugin.Port].
 func (a *Agent) SetDevicePort(port int) {
 	if port <= 0 || port == a.DevicePort() {
 		return

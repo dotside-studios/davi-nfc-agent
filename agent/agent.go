@@ -38,9 +38,8 @@ const readerOperationTimeout = 5 * time.Second
 
 // Config is the agent's settled configuration. New copies it in, and nothing
 // afterwards can change it: the fields below are read through the accessors on
-// Agent, so a caller holding a running agent cannot rebind its port, swap its
-// origin allowlist or withdraw its pairing requirement behind the servers'
-// backs. The few settings that may legitimately change while running have
+// Agent, so a caller holding a running agent cannot rebind its port or withdraw
+// its pairing requirement behind the servers' backs. The few settings that may legitimately change while running have
 // methods of their own: SetRequirePairedDevice, SetAllowCardType.
 type Config struct {
 	// Manager supplies the readers. Required; New panics without one, because
@@ -105,7 +104,7 @@ type Config struct {
 	DevicePath string
 }
 
-// Agent runs the NFC reader and the servers in front of it. Build one with New;
+// Agent runs the NFC readers and reports what they see. Build one with New;
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
@@ -114,8 +113,8 @@ type Agent struct {
 	DeviceAuth *server.DeviceAuth
 
 	// lastCard is the most recent scan the agent reported, kept here rather
-	// than in the client server it is reported through: the servers are rebuilt
-	// by every restart, and the card on the reader is still there afterwards.
+	// than in whatever it was reported to: the readers a run opens are rebuilt
+	// by every start, and the card on one is still there afterwards.
 	lastCard atomic.Pointer[nfc.Card]
 
 	// supervisor operates the readers, nil before Start and after Stop.
@@ -182,8 +181,8 @@ type Agent struct {
 	done     chan struct{}
 	doneOnce sync.Once
 
-	// mounter is what the agent's routes are served from, published by
-	// whichever plugin serves them. Nil is an agent serving no HTTP at all.
+	// mounter is what plugins mount their routes on, published by whichever
+	// plugin serves them. Nil is an agent serving no HTTP at all.
 	mounter Mounter
 
 	// devicePath is the reader Start resolved to, kept so a restart reopens the
@@ -279,8 +278,9 @@ func (a *Agent) APISecret() string {
 // installed none.
 func (a *Agent) Logs() *logbuf.Ring { return a.logs }
 
-// DevicePort is the port the agent serves on, which a saved preference can
-// change; the listener keeps the port it is bound on until it is rebound.
+// DevicePort is the port the agent is configured to serve on, which a saved
+// preference can change. A listener keeps the port it was built with, so what
+// is being served on is [ServerPlugin.Port].
 func (a *Agent) DevicePort() int {
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
@@ -314,8 +314,8 @@ func (a *Agent) ReaderFeedback() bool {
 	return a.readerFeedback
 }
 
-// startLocked opens the reader and brings the servers up. The caller holds the
-// lifecycle lock and owns the state transition; see Start.
+// startLocked opens the readers. The caller holds the lifecycle lock and owns
+// the state transition; see Start.
 func (a *Agent) startLocked(devicePath string) error {
 	a.devicePath.Store(&devicePath)
 
@@ -340,8 +340,7 @@ func (a *Agent) startLocked(devicePath string) error {
 	a.adoptReaderSettings()
 
 	// The agent reports what its readers scan, and what serves clients
-	// subscribes to that. The readers are not started here: their lifetime is
-	// the agent's, not a server's.
+	// subscribes to that rather than being fed by the agent.
 	a.readerScans = readers.Scans().Connect(a.forwardScan)
 	a.readerStatus = readers.Status().Connect(a.fireReaderStatus)
 
@@ -353,8 +352,8 @@ func (a *Agent) startLocked(devicePath string) error {
 	return nil
 }
 
-// stopLocked tears down the servers and the reader. The caller holds the
-// lifecycle lock and owns the state transition; see Stop. It is safe to call on
+// stopLocked closes the readers. The caller holds the lifecycle lock and owns
+// the state transition; see Stop. It is safe to call on
 // a partly started agent, so an aborted Start is recoverable.
 func (a *Agent) stopLocked() {
 	if a.supervisor.Load() == nil && a.readerScans == nil {

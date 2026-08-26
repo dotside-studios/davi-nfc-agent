@@ -25,8 +25,8 @@ func (s *App) showState(state agent.State) {
 	switch state {
 	case agent.StateRunning:
 		s.showRunning()
-		// The reader may be a different one: a device picked in the console
-		// restarts the agent rather than telling the tray about it.
+		// The pinned device may be a different one: it is a preference like any
+		// other, and the console changes it without telling the tray.
 		s.markCurrentReader()
 	case agent.StateStopped:
 		s.showStopped("Stopped")

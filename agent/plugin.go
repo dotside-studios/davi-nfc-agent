@@ -177,7 +177,7 @@ type Mounter interface {
 // Serve publishes what the agent is served from, so a plugin registered after
 // this one can add a route with Mount.
 //
-// It mounts nothing itself. The agent's own routes are [Agent.Routes], and
+// It mounts nothing itself. What the agent is reached on is mounted by
 // whoever serves them mounts them, ahead of anything of its own.
 //
 // One plugin publishes, before any other mounts a route. A second call is an

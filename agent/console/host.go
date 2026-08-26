@@ -59,8 +59,8 @@ func (h *host) CurrentCard() (uid, cardType string, present bool) {
 }
 
 // Port is the port being served, not the one configured. A port saved in the
-// console is bound only once the listener has been restarted, and until then
-// the console must not hand out a URL nothing is listening on.
+// console reaches the listener only when one is next built, and until then the
+// console must not hand out a URL nothing is listening on.
 func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.servers.CertFile() }

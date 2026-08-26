@@ -48,8 +48,8 @@ type Events struct {
 	// Preferences carries the preferences after each change, whoever made it.
 	Preferences event.Signal[Preferences]
 
-	// Servers carries the port the listeners are bound on, after a restart has
-	// rebuilt them.
+	// Servers carries the agent's configured port, after a listener has bound
+	// again. Emitted when a reissued certificate rebinds one.
 	Servers event.Signal[int]
 
 	// Reader carries the reader's status: whether it is connected, and whether

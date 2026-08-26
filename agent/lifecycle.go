@@ -45,8 +45,9 @@ func (s State) String() string {
 }
 
 // Component is a part of the agent's runtime whose lifetime follows the
-// agent's own. Register one with Use and the agent starts it once the reader
-// and servers are up, and stops it before taking them down again.
+// agent's own. Register one with Use and the agent starts it once the readers
+// are open, in registration order, and stops it in reverse before closing
+// them.
 //
 // This is what the agent hangs anything extra from: a metrics exporter, a
 // watchdog, a bridge to some other system. The context passed to Start is
@@ -138,8 +139,8 @@ func (a *Agent) stopComponentRange(last int) {
 	}
 }
 
-// Start opens the reader, brings up the servers, then starts any registered
-// components. It is safe to call from any goroutine: a second caller either
+// Start opens the readers, then starts the registered components, the
+// listener among them. It is safe to call from any goroutine: a second caller either
 // waits for the first to finish or is told the agent is already running.
 func (a *Agent) Start(devicePath string) error {
 	a.lifecycleMu.Lock()
@@ -192,7 +193,7 @@ func (a *Agent) Start(devicePath string) error {
 }
 
 // Stop takes the agent back down: components first, in reverse order, then the
-// servers and the reader.
+// readers.
 func (a *Agent) Stop() {
 	a.lifecycleMu.Lock()
 

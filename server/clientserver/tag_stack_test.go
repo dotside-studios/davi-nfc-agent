@@ -23,7 +23,6 @@ type stack struct {
 	URL     string
 	Router  *tagOps
 	Client  *fakeClient
-	Auth    *server.DeviceAuth
 	Remote  *remotenfc.Manager
 	Readers *nfc.Supervisor
 }
@@ -81,10 +80,21 @@ type stackConfig struct {
 	NoDriver bool
 }
 
+// deviceGate is what agent.ServerPlugin.Authenticate does, over a static
+// config rather than a running agent.
+func deviceGate(cfg stackConfig) func(w http.ResponseWriter, r *http.Request) (string, bool) {
+	return func(w http.ResponseWriter, r *http.Request) (string, bool) {
+		if cfg.RequirePaired {
+			return server.CheckPairedDevice(w, r, cfg.TokenVerifier)
+		}
+		return server.CheckAuth(w, r, cfg.APISecret, cfg.TokenVerifier)
+	}
+}
+
 func newStack(t *testing.T, cfg stackConfig) *stack {
 	t.Helper()
 
-	auth := server.NewDeviceAuth(func() string { return cfg.APISecret }, cfg.TokenVerifier, cfg.RequirePaired)
+	auth := deviceGate(cfg)
 	client := newFakeClient()
 
 	var remote *remotenfc.Manager
@@ -94,7 +104,7 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	if !cfg.NoDriver {
 		remote = remotenfc.NewManager(30 * time.Second)
 		endpoint = remote.Handler(remotenfc.ServerOptions{
-			Authenticate:         auth.Check,
+			Authenticate:         auth,
 			AllowTagModification: func() bool { return cfg.Mode != nfc.ModeReadOnly },
 			PublicKeyPin:         func() string { return cfg.PublicKeyPin },
 		})
@@ -136,7 +146,6 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 		URL:     "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device",
 		Router:  router,
 		Client:  client,
-		Auth:    auth,
 		Remote:  remote,
 		Readers: readers,
 	}

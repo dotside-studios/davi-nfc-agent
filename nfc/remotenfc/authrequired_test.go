@@ -70,12 +70,12 @@ func TestAuthenticatorDecides(t *testing.T) {
 	defer m.Close()
 
 	ts := httptest.NewServer(m.Handler(remotenfc.ServerOptions{
-		Authenticate: func(w http.ResponseWriter, r *http.Request) bool {
+		Authenticate: func(w http.ResponseWriter, r *http.Request) (string, bool) {
 			if r.URL.Query().Get("token") != "good" {
 				http.Error(w, "nope", http.StatusUnauthorized)
-				return false
+				return "", false
 			}
-			return true
+			return "", true
 		},
 	}))
 	defer ts.Close()

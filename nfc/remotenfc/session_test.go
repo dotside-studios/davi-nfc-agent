@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/gorilla/websocket"
 )
 
@@ -154,5 +155,44 @@ func TestDeviceTimeoutAllowsMissedHeartbeats(t *testing.T) {
 	}
 	if DeviceTimeout < 3*HeartbeatInterval {
 		t.Errorf("DeviceTimeout %v leaves under three heartbeats of %v", DeviceTimeout, HeartbeatInterval)
+	}
+}
+
+// A device that comes back replaces its own session. The connection it replaced
+// ends afterwards, and must take neither the live session nor the device.
+func TestAReplacedConnectionEndsWithoutTakingTheLiveOne(t *testing.T) {
+	m := NewManager(DeviceTimeout)
+
+	// These sessions stand for connections rather than holding one, so they go
+	// before the manager closes what it thinks it has open.
+	defer func() {
+		m.removeSession("device-1")
+		m.Close()
+	}()
+
+	req := DeviceRegistrationRequest{DeviceName: "Operator iPhone", Platform: "ios"}
+
+	if _, err := m.registerDevice("device-1", req); err != nil {
+		t.Fatalf("registerDevice: %v", err)
+	}
+	previous := wsconn.NewSafeConn(nil)
+	m.addSession("device-1", previous)
+
+	// What a reconnection does, minus the socket.
+	m.removeSession("device-1")
+	live, err := m.registerDevice("device-1", req)
+	if err != nil {
+		t.Fatalf("registerDevice on reconnect: %v", err)
+	}
+	current := wsconn.NewSafeConn(nil)
+	m.addSession("device-1", current)
+
+	m.endSession(previous, "device-1", DisconnectDropped)
+
+	if conn, ok := m.session("device-1"); !ok || conn != current {
+		t.Error("the connection that was replaced took the live session with it")
+	}
+	if device, ok := m.GetDevice("device-1"); !ok || device != live {
+		t.Error("the connection that was replaced unregistered the device that came back")
 	}
 }

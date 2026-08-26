@@ -163,7 +163,7 @@ func (s *Server) clientCount() int {
 
 // handleWebSocket handles WebSocket connections from clients.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if !server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier) {
+	if _, ok := server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier); !ok {
 		log.Printf("[client] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}

@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `server.CheckAuth`, `server.CheckPairedDevice` and `DeviceAuth.Check` name the
+  paired device they admitted, and `remotenfc.ServerOptions.Authenticate` and
+  `agent.DeviceEndpointOptions.Authenticate` take that shape. A device admitted
+  under a name registers under it; an empty name identifies nobody
+- `remotenfc.Manager.ListDevices` names its devices by identity rather than
+  prefixing them. An aggregate adds the prefix naming the manager, so a caller
+  asking the driver had to know to strip one
 - Choosing a device is a preference, not a restart. The pin filters what the
   agent serves, so the console and the tray set it rather than stopping and
   starting the agent, which dropped every connected client to change a
@@ -216,6 +223,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A paired device connects as itself. It registered under an identity minted per
+  connection, so nothing could match it to the device that paired: the console
+  showed every paired device offline while it was connected. The credential
+  names the device, and the driver registers it under that name
 - Starting without naming a device is auto-detect again. It pinned whichever
   reader was listed first, so an agent that polls every reader dropped the scans
   of all but one of them, and the preferences reported a choice nobody made

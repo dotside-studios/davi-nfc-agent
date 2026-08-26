@@ -38,18 +38,23 @@ func (a *DeviceAuth) RequirePaired() bool { return a.requirePaired.Load() }
 // Check admits or rejects one request, writing the rejection itself. This is
 // the form a driver takes, so the credential is checked inside the endpoint
 // rather than only by whoever remembered to wrap it.
-func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) bool {
+//
+// It names the paired device it admitted, so the driver registers that device
+// under the identity it paired with rather than minting one per connection.
+func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool) {
 	if a.requirePaired.Load() {
-		if !CheckPairedDevice(w, r, a.tokenVerifier) {
+		id, ok := CheckPairedDevice(w, r, a.tokenVerifier)
+		if !ok {
 			log.Printf("[device] Connection rejected from %s: no paired-device credential", r.RemoteAddr)
-			return false
+			return "", false
 		}
-		return true
+		return id, true
 	}
 
-	if !CheckAuth(w, r, a.apiSecret, a.tokenVerifier) {
+	id, ok := CheckAuth(w, r, a.apiSecret, a.tokenVerifier)
+	if !ok {
 		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
-		return false
+		return "", false
 	}
-	return true
+	return id, true
 }

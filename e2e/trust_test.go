@@ -3,8 +3,15 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
+	"slices"
 	"testing"
+	"time"
+
+	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // A device recognises the agent by its key, not by an authority. The pin it is
@@ -52,27 +59,7 @@ func TestHealthAnswersOverTLS(t *testing.T) {
 func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 	h := start(t, options{Pairing: true})
 
-	pin := h.Pairing.PIN()
-	body, _ := json.Marshal(map[string]string{"deviceName": "Operator iPhone", "platform": "ios"})
-
-	resp, err := http.Post(h.Pair+"/pair?pin="+pin, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST /pair: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("pairing status = %s, want 200", resp.Status)
-	}
-
-	var paired struct {
-		DeviceID     string `json:"deviceID"`
-		DeviceToken  string `json:"deviceToken"`
-		PublicKeyPin string `json:"publicKeyPin"`
-		AgentPort    int    `json:"agentPort"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&paired); err != nil {
-		t.Fatalf("decode the pairing response: %v", err)
-	}
+	paired := pairDevice(t, h)
 	if paired.DeviceToken == "" {
 		t.Fatal("pairing issued no token")
 	}
@@ -93,8 +80,50 @@ func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 
 	_, deviceID, _ := h.phone(t, paired.DeviceToken, phoneCapabilities())
 	if deviceID == "" {
-		t.Error("the paired device was not registered")
+		t.Fatal("the paired device was not registered")
 	}
+
+	// The credential names the device, so what connects is what paired. An
+	// identity minted per connection left the console showing every paired
+	// device offline while it was connected.
+	if deviceID != paired.DeviceID {
+		t.Errorf("the device registered as %q, want the identity it paired with, %q", deviceID, paired.DeviceID)
+	}
+
+	online := h.Agent.OnlineDevices()
+	if !slices.Contains(online, paired.DeviceID) {
+		t.Errorf("OnlineDevices() = %v, want the paired device among them", online)
+	}
+}
+
+// pairedDevice is what pairing hands a device.
+type pairedDevice struct {
+	DeviceID     string `json:"deviceID"`
+	DeviceToken  string `json:"deviceToken"`
+	PublicKeyPin string `json:"publicKeyPin"`
+	AgentPort    int    `json:"agentPort"`
+}
+
+// pairDevice pairs one device as the mobile app does, with the PIN.
+func pairDevice(t *testing.T, h *harness) pairedDevice {
+	t.Helper()
+
+	body, _ := json.Marshal(map[string]string{"deviceName": "Operator iPhone", "platform": "ios"})
+
+	resp, err := http.Post(h.Pair+"/pair?pin="+h.Pairing.PIN(), "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /pair: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pairing status = %s, want 200", resp.Status)
+	}
+
+	var paired pairedDevice
+	if err := json.NewDecoder(resp.Body).Decode(&paired); err != nil {
+		t.Fatalf("decode the pairing response: %v", err)
+	}
+	return paired
 }
 
 // A revoked device is refused.
@@ -138,5 +167,57 @@ func TestPairingRefusesTheWrongPIN(t *testing.T) {
 
 	if resp.StatusCode == http.StatusOK {
 		t.Error("pairing accepted a PIN it never issued")
+	}
+}
+
+// A device that comes back is the same device: its identity is the one it
+// paired with, so a second connection replaces the first.
+func TestAPairedDeviceReconnectsAsItself(t *testing.T) {
+	h := start(t, options{Pairing: true})
+
+	paired := pairDevice(t, h)
+
+	// The first connection is left open, which is the case that matters: a
+	// phone whose radio dropped comes back while the agent still holds a
+	// session it cannot reach.
+	first, _, _ := h.phone(t, paired.DeviceToken, phoneCapabilities())
+	second, secondID, _ := h.phone(t, paired.DeviceToken, phoneCapabilities())
+
+	if secondID != paired.DeviceID {
+		t.Errorf("the device came back as %q, want the identity it paired with, %q", secondID, paired.DeviceID)
+	}
+
+	_ = first.SetReadDeadline(time.Now().Add(timeout))
+	_, _, err := first.ReadMessage()
+	var timedOut net.Error
+	if err == nil || (errors.As(err, &timedOut) && timedOut.Timeout()) {
+		t.Errorf("the connection that was replaced is still being served (read: %v)", err)
+	}
+
+	// That connection is torn down on its own goroutine, after this one
+	// registered. What it drops must not be this one.
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if online := h.Agent.OnlineDevices(); len(online) != 1 || online[0] != paired.DeviceID {
+			t.Fatalf("OnlineDevices() = %v, want only the device that reconnected", online)
+		}
+		if err := h.Devices.SendToDevice(secondID, protocol.WebSocketMessage{Type: "ping"}); err != nil {
+			t.Fatalf("the agent cannot reach the device that reconnected: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	send(t, second, protocol.WebSocketRequest{
+		Type: remotenfc.WSTypeTagScanned,
+		Payload: map[string]any{
+			"deviceID":   secondID,
+			"uid":        "04FEEDFACE",
+			"technology": "ISO14443A",
+			"type":       "NTAG215",
+			"scannedAt":  time.Now().Format(time.RFC3339),
+		},
+	})
+	if data := h.observed(t); data.Card == nil || data.Card.UID != "04:FE:ED:FA:CE" {
+		t.Errorf("the agent saw %+v, want the scan from the device that reconnected", data)
 	}
 }

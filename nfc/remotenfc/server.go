@@ -30,14 +30,17 @@ type ServerOptions struct {
 	PublicKeyPin func() string
 
 	// Authenticate admits or rejects a device before the upgrade, writing its
-	// own response when it rejects. This driver speaks the device protocol and
-	// has no idea what a credential is here, so the check is supplied; see
-	// server.DeviceAuth for the agent's.
+	// own response when it rejects, and names the device it admitted. This
+	// driver speaks the device protocol and has no idea what a credential is
+	// here, so the check is supplied; see server.DeviceAuth for the agent's.
+	//
+	// A device admitted under a name registers under it. An empty name
+	// identifies nobody, and the device is given one for the connection.
 	//
 	// Required. A nil Authenticate is refused at Handler unless
 	// AllowUnauthenticated says otherwise, because the endpoint is otherwise
 	// open to anyone who can reach the port.
-	Authenticate func(w http.ResponseWriter, r *http.Request) bool
+	Authenticate func(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool)
 
 	// AllowUnauthenticated serves devices with no check at all. For a driver
 	// reached only over a trusted transport, and for tests.
@@ -84,13 +87,18 @@ func IsDeviceConnection(r *http.Request) bool {
 
 type deviceEndpoint struct {
 	manager      *Manager
-	authenticate func(w http.ResponseWriter, r *http.Request) bool
+	authenticate func(w http.ResponseWriter, r *http.Request) (string, bool)
 	upgrader     websocket.Upgrader
 }
 
 func (e *deviceEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if e.authenticate != nil && !e.authenticate(w, r) {
-		return
+	var admitted string
+	if e.authenticate != nil {
+		id, ok := e.authenticate(w, r)
+		if !ok {
+			return
+		}
+		admitted = id
 	}
 
 	wsConn, err := e.upgrader.Upgrade(w, r, nil)
@@ -102,24 +110,24 @@ func (e *deviceEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn := wsconn.NewSafeConn(wsConn)
 	log.Printf("[device] WebSocket connected from %s (subprotocol=%q)", r.RemoteAddr, wsConn.Subprotocol())
 
-	e.manager.serveSession(conn)
+	e.manager.serveSession(conn, admitted)
 }
 
 // serveSession registers the device on its first frame and then serves it until
 // the connection ends.
-func (m *Manager) serveSession(conn *wsconn.SafeConn) {
+func (m *Manager) serveSession(conn *wsconn.SafeConn, admitted string) {
 	var deviceID string
 	reason := DisconnectDropped
 
 	defer func() {
 		_ = conn.Close()
 		if deviceID != "" {
-			m.endSession(deviceID, reason)
+			m.endSession(conn, deviceID, reason)
 		}
 		log.Printf("[device] WebSocket disconnected: %s (%s)", deviceID, reason)
 	}()
 
-	deviceID, ok := m.awaitRegistration(conn)
+	deviceID, ok := m.awaitRegistration(conn, admitted)
 	if !ok {
 		return
 	}
@@ -176,7 +184,7 @@ func (m *Manager) serveSession(conn *wsconn.SafeConn) {
 // The frame's type selects the dialect: hello is v1, registerDevice is the
 // legacy v0 exchange. The negotiated subprotocol is advisory, so a device that
 // offered none is still served whichever it actually speaks.
-func (m *Manager) awaitRegistration(conn *wsconn.SafeConn) (string, bool) {
+func (m *Manager) awaitRegistration(conn *wsconn.SafeConn, admitted string) (string, bool) {
 	messageType, message, err := conn.ReadMessage()
 	if err != nil {
 		log.Printf("[device] Failed to read registration message: %v", err)
@@ -199,9 +207,9 @@ func (m *Manager) awaitRegistration(conn *wsconn.SafeConn) (string, bool) {
 
 	switch req.Type {
 	case WSTypeHello:
-		err = m.handleHello(conn, req)
+		err = m.handleHello(conn, req, admitted)
 	case WSTypeRegisterDevice:
-		err = m.handleRegisterDevice(conn, req)
+		err = m.handleRegisterDevice(conn, req, admitted)
 	default:
 		log.Printf("[device] Expected '%s' or '%s', got '%s'", WSTypeHello, WSTypeRegisterDevice, req.Type)
 		m.sendError(conn, req.ID, protocol.ErrCodeInvalidMessageType, fmt.Sprintf("Expected '%s' or '%s' message", WSTypeHello, WSTypeRegisterDevice))
@@ -223,7 +231,7 @@ func (m *Manager) awaitRegistration(conn *wsconn.SafeConn) (string, bool) {
 
 // handleHello processes a v1 hello, which carries the protocol version
 // alongside the registration payload.
-func (m *Manager) handleHello(conn *wsconn.SafeConn, req protocol.WebSocketRequest) error {
+func (m *Manager) handleHello(conn *wsconn.SafeConn, req protocol.WebSocketRequest, admitted string) error {
 	var hello HelloRequest
 	if err := decodePayload(req.Payload, &hello); err != nil {
 		m.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid hello request format")
@@ -232,7 +240,7 @@ func (m *Manager) handleHello(conn *wsconn.SafeConn, req protocol.WebSocketReque
 
 	version := NegotiateDeviceVersion(hello.ProtocolVersion)
 
-	device, regResp, err := m.registerSession(conn, req.ID, hello.DeviceRegistrationRequest, version)
+	device, regResp, err := m.registerSession(conn, req.ID, hello.DeviceRegistrationRequest, version, admitted)
 	if err != nil {
 		return err
 	}
@@ -249,14 +257,14 @@ func (m *Manager) handleHello(conn *wsconn.SafeConn, req protocol.WebSocketReque
 }
 
 // handleRegisterDevice processes a legacy v0 registration.
-func (m *Manager) handleRegisterDevice(conn *wsconn.SafeConn, req protocol.WebSocketRequest) error {
+func (m *Manager) handleRegisterDevice(conn *wsconn.SafeConn, req protocol.WebSocketRequest, admitted string) error {
 	var regReq DeviceRegistrationRequest
 	if err := decodePayload(req.Payload, &regReq); err != nil {
 		m.sendError(conn, req.ID, protocol.ErrCodeInvalidPayload, "Invalid registration request format")
 		return fmt.Errorf("failed to parse registration request: %w", err)
 	}
 
-	device, regResp, err := m.registerSession(conn, req.ID, regReq, DeviceProtocolV0)
+	device, regResp, err := m.registerSession(conn, req.ID, regReq, DeviceProtocolV0, admitted)
 	if err != nil {
 		return err
 	}
@@ -271,13 +279,13 @@ func (m *Manager) handleRegisterDevice(conn *wsconn.SafeConn, req protocol.WebSo
 
 // registerSession registers the device and binds it to its connection, leaving
 // the caller to answer in whichever dialect it is speaking.
-func (m *Manager) registerSession(conn *wsconn.SafeConn, reqID string, regReq DeviceRegistrationRequest, version int) (*Device, DeviceRegistrationResponse, error) {
+func (m *Manager) registerSession(conn *wsconn.SafeConn, reqID string, regReq DeviceRegistrationRequest, version int, admitted string) (*Device, DeviceRegistrationResponse, error) {
 	if regReq.DeviceName == "" {
 		m.sendError(conn, reqID, protocol.ErrCodeInvalidRequest, "Device name is required")
 		return nil, DeviceRegistrationResponse{}, fmt.Errorf("device name is required")
 	}
 
-	device, err := m.RegisterDevice(DeviceRegistrationRequest{
+	device, err := m.registerDevice(admitted, DeviceRegistrationRequest{
 		DeviceName:      regReq.DeviceName,
 		Platform:        regReq.Platform,
 		AppVersion:      regReq.AppVersion,
@@ -414,8 +422,12 @@ func (m *Manager) handleGoodbye(conn *wsconn.SafeConn, deviceID string, req prot
 // endSession tears down everything a departed device owned. It is the only path
 // that unregisters a connected device, so a session and a registration cannot
 // outlive one another.
-func (m *Manager) endSession(deviceID string, reason DisconnectReason) {
-	m.removeSession(deviceID)
+func (m *Manager) endSession(conn *wsconn.SafeConn, deviceID string, reason DisconnectReason) {
+	// A device that came back has replaced this session already, and tearing
+	// down by name alone would take the live one with it.
+	if !m.removeSessionFor(conn, deviceID) {
+		return
+	}
 	m.failPendingRequests(deviceID)
 	m.clearActiveTag(deviceID, "")
 

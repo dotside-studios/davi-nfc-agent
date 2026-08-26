@@ -102,7 +102,9 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return device, nil
 }
 
-// ListDevices returns list of connected smartphone device connection strings.
+// ListDevices names the devices connected right now, by the identity each
+// holds: for one that paired, the identity it paired with. An aggregate adds
+// the prefix naming the manager it came from.
 func (m *Manager) ListDevices() ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -110,15 +112,23 @@ func (m *Manager) ListDevices() ([]string, error) {
 	devices := make([]string, 0, len(m.devices))
 	for deviceID, device := range m.devices {
 		if device.IsActive() {
-			devices = append(devices, fmt.Sprintf("smartphone:%s", deviceID))
+			devices = append(devices, deviceID)
 		}
 	}
 
 	return devices, nil
 }
 
-// RegisterDevice creates and registers a new smartphone device.
+// RegisterDevice registers a device under an identity of this manager's own.
 func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error) {
+	return m.registerDevice("", req)
+}
+
+// registerDevice registers a device under the identity it was admitted with,
+// minting one when it was admitted under none. A device that paired holds an
+// identity already, and a fresh one per connection leaves the agent unable to
+// say that the device connected is the device paired.
+func (m *Manager) registerDevice(deviceID string, req DeviceRegistrationRequest) (*Device, error) {
 	// Validate request
 	if req.DeviceName == "" {
 		return nil, fmt.Errorf("device name is required")
@@ -129,8 +139,17 @@ func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error)
 		req.Platform = "unknown"
 	}
 
-	// Generate unique device ID
-	deviceID := uuid.New().String()
+	if deviceID == "" {
+		deviceID = uuid.New().String()
+	}
+
+	// A device coming back meets what is left of its last connection. Dropped
+	// here rather than by that connection, which ends after this registration
+	// and would take the new session with it.
+	if conn, ok := m.session(deviceID); ok {
+		m.removeSession(deviceID)
+		_ = conn.Close()
+	}
 
 	// Create device
 	device := NewDevice(deviceID, req)

@@ -3,7 +3,6 @@ package agent
 import (
 	"errors"
 	"log"
-	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -14,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -40,9 +38,8 @@ const readerOperationTimeout = 5 * time.Second
 
 // Config is the agent's settled configuration. New copies it in, and nothing
 // afterwards can change it: the fields below are read through the accessors on
-// Agent, so a caller holding a running agent cannot rebind its port, swap its
-// origin allowlist or withdraw its pairing requirement behind the servers'
-// backs. The few settings that may legitimately change while running have
+// Agent, so a caller holding a running agent cannot rebind its port or withdraw
+// its pairing requirement behind the servers' backs. The few settings that may legitimately change while running have
 // methods of their own: SetRequirePairedDevice, SetAllowCardType.
 type Config struct {
 	// Manager supplies the readers. Required; New panics without one, because
@@ -69,19 +66,6 @@ type Config struct {
 
 	// ConfigDir is where the API secret and other state persist.
 	ConfigDir string
-
-	// AllowedOrigins extends the same-origin policy on both WebSocket
-	// endpoints. A browser page served from anywhere other than the agent's
-	// own host:port, which is every hosted console, needs its origin listed
-	// here, or the upgrade is rejected as cross-site.
-	//
-	// Ignored when Origins is set, which is the normal path.
-	AllowedOrigins []string
-
-	// Origins is the live allowlist. Unlike AllowedOrigins its contents can
-	// change while the agent runs, and it reports rejections so they can be
-	// surfaced. The store is mutable; which store is in use is not.
-	Origins *OriginStore
 
 	// Devices holds the paired devices and their per-device credentials.
 	Devices *DeviceRegistry
@@ -118,39 +102,25 @@ type Config struct {
 	Mode       nfc.ReaderMode
 	CardTypes  []string
 	DevicePath string
-
-	// DeviceEndpoint builds the handler serving device connections on the
-	// shared /ws path.
-	//
-	// A function, because the policies are the agent's and the wire is the
-	// driver's: the agent hands over what it decides and the caller builds the
-	// handler, so neither names the other's types. Nil serves clients only.
-	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 }
 
-// Agent runs the NFC reader and the servers in front of it. Build one with New;
+// Agent runs the NFC readers and reports what they see. Build one with New;
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// ClientServer fans a scan out to every connected client and performs what
-	// clients ask of a tag, and DeviceAuth gates the device endpoint. Both are
-	// nil until Start.
-	ClientServer *clientserver.Server
-
-	// serving is what the mounted routes dispatch to, replaced on every start
-	// and cleared on stop.
-	serving atomic.Pointer[endpoints]
+	// DeviceAuth gates the device endpoint. Built with the agent, so a caller
+	// can put its device endpoint behind it before anything runs.
+	DeviceAuth *server.DeviceAuth
 
 	// lastCard is the most recent scan the agent reported, kept here rather
-	// than in the client server it is reported through: the servers are rebuilt
-	// by every restart, and the card on the reader is still there afterwards.
+	// than in whatever it was reported to: the readers a run opens are rebuilt
+	// by every start, and the card on one is still there afterwards.
 	lastCard atomic.Pointer[nfc.Card]
 
 	// supervisor operates the readers, nil before Start and after Stop.
 	// Atomic because the handlers read it from their own goroutines, and Stop
 	// holds the lifecycle lock while the server waits for them to finish.
 	supervisor atomic.Pointer[nfc.Supervisor]
-	DeviceAuth *server.DeviceAuth
 
 	// Plugins is the plugin list, added to before the agent starts and
 	// activated once, on the first Start or by a host that activates them
@@ -166,11 +136,7 @@ type Agent struct {
 	info                buildinfo.Info
 	logger              *log.Logger
 	manager             nfc.Manager
-	deviceEndpoint      http.Handler
-	apiSecret           string
 	configDir           string
-	allowedOrigins      []string
-	origins             *OriginStore
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
@@ -183,6 +149,11 @@ type Agent struct {
 	// would be lost with every restart.
 	readerMode   nfc.ReaderMode
 	pinnedDevice string
+
+	// apiSecret is guarded rather than settled, because rotating it replaces
+	// it while the agent runs. Whatever checks it reads it per request, so a
+	// rotation reaches the endpoints without anything being rebuilt.
+	apiSecret string
 
 	// settingsMu guards the settings state above. The console changes it from
 	// its own goroutines and reads it back for every snapshot it draws, and the
@@ -210,8 +181,8 @@ type Agent struct {
 	done     chan struct{}
 	doneOnce sync.Once
 
-	// mounter is what the agent's routes are served from, published by
-	// whichever plugin serves them. Nil is an agent serving no HTTP at all.
+	// mounter is what plugins mount their routes on, published by whichever
+	// plugin serves them. Nil is an agent serving no HTTP at all.
 	mounter Mounter
 
 	// devicePath is the reader Start resolved to, kept so a restart reopens the
@@ -244,8 +215,6 @@ func New(cfg Config) *Agent {
 		manager:             cfg.Manager,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
-		allowedOrigins:      cfg.AllowedOrigins,
-		origins:             cfg.Origins,
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
@@ -269,15 +238,7 @@ func New(cfg Config) *Agent {
 
 	// Built here rather than at start, so a caller can put its device endpoint
 	// behind it before anything runs.
-	a.DeviceAuth = server.NewDeviceAuth(cfg.APISecret, a.tokenVerifier(), a.requirePairedDevice)
-	if cfg.DeviceEndpoint != nil {
-		a.deviceEndpoint = cfg.DeviceEndpoint(DeviceEndpointOptions{
-			Authenticate:         a.DeviceAuth.Check,
-			CheckOrigin:          a.checkOrigin(),
-			AllowTagModification: a.TagModificationAllowed,
-			PublicKeyPin:         a.PublicKeyPin,
-		})
-	}
+	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.TokenVerifier(), a.requirePairedDevice)
 
 	return a
 }
@@ -302,17 +263,24 @@ func (a *Agent) Readers() []string {
 	return readers
 }
 func (a *Agent) Logger() *log.Logger      { return a.logger }
-func (a *Agent) APISecret() string        { return a.apiSecret }
 func (a *Agent) ConfigDir() string        { return a.configDir }
-func (a *Agent) Origins() *OriginStore    { return a.origins }
 func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+
+// APISecret is the secret non-loopback connections must present. Read on every
+// upgrade by whatever checks it, so it follows a rotation.
+func (a *Agent) APISecret() string {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.apiSecret
+}
 
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none.
 func (a *Agent) Logs() *logbuf.Ring { return a.logs }
 
-// DevicePort is the port the agent serves on, which a saved preference can
-// change; the listener keeps the port it is bound on until it is rebound.
+// DevicePort is the port the agent is configured to serve on, which a saved
+// preference can change. A listener keeps the port it was built with, so what
+// is being served on is [ServerPlugin.Port].
 func (a *Agent) DevicePort() int {
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
@@ -346,8 +314,8 @@ func (a *Agent) ReaderFeedback() bool {
 	return a.readerFeedback
 }
 
-// startLocked opens the reader and brings the servers up. The caller holds the
-// lifecycle lock and owns the state transition; see Start.
+// startLocked opens the readers. The caller holds the lifecycle lock and owns
+// the state transition; see Start.
 func (a *Agent) startLocked(devicePath string) error {
 	a.devicePath.Store(&devicePath)
 
@@ -371,10 +339,10 @@ func (a *Agent) startLocked(devicePath string) error {
 	a.supervisor.Store(readers)
 	a.adoptReaderSettings()
 
-	// Start the servers using shared code
-	if err := a.startServers(); err != nil {
-		return err
-	}
+	// The agent reports what its readers scan, and what serves clients
+	// subscribes to that rather than being fed by the agent.
+	a.readerScans = readers.Scans().Connect(a.forwardScan)
+	a.readerStatus = readers.Status().Connect(a.fireReaderStatus)
 
 	// After them, so what the readers publish already has somewhere to go.
 	if err := readers.Start(); err != nil {
@@ -384,17 +352,19 @@ func (a *Agent) startLocked(devicePath string) error {
 	return nil
 }
 
-// stopLocked tears down the servers and the reader. The caller holds the
-// lifecycle lock and owns the state transition; see Stop. It is safe to call on
+// stopLocked closes the readers. The caller holds the lifecycle lock and owns
+// the state transition; see Stop. It is safe to call on
 // a partly started agent, so an aborted Start is recoverable.
 func (a *Agent) stopLocked() {
-	if a.supervisor.Load() == nil && a.serving.Load() == nil {
+	if a.supervisor.Load() == nil && a.readerScans == nil {
 		return
 	}
 
 	a.logger.Println("Stopping agent...")
 
-	a.stopServers()
+	a.readerScans.Disconnect()
+	a.readerStatus.Disconnect()
+	a.readerScans, a.readerStatus = nil, nil
 
 	if readers := a.supervisor.Load(); readers != nil {
 		readers.Stop()
@@ -432,109 +402,12 @@ func (a *Agent) Shutdown() {
 	}
 }
 
-// RestartServers rebuilds what the agent serves: the router, the client server
-// and the tag sources feeding them. The reader and the listener carry on.
+// RotateAPISecret generates a fresh API secret, persists it under ConfigDir
+// and returns it. It takes effect on the next connection to either endpoint,
+// since both read the secret per request; connections already open are not
+// dropped.
 //
-// For a change the serving state captured when it was built, such as the API
-// secret the client server holds. A certificate reissued on disk is not one of
-// those: the listener binds again on its own, and nothing here is rebuilt.
-func (a *Agent) RestartServers() error {
-	a.lifecycleMu.Lock()
-
-	a.logger.Println("Restarting servers...")
-
-	// Stop servers
-	a.stopServers()
-
-	// Brief pause to allow ports to be released
-	time.Sleep(100 * time.Millisecond)
-
-	// Restart servers
-	err := a.startServers()
-
-	// Released before the listeners are told, as the state hooks are: a hook
-	// that touched the agent would otherwise wait for a lock its own caller
-	// holds.
-	a.lifecycleMu.Unlock()
-
-	if err != nil {
-		return err
-	}
-
-	a.logger.Println("Servers restarted successfully")
-	a.fireServerRestart()
-	return nil
-}
-
-// stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
-func (a *Agent) stopServers() {
-	a.readerScans.Disconnect()
-	a.readerStatus.Disconnect()
-	a.readerScans, a.readerStatus = nil, nil
-
-	a.ClientServer = nil
-
-	a.serving.Store(nil)
-}
-
-// startServers starts the HTTP/WebSocket servers.
-func (a *Agent) startServers() error {
-	readers := a.supervisor.Load()
-	if readers == nil {
-		return errors.New("the readers are not initialized")
-	}
-
-	// A client request resolves to the tag it names, which the agent answers
-	// for wherever it is: on a reader it polls, or on a device that reported
-	// it. Asked of the agent rather than of the readers it happens to hold, so
-	// what governs a scan governs an operation on that tag too.
-	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret:            a.apiSecret,
-		AllowedOrigins:       a.allowedOrigins,
-		OriginPolicy:         a.originPolicy(),
-		TokenVerifier:        a.tokenVerifier(),
-		Tags:                 a,
-		AllowTagModification: a.TagModificationAllowed,
-		OnChange:             a.fireClientsChanged,
-		OnTag:                a.reportTag,
-	})
-
-	// The agent's tag sources feed the client server directly. Connected to the
-	// server being built rather than read from a field, so a restart leaves
-	// nothing feeding the one it replaced.
-	//
-	// The readers are not started here. Their lifetime is the agent's, not the
-	// servers': starting them on every restart left a second worker polling the
-	// same reader, racing the first and scanning every card twice. See
-	// startLocked, which starts the ones it opened.
-	sink := a.ClientServer
-	a.readerScans = readers.Scans().Connect(func(data nfc.NFCData) { a.forwardScan(data, sink) })
-	a.readerStatus = readers.Status().Connect(func(status nfc.DeviceStatus) {
-		a.fireReaderStatus(status)
-		sink.BroadcastDeviceStatus(status)
-	})
-
-	// Published as a pair, so a request never sees a client from one start
-	// beside a device from the next.
-	a.serving.Store(&endpoints{
-		client: http.HandlerFunc(a.ClientServer.ServeWS),
-		device: a.deviceEndpoint,
-	})
-
-	// Nothing is bound here. The listener is a component of whoever serves it,
-	// so it comes up once this has, and goes down before it; an agent with none
-	// registered serves no HTTP at all, which is what a program driving the
-	// reader directly wants.
-	return nil
-}
-
-// RotateAPISecret generates a fresh API secret, persists it under
-// ConfigDir, updates the running servers, and restarts them so the
-// new secret takes effect. Existing connections are dropped (clients
-// must re-handshake with the new secret).
-//
-// Returns the new secret. Errors propagate from filesystem ops or
-// server restart; on error the previous secret remains in effect.
+// On error the previous secret remains in effect.
 func (a *Agent) RotateAPISecret() (string, error) {
 	if a.configDir == "" {
 		return "", errors.New("config dir not configured")
@@ -545,11 +418,11 @@ func (a *Agent) RotateAPISecret() (string, error) {
 		return "", err
 	}
 
+	a.settingsMu.Lock()
 	a.apiSecret = fresh
-	a.logger.Println("API secret rotated; restarting servers…")
-	if err := a.RestartServers(); err != nil {
-		return fresh, err
-	}
+	a.settingsMu.Unlock()
+
+	a.logger.Println("API secret rotated")
 	return fresh, nil
 }
 
@@ -604,16 +477,6 @@ func (a *Agent) CurrentDevicePath() string {
 	return ""
 }
 
-// checkOrigin admits or rejects a device upgrade by Origin, preferring the
-// live policy over the static allowlist so the tray can admit one without
-// restarting the listener.
-func (a *Agent) checkOrigin() func(r *http.Request) bool {
-	if policy := a.originPolicy(); policy != nil {
-		return server.CheckOriginPolicy(policy)
-	}
-	return server.CheckOrigin(a.allowedOrigins)
-}
-
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
@@ -648,22 +511,15 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	a.firePreferencesChanged()
 }
 
-// tokenVerifier returns the device registry as a token verifier, or nil when
-// there is none. As with originPolicy, a typed nil would satisfy the interface
-// and defeat the caller's nil check.
-func (a *Agent) tokenVerifier() server.TokenVerifier {
+// TokenVerifier recognises the per-device credentials this agent issued at
+// pairing, for whatever admits a connection presenting one. Nil on an agent
+// built without a registry, which admits nobody on a credential.
+//
+// Take it from here rather than from Devices: a nil registry assigned to the
+// interface is not a nil interface, and the caller's nil check would miss it.
+func (a *Agent) TokenVerifier() server.TokenVerifier {
 	if a.devices == nil {
 		return nil
 	}
 	return a.devices
-}
-
-// originPolicy returns the live allowlist as an origin policy, or nil to fall
-// back to the static AllowedOrigins list. Returning a typed nil would satisfy
-// the interface and defeat that fallback, so the check is explicit.
-func (a *Agent) originPolicy() server.OriginPolicy {
-	if a.origins == nil {
-		return nil
-	}
-	return a.origins
 }

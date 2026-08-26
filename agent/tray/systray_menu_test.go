@@ -65,7 +65,6 @@ func TestMenuLayout(t *testing.T) {
 		"Card Type Filter",
 		"----",
 		"Paired Devices",
-		"Allowed Origins",
 		"----",
 		"Start Agent",
 		"Stop Agent",
@@ -251,79 +250,6 @@ func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 	if app.mReaderFeedback.Checked() || agent.ReaderFeedback() {
 		t.Error("clicking again did not turn the feedback back off")
 	}
-}
-
-func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
-	store, err := nfcagent.NewOriginStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewOriginStore: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Origins: store})
-
-	app, _ := newTestTray(t, agent)
-	app.subscribe()
-
-	// A refused page shows up as a one-click offer to allow it, put there by
-	// the agent's stream rather than by reopening the menu.
-	store.RecordBlocked("https://console.example")
-
-	row := findOriginRow(t, app, "Allow console.example")
-	row.Click()
-
-	if !store.Allowed("console.example") {
-		t.Fatal("the origin was not allowed")
-	}
-
-	// It is now an allowed origin, and clicking it revokes it again.
-	allowed := findOriginRow(t, app, "console.example")
-	if !allowed.Checked() {
-		t.Error("an allowed origin is not ticked")
-	}
-	allowed.Click()
-
-	if store.Allowed("console.example") {
-		t.Fatal("the origin was not revoked")
-	}
-}
-
-func TestOriginsAllowAnyToggle(t *testing.T) {
-	store, err := nfcagent.NewOriginStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewOriginStore: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Origins: store})
-
-	app, _ := newTestTray(t, agent)
-
-	app.mOriginAllowAny.Click()
-	if !store.IsSessionAllowAny() || !app.mOriginAllowAny.Checked() {
-		t.Fatal("the session escape hatch did not turn on")
-	}
-
-	app.mOriginAllowAny.Click()
-	if store.IsSessionAllowAny() || app.mOriginAllowAny.Checked() {
-		t.Fatal("the session escape hatch did not turn back off")
-	}
-}
-
-// findOriginRow returns the visible origin row with the given label.
-func findOriginRow(t *testing.T, app *App, title string) *traymenu.Item {
-	t.Helper()
-
-	for _, item := range app.origins.Items() {
-		if item.Visible() && item.Title() == title {
-			return item
-		}
-	}
-
-	var shown []string
-	for _, item := range app.origins.Items() {
-		if item.Visible() {
-			shown = append(shown, item.Title())
-		}
-	}
-	t.Fatalf("no origin row titled %q; the menu shows %v", title, shown)
-	return nil
 }
 
 func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {

@@ -7,13 +7,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// tagSink receives scans. The client server is the one the agent has; the
-// interface is here so the pumps can be tested without one.
-type tagSink interface {
-	Broadcast(nfc.NFCData)
-	BroadcastDeviceStatus(nfc.DeviceStatus)
-}
-
 // readerSelected reports whether a scan's source is wanted. The pinned device
 // is a filter rather than a lock: a scan from a reader the operator is not
 // asking for is dropped here, wherever it was read.
@@ -31,15 +24,16 @@ func (a *Agent) readerSelected(device string) bool {
 	return readers == nil || !readers.Operates(device)
 }
 
-// forwardScan applies the agent's filters and hands the scan on.
-func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
+// forwardScan applies the agent's filters and reports what passes them. What
+// serves clients subscribes to that, so every consumer sees the same stream.
+func (a *Agent) forwardScan(data nfc.NFCData) {
 	if !a.readerSelected(data.Device) {
 		return
 	}
 
 	if data.Err != nil {
 		log.Printf("Error: %v", data.Err)
-		sink.Broadcast(data)
+		a.reportTag(data)
 		return
 	}
 
@@ -49,7 +43,7 @@ func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
 
 	if !a.cardTypes.isAllowed(data.Card.Type) {
 		log.Printf("Card type '%s' not in allowed list, ignoring", data.Card.Type)
-		sink.Broadcast(nfc.NFCData{
+		a.reportTag(nfc.NFCData{
 			Device: data.Device,
 			Err:    fmt.Errorf("card type '%s' not allowed by filter", data.Card.Type),
 		})
@@ -69,5 +63,5 @@ func (a *Agent) forwardScan(data nfc.NFCData, sink tagSink) {
 	}
 	fmt.Printf("UID: %s\nDecoded text: %s\n", data.Card.UID, text)
 
-	sink.Broadcast(data)
+	a.reportTag(data)
 }

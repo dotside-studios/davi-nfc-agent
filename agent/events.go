@@ -13,11 +13,8 @@ type Change int
 const (
 	ChangeState Change = iota
 	ChangePreferences
-	ChangeClients
 	ChangeServers
 	ChangeDevices
-	ChangeOrigins
-	ChangeBlocked
 )
 
 func (c Change) String() string {
@@ -26,16 +23,10 @@ func (c Change) String() string {
 		return "state"
 	case ChangePreferences:
 		return "preferences"
-	case ChangeClients:
-		return "clients"
 	case ChangeServers:
 		return "servers"
 	case ChangeDevices:
 		return "devices"
-	case ChangeOrigins:
-		return "origins"
-	case ChangeBlocked:
-		return "blocked"
 	}
 	return "change(" + strconv.Itoa(int(c)) + ")"
 }
@@ -57,12 +48,8 @@ type Events struct {
 	// Preferences carries the preferences after each change, whoever made it.
 	Preferences event.Signal[Preferences]
 
-	// Clients carries the number of connected clients after each connect and
-	// disconnect.
-	Clients event.Signal[int]
-
-	// Servers carries the port the listeners are bound on, after a restart has
-	// rebuilt them.
+	// Servers carries the agent's configured port, after a listener has bound
+	// again. Emitted when a reissued certificate rebinds one.
 	Servers event.Signal[int]
 
 	// Reader carries the reader's status: whether it is connected, and whether
@@ -81,13 +68,6 @@ type Events struct {
 	// Silent on an agent built without a registry.
 	Devices event.Signal[[]PairedDevice]
 
-	// Origins carries the allowlist after each edit. Silent on an agent built
-	// without an origin store.
-	Origins event.Signal[[]string]
-
-	// Blocked carries each origin refused a connection, once per origin.
-	Blocked event.Signal[string]
-
 	// Tag carries every scan the agent broadcasts, so a program embedding the
 	// agent acts on cards without connecting to its own WebSocket endpoint.
 	//
@@ -105,14 +85,10 @@ type Events struct {
 // restart.
 func (a *Agent) Events() *Events { return &a.events }
 
-// watchStores republishes the origin and device stores through the agent, so a
-// subscriber follows one surface rather than three. Called from New, before the
+// watchStores republishes the device store through the agent, so a subscriber
+// follows one surface rather than two. Called from New, before the
 // agent is handed out.
 func (a *Agent) watchStores() {
-	if a.origins != nil {
-		a.origins.changed.Connect(a.fireOriginsChanged)
-		a.origins.rejected.Connect(a.fireOriginBlocked)
-	}
 	if a.devices != nil {
 		a.devices.changed.Connect(a.fireDevicesChanged)
 	}
@@ -153,11 +129,6 @@ func (a *Agent) firePreferencesChanged() {
 	a.events.Any.Emit(ChangePreferences)
 }
 
-func (a *Agent) fireClientsChanged(count int) {
-	a.events.Clients.Emit(count)
-	a.events.Any.Emit(ChangeClients)
-}
-
 func (a *Agent) fireServerRestart() {
 	a.events.Servers.Emit(a.DevicePort())
 	a.events.Any.Emit(ChangeServers)
@@ -168,16 +139,6 @@ func (a *Agent) fireDevicesChanged(devices []PairedDevice) {
 	a.events.Any.Emit(ChangeDevices)
 }
 
-func (a *Agent) fireOriginsChanged(origins []string) {
-	a.events.Origins.Emit(origins)
-	a.events.Any.Emit(ChangeOrigins)
-}
-
 func (a *Agent) fireReaderStatus(status nfc.DeviceStatus) {
 	a.events.Reader.Emit(status)
-}
-
-func (a *Agent) fireOriginBlocked(origin string) {
-	a.events.Blocked.Emit(origin)
-	a.events.Any.Emit(ChangeBlocked)
 }

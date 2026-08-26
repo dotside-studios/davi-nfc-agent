@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -30,26 +31,64 @@ type Server struct {
 	// Client connections (multiple allowed)
 	clients    map[*wsconn.SafeConn]*clientSession
 	clientsMux sync.RWMutex
+
+	// What Config.Scans and Config.ReaderStatus were connected with, for Close
+	// to take back.
+	scans  *event.Connection
+	status *event.Connection
+
+	// changed carries the connected count after each connect and disconnect.
+	changed event.Signal[int]
 }
 
-// New creates a client server. It has no lifetime of its own: connections are
-// served as they arrive and scans are handed to it by whatever produced them.
+// New creates a client server, subscribed to whatever it was given to
+// broadcast. Connections are served as they arrive; Close takes the
+// subscriptions back.
 func New(config Config) *Server {
-	return &Server{
+	s := &Server{
 		config:  config,
 		clients: make(map[*wsconn.SafeConn]*clientSession),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: originChecker(config),
 		},
 	}
+
+	if config.Scans != nil {
+		s.scans = config.Scans.Connect(s.Broadcast)
+	}
+	if config.ReaderStatus != nil {
+		s.status = config.ReaderStatus.Connect(s.BroadcastDeviceStatus)
+	}
+	return s
 }
 
-// ServeWS handles a WebSocket connection request for a client. It performs its
-// own API-secret check and origin validation, so it is safe to call directly
-// from a shared listener (unified single-port mode).
-func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
+// Close ends the subscriptions the server was built with. Connections already
+// open are left alone: they are held by the listener, which closes them when it
+// stops.
+//
+// Safe to call more than once, and on a server built with nothing to subscribe
+// to.
+func (s *Server) Close() {
+	s.scans.Disconnect()
+	s.status.Disconnect()
+}
+
+// apiSecret is the secret required right now, empty for a server admitting
+// connections without one.
+func (s *Server) apiSecret() string {
+	if s.config.APISecret == nil {
+		return ""
+	}
+	return s.config.APISecret()
+}
+
+// ServeHTTP upgrades a client connection. The server checks the API secret and
+// the origin itself, so it is safe to mount directly on a shared listener.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handleWebSocket(w, r)
 }
+
+var _ http.Handler = (*Server)(nil)
 
 // ClientCount returns the number of currently connected clients.
 func (s *Server) ClientCount() int {
@@ -127,12 +166,18 @@ func (s *Server) Disconnect(clientID string) bool {
 	return true
 }
 
-// notifyChange tells any observer that the client list moved.
-func (s *Server) notifyChange() {
-	if s.config.OnChange != nil {
-		s.config.OnChange(s.clientCount())
-	}
+// OnClientsChange calls fn with the connected count after each connect and
+// disconnect, so an observer refreshes without polling. The connection it
+// returns removes it.
+//
+// Handlers run on the connection's own goroutine, off the hot path, so one must
+// not block.
+func (s *Server) OnClientsChange(fn func(clients int)) *event.Connection {
+	return s.changed.Connect(fn)
 }
+
+// notifyChange tells any observer that the client list moved.
+func (s *Server) notifyChange() { s.changed.Emit(s.clientCount()) }
 
 // countOperation records that a client issued a write or lock.
 func (s *Server) countOperation(conn *wsconn.SafeConn, kind string) {
@@ -163,7 +208,7 @@ func (s *Server) clientCount() int {
 
 // handleWebSocket handles WebSocket connections from clients.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier); !ok {
+	if _, ok := server.CheckAuth(w, r, s.apiSecret(), s.config.TokenVerifier); !ok {
 		log.Printf("[client] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}
@@ -374,17 +419,9 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// Broadcast hands a scan to the in-process observer and then to every
-// connected client.
-//
-// Called by whatever produced the scan.
+// Broadcast serves a scan to every connected client. Called by whatever
+// produced it, which decides what is worth serving.
 func (s *Server) Broadcast(data nfc.NFCData) {
-	// The observer sees it before the clients do. This is the supported way to
-	// read tags from Go.
-	if s.config.OnTag != nil {
-		s.config.OnTag(data)
-	}
-
 	s.broadcastTagData(data)
 }
 
@@ -537,8 +574,9 @@ func errorPayloadOrDefault(code, fallback protocol.ErrorCode) protocol.ErrorPayl
 	return protocol.NewErrorPayload(code)
 }
 
-// originChecker prefers an explicit policy over the static allowlist, so the
-// tray can admit an origin without restarting the listener.
+// originChecker prefers an explicit policy over the static allowlist, so an
+// origin allowed while the agent runs is admitted without anything being
+// rebuilt.
 func originChecker(config Config) func(r *http.Request) bool {
 	if config.OriginPolicy != nil {
 		return server.CheckOriginPolicy(config.OriginPolicy)

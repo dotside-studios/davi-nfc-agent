@@ -22,9 +22,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		c.host.StopAgent()
 		return nil, nil
 
-	case "agent.restartServers":
-		return nil, c.host.RestartServers()
-
 	case "agent.quit":
 		// Deferred so the response reaches the console before the process exits.
 		go c.host.QuitAgent()

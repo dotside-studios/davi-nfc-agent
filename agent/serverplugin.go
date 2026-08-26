@@ -2,11 +2,17 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -62,15 +68,18 @@ func (e Endpoint) name() string {
 
 // ServerPlugin is the agent's listener and everything served from it.
 //
-// It owns the [listener.Server]. It builds one from Config or serves the
-// one it is given, publishes it to the agent, which mounts its own routes on
-// it, then mounts the endpoints registered here. A build decides what the agent
+// It owns the [listener.Server]. It builds one from Config or serves the one it
+// is given, mounts what the agent is reached on, publishes it for the plugins
+// registered after it, then mounts the endpoints registered here. A build decides what the agent
 // serves by registering one and listing what goes on it:
 //
 //	a.Plugins.Add(&agent.ServerPlugin{Endpoints: []agent.Endpoint{
 //		{Name: "control API", Pattern: "/control/", Handler: console.Routes()},
 //		{Name: "control center", Pattern: "/", Handler: console.Assets()},
 //	}})
+//
+// It also answers for the connections: the origin allowlist that admits them is
+// its own, and so are the clients holding one right now.
 //
 // An agent with none of these registered serves no HTTP at all, which is what a
 // program driving the reader directly wants.
@@ -105,12 +114,52 @@ type ServerPlugin struct {
 	// which Setup resolves onto Runtime.
 	Certificates tlspkg.CertificateWatcher
 
+	// Origins is the allowlist of pages permitted to connect, consulted on
+	// every upgrade. Nil builds one from the agent's config directory, seeded
+	// with AllowedOrigins.
+	Origins *server.OriginStore
+
+	// AllowedOrigins seeds a store built here, for a build passing through what
+	// it was told on the command line. Ignored when Origins is set.
+	AllowedOrigins []string
+
+	// ClientServer is what browser clients connect to, mounted on /ws under
+	// server.ModeClient. Nil builds one from the agent at activation, which is
+	// what a build with nothing to say about it wants.
+	//
+	// It is what ClientCount, Clients and DisconnectClient report on, and lives
+	// as long as the plugin: a client stays connected across a stop and start of
+	// the agent, and receives again once it runs.
+	ClientServer *clientserver.Server
+
+	// ServeMode names the handler serving each connection mode on /ws. A
+	// connection declaring none is a client, and takes the entry under
+	// server.ModeClient; server.ModeDevice is the device driver's endpoint.
+	//
+	// Both are mounted for you: the client server the plugin runs for the agent
+	// under the first, and whatever built the device endpoint under the second.
+	// An entry here replaces what would have been mounted.
+	ServeMode map[string]http.Handler
+
 	// The entries whose labels follow what is being served.
 	device *traymenu.Item
 	client *traymenu.Item
 	secret *traymenu.Item
 	logger *log.Logger
 	agent  *Agent
+
+	// clientChanges republishes what the client server reports, so a subscriber
+	// connects to the plugin rather than to whichever server this build put
+	// behind it.
+	clientChanges event.Signal[int]
+
+	// The allowlist entries, redrawn from the store rather than from clicks.
+	origins        *traymenu.List[originRow]
+	originAllowAny *traymenu.Item
+
+	// originWatchers are registered before the store exists; see
+	// OnOriginsChange.
+	originWatchers []func()
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -147,9 +196,10 @@ func (p *ServerPlugin) TLSEnabled() bool {
 	return p.Server.TLSEnabled()
 }
 
-// Port is the port being served, which a client should be told to
-// connect to. It differs from the agent's configured port after one is saved
-// and before the listener is rebuilt, and is 0 before activation.
+// Port is the port being served, which a client should be told to connect to.
+// It differs from the agent's configured port once a preference saves a
+// different one, since the listener keeps the port it was built with, and is 0
+// before activation.
 func (p *ServerPlugin) Port() int {
 	if p == nil || p.Server == nil {
 		return 0
@@ -162,14 +212,24 @@ func (p *ServerPlugin) Port() int {
 // It stops at the first endpoint it cannot register, failing the agent's start.
 // A control center missing its API is worse than one that is not there.
 func (p *ServerPlugin) Activate(ctx AgentContext) error {
+	p.logger = ctx.Logger()
+	p.agent = ctx.Agent
+	p.loadOrigins(ctx)
+	p.serveModes()
+
 	if p.Server == nil {
 		p.Server = listener.New(p.config(ctx.Agent))
 	}
-	// The agent's own routes go on first, so an endpoint cannot displace /ws
-	// or the health checks.
-	for _, route := range ctx.Agent.Routes() {
-		if err := p.Server.Mount(route.Pattern, route.Handler); err != nil {
-			return fmt.Errorf("the agent's own route %q: %w", route.Pattern, err)
+	// What the agent is reached on goes first, so an endpoint cannot displace
+	// /ws or the health checks.
+	routes := map[string]http.Handler{
+		"/ws":            p.wsHandler(),
+		"/health":        p.healthHandler(),
+		"/api/v1/health": p.healthHandler(),
+	}
+	for _, pattern := range []string{"/ws", "/health", "/api/v1/health"} {
+		if err := p.Server.Mount(pattern, server.CORS(routes[pattern])); err != nil {
+			return fmt.Errorf("the agent's own route %q: %w", pattern, err)
 		}
 	}
 	if err := ctx.Serve(p.Server); err != nil {
@@ -179,8 +239,6 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if err := p.watchCertificates(ctx); err != nil {
 		return err
 	}
-	p.logger = ctx.Logger()
-	p.agent = ctx.Agent
 
 	for _, endpoint := range p.Endpoints {
 		if err := p.register(ctx, endpoint); err != nil {
@@ -191,9 +249,8 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if err := p.serverURLs(ctx); err != nil {
 		return err
 	}
+	p.originsMenu(ctx)
 
-	// Last, so it is the first thing to come down: nothing new arrives while
-	// what answers it is being torn down. Components stop in reverse.
 	return ctx.Use(&listenerComponent{server: p.Server, agent: ctx.Agent})
 }
 
@@ -300,7 +357,7 @@ func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
 				p.logf("Failed to rotate the API secret: %v", err)
 				return
 			}
-			p.logf("API secret rotated; the servers were restarted")
+			p.logf("API secret rotated; it is required from the next connection")
 			p.secret.SetTitle("API Secret: " + redact(fresh))
 		}),
 	)
@@ -465,4 +522,115 @@ func (p *ServerPlugin) menuTitle() string {
 		return p.MenuTitle
 	}
 	return "Server URLs"
+}
+
+// serving is the client server mounted under server.ModeClient, nil before
+// activation and for a build serving clients with something else. As with the
+// listener accessors, a build that registered no plugin holds a nil one and is
+// answered rather than panicked.
+func (p *ServerPlugin) serving() *clientserver.Server {
+	if p == nil {
+		return nil
+	}
+	srv, _ := p.ServeMode[server.ModeClient].(*clientserver.Server)
+	return srv
+}
+
+// ClientCount is how many clients are connected, 0 when nothing is serving
+// them.
+func (p *ServerPlugin) ClientCount() int {
+	serving := p.serving()
+	if serving == nil {
+		return 0
+	}
+	return serving.ClientCount()
+}
+
+// Clients lists the connected clients, most recently connected first.
+func (p *ServerPlugin) Clients() []clientserver.ClientInfo {
+	serving := p.serving()
+	if serving == nil {
+		return nil
+	}
+	return serving.Clients()
+}
+
+// DisconnectClient drops one client's connection. It reports an error for a
+// client that is not connected, which includes one that just left.
+func (p *ServerPlugin) DisconnectClient(id string) error {
+	serving := p.serving()
+	if serving == nil {
+		return errors.New("nothing is serving clients")
+	}
+	if !serving.Disconnect(id) {
+		return errors.New("no such client: it may have already disconnected")
+	}
+	return nil
+}
+
+// OnClientsChange calls fn with the connected count after each connect and
+// disconnect. The connection it returns removes it. A console built alongside
+// this plugin subscribes before there is a server to subscribe to.
+func (p *ServerPlugin) OnClientsChange(fn func(int)) *event.Connection {
+	if p == nil {
+		return nil
+	}
+	return p.clientChanges.Connect(fn)
+}
+
+// serveModes republishes what the client server reports, so a subscriber
+// connects to the plugin rather than to the server the build mounted.
+func (p *ServerPlugin) serveModes() {
+	if srv := p.serving(); srv != nil {
+		srv.OnClientsChange(p.clientChanges.Emit)
+	}
+}
+
+// wsHandler routes a connection to the handler for the mode it declares.
+// Clients take the modes nothing is mounted for too: a connection naming a mode
+// this build does not run is not a device it can answer.
+func (p *ServerPlugin) wsHandler() http.Handler {
+	byMode := maps.Clone(p.ServeMode)
+	clients := p.whileRunning(byMode[server.ModeClient])
+	delete(byMode, server.ModeClient)
+
+	return server.RouteByMode(clients, byMode)
+}
+
+// whileRunning admits clients only while the agent is running. One arriving
+// before it is told so rather than left holding a connection that reports
+// nothing. Devices are not gated: a driver decides for itself what to do with
+// one that connects early.
+func (p *ServerPlugin) whileRunning(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h == nil {
+			http.Error(w, "this agent serves no clients", http.StatusServiceUnavailable)
+			return
+		}
+		if p.agent == nil || !p.agent.Running() {
+			http.Error(w, "agent is not running", http.StatusServiceUnavailable)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// healthHandler reports that the agent is up and how many clients it is
+// serving. Mounted at both /health and /api/v1/health: the two spellings
+// predate each other and clients in the wild use both.
+func (p *ServerPlugin) healthHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":    "ok",
+			"type":      "agent",
+			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			"clients":   p.ClientCount(),
+		})
+	})
 }

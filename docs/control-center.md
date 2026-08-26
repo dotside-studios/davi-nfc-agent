@@ -49,7 +49,7 @@ your own.
 **Overview**: the page an operator works from, split a third to two thirds.
 
 The left third holds state and the knobs that get turned: start/stop, reader
-selection, mode, card-type filter, port, restart and quit, plus the server URLs
+selection, mode, card-type filter, port and quit, plus the server URLs
 and certificate summary needed to decide whether to turn any of them.
 
 The right two thirds hold what the reader is doing: the tag on it now with its
@@ -273,7 +273,7 @@ They are not a public API and carry no compatibility guarantee.
 | `POST /control/action` | `{"action": "...", "params": {...}}` |
 | `GET /control/ws` | Live state snapshots and log lines |
 
-Actions: `agent.start`, `agent.stop`, `agent.restartServers`, `agent.quit`,
+Actions: `agent.start`, `agent.stop`, `agent.quit`,
 `reader.selectDevice`, `reader.setMode`, `reader.setCardTypes`,
 `settings.save`, `devices.revoke`, `devices.revokeAll`,
 `devices.setRequirePaired`, `clients.disconnect`, `origins.allow`, `origins.revoke`,

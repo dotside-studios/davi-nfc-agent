@@ -29,24 +29,16 @@ func TestAnyNamesEveryChange(t *testing.T) {
 
 	a.fireState(StateRunning)
 	a.SetReaderMode(nfc.ModeReadOnly)
-	a.fireClientsChanged(1)
 	a.fireServerRestart()
 	if _, _, err := a.Devices().Pair("phone", "android"); err != nil {
 		t.Fatalf("Pair: %v", err)
 	}
-	if err := a.Origins().Allow("shop.example"); err != nil {
-		t.Fatalf("Allow: %v", err)
-	}
-	a.Origins().RecordBlocked("evil.example")
 
 	want := []Change{
 		ChangeState,
 		ChangePreferences,
-		ChangeClients,
 		ChangeServers,
 		ChangeDevices,
-		ChangeOrigins,
-		ChangeBlocked,
 	}
 	if len(seen) != len(want) {
 		t.Fatalf("Any carried %v, want %v", seen, want)
@@ -119,27 +111,6 @@ func TestDevicesCarriesTheRegistry(t *testing.T) {
 
 	if len(got) != 1 || got[0].Name != "phone" {
 		t.Errorf("subscriber saw %v, want the one paired device", got)
-	}
-}
-
-func TestOriginsCarriesTheAllowlist(t *testing.T) {
-	a := eventsAgent(t)
-
-	var got []string
-	a.Events().Origins.Connect(func(o []string) { got = o })
-
-	if err := a.Origins().Allow("shop.example"); err != nil {
-		t.Fatalf("Allow: %v", err)
-	}
-
-	var found bool
-	for _, origin := range got {
-		if origin == "shop.example" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("subscriber saw %v, want the allowed origin in it", got)
 	}
 }
 

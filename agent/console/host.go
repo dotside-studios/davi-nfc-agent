@@ -7,6 +7,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // host adapts the agent to Host. Every reach the console makes into the agent
@@ -42,8 +43,6 @@ func (h *host) QuitAgent() {
 	h.quit()
 }
 
-func (h *host) RestartServers() error { return h.agent.RestartServers() }
-
 // AvailableDevices is the reader picker, so it lists what the agent reads from.
 // A phone reports what it scans for itself and is never read from here, so it
 // belongs in the paired devices rather than among the readers.
@@ -60,18 +59,18 @@ func (h *host) CurrentCard() (uid, cardType string, present bool) {
 }
 
 // Port is the port being served, not the one configured. A port saved in the
-// console is bound only once the listener has been restarted, and until then
-// the console must not hand out a URL nothing is listening on.
+// console reaches the listener only when one is next built, and until then the
+// console must not hand out a URL nothing is listening on.
 func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
-func (h *host) ClientCount() int { return h.agent.ClientCount() }
+func (h *host) ClientCount() int { return h.servers.ClientCount() }
 
 func (h *host) Clients() []Client {
-	live := h.agent.Clients()
+	live := h.servers.Clients()
 
 	out := make([]Client, 0, len(live))
 	for _, c := range live {
@@ -88,7 +87,7 @@ func (h *host) Clients() []Client {
 	return out
 }
 
-func (h *host) DisconnectClient(id string) error { return h.agent.DisconnectClient(id) }
+func (h *host) DisconnectClient(id string) error { return h.servers.DisconnectClient(id) }
 
 func (h *host) APISecret() string    { return h.agent.APISecret() }
 func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
@@ -177,41 +176,50 @@ func (h *host) RevokeAllDevices() error {
 	return h.agent.Devices().RevokeAll()
 }
 
-func (h *host) AllowedOrigins() []string {
-	if h.agent.Origins() == nil {
+// The allowlist belongs to what serves the connections it admits, so these ask
+// the server plugin. A build with none has no origins to show.
+func (h *host) origins() *server.OriginStore {
+	if h.servers == nil {
 		return nil
 	}
-	return h.agent.Origins().List()
+	return h.servers.Origins
+}
+
+func (h *host) AllowedOrigins() []string {
+	if h.origins() == nil {
+		return nil
+	}
+	return h.origins().List()
 }
 
 func (h *host) BlockedOrigins() []string {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return nil
 	}
-	return h.agent.Origins().Blocked()
+	return h.origins().Blocked()
 }
 
 func (h *host) OriginCheckDisabled() bool {
-	return h.agent.Origins() != nil && h.agent.Origins().IsSessionAllowAny()
+	return h.origins() != nil && h.origins().IsSessionAllowAny()
 }
 
 func (h *host) AllowOrigin(origin string) error {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins().Allow(origin)
+	return h.origins().Allow(origin)
 }
 
 func (h *host) RevokeOrigin(origin string) error {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins().Revoke(origin)
+	return h.origins().Revoke(origin)
 }
 
 func (h *host) SetOriginCheckDisabled(on bool) {
-	if h.agent.Origins() != nil {
-		h.agent.Origins().SessionAllowAny(on)
+	if h.origins() != nil {
+		h.origins().SessionAllowAny(on)
 	}
 }
 

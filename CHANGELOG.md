@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ServerPlugin.CheckOrigin` reports the origin check the listener applies, and
+  `ServerPlugin.OriginPolicy` the same allowlist as a `server.OriginPolicy`, for
+  whatever serves a WebSocket endpoint beside it. Both resolve per request, so
+  they can be handed to something built before the plugin activates. `ServerPlugin.OnOriginsChange`
+  follows the allowlist from something built before the plugin activates
+- `clientserver.Server` is an `http.Handler`: `ServeWS` is `ServeHTTP`, so it is
+  mounted as `ServeMode[server.ModeClient]` the way a device endpoint is mounted
+  under `server.ModeDevice`
+- `Agent.TokenVerifier` reports the per-device credentials the agent issued at
+  pairing, for whatever admits a connection presenting one
+- `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
+  `OnClientsChange` report on and act on the clients connected right now. A
+  subscription outlives the server behind it, so it survives a restart
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened
@@ -52,10 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `traymenu.Discard` and `traymenu.Section` as a `Container`
 - Subscriptions: `Agent.Events()` publishes what the agent reports as typed
   signals, connected to at any time and disconnected through the handle each
-  connection returns. `State`, `Preferences`, `Clients`, `Servers`, `Devices`,
-  `Origins`, `Blocked` and `Tag` carry the new value; `Any` carries an
-  `agent.Change` naming what moved, for a surface that redraws. A plugin gets
-  the same surface as `ctx.Events`
+  connection returns. `State`, `Preferences`, `Servers`, `Devices` and `Tag`
+  carry the new value; `Any` carries an `agent.Change` naming what moved, for a
+  surface that redraws. A plugin gets the same surface as `ctx.Events`
 - `Events().Tag` carries every scan the agent broadcasts, so a program embedding
   the agent acts on cards without connecting to its own WebSocket. The broadcast
   to clients is unaffected
@@ -92,6 +104,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `clientserver.Config` takes the scans and reader status to broadcast as
+  signals and subscribes itself; `clientserver.Server.Close` takes the
+  subscriptions back. Building one is the whole wiring, rather than building one
+  and then connecting it to what feeds it
+- `clientserver.Config.OnChange` is `clientserver.Server.OnClientsChange`, which
+  any number of observers connect to and disconnect from, rather than one
+  callback the server had to be built with
+- `server.NewDeviceAuth` and `clientserver.Config.APISecret` take the secret as
+  a function, read on every connection rather than captured. `RotateAPISecret`
+  no longer restarts anything: both endpoints see the new secret on the next
+  connection, and connections already open are left alone
+- The clients connected to an agent are the server plugin's, not the agent's.
+  `Agent.ClientCount`, `Clients` and `DisconnectClient` are the same three
+  methods on `ServerPlugin`, and `Events().Clients` is
+  `ServerPlugin.OnClientsChange`. The agent no longer holds a pointer to the
+  server serving them
+- `agent.OriginStore` and `agent.ParseAllowedOrigins` are `server.OriginStore`
+  and `server.ParseAllowedOrigins`, beside the origin checks that read them, and
+  the allowlist is `agent.ServerPlugin`'s: it builds the store under the agent's
+  config directory, seeds it from `ServerPlugin.AllowedOrigins`, consults it on
+  every upgrade and owns the tray's **Allowed Origins** section. `Setup` parses
+  what the flags named onto `Runtime.AllowedOrigins` for the plugin to serve
+  behind. An agent serving nothing holds no allowlist
+- `agent.ServerPlugin` serves the clients. It mounts `/ws` and the health checks
+  itself and routes a connection by the mode it declares; `ServeMode` names what
+  serves each, browser clients included. A build declares its own client server,
+  as it already declared its device endpoint, and one that declares neither
+  serves no HTTP and still reports every scan through `Events()`
+- The client server lives as long as the server plugin rather than as long as a
+  run. It was rebuilt by every start, which left a connected client holding a
+  server nothing reported to; a client now stays connected across a stop and
+  start and receives again once the agent runs
+- The agent reports what its readers scan and what serves clients subscribes,
+  rather than the agent pushing scans into a server it built. `Events().Tag`
+  fires from the agent's own path now, so a plugin following the agent sees the
+  same stream a client does, and the card-type filter and the pinned device
+  still decide what passes
 - `server.CheckAuth`, `server.CheckPairedDevice` and `DeviceAuth.Check` name the
   paired device they admitted, and `remotenfc.ServerOptions.Authenticate` and
   `agent.DeviceEndpointOptions.Authenticate` take that shape. A device admitted
@@ -233,6 +282,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rotating the API secret revoked nothing on the device endpoint. `DeviceAuth`
+  was built once with the secret the agent started with and never updated, so
+  after a rotation a device presenting the old secret was still admitted and one
+  presenting the secret the console had just shown the operator was refused.
+  Both endpoints read the secret per connection now
+- `Agent.apiSecret` was written by a rotation without holding the lock the
+  readers take
 - A paired device connects as itself. It registered under an identity minted per
   connection, so nothing could match it to the device that paired: the console
   showed every paired device offline while it was connected. The credential
@@ -329,6 +385,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Agent.RestartServers` and the console's `agent.restartServers` action, with
+  the **restart listeners** control that called it. Both endpoints read the API
+  secret per connection now, so nothing needs rebuilding, and what the action
+  did was not what it offered: it replaced the client server without closing the
+  connections the old one held, leaving them open, receiving nothing, and absent
+  from the client list
+- `Events().Clients` and `ChangeClients`. An agent with no server plugin
+  registered has no clients to count, so the signal was only ever meaningful
+  through the plugin that now carries it
+- `Agent.Origins`, `Config.Origins`, `Agent.CheckOrigin`, `Events().Origins`,
+  `Events().Blocked`, `ChangeOrigins` and `ChangeBlocked`. Which browser origins
+  may connect is a question for what serves the connection, so it is the server
+  plugin's; a build with no plugin registered admits nobody by origin because it
+  admits nobody at all
+- `Config.DeviceEndpoint`, `Options.DeviceEndpoint` and
+  `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
+  the agent answers, `DeviceAuth.Check`, `TagModificationAllowed` and
+  `PublicKeyPin`, plus `servers.CheckOrigin()`, and mounts it as
+  `ServerPlugin.ServeMode[server.ModeDevice]` rather than handing the agent a
+  builder to call
+- `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
+  is the server plugin's, so the agent holds no server and hands over no routes.
+  What answers about the clients moved with it; see Changed
+- `clientserver.Config.OnTag`. It let an embedder observe a scan before the
+  clients saw it, which is what the agent used it for; the agent reports the
+  scan before handing it over now, so nothing sets it
 - `Agent.RemoteDevices` and `console.Host.RemoteDevices`. The agent reached past
   its manager into the child holding phones for a count the console can take
   from the devices it already lists. `Agent.OnlineDevices` answers from what the

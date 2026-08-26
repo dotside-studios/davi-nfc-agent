@@ -14,7 +14,7 @@ import (
 func dial(t *testing.T, s *Server, origin string) *websocket.Conn {
 	t.Helper()
 
-	ts := httptest.NewServer(http.HandlerFunc(s.ServeWS))
+	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
 
 	header := http.Header{}
@@ -48,7 +48,11 @@ func waitFor(t *testing.T, cond func() bool) {
 func newTestServer(onChange func(clients int)) *Server {
 	// No origin policy and no secret: the test dials from an ephemeral port, and
 	// what is under test is the session bookkeeping, not admission.
-	return New(Config{AllowedOrigins: []string{"*"}, OnChange: onChange})
+	s := New(Config{AllowedOrigins: []string{"*"}})
+	if onChange != nil {
+		s.OnClientsChange(onChange)
+	}
+	return s
 }
 
 func TestClientsReportsConnectionDetail(t *testing.T) {

@@ -18,6 +18,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
@@ -43,9 +45,11 @@ type harness struct {
 	Agent   *agent.Agent
 	Runtime *agent.Runtime
 
-	// Devices is the phone driver the test built and handed over, and Pairing
-	// the pairing plugin, when the test asked for one.
+	// Devices is the phone driver the test built and handed over, Servers what
+	// the agent is served from, and Pairing the pairing plugin, when the test
+	// asked for one.
 	Devices *remotenfc.Manager
+	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
@@ -70,18 +74,10 @@ func start(t *testing.T, opts options) *harness {
 	// running on this machine.
 	o.DevicePort = freePort(t)
 
-	// The agent receives a handler builder rather than the driver itself, so it
-	// names no device protocol. What the devices scan and what they hold reach
-	// it through the manager below.
+	// The agent names no device protocol: what the devices scan and what they
+	// hold reach it through the manager below, and their endpoint is mounted
+	// alongside the clients.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	o.DeviceEndpoint = func(d agent.DeviceEndpointOptions) http.Handler {
-		return devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         d.Authenticate,
-			CheckOrigin:          d.CheckOrigin,
-			AllowTagModification: d.AllowTagModification,
-			PublicKeyPin:         d.PublicKeyPin,
-		})
-	}
 
 	// Stands in for nfc/pcsc, the one part a test cannot supply.
 	hardware := nfc.NewMockManager()
@@ -102,7 +98,30 @@ func start(t *testing.T, opts options) *harness {
 	// serves and the authority pairing hands out are the trust plugin's, not
 	// the agent's.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{Config: listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile}, Certificates: rt.Certificates}, trust); err != nil {
+	servers := &agent.ServerPlugin{
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
+	}
+
+	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
@@ -118,6 +137,7 @@ func start(t *testing.T, opts options) *harness {
 		Agent:    rt.Agent,
 		Runtime:  rt,
 		Devices:  devices,
+		Servers:  servers,
 		Hardware: hardware.MockDevice,
 		Pairing:  pairing,
 		Origin:   "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
@@ -156,7 +176,7 @@ func (h *harness) reopenHardware() {
 	h.Hardware.IsOpen = true
 }
 
-// observed waits for the next scan to reach an OnTag observer.
+// observed waits for the next scan the agent reports.
 func (h *harness) observed(t *testing.T) nfc.NFCData {
 	t.Helper()
 
@@ -246,7 +266,7 @@ func (h *harness) client(t *testing.T) *websocket.Conn {
 	t.Helper()
 
 	registered := make(chan struct{}, 1)
-	sub := h.Agent.Events().Clients.Connect(func(int) {
+	sub := h.Servers.OnClientsChange(func(int) {
 		select {
 		case registered <- struct{}{}:
 		default:

@@ -33,6 +33,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -46,17 +48,9 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
 
 	// The driver serving phones. What it scans and what its devices hold reach
-	// the agent through the manager below; only its handler is handed over, so
-	// the agent names no device protocol itself.
+	// the agent through the manager below; its endpoint is mounted with the
+	// server plugin, so the agent names no device protocol itself.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
-		return devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         o.Authenticate,
-			CheckOrigin:          o.CheckOrigin,
-			AllowTagModification: o.AllowTagModification,
-			PublicKeyPin:         o.PublicKeyPin,
-		})
-	}
 
 	// Hardware readers and phones behind one manager, which the agent opens
 	// its reader from.
@@ -78,8 +72,30 @@ func main() {
 	// decides what this agent serves. Setup resolved which certificate to
 	// serve; Certificates is what rebinds the listener when it is reissued.
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
+
+	// The two halves of /ws, both declared here. The agent decides who is
+	// admitted and what is allowed; each protocol decides what its own side
+	// may say.
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
 	}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
@@ -115,9 +131,9 @@ func main() {
 
 `agent.Setup` performs the work the flags imply: it resolves the config
 directory, loads or generates the TLS certificate and the API secret, and reads
-the paired devices and the origin allowlist. It returns an `*agent.Runtime`
-holding the configured agent, the certificate manager, the log ring and the
-reader path to open.
+the paired devices. It returns an `*agent.Runtime` holding the configured agent,
+the certificate manager, the log ring, the reader path to open and the origins
+the flags named, for the server plugin to serve behind.
 
 The listener, the pairing server and the control center are plugins the program
 registers, not part of `Setup`. An agent with none of them drives the reader and
@@ -151,9 +167,9 @@ The NFC backend is `Setup`'s second argument, which is why every package beneath
 `nfc.TagReporter` and answers for the tags they hold through `nfc.TagHolder`,
 both optional, so the agent subscribes to the manager it was given rather than
 being handed the driver. `multimanager` implements both by fanning its children
-in. The one value left is `DeviceEndpoint`, which builds the handler serving
-those devices, since a route is not the manager's business. Supply none and the
-agent serves its own reader.
+in. Serving those devices is not the manager's business: the driver's endpoint
+goes on the server plugin as `ServeMode[server.ModeDevice]`, built from what the
+agent answers, and a build that mounts none serves its own readers alone.
 
 Flags and the standard logger belong to the program. Registering flags writes to
 `flag.CommandLine`, which would collide with the flags of anything embedding the
@@ -250,15 +266,16 @@ none leaves an agent that drives the reader and serves nothing.
 
 | Plugin | Owns |
 |---|---|
-| `agent.ServerPlugin` | The listener, everything mounted on it, and the tray's **Server URLs** submenu |
+| `agent.ServerPlugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
 | `agent.PairingPlugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
 | `agent.TrustPlugin` | The entry that installs the local certificate authority |
 
 ```go
 trust := &agent.TrustPlugin{Manager: rt.Certificates}
 servers := &agent.ServerPlugin{
-	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-	Certificates: rt.Certificates,
+	Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+	Certificates:   rt.Certificates,
+	AllowedOrigins: rt.AllowedOrigins,
 }
 pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
 
@@ -277,10 +294,45 @@ servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks}
 servers.Add(agent.Endpoint{Name: "queue drain", Component: drain})
 ```
 
-`agent.Routes` is mounted first and reserves what the agent serves of its own:
-`/ws`, where devices and clients both connect, and `/health` with
-`/api/v1/health` beside it. An endpoint on one of those paths fails the start,
-as two endpoints on one path do, rather than leaving the mux to decide.
+The plugin mounts what the agent is reached on first and reserves it: `/ws`,
+where devices and clients both connect, and `/health` with `/api/v1/health`
+beside it. An endpoint on one of those paths fails the start, as two endpoints
+on one path do, rather than leaving the mux to decide.
+
+`/ws` routes a connection by the mode it declares, and `ServeMode` is the whole
+answer to what a connection reaches. Nothing is mounted for you: a build
+declares what it serves, browser clients included.
+
+```go
+servers.ServeMode = map[string]http.Handler{
+	server.ModeClient: clientserver.New(clientserver.Config{ ... }),
+	server.ModeDevice: devices.Handler(remotenfc.ServerOptions{ ... }),
+}
+```
+
+A build that names no client server serves no clients, the same way one that
+names no device endpoint serves no devices. What is named lives as long as the
+plugin rather than as long as a run, so a client stays connected across a stop
+and start of the agent and receives again once it runs.
+
+The allowlist of browser origins is the plugin's too, since it decides which
+upgrades it admits. `AllowedOrigins` seeds it and the store persists under the
+config directory; `Origins` supplies one loaded elsewhere. `servers.CheckOrigin()` is the
+same decision for a handler mounted beside it, and `servers.OriginPolicy()` the
+same for anything taking a `server.OriginPolicy`. Both resolve per request, so
+they can be handed over before the plugin has a store and follow an origin
+allowed while the agent runs.
+
+The clients connected right now are reported through the plugin:
+`servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
+answer from whatever is under `server.ModeClient`, when it is a
+`*clientserver.Server`, and report nothing when it is not.
+`servers.OnClientsChange(fn)` follows the count and takes a subscriber before
+the plugin activates, which is when a console is built.
+
+A build that registers no server plugin serves no HTTP and runs no client
+server, which is what a program driving the readers directly wants. It still
+gets every scan through `Agent.Events()`.
 
 The listener is bound by a component the plugin registers, so it comes up once
 the agent is serving and goes down before it. Give it `Certificates` and a
@@ -402,6 +454,8 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -417,12 +471,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// The listener, with nothing on it but the agent's own routes. Leave it
-	// out for a service that reads cards and serves no HTTP. Setup resolved
-	// the certificate; blank leaves the listener serving plain HTTP.
+	// The listener, serving browser clients on /ws and the health checks beside
+	// it. Leave it out for a service that reads cards and serves no HTTP. Setup
+	// resolved the certificate; blank leaves the listener serving plain HTTP.
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
 	}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		log.Fatal(err)
@@ -485,13 +551,10 @@ it runs on every emission; the connection it returns removes it again.
 |---|---|
 | `State` | Each settled lifecycle transition |
 | `Preferences` | The preferences after a change, whoever made it |
-| `Clients` | The number of connected clients |
 | `Servers` | The port the listeners are bound on, after a restart |
 | `Reader` | The reader's status: connected, and whether a card is on it |
 | `Readers` | The readers that can be picked, when the set changes |
 | `Devices` | The paired devices, after a pairing or a revocation |
-| `Origins` | The allowlist, after an edit |
-| `Blocked` | Each origin refused a connection |
 | `Tag` | Every scan the agent broadcasts |
 | `Any` | The kind of every change above, except scans and reader status |
 

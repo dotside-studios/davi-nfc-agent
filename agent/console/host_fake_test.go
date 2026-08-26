@@ -95,13 +95,6 @@ func (h *fakeHost) QuitAgent() {
 	h.quit++
 }
 
-func (h *fakeHost) RestartServers() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.restarted++
-	return nil
-}
-
 func (h *fakeHost) AvailableDevices() []string { return h.available }
 func (h *fakeHost) AllCardTypes() []string     { return h.cardTypes }
 

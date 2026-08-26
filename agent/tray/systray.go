@@ -44,10 +44,6 @@ type App struct {
 	mRequirePaired    *traymenu.Item
 	pairedDevices     *traymenu.List[string]
 
-	// Origin allowlist menu items
-	mOriginAllowAny *traymenu.Item
-	origins         *traymenu.List[originRow]
-
 	// Reader feedback toggle
 	mReaderFeedback *traymenu.Item
 
@@ -147,7 +143,6 @@ func (s *App) setupUI() {
 	s.menu.AddSeparator()
 
 	s.setupDevicesMenu()
-	s.setupOriginsMenu()
 
 	// The menus open on what the agent is set to, which is not always the
 	// default: what the launcher set was decided before the tray existed.

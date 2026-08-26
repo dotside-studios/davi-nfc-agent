@@ -83,27 +83,6 @@ func TestAStopElsewhereReachesTheControls(t *testing.T) {
 	}
 }
 
-// An origin allowed from the console shows as allowed in the tray, without the
-// operator reopening the menu.
-func TestAnOriginAllowedElsewhereRedrawsTheMenu(t *testing.T) {
-	store, err := nfcagent.NewOriginStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewOriginStore: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Origins: store})
-	app, _ := newTestTray(t, agent)
-	app.subscribe()
-
-	if err := store.Allow("console.example"); err != nil {
-		t.Fatalf("Allow: %v", err)
-	}
-
-	row := findOriginRow(t, app, "console.example")
-	if !row.Checked() {
-		t.Error("the allowed origin is not ticked in the menu")
-	}
-}
-
 // A reader picked in the console restarts the agent on it and tells the tray
 // nothing, so the tick has to follow the transition.
 func TestAReaderPickedElsewhereMovesTheTick(t *testing.T) {

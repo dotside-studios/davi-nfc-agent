@@ -3,6 +3,7 @@ package agent
 import (
 	"net/http"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -44,24 +45,40 @@ func (p *ServerPlugin) loadOrigins(ctx AgentContext) {
 	}
 
 	p.Origins = store
-	for _, fn := range p.originWatchers {
-		p.connectOrigins(fn)
+	p.republishOrigins()
+}
+
+// republishOrigins carries what the store reports onto the plugin's own signal,
+// so a subscriber follows the plugin rather than the store it happens to hold.
+// Called once, when the store settles.
+func (p *ServerPlugin) republishOrigins() {
+	emit := func() { p.Events().Origins.Emit(p.OriginState()) }
+	p.Origins.OnChange(emit)
+	p.Origins.OnBlocked(func(string) { emit() })
+}
+
+// OriginState is the allowlist as something displaying it reads it. Empty
+// before the plugin activates, when there is no store yet.
+func (p *ServerPlugin) OriginState() OriginState {
+	if p == nil || p.Origins == nil {
+		return OriginState{}
+	}
+	return OriginState{
+		Allowed:       p.Origins.List(),
+		Blocked:       p.Origins.Blocked(),
+		CheckDisabled: p.Origins.IsSessionAllowAny(),
 	}
 }
 
 // OnOriginsChange calls fn whenever the allowlist changes or refuses a
-// connection. It may be registered before activation, when there is no store
-// yet: a console is built alongside this plugin rather than after it.
-func (p *ServerPlugin) OnOriginsChange(fn func()) {
-	p.originWatchers = append(p.originWatchers, fn)
-	if p.Origins != nil {
-		p.connectOrigins(fn)
+// connection. The connection it returns removes it.
+//
+// Deprecated: use Events().Origins, which also reports the current allowlist.
+func (p *ServerPlugin) OnOriginsChange(fn func()) *event.Connection {
+	if p == nil {
+		return nil
 	}
-}
-
-func (p *ServerPlugin) connectOrigins(fn func()) {
-	p.Origins.OnChange(fn)
-	p.Origins.OnBlocked(func(string) { fn() })
+	return p.Events().Origins.Signal.Connect(func(OriginState) { fn() })
 }
 
 // OriginPolicy is the allowlist as something serving connections reads it,

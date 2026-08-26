@@ -20,6 +20,9 @@ func TestAPreferenceChangeDoesNotLookLikeAClientChange(t *testing.T) {
 	p.OnClientsChange(func(int) { clients++ })
 	a.Events().Preferences.Connect(func(Preferences) { preferences++ })
 
+	// Preferences is a Property, so connecting replayed the current value.
+	preferences = 0
+
 	a.SetReaderMode(nfc.ModeReadOnly)
 
 	if preferences != 1 {
@@ -44,7 +47,7 @@ func TestALateClientSubscriberIsStillCalled(t *testing.T) {
 	defer a.Stop()
 
 	// What the client server was handed, taken before any subscriber exists.
-	notify := p.clientChanges.Emit
+	notify := p.Events().Clients.Emit
 
 	got := -1
 	sub := p.OnClientsChange(func(clients int) { got = clients })
@@ -75,13 +78,13 @@ func TestASubscriberFollowsTheServerTheBuildSupplied(t *testing.T) {
 	// What the server reports reaches a subscriber that connected to the
 	// plugin before it was wired to one.
 	supplied.OnClientsChange(func(int) {})
-	p.clientChanges.Emit(2)
+	p.Events().Clients.Emit(2)
 	if got != 2 {
 		t.Errorf("the subscriber saw %d, want 2", got)
 	}
 
 	sub.Disconnect()
-	p.clientChanges.Emit(5)
+	p.Events().Clients.Emit(5)
 	if got != 2 {
 		t.Error("a disconnected subscriber was still called")
 	}

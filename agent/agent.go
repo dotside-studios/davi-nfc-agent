@@ -232,6 +232,7 @@ func New(cfg Config) *Agent {
 		Plugins:             &PluginSet{},
 	}
 
+	a.publishEvents()
 	a.watchStores()
 	a.watchManager()
 

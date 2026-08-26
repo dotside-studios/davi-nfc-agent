@@ -31,7 +31,11 @@ func newTestTray(t *testing.T, a *nfcagent.Agent) (*App, *traymenu.Fake) {
 	fake := traymenu.NewFake()
 	app := newApp(&nfcagent.Runtime{Agent: a}, fake)
 	t.Cleanup(app.menu.Close)
+
+	// As onReady does it: setupUI declares the entries, subscribe draws what
+	// the agent is set to into them.
 	app.setupUI()
+	app.subscribe()
 	return app, fake
 }
 

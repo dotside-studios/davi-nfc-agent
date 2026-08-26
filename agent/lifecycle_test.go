@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -96,8 +97,10 @@ func TestStateTransitions(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 2 || seen[0] != StateRunning || seen[1] != StateStopped {
-		t.Errorf("hook saw %v, want [running stopped]", seen)
+	// State is a Property: connecting replayed the state the agent was in.
+	want := []State{StateStopped, StateRunning, StateStopped}
+	if !slices.Equal(seen, want) {
+		t.Errorf("hook saw %v, want %v", seen, want)
 	}
 }
 

@@ -32,6 +32,7 @@ func TestEveryPreferenceChangeIsAnnounced(t *testing.T) {
 
 			announced := 0
 			rt.Agent.Events().Preferences.Connect(func(Preferences) { announced++ })
+			announced = 0 // Connecting to a Property replays the current value.
 
 			tc.change(rt.Agent)
 			if announced == 0 {
@@ -60,6 +61,7 @@ func TestApplyPreferencesAnnouncesOnceWithEveryFieldInPlace(t *testing.T) {
 
 	var seen []Preferences
 	rt.Agent.Events().Preferences.Connect(func(p Preferences) { seen = append(seen, p) })
+	seen = nil // Connecting to a Property replays the current value.
 
 	want := rt.Agent.ApplyPreferences(func(p *Preferences) {
 		p.Mode = nfc.ModeReadOnly
@@ -92,6 +94,7 @@ func TestApplyPreferencesIsSilentWithoutAChange(t *testing.T) {
 
 	announced := 0
 	rt.Agent.Events().Preferences.Connect(func(Preferences) { announced++ })
+	announced = 0 // Connecting to a Property replays the current value.
 
 	rt.Agent.ApplyPreferences(func(p *Preferences) { p.Mode = nfc.ModeReadOnly })
 	rt.Agent.ApplyPreferences(nil)

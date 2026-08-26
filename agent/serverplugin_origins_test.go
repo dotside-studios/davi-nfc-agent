@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -264,4 +265,62 @@ func findOriginRow(t *testing.T, p *ServerPlugin, title string) *traymenu.Item {
 	}
 	t.Fatalf("no origin row titled %q; the menu shows %v", title, shown)
 	return nil
+}
+
+// The allowlist reaches a subscriber as a value, so a console renders it
+// without three separate reads back into the plugin.
+func TestOriginsEventCarriesTheAllowlist(t *testing.T) {
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+
+	var seen []OriginState
+	p.Events().Origins.Connect(func(s OriginState) { seen = append(seen, s) })
+
+	// Before activation there is no store, so the replay is an empty list
+	// rather than an absent one.
+	if len(seen) != 1 || len(seen[0].Allowed) != 0 {
+		t.Fatalf("the replay carried %+v, want an empty allowlist", seen)
+	}
+
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	seen = nil
+
+	if err := p.Origins.Allow("https://app.example.com"); err != nil {
+		t.Fatalf("Allow: %v", err)
+	}
+	p.Origins.RecordBlocked("https://evil.example.com")
+
+	if len(seen) != 2 {
+		t.Fatalf("the allowlist changed twice and announced %d times", len(seen))
+	}
+	// The store holds an origin by host, whatever scheme it was allowed under.
+	if !slices.Contains(seen[0].Allowed, "app.example.com") {
+		t.Errorf("the allowed origins are %v, want the one allowed", seen[0].Allowed)
+	}
+	if !slices.Contains(seen[1].Blocked, "evil.example.com") {
+		t.Errorf("the blocked origins are %v, want the one refused", seen[1].Blocked)
+	}
+}
+
+// A subscriber can stop following. OnOriginsChange returned nothing, so a
+// console rebuilt against a long-lived plugin kept notifying a dead server.
+func TestOriginsSubscriberCanDisconnect(t *testing.T) {
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	changes := 0
+	conn := p.Events().Origins.Connect(func(OriginState) { changes++ })
+	conn.Disconnect()
+
+	if err := p.Origins.Allow("https://app.example.com"); err != nil {
+		t.Fatalf("Allow: %v", err)
+	}
+	if changes != 1 {
+		t.Errorf("a disconnected subscriber ran %d times beyond its replay", changes-1)
+	}
 }

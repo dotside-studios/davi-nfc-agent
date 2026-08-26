@@ -7,18 +7,26 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// rosterManager carries devices of its own, as the phone driver does.
+// rosterManager carries devices that report their own scans, as the phone
+// driver does, naming each by identity rather than by path.
 type rosterManager struct {
 	devices []string
-	active  int
 }
 
 func (m *rosterManager) OpenDevice(string) (nfc.Device, error) {
 	return nil, errors.New("rosterManager opens nothing")
 }
-func (m *rosterManager) ListDevices() ([]string, error) { return m.devices, nil }
-func (m *rosterManager) GetDeviceCount() int            { return len(m.devices) }
-func (m *rosterManager) GetActiveDeviceCount() int      { return m.active }
+func (m *rosterManager) Devices() ([]nfc.DeviceListing, error) {
+	out := make([]nfc.DeviceListing, 0, len(m.devices))
+	for _, id := range m.devices {
+		out = append(out, nfc.DeviceListing{
+			Path:         "smartphone:" + id,
+			ID:           id,
+			Capabilities: nfc.DeviceCapabilities{SupportsEvents: true},
+		})
+	}
+	return out, nil
+}
 
 // A surface asks the agent, and the agent answers whether or not it is running.
 // These used to be five nil checks on Agent.ClientServer in the console, which
@@ -40,30 +48,22 @@ func TestAStoppedAgentAnswersAboutItsClients(t *testing.T) {
 	}
 }
 
-// The counts come from whichever manager carries the devices, without the
-// caller naming the driver that does.
-func TestRemoteDevicesComeFromTheManager(t *testing.T) {
-	m := &rosterManager{devices: []string{"phone-1", "phone-2"}, active: 1}
+// Connected devices come from the manager, by identity: that is what a paired
+// device is matched against, not the path an aggregate qualified.
+func TestOnlineDevicesComeFromTheManager(t *testing.T) {
+	m := &rosterManager{devices: []string{"phone-1", "phone-2"}}
 	a := New(Config{Manager: m})
-
-	total, active := a.RemoteDevices()
-	if total != 2 || active != 1 {
-		t.Errorf("RemoteDevices() = %d, %d; want 2, 1", total, active)
-	}
 
 	online := a.OnlineDevices()
 	if len(online) != 2 || online[0] != "phone-1" {
-		t.Errorf("OnlineDevices() = %v, want both devices", online)
+		t.Errorf("OnlineDevices() = %v, want both devices by identity", online)
 	}
 }
 
-// A manager with no devices of its own reports none rather than failing.
-func TestRemoteDevicesAreNoneWithoutADriver(t *testing.T) {
+// A manager whose devices are all readers reports none connected of its own.
+func TestOnlineDevicesAreNoneWithoutADriver(t *testing.T) {
 	a := New(Config{Manager: nfc.NewMockManager()})
 
-	if total, active := a.RemoteDevices(); total != 0 || active != 0 {
-		t.Errorf("RemoteDevices() = %d, %d; want none", total, active)
-	}
 	if got := a.OnlineDevices(); got != nil {
 		t.Errorf("OnlineDevices() = %v, want nil", got)
 	}

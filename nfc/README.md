@@ -73,10 +73,10 @@ import "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 manager := pcsc.NewManager()
 
 // List available NFC readers
-devices, err := manager.ListDevices()
+devices, err := manager.Devices()
 
 // Open a device
-device, err := manager.OpenDevice(devices[0])
+device, err := manager.OpenDevice(devices[0].Path)
 defer device.Close()
 ```
 
@@ -287,8 +287,8 @@ import (
 func main() {
     // Initialize manager and device
     manager := pcsc.NewManager()
-    devices, _ := manager.ListDevices()
-    device, _ := manager.OpenDevice(devices[0])
+    devices, _ := manager.Devices()
+    device, _ := manager.OpenDevice(devices[0].Path)
     defer device.Close()
 
     // Get tags
@@ -369,8 +369,8 @@ if ultralight, ok := tag.(*nfc.UltralightTag); ok {
 
 ```go
 manager := pcsc.NewManager()
-devices, _ := manager.ListDevices()
-device, _ := manager.OpenDevice(devices[0])
+devices, _ := manager.Devices()
+device, _ := manager.OpenDevice(devices[0].Path)
 defer device.Close()
 
 for {

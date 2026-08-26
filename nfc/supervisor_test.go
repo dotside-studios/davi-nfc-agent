@@ -374,3 +374,30 @@ func awaitHeld(t *testing.T, s *Supervisor, device string) {
 	}
 	t.Fatalf("%s never reported the tag on it", device)
 }
+
+// The supervisor opens what a manager offers as pollable and nothing else:
+// connecting to a device that reports its own scans cannot succeed.
+func TestASupervisorOpensOnlyWhatCanBePolled(t *testing.T) {
+	m := &mixedManager{Manager: NewMockManager()}
+	s := startedSupervisor(t, m)
+
+	if devices := s.Devices(); len(devices) != 1 || devices[0] != "mock:usb:001" {
+		t.Errorf("Devices() = %v, want the reader alone", devices)
+	}
+	if s.Operates("phone-9f2a") {
+		t.Error("a device that reports its own scans was opened as a reader")
+	}
+}
+
+// mixedManager offers a reader and a device that reports for itself, as a build
+// with a phone driver beside a reader does.
+type mixedManager struct {
+	Manager
+}
+
+func (m *mixedManager) Devices() ([]DeviceListing, error) {
+	return []DeviceListing{
+		{Path: "mock:usb:001", Capabilities: DeviceCapabilities{CanPoll: true}},
+		{Path: "phone-9f2a", Capabilities: DeviceCapabilities{SupportsEvents: true}},
+	}, nil
+}

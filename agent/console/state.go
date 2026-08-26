@@ -174,7 +174,16 @@ func (c *Server) buildReaderInfo() ReaderInfo {
 	}
 
 	info.CardUID, info.CardType, info.CardPresent = c.host.CurrentCard()
-	info.RemoteDevices, info.RemoteActive = c.host.RemoteDevices()
+
+	// Counted from the devices the console lists. The count and the panel
+	// disagreed while one came from the driver and the other from the registry.
+	paired := c.host.PairedDevices()
+	info.RemoteDevices = len(paired)
+	for _, device := range paired {
+		if device.Online {
+			info.RemoteActive++
+		}
+	}
 	return info
 }
 

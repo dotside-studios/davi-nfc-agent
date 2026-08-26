@@ -59,10 +59,6 @@ func (h *host) CurrentCard() (uid, cardType string, present bool) {
 	return card.UID, card.Type, true
 }
 
-func (h *host) RemoteDevices() (total, active int) {
-	return h.agent.RemoteDevices()
-}
-
 // Port is the port being served, not the one configured. A port saved in the
 // console is bound only once the listener has been restarted, and until then
 // the console must not hand out a URL nothing is listening on.

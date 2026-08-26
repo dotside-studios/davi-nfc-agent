@@ -53,60 +53,21 @@ func (a *Agent) reportTag(data nfc.NFCData) {
 	a.events.Tag.Emit(data)
 }
 
-// deviceRoster is what a manager carrying devices of its own can report about
-// them. Declared here in the terms the agent needs, so it names no driver.
-type deviceRoster interface {
-	GetDeviceCount() int
-	GetActiveDeviceCount() int
-	ListDevices() ([]string, error)
-}
-
-// RemoteDevices counts the devices registered with the agent and how many of
-// them are active.
-//
-// It asks the manager, digging past an aggregate to the child holding devices.
-// That dig is what a manager carrying devices of its own costs today, and it
-// goes when the supervisor answers for every device the agent can see.
-func (a *Agent) RemoteDevices() (total, active int) {
-	roster := a.deviceRoster()
-	if roster == nil {
-		return 0, 0
-	}
-	return roster.GetDeviceCount(), roster.GetActiveDeviceCount()
-}
-
-func (a *Agent) deviceRoster() deviceRoster {
-	if a.manager == nil {
-		return nil
-	}
-	if roster, ok := a.manager.(deviceRoster); ok {
-		return roster
-	}
-
-	aggregate, ok := a.manager.(interface {
-		GetManager(string) (nfc.Manager, bool)
-	})
-	if !ok {
-		return nil
-	}
-	child, exists := aggregate.GetManager(nfc.ManagerTypeSmartphone)
-	if !exists {
-		return nil
-	}
-	roster, _ := child.(deviceRoster)
-	return roster
-}
-
-// OnlineDevices lists the devices connected to the agent right now, by ID. A
-// paired device absent from this list is one that is not connected.
+// OnlineDevices lists the devices connected right now that report their own
+// scans, rather than readers the agent opened, by the identity each holds. A
+// paired device absent from this list is not connected.
 func (a *Agent) OnlineDevices() []string {
-	roster := a.deviceRoster()
-	if roster == nil {
-		return nil
-	}
-	ids, err := roster.ListDevices()
+	listings, err := a.manager.Devices()
 	if err != nil {
+		a.logger.Printf("Listing devices failed: %v", err)
 		return nil
 	}
-	return ids
+
+	var online []string
+	for _, listing := range listings {
+		if !listing.Capabilities.CanPoll {
+			online = append(online, listing.ID)
+		}
+	}
+	return online
 }

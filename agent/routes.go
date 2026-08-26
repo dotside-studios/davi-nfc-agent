@@ -76,8 +76,9 @@ type endpoints struct {
 // handed to whatever builds the endpoint. It mirrors the driver's own options
 // without naming them.
 type DeviceEndpointOptions struct {
-	// Authenticate admits or rejects a device, writing its own rejection.
-	Authenticate func(w http.ResponseWriter, r *http.Request) bool
+	// Authenticate admits or rejects a device, writing its own rejection, and
+	// names the paired device it admitted. An empty name identifies nobody.
+	Authenticate func(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool)
 
 	// CheckOrigin admits or rejects an upgrade by Origin.
 	CheckOrigin func(r *http.Request) bool

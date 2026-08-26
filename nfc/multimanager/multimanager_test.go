@@ -3,6 +3,7 @@ package multimanager
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -32,11 +33,11 @@ func (m *mockManager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return nil, fmt.Errorf("device not found: %s", deviceStr)
 }
 
-func (m *mockManager) ListDevices() ([]string, error) {
+func (m *mockManager) Devices() ([]nfc.DeviceListing, error) {
 	if m.failList {
 		return nil, fmt.Errorf("mock list error")
 	}
-	return m.devices, nil
+	return listings(m.devices, nfc.DeviceCapabilities{CanPoll: true}), nil
 }
 
 // mockDevice is a minimal Device implementation for testing
@@ -280,7 +281,7 @@ func TestMultiManagerOpenDeviceFallback(t *testing.T) {
 	}
 }
 
-func TestMultiManagerListDevices(t *testing.T) {
+func TestMultiManagerDevices(t *testing.T) {
 
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1", "device2"}}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device3"}}
@@ -291,23 +292,23 @@ func TestMultiManagerListDevices(t *testing.T) {
 	)
 
 	// List all devices
-	devices, err := mm.ListDevices()
+	devices, err := mm.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() failed: %v", err)
+		t.Errorf("Devices() failed: %v", err)
 	}
 
 	if len(devices) != 3 {
-		t.Errorf("ListDevices() returned %d devices, want 3", len(devices))
+		t.Errorf("Devices() returned %d devices, want 3", len(devices))
 	}
 
 	// Check that devices have manager prefix
 	hasHardware := false
 	hasSmartphone := false
 	for _, device := range devices {
-		if len(device) > 9 && device[:9] == "hardware:" {
+		if strings.HasPrefix(device.Path, "hardware:") {
 			hasHardware = true
 		}
-		if len(device) > 11 && device[:11] == "smartphone:" {
+		if strings.HasPrefix(device.Path, "smartphone:") {
 			hasSmartphone = true
 		}
 	}
@@ -317,7 +318,7 @@ func TestMultiManagerListDevices(t *testing.T) {
 	}
 }
 
-func TestMultiManagerListDevicesWithErrors(t *testing.T) {
+func TestMultiManagerDevicesWithErrors(t *testing.T) {
 
 	mock1 := &mockManager{name: "mock1", devices: []string{"device1"}, failList: true}
 	mock2 := &mockManager{name: "mock2", devices: []string{"device2"}}
@@ -328,13 +329,13 @@ func TestMultiManagerListDevicesWithErrors(t *testing.T) {
 	)
 
 	// Should still return devices from working manager
-	devices, err := mm.ListDevices()
+	devices, err := mm.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() should not return error when some managers fail: %v", err)
+		t.Errorf("Devices() should not return error when some managers fail: %v", err)
 	}
 
 	if len(devices) != 1 {
-		t.Errorf("ListDevices() should return 1 device from working manager, got %d", len(devices))
+		t.Errorf("Devices() should return 1 device from working manager, got %d", len(devices))
 	}
 }
 
@@ -348,18 +349,18 @@ func TestMultiManagerNoManagers(t *testing.T) {
 	}
 
 	// List devices with no managers
-	devices, err := mm.ListDevices()
+	devices, err := mm.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() should not fail with no managers: %v", err)
+		t.Errorf("Devices() should not fail with no managers: %v", err)
 	}
 	if len(devices) != 0 {
-		t.Errorf("ListDevices() should return empty list, got %d devices", len(devices))
+		t.Errorf("Devices() should return empty list, got %d devices", len(devices))
 	}
 }
 
 // The listing picks the agent's reader when none is pinned, so it has to follow
 // registration order rather than map order.
-func TestListDevicesFollowsRegistrationOrder(t *testing.T) {
+func TestDevicesFollowRegistrationOrder(t *testing.T) {
 	mm := NewMultiManager(
 		ManagerEntry{Name: "first", Manager: &mockManager{name: "mock1", devices: []string{"a"}}},
 		ManagerEntry{Name: "second", Manager: &mockManager{name: "mock2", devices: []string{"b"}}},
@@ -371,16 +372,16 @@ func TestListDevicesFollowsRegistrationOrder(t *testing.T) {
 	// Repeated, because map iteration only sometimes disagrees with insertion
 	// order and a single pass can pass by luck.
 	for i := 0; i < 20; i++ {
-		got, err := mm.ListDevices()
+		got, err := mm.Devices()
 		if err != nil {
-			t.Fatalf("ListDevices: %v", err)
+			t.Fatalf("Devices: %v", err)
 		}
 		if len(got) != len(want) {
-			t.Fatalf("ListDevices() = %v, want %v", got, want)
+			t.Fatalf("Devices() = %v, want %v", got, want)
 		}
 		for j := range want {
-			if got[j] != want[j] {
-				t.Fatalf("ListDevices() = %v, want %v", got, want)
+			if got[j].Path != want[j] {
+				t.Fatalf("Devices() = %v, want %v", got, want)
 			}
 		}
 	}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -176,8 +177,20 @@ type fakeManager struct {
 func (m *fakeManager) OpenDevice(string) (nfc.Device, error) {
 	return nil, errors.New("fakeManager opens nothing")
 }
-func (m *fakeManager) ListDevices() ([]string, error) { return m.devices, nil }
-func (m *fakeManager) ListReaders() ([]string, error) { return m.readers, nil }
+
+// Devices marks the ones in readers as pollable, the rest as reporting for
+// themselves.
+func (m *fakeManager) Devices() ([]nfc.DeviceListing, error) {
+	out := make([]nfc.DeviceListing, 0, len(m.devices))
+	for _, path := range m.devices {
+		caps := nfc.DeviceCapabilities{SupportsEvents: true}
+		if slices.Contains(m.readers, path) {
+			caps = nfc.DeviceCapabilities{CanPoll: true}
+		}
+		out = append(out, nfc.DeviceListing{Path: path, Capabilities: caps})
+	}
+	return out, nil
+}
 func (m *fakeManager) DeviceChanges() <-chan struct{} { return m.changes }
 
 // A phone is a tag source, not a reader. Offering one in a reader picker pins

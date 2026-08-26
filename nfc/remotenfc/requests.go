@@ -164,6 +164,23 @@ func (m *Manager) addSession(deviceID string, conn *wsconn.SafeConn) {
 	m.sessionConn[conn] = deviceID
 }
 
+// removeSessionFor drops a device's session when it is still this connection's,
+// reporting whether it did. A device that comes back replaces its own session,
+// which the connection it replaced must not then remove.
+func (m *Manager) removeSessionFor(conn *wsconn.SafeConn, deviceID string) bool {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
+	if m.sessions[deviceID] != conn {
+		delete(m.sessionConn, conn)
+		return false
+	}
+
+	delete(m.sessionConn, conn)
+	delete(m.sessions, deviceID)
+	return true
+}
+
 func (m *Manager) removeSession(deviceID string) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()

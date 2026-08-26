@@ -102,23 +102,39 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return device, nil
 }
 
-// ListDevices returns list of connected smartphone device connection strings.
-func (m *Manager) ListDevices() ([]string, error) {
+// deviceTransport is what any device on the bridge can do: it reports its own
+// scans rather than being opened and polled. What a device declares at
+// registration refines it; see [Device.PhoneCapabilities].
+var deviceTransport = nfc.DeviceCapabilities{
+	SupportsEvents: true,
+	DeviceType:     "smartphone",
+}
+
+// Devices lists the devices connected right now, by the identity each holds.
+// An aggregate adds the prefix naming this manager.
+func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	devices := make([]string, 0, len(m.devices))
+	listings := make([]nfc.DeviceListing, 0, len(m.devices))
 	for deviceID, device := range m.devices {
 		if device.IsActive() {
-			devices = append(devices, fmt.Sprintf("smartphone:%s", deviceID))
+			listings = append(listings, nfc.DeviceListing{Path: deviceID, ID: deviceID, Capabilities: deviceTransport})
 		}
 	}
 
-	return devices, nil
+	return listings, nil
 }
 
-// RegisterDevice creates and registers a new smartphone device.
+// RegisterDevice registers a device under an identity of this manager's own.
 func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error) {
+	return m.registerDevice("", req)
+}
+
+// registerDevice registers a device under the identity it was admitted with,
+// minting one when it was admitted under none. A paired device holds an
+// identity already; a fresh one per connection cannot be matched to it.
+func (m *Manager) registerDevice(deviceID string, req DeviceRegistrationRequest) (*Device, error) {
 	// Validate request
 	if req.DeviceName == "" {
 		return nil, fmt.Errorf("device name is required")
@@ -129,8 +145,16 @@ func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error)
 		req.Platform = "unknown"
 	}
 
-	// Generate unique device ID
-	deviceID := uuid.New().String()
+	if deviceID == "" {
+		deviceID = uuid.New().String()
+	}
+
+	// Drop the session this one replaces here: the connection it belongs to
+	// ends after this registration and would take the new session with it.
+	if conn, ok := m.session(deviceID); ok {
+		m.removeSession(deviceID)
+		_ = conn.Close()
+	}
 
 	// Create device
 	device := NewDevice(deviceID, req)
@@ -392,8 +416,3 @@ func (m *Manager) notifyDeviceChange() {
 		// Channel full, skip (previous notification not yet consumed)
 	}
 }
-
-// RemoteDevices reports that this manager's devices are phones rather than
-// readers attached to this machine, so none of them is a candidate to be the
-// agent's own reader.
-func (m *Manager) RemoteDevices() bool { return true }

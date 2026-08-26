@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestMockManager_ListDevices(t *testing.T) {
+func TestMockManager_Devices(t *testing.T) {
 	manager := NewMockManager()
 	manager.DevicesList = []string{"mock:usb:001", "mock:usb:002", "mock:usb:003"}
 
-	devices, err := manager.ListDevices()
+	devices, err := manager.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() failed: %v", err)
+		t.Errorf("Devices() failed: %v", err)
 	}
 
 	if len(devices) != 3 {
@@ -20,18 +20,21 @@ func TestMockManager_ListDevices(t *testing.T) {
 
 	expectedDevices := []string{"mock:usb:001", "mock:usb:002", "mock:usb:003"}
 	for i, device := range devices {
-		if device != expectedDevices[i] {
-			t.Errorf("Expected device %d to be '%s', got '%s'", i, expectedDevices[i], device)
+		if device.Path != expectedDevices[i] {
+			t.Errorf("Expected device %d to be '%s', got '%s'", i, expectedDevices[i], device.Path)
+		}
+		if !device.Capabilities.CanPoll {
+			t.Errorf("device %d is not offered as a reader", i)
 		}
 	}
 }
 
-func TestMockManager_ListDevicesError(t *testing.T) {
+func TestMockManager_DevicesError(t *testing.T) {
 	manager := NewMockManager()
 	expectedErr := fmt.Errorf("no devices found")
-	manager.ListDevicesError = expectedErr
+	manager.DevicesError = expectedErr
 
-	_, err := manager.ListDevices()
+	_, err := manager.Devices()
 	if err != expectedErr {
 		t.Errorf("Expected error '%v', got '%v'", expectedErr, err)
 	}
@@ -125,12 +128,12 @@ func TestMockManager_CallLog(t *testing.T) {
 	manager := NewMockManager()
 	manager.ClearCallLog()
 
-	_, _ = manager.ListDevices()
+	_, _ = manager.Devices()
 	device, _ := manager.OpenDevice("mock:usb:001")
 
 	callLog := manager.GetCallLog()
 	expectedCalls := []string{
-		"ListDevices",
+		"Devices",
 		"OpenDevice(mock:usb:001)",
 	}
 

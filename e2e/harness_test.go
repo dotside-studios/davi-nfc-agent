@@ -44,9 +44,11 @@ type harness struct {
 	Agent   *agent.Agent
 	Runtime *agent.Runtime
 
-	// Devices is the phone driver the test built and handed over, and Pairing
-	// the pairing plugin, when the test asked for one.
+	// Devices is the phone driver the test built and handed over, Servers what
+	// the agent is served from, and Pairing the pairing plugin, when the test
+	// asked for one.
 	Devices *remotenfc.Manager
+	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
@@ -124,6 +126,7 @@ func start(t *testing.T, opts options) *harness {
 		Agent:    rt.Agent,
 		Runtime:  rt,
 		Devices:  devices,
+		Servers:  servers,
 		Hardware: hardware.MockDevice,
 		Pairing:  pairing,
 		Origin:   "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
@@ -252,7 +255,7 @@ func (h *harness) client(t *testing.T) *websocket.Conn {
 	t.Helper()
 
 	registered := make(chan struct{}, 1)
-	sub := h.Agent.Events().Clients.Connect(func(int) {
+	sub := h.Servers.OnClientsChange(func(int) {
 		select {
 		case registered <- struct{}{}:
 		default:

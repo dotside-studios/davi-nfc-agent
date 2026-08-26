@@ -500,12 +500,13 @@ func await(t *testing.T, seen chan string, want string) bool {
 func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
 	// Serving clients is the plugin's, so an agent with none has nobody to
 	// report to.
-	a := serverAgent(t, &ServerPlugin{})
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
 
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	replaced := a.clients.Load()
+	replaced := p.serving()
 	stale := clientOf(t, replaced)
 
 	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
@@ -523,7 +524,7 @@ func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
 	}
 	defer a.Stop()
 
-	if a.clients.Load() == replaced {
+	if p.serving() == replaced {
 		t.Fatal("the restart kept the server it was meant to replace")
 	}
 

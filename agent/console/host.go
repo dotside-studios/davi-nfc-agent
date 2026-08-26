@@ -69,10 +69,10 @@ func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
-func (h *host) ClientCount() int { return h.agent.ClientCount() }
+func (h *host) ClientCount() int { return h.servers.ClientCount() }
 
 func (h *host) Clients() []Client {
-	live := h.agent.Clients()
+	live := h.servers.Clients()
 
 	out := make([]Client, 0, len(live))
 	for _, c := range live {
@@ -89,7 +89,7 @@ func (h *host) Clients() []Client {
 	return out
 }
 
-func (h *host) DisconnectClient(id string) error { return h.agent.DisconnectClient(id) }
+func (h *host) DisconnectClient(id string) error { return h.servers.DisconnectClient(id) }
 
 func (h *host) APISecret() string    { return h.agent.APISecret() }
 func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }

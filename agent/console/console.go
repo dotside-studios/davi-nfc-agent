@@ -65,11 +65,13 @@ func New(cfg Config) *Server {
 	// loaded, including changes made from the tray.
 	a.Events().Any.Connect(func(agent.Change) { s.NotifyChange() })
 
-	// The allowlist is the server's rather than the agent's, so it is followed
-	// separately: an origin allowed from the tray, or one refused a connection,
-	// reaches an open page the same way.
+	// The allowlist and the connected clients are the server's rather than the
+	// agent's, so they are followed separately: an origin allowed from the
+	// tray, a page refused, or a client connecting reaches an open page the
+	// same way.
 	if cfg.Servers != nil {
 		cfg.Servers.OnOriginsChange(s.NotifyChange)
+		cfg.Servers.OnClientsChange(func(int) { s.NotifyChange() })
 	}
 
 	return s

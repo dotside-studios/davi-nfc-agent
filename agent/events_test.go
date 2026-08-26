@@ -29,15 +29,14 @@ func TestAnyNamesEveryChange(t *testing.T) {
 
 	a.fireState(StateRunning)
 	a.SetReaderMode(nfc.ModeReadOnly)
-	a.fireClientsChanged(1)
 	a.fireServerRestart()
 	if _, _, err := a.Devices().Pair("phone", "android"); err != nil {
 		t.Fatalf("Pair: %v", err)
 	}
+
 	want := []Change{
 		ChangeState,
 		ChangePreferences,
-		ChangeClients,
 		ChangeServers,
 		ChangeDevices,
 	}

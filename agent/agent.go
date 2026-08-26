@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -113,10 +112,6 @@ type Agent struct {
 	// DeviceAuth gates the device endpoint. Built with the agent, so a caller
 	// can put its device endpoint behind it before anything runs.
 	DeviceAuth *server.DeviceAuth
-
-	// clients is what serves the clients connected right now, published by
-	// whatever is running one. Nil while the agent is not serving.
-	clients atomic.Pointer[clientserver.Server]
 
 	// lastCard is the most recent scan the agent reported, kept here rather
 	// than in the client server it is reported through: the servers are rebuilt

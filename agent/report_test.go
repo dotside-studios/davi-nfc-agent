@@ -28,23 +28,18 @@ func (m *rosterManager) Devices() ([]nfc.DeviceListing, error) {
 	return out, nil
 }
 
-// A surface asks the agent, and the agent answers whether or not it is running.
-// These used to be five nil checks on Agent.ClientServer in the console, which
-// is a field that does not exist until Start.
-func TestAStoppedAgentAnswersAboutItsClients(t *testing.T) {
+// The last card outlives a run: the readers that scanned it are rebuilt by
+// every restart, the card presented to them is not.
+func TestAStoppedAgentAnswersForTheLastCard(t *testing.T) {
 	a := New(Config{Manager: nfc.NewMockManager()})
 
-	if got := a.ClientCount(); got != 0 {
-		t.Errorf("ClientCount() = %d on a stopped agent, want 0", got)
-	}
-	if got := a.Clients(); got != nil {
-		t.Errorf("Clients() = %v on a stopped agent, want nil", got)
-	}
 	if got := a.LastCard(); got != nil {
-		t.Errorf("LastCard() = %v on a stopped agent, want nil", got)
+		t.Errorf("LastCard() = %v before anything was scanned, want nil", got)
 	}
-	if err := a.DisconnectClient("whoever"); err == nil {
-		t.Error("DisconnectClient succeeded on a stopped agent")
+
+	a.reportTag(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
+	if got := a.LastCard(); got == nil || got.UID != "04A1B2C3" {
+		t.Errorf("LastCard() = %v, want the card that was reported", got)
 	}
 }
 

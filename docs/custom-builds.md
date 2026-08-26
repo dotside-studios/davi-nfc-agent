@@ -304,6 +304,12 @@ config directory; `Origins` supplies one built elsewhere. `servers.CheckOrigin()
 is the same decision for a handler mounted beside it, read per request rather
 than fixed when the handler was built.
 
+The clients connected right now are the plugin's for the same reason:
+`servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
+answer from whatever is serving, and report nothing when nothing is.
+`servers.OnClientsChange(fn)` follows the count, and the subscription survives
+the restarts that rebuild the server behind it.
+
 A build that registers no server plugin serves no HTTP and runs no client
 server, which is what a program driving the readers directly wants. It still
 gets every scan through `Agent.Events()`.
@@ -524,7 +530,6 @@ it runs on every emission; the connection it returns removes it again.
 |---|---|
 | `State` | Each settled lifecycle transition |
 | `Preferences` | The preferences after a change, whoever made it |
-| `Clients` | The number of connected clients |
 | `Servers` | The port the listeners are bound on, after a restart |
 | `Reader` | The reader's status: connected, and whether a card is on it |
 | `Readers` | The readers that can be picked, when the set changes |

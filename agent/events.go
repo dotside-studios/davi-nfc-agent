@@ -13,7 +13,6 @@ type Change int
 const (
 	ChangeState Change = iota
 	ChangePreferences
-	ChangeClients
 	ChangeServers
 	ChangeDevices
 )
@@ -24,8 +23,6 @@ func (c Change) String() string {
 		return "state"
 	case ChangePreferences:
 		return "preferences"
-	case ChangeClients:
-		return "clients"
 	case ChangeServers:
 		return "servers"
 	case ChangeDevices:
@@ -50,10 +47,6 @@ type Events struct {
 
 	// Preferences carries the preferences after each change, whoever made it.
 	Preferences event.Signal[Preferences]
-
-	// Clients carries the number of connected clients after each connect and
-	// disconnect.
-	Clients event.Signal[int]
 
 	// Servers carries the port the listeners are bound on, after a restart has
 	// rebuilt them.
@@ -134,11 +127,6 @@ func (a *Agent) fireState(s State) {
 func (a *Agent) firePreferencesChanged() {
 	a.events.Preferences.Emit(a.Preferences())
 	a.events.Any.Emit(ChangePreferences)
-}
-
-func (a *Agent) fireClientsChanged(count int) {
-	a.events.Clients.Emit(count)
-	a.events.Any.Emit(ChangeClients)
 }
 
 func (a *Agent) fireServerRestart() {

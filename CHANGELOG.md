@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ServerPlugin.CheckOrigin` reports the origin check the listener applies, for
   whatever serves a WebSocket endpoint beside it. `ServerPlugin.OnOriginsChange`
   follows the allowlist from something built before the plugin activates
+- `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
+  `OnClientsChange` report on and act on the clients connected right now. A
+  subscription outlives the server behind it, so it survives a restart
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened
@@ -55,10 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `traymenu.Discard` and `traymenu.Section` as a `Container`
 - Subscriptions: `Agent.Events()` publishes what the agent reports as typed
   signals, connected to at any time and disconnected through the handle each
-  connection returns. `State`, `Preferences`, `Clients`, `Servers`, `Devices`
-  and `Tag` carry the new value; `Any` carries an
-  `agent.Change` naming what moved, for a surface that redraws. A plugin gets
-  the same surface as `ctx.Events`
+  connection returns. `State`, `Preferences`, `Servers`, `Devices` and `Tag`
+  carry the new value; `Any` carries an `agent.Change` naming what moved, for a
+  surface that redraws. A plugin gets the same surface as `ctx.Events`
 - `Events().Tag` carries every scan the agent broadcasts, so a program embedding
   the agent acts on cards without connecting to its own WebSocket. The broadcast
   to clients is unaffected
@@ -95,6 +97,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The clients connected to an agent are the server plugin's, not the agent's.
+  `Agent.ClientCount`, `Clients` and `DisconnectClient` are the same three
+  methods on `ServerPlugin`, and `Events().Clients` is
+  `ServerPlugin.OnClientsChange`. The agent no longer holds a pointer to the
+  server serving them
 - `agent.OriginStore` and `agent.ParseAllowedOrigins` are `server.OriginStore`
   and `server.ParseAllowedOrigins`, beside the origin checks that read them, and
   the allowlist is `agent.ServerPlugin`'s: it builds the store under the agent's
@@ -349,6 +356,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Events().Clients` and `ChangeClients`. An agent with no server plugin
+  registered has no clients to count, so the signal was only ever meaningful
+  through the plugin that now carries it
 - `Agent.Origins`, `Config.Origins`, `Agent.CheckOrigin`, `Events().Origins`,
   `Events().Blocked`, `ChangeOrigins` and `ChangeBlocked`. Which browser origins
   may connect is a question for what serves the connection, so it is the server
@@ -358,12 +368,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
   the agent answers, `DeviceAuth.Check`, `TagModificationAllowed` and
   `PublicKeyPin`, plus `servers.CheckOrigin()`, and mounts it as
-  `ServerPlugin.ServeMode[server.ModeDevice]`
-  rather than handing the agent a builder to call
+  `ServerPlugin.ServeMode[server.ModeDevice]` rather than handing the agent a
+  builder to call
 - `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
   is the server plugin's, so the agent holds no server and hands over no routes.
-  `Agent.ClientCount`, `Clients` and `DisconnectClient` answer from whatever is
-  serving, and report nothing when nothing is
+  What answers about the clients moved with it; see Changed
 - `clientserver.Config.OnTag`. It let an embedder observe a scan before the
   clients saw it, which is what the agent used it for; the agent reports the
   scan before handing it over now, so nothing sets it

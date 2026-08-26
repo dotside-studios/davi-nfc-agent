@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -78,8 +79,8 @@ func (e Endpoint) name() string {
 //		{Name: "control center", Pattern: "/", Handler: console.Assets()},
 //	}})
 //
-// It also decides who may connect: the origin allowlist is its own, since a
-// build serving nothing admits nobody.
+// It also answers for the connections: the origin allowlist that admits them is
+// its own, and so are the clients holding one right now.
 //
 // An agent with none of these registered serves no HTTP at all, which is what a
 // program driving the reader directly wants.
@@ -142,6 +143,11 @@ type ServerPlugin struct {
 	// clients is the server running for the agent, replaced by every start and
 	// read by the routes mounted before it existed.
 	clients atomic.Pointer[clientserver.Server]
+
+	// clientChanges carries the connected count after each connect and
+	// disconnect. It outlives the server emitting it, so a subscriber stays
+	// connected across a restart.
+	clientChanges event.Signal[int]
 
 	// The allowlist entries, redrawn from the store rather than from clicks.
 	origins        *traymenu.List[originRow]
@@ -518,6 +524,59 @@ func (p *ServerPlugin) menuTitle() string {
 	return "Server URLs"
 }
 
+// serving is the client server running right now, nil before the agent starts
+// and after it stops. As with the listener accessors, a build that registered
+// no plugin holds a nil one and is answered rather than panicked.
+func (p *ServerPlugin) serving() *clientserver.Server {
+	if p == nil {
+		return nil
+	}
+	return p.clients.Load()
+}
+
+// ClientCount is how many clients are connected, 0 when nothing is serving
+// them.
+func (p *ServerPlugin) ClientCount() int {
+	serving := p.serving()
+	if serving == nil {
+		return 0
+	}
+	return serving.ClientCount()
+}
+
+// Clients lists the connected clients, most recently connected first.
+func (p *ServerPlugin) Clients() []clientserver.ClientInfo {
+	serving := p.serving()
+	if serving == nil {
+		return nil
+	}
+	return serving.Clients()
+}
+
+// DisconnectClient drops one client's connection. It reports an error for a
+// client that is not connected, which includes one that just left.
+func (p *ServerPlugin) DisconnectClient(id string) error {
+	serving := p.serving()
+	if serving == nil {
+		return errors.New("nothing is serving clients")
+	}
+	if !serving.Disconnect(id) {
+		return errors.New("no such client: it may have already disconnected")
+	}
+	return nil
+}
+
+// OnClientsChange calls fn with the connected count after each connect and
+// disconnect. The connection it returns removes it. A console built alongside
+// this plugin subscribes before the agent starts, and stays subscribed across
+// every restart of the server behind it.
+func (p *ServerPlugin) OnClientsChange(fn func(int)) *event.Connection {
+	if p == nil {
+		return nil
+	}
+	return p.clientChanges.Connect(fn)
+}
+
 // CheckOrigin admits or rejects an upgrade by Origin, for whatever else this
 // build serves on the agent's behalf, such as a device driver's endpoint.
 //
@@ -545,7 +604,7 @@ func (p *ServerPlugin) wsHandler() http.Handler {
 		clients := byMode[server.ModeClient]
 		delete(byMode, server.ModeClient)
 		if clients == nil {
-			if running := p.clients.Load(); running != nil {
+			if running := p.serving(); running != nil {
 				clients = http.HandlerFunc(running.ServeWS)
 			}
 		}
@@ -568,17 +627,12 @@ func (p *ServerPlugin) healthHandler() http.Handler {
 			return
 		}
 
-		clients := 0
-		if running := p.clients.Load(); running != nil {
-			clients = running.ClientCount()
-		}
-
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":    "ok",
 			"type":      "agent",
 			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
-			"clients":   clients,
+			"clients":   p.ClientCount(),
 		})
 	})
 }
@@ -603,7 +657,7 @@ func (c *clientsComponent) Start(context.Context) error {
 		TokenVerifier:        c.agent.tokenVerifier(),
 		Tags:                 c.agent,
 		AllowTagModification: c.agent.TagModificationAllowed,
-		OnChange:             c.agent.fireClientsChanged,
+		OnChange:             c.plugin.clientChanges.Emit,
 	})
 
 	c.tags = c.agent.events.Tag.Connect(srv.Broadcast)
@@ -612,7 +666,6 @@ func (c *clientsComponent) Start(context.Context) error {
 	})
 
 	c.plugin.clients.Store(srv)
-	c.agent.clients.Store(srv)
 	return nil
 }
 
@@ -622,6 +675,5 @@ func (c *clientsComponent) Stop() error {
 	c.tags, c.status = nil, nil
 
 	c.plugin.clients.Store(nil)
-	c.agent.clients.Store(nil)
 	return nil
 }

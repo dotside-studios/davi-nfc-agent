@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -341,7 +342,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	}
 	defer rt.Agent.Stop()
 
-	before := rt.Agent.clients.Load()
+	before := servers.serving()
 	if before == nil {
 		t.Fatal("no client server after Start")
 	}
@@ -349,7 +350,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if err := servers.Rebind(); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
-	if rt.Agent.clients.Load() != before {
+	if servers.serving() != before {
 		t.Error("rebinding rebuilt the client server; only the listener should have moved")
 	}
 
@@ -358,7 +359,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if err := rt.Agent.RestartServers(); err != nil {
 		t.Fatalf("RestartServers: %v", err)
 	}
-	if rt.Agent.clients.Load() == before {
+	if servers.serving() == before {
 		t.Error("RestartServers left the old client server in place")
 	}
 }
@@ -657,14 +658,16 @@ func mark(code int) http.Handler {
 // on. A build with none registered serves no HTTP at all, which is what a
 // program driving the readers directly wants.
 func TestTheClientServerBelongsToThePlugin(t *testing.T) {
-	bare := quietAgent(t)
-	if err := bare.Start(""); err != nil {
-		t.Fatalf("Start: %v", err)
+	var none *ServerPlugin
+	if got := none.ClientCount(); got != 0 {
+		t.Errorf("ClientCount() = %d with no plugin registered, want 0", got)
 	}
-	if got := bare.ClientCount(); got != 0 {
-		t.Errorf("ClientCount() = %d with nothing serving clients", got)
+	if got := none.Clients(); got != nil {
+		t.Errorf("Clients() = %v with no plugin registered, want nil", got)
 	}
-	bare.Stop()
+	if err := none.DisconnectClient("whoever"); err == nil {
+		t.Error("DisconnectClient succeeded with nothing serving clients")
+	}
 
 	p := &ServerPlugin{}
 	a := serverAgent(t, p)
@@ -673,7 +676,7 @@ func TestTheClientServerBelongsToThePlugin(t *testing.T) {
 	}
 	defer a.Stop()
 
-	if a.clients.Load() == nil {
+	if p.serving() == nil {
 		t.Error("the plugin is running no client server")
 	}
 	if code := get(t, p.Listener(), "/health"); code != http.StatusOK {
@@ -681,9 +684,59 @@ func TestTheClientServerBelongsToThePlugin(t *testing.T) {
 	}
 
 	a.Stop()
-	if a.clients.Load() != nil {
+	if p.serving() != nil {
 		t.Error("the client server outlived the run")
 	}
+}
+
+// The health check answers what the listener is serving, including how many
+// clients it holds: a probe reads it to tell a live agent from a bound port.
+func TestTheHealthCheckCountsTheClients(t *testing.T) {
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if got := health(t, p).Clients; got != 0 {
+		t.Errorf("/health reports %d clients with none connected, want 0", got)
+	}
+
+	clientOf(t, p.serving())
+
+	got := health(t, p)
+	if got.Status != "ok" || got.Type != "agent" {
+		t.Errorf("/health reports %+v, want an agent reporting itself up", got)
+	}
+	if got.Clients != 1 {
+		t.Errorf("/health reports %d clients with one connected, want 1", got.Clients)
+	}
+}
+
+// health reads the health check through the listener's mux.
+func health(t *testing.T, p *ServerPlugin) struct {
+	Status  string `json:"status"`
+	Type    string `json:"type"`
+	Clients int    `json:"clients"`
+} {
+	t.Helper()
+
+	var got struct {
+		Status  string `json:"status"`
+		Type    string `json:"type"`
+		Clients int    `json:"clients"`
+	}
+
+	rec := httptest.NewRecorder()
+	p.Listener().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /health = %d, want 200", rec.Code)
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding /health: %v", err)
+	}
+	return got
 }
 
 // ServeMode is what a build names its own handlers with. What it names replaces

@@ -59,7 +59,7 @@ type captured struct {
 	restartErr error
 }
 
-func (c *captured) CapturedConfiguration() {}
+func (c *captured) Rebuildable() {}
 
 func (c *captured) Start(ctx context.Context) error {
 	if err := c.counter.Start(ctx); err != nil {

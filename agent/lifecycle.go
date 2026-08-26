@@ -77,10 +77,10 @@ type Component interface {
 type Rebuildable interface {
 	Component
 
-	// CapturedConfiguration declares the component one of these. It is never
-	// called: the agent stops and starts the component through Component, so
-	// there is one teardown path rather than two.
-	CapturedConfiguration()
+	// Rebuildable declares the component one of these. It is never called: the
+	// agent stops and starts the component through Component, so there is one
+	// teardown path rather than two.
+	Rebuildable()
 }
 
 // State reports where the agent is. Safe from any goroutine, including from a

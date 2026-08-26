@@ -8,7 +8,7 @@ import (
 )
 
 // rosterManager carries devices that report their own scans, as the phone
-// driver does, and names each by the identity it holds rather than by its path.
+// driver does, naming each by identity rather than by path.
 type rosterManager struct {
 	devices []string
 }
@@ -48,9 +48,8 @@ func TestAStoppedAgentAnswersAboutItsClients(t *testing.T) {
 	}
 }
 
-// The devices connected come from whatever manager carries them, by the
-// identity each holds: what a paired device is matched against is that, not the
-// path an aggregate qualified.
+// Connected devices come from the manager, by identity: that is what a paired
+// device is matched against, not the path an aggregate qualified.
 func TestOnlineDevicesComeFromTheManager(t *testing.T) {
 	m := &rosterManager{devices: []string{"phone-1", "phone-2"}}
 	a := New(Config{Manager: m})
@@ -61,8 +60,7 @@ func TestOnlineDevicesComeFromTheManager(t *testing.T) {
 	}
 }
 
-// A manager whose devices are all readers has none connected of its own, and
-// says so rather than counting the readers.
+// A manager whose devices are all readers reports none connected of its own.
 func TestOnlineDevicesAreNoneWithoutADriver(t *testing.T) {
 	a := New(Config{Manager: nfc.NewMockManager()})
 

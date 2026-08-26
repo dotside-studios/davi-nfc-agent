@@ -159,12 +159,12 @@ func TestDeviceTimeoutAllowsMissedHeartbeats(t *testing.T) {
 }
 
 // A device that comes back replaces its own session. The connection it replaced
-// ends afterwards, and must take neither the live session nor the device.
+// ends afterwards and must take neither the live session nor the device.
 func TestAReplacedConnectionEndsWithoutTakingTheLiveOne(t *testing.T) {
 	m := NewManager(DeviceTimeout)
 
-	// These sessions stand for connections rather than holding one, so they go
-	// before the manager closes what it thinks it has open.
+	// These sessions hold no socket, so drop them before the manager closes
+	// what it thinks it has open.
 	defer func() {
 		m.removeSession("device-1")
 		m.Close()

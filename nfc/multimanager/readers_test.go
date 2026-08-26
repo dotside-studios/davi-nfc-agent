@@ -32,8 +32,8 @@ func (m *localManager) OpenDevice(string) (nfc.Device, error) {
 }
 func (m *localManager) Close() error { return nil }
 
-// listings describes each path the same way, which is what a driver whose
-// transport is fixed does.
+// listings describes every path the same way, as a driver with a fixed
+// transport does.
 func listings(paths []string, caps nfc.DeviceCapabilities) []nfc.DeviceListing {
 	out := make([]nfc.DeviceListing, 0, len(paths))
 	for _, path := range paths {

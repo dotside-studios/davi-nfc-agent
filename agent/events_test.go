@@ -178,8 +178,8 @@ func (m *fakeManager) OpenDevice(string) (nfc.Device, error) {
 	return nil, errors.New("fakeManager opens nothing")
 }
 
-// Devices describes the ones in readers as devices this agent opens, and the
-// rest as devices that report for themselves.
+// Devices marks the ones in readers as pollable, the rest as reporting for
+// themselves.
 func (m *fakeManager) Devices() ([]nfc.DeviceListing, error) {
 	out := make([]nfc.DeviceListing, 0, len(m.devices))
 	for _, path := range m.devices {

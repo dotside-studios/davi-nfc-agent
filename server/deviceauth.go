@@ -39,8 +39,8 @@ func (a *DeviceAuth) RequirePaired() bool { return a.requirePaired.Load() }
 // the form a driver takes, so the credential is checked inside the endpoint
 // rather than only by whoever remembered to wrap it.
 //
-// It names the paired device it admitted, so the driver registers that device
-// under the identity it paired with rather than minting one per connection.
+// It names the paired device it admitted, so the driver registers it under the
+// identity it paired with rather than minting one per connection.
 func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool) {
 	if a.requirePaired.Load() {
 		id, ok := CheckPairedDevice(w, r, a.tokenVerifier)

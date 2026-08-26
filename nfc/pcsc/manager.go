@@ -160,7 +160,7 @@ func (m *Manager) isCardPresentLocked(ctx scardContext, readerName string) (bool
 	return (state & statePresent) != 0, nil
 }
 
-// readerTransport is what a PC/SC reader can do here: it is opened, polled and
+// readerTransport is what any PC/SC reader can do: it is opened, polled and
 // spoken to directly.
 var readerTransport = nfc.DeviceCapabilities{
 	CanPoll:       true,

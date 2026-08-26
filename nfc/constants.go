@@ -51,10 +51,8 @@ func GetAllCardTypes() []string {
 }
 
 // ListReaders names the devices this agent can open and read from, which is
-// what the supervisor opens and what a reader picker offers.
-//
-// A device that reports its own scans is left out: it is never opened here, and
-// offering one produces a reader that can never connect.
+// what the supervisor opens and what a reader picker offers. Devices that
+// report their own scans are left out; connecting to one cannot succeed.
 func ListReaders(m Manager) ([]string, error) {
 	if m == nil {
 		return nil, nil

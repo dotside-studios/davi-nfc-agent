@@ -28,11 +28,9 @@ type MultiManager struct {
 	// Raw, as the children report them: reading the tag is the supervisor's.
 	scans event.Signal[nfc.ScannedTag]
 
-	// listErrMu guards lastListErr, which holds the last listing error reported
-	// per manager so a persistent one is logged once rather than on every poll.
-	// The device list is polled continuously by the tray, the console and the
-	// device watcher, so an unavailable reader would otherwise be the only
-	// thing in the log.
+	// listErrMu guards lastListErr, the last listing error reported per manager,
+	// so a persistent one is logged once rather than on every poll. The tray,
+	// the console and the device watcher all poll the list.
 	listErrMu   sync.Mutex
 	lastListErr map[string]string
 }
@@ -145,18 +143,15 @@ func (mm *MultiManager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return nil, fmt.Errorf("no device found: %s", deviceStr)
 }
 
-// Devices aggregates what every manager offers, each entry prefixed with the
-// manager it came from. What a child says about a device is carried through, so
-// a caller can tell a reader from a device that reports its own scans without
-// knowing which manager answered.
+// Devices aggregates what every manager offers, prefixing each path with the
+// manager it came from and carrying the child's description through unchanged.
 //
-// A manager that cannot list is logged and left out rather than failing the
-// rest: one unavailable backend should not hide the others.
+// A manager that cannot list is logged and left out: one unavailable backend
+// must not hide the others.
 func (mm *MultiManager) Devices() ([]nfc.DeviceListing, error) {
 	var all []nfc.DeviceListing
 
-	// In registration order, so what a caller picks from does not vary between
-	// runs the way map order would.
+	// In registration order: map order would vary between runs.
 	for _, name := range mm.managerOrder {
 		listings, err := mm.managers[name].Devices()
 		if err != nil {
@@ -174,8 +169,8 @@ func (mm *MultiManager) Devices() ([]nfc.DeviceListing, error) {
 	return all, nil
 }
 
-// qualify names a device by the manager holding it, leaving one that already
-// carries a prefix alone.
+// qualify prefixes a path with the manager holding it, leaving an already
+// qualified one alone.
 func qualify(manager, path string) string {
 	if strings.Contains(path, ":") {
 		return path

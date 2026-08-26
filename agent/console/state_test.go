@@ -91,9 +91,9 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 	}
 }
 
-// The overview counts the devices the console lists. The count used to be the
-// driver's own, beside a panel built from the pairing registry, so a device
-// shown offline could still be counted as active.
+// The overview counts the devices the console lists. The count came from the
+// driver and the panel from the registry, so a device shown offline could still
+// be counted as active.
 func TestTheOverviewCountsTheDevicesItLists(t *testing.T) {
 	host := newFakeHost()
 	host.devices = []PairedDevice{

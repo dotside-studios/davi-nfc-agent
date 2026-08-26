@@ -53,13 +53,9 @@ func (a *Agent) reportTag(data nfc.NFCData) {
 	a.events.Tag.Emit(data)
 }
 
-// Devices connected to the agent that report their own scans, rather than
-// readers it opened. The manager describes each device it offers, so this is a
-// question about capabilities and names no driver.
-
-// OnlineDevices lists the devices connected right now, by the identity each
-// holds: for one that paired, the identity it paired with. A paired device
-// absent from this list is one that is not connected.
+// OnlineDevices lists the devices connected right now that report their own
+// scans, rather than readers the agent opened, by the identity each holds. A
+// paired device absent from this list is not connected.
 func (a *Agent) OnlineDevices() []string {
 	listings, err := a.manager.Devices()
 	if err != nil {

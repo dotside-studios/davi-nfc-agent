@@ -102,19 +102,16 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return device, nil
 }
 
-// deviceTransport is what a device on the bridge can do: it reports what it
-// scans and is asked to act on the tag it holds, rather than being opened and
-// polled from here.
-//
-// What one declares when it registers refines this; see [Device.PhoneCapabilities].
+// deviceTransport is what any device on the bridge can do: it reports its own
+// scans rather than being opened and polled. What a device declares at
+// registration refines it; see [Device.PhoneCapabilities].
 var deviceTransport = nfc.DeviceCapabilities{
 	SupportsEvents: true,
 	DeviceType:     "smartphone",
 }
 
-// Devices names the devices connected right now, by the identity each holds:
-// for one that paired, the identity it paired with. An aggregate adds the
-// prefix naming the manager it came from.
+// Devices lists the devices connected right now, by the identity each holds.
+// An aggregate adds the prefix naming this manager.
 func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -135,9 +132,8 @@ func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error)
 }
 
 // registerDevice registers a device under the identity it was admitted with,
-// minting one when it was admitted under none. A device that paired holds an
-// identity already, and a fresh one per connection leaves the agent unable to
-// say that the device connected is the device paired.
+// minting one when it was admitted under none. A paired device holds an
+// identity already; a fresh one per connection cannot be matched to it.
 func (m *Manager) registerDevice(deviceID string, req DeviceRegistrationRequest) (*Device, error) {
 	// Validate request
 	if req.DeviceName == "" {
@@ -153,9 +149,8 @@ func (m *Manager) registerDevice(deviceID string, req DeviceRegistrationRequest)
 		deviceID = uuid.New().String()
 	}
 
-	// A device coming back meets what is left of its last connection. Dropped
-	// here rather than by that connection, which ends after this registration
-	// and would take the new session with it.
+	// Drop the session this one replaces here: the connection it belongs to
+	// ends after this registration and would take the new session with it.
 	if conn, ok := m.session(deviceID); ok {
 		m.removeSession(deviceID)
 		_ = conn.Close()

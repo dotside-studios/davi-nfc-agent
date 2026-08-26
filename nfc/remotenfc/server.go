@@ -423,8 +423,8 @@ func (m *Manager) handleGoodbye(conn *wsconn.SafeConn, deviceID string, req prot
 // that unregisters a connected device, so a session and a registration cannot
 // outlive one another.
 func (m *Manager) endSession(conn *wsconn.SafeConn, deviceID string, reason DisconnectReason) {
-	// A device that came back has replaced this session already, and tearing
-	// down by name alone would take the live one with it.
+	// A device that came back has replaced this session already; tearing down
+	// by name alone would take the live one with it.
 	if !m.removeSessionFor(conn, deviceID) {
 		return
 	}

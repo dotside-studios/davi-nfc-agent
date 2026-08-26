@@ -16,31 +16,25 @@ import "github.com/dotside-studios/davi-nfc-agent/event"
 type Manager interface {
 	OpenDevice(deviceStr string) (Device, error)
 
-	// Devices lists what this manager knows about, with what is known of each
-	// before anything opens it.
+	// Devices lists what this manager offers.
 	Devices() ([]DeviceListing, error)
 }
 
-// DeviceListing is a device a manager offers, described before it is opened.
-//
-// A driver's transport settles most of what a device can do, so a listing
-// carries what the driver knows without touching it. A device that declares
-// more when it connects refines it; what an opened device reports is its own,
-// through [GetDeviceCapabilities].
+// DeviceListing describes a device before it is opened. An opened device
+// reports its own capabilities through [GetDeviceCapabilities].
 type DeviceListing struct {
-	// Path names the device to OpenDevice, qualified by the manager holding it
-	// when an aggregate lists several.
+	// Path names the device to OpenDevice. An aggregate qualifies it with the
+	// manager holding it.
 	Path string
 
-	// ID is the identity the device holds with its driver: for one that paired,
-	// the identity it paired with. A driver with no identity of its own answers
-	// with the path, which is what a reader is known by.
+	// ID is the identity the device holds with its driver: for a paired device,
+	// the identity it paired with. Drivers with no identity of their own repeat
+	// the path.
 	ID string
 
-	// Capabilities is what the driver knows the device can do. CanPoll is the
-	// one a consumer must respect: a device that reports its own scans is not
-	// opened and read from here, and opening one produces a connection that
-	// can never succeed.
+	// Capabilities is what the driver knows without opening the device. CanPoll
+	// gates opening it: a device that reports its own scans is never opened
+	// here, and connecting to one cannot succeed.
 	Capabilities DeviceCapabilities
 }
 

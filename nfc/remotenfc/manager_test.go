@@ -242,8 +242,7 @@ func TestManagerDevices(t *testing.T) {
 		t.Errorf("Devices() should return 3 devices, got %d", len(devices))
 	}
 
-	// A device is named by the identity it holds, and is not one this agent
-	// opens and reads from.
+	// Named by identity, and not a device this agent opens and reads from.
 	for _, device := range devices {
 		if device.Path == "" {
 			t.Error("a device was listed with no identity")

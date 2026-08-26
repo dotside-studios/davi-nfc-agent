@@ -84,8 +84,7 @@ func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 	}
 
 	// The credential names the device, so what connects is what paired. An
-	// identity minted per connection left the console showing every paired
-	// device offline while it was connected.
+	// identity minted per connection showed every paired device as offline.
 	if deviceID != paired.DeviceID {
 		t.Errorf("the device registered as %q, want the identity it paired with, %q", deviceID, paired.DeviceID)
 	}
@@ -170,16 +169,15 @@ func TestPairingRefusesTheWrongPIN(t *testing.T) {
 	}
 }
 
-// A device that comes back is the same device: its identity is the one it
-// paired with, so a second connection replaces the first.
+// A device that comes back holds the identity it paired with, so a second
+// connection replaces the first rather than adding another device.
 func TestAPairedDeviceReconnectsAsItself(t *testing.T) {
 	h := start(t, options{Pairing: true})
 
 	paired := pairDevice(t, h)
 
-	// The first connection is left open, which is the case that matters: a
-	// phone whose radio dropped comes back while the agent still holds a
-	// session it cannot reach.
+	// Left open deliberately: a phone whose radio dropped comes back while the
+	// agent still holds a session it cannot reach.
 	first, _, _ := h.phone(t, paired.DeviceToken, phoneCapabilities())
 	second, secondID, _ := h.phone(t, paired.DeviceToken, phoneCapabilities())
 
@@ -194,7 +192,7 @@ func TestAPairedDeviceReconnectsAsItself(t *testing.T) {
 		t.Errorf("the connection that was replaced is still being served (read: %v)", err)
 	}
 
-	// That connection is torn down on its own goroutine, after this one
+	// The replaced connection is torn down on its own goroutine, after this one
 	// registered. What it drops must not be this one.
 	deadline := time.Now().Add(300 * time.Millisecond)
 	for time.Now().Before(deadline) {

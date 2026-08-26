@@ -65,8 +65,8 @@ func (m *MockManager) OpenDevice(deviceStr string) (Device, error) {
 	return m.MockDevice, nil
 }
 
-// Devices simulates listing available NFC devices. They are readers: a mock
-// manager stands in for hardware.
+// Devices lists the mock devices, as readers: a mock manager stands in for
+// hardware.
 func (m *MockManager) Devices() ([]DeviceListing, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

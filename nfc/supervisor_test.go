@@ -375,9 +375,8 @@ func awaitHeld(t *testing.T, s *Supervisor, device string) {
 	t.Fatalf("%s never reported the tag on it", device)
 }
 
-// The supervisor opens what a manager offers as a device to read from, and
-// nothing else. A device that reports its own scans is never opened here, and
-// opening one produces a connection that can never succeed.
+// The supervisor opens what a manager offers as pollable and nothing else:
+// connecting to a device that reports its own scans cannot succeed.
 func TestASupervisorOpensOnlyWhatCanBePolled(t *testing.T) {
 	m := &mixedManager{Manager: NewMockManager()}
 	s := startedSupervisor(t, m)
@@ -390,8 +389,8 @@ func TestASupervisorOpensOnlyWhatCanBePolled(t *testing.T) {
 	}
 }
 
-// mixedManager offers a reader and a device that reports for itself, which is
-// what a build with a phone driver beside a reader has.
+// mixedManager offers a reader and a device that reports for itself, as a build
+// with a phone driver beside a reader does.
 type mixedManager struct {
 	Manager
 }

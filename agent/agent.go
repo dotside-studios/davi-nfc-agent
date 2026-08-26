@@ -260,6 +260,13 @@ func logSink(logs *logbuf.Ring) io.Writer {
 	return io.MultiWriter(os.Stderr, logs)
 }
 
+// pluginLogger is the log channel a plugin writes on: the agent's own sink,
+// under the plugin's name in place of the agent's prefix, which is what makes
+// [logbuf.Entry.Source] tell them apart.
+func (a *Agent) pluginLogger(name string) *log.Logger {
+	return log.New(a.logger.Writer(), "["+name+"] ", a.logger.Flags())
+}
+
 // Configuration readers. These exist because the tray and the console display
 // what the agent was built with; none of them can change it.
 

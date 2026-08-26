@@ -74,6 +74,89 @@ func TestASuppliedLoggerIsLeftAlone(t *testing.T) {
 	}
 }
 
+// logging is a plugin that writes one line on the channel it was given.
+type logging struct {
+	name string
+	line string
+}
+
+func (p *logging) Name() string { return p.name }
+
+func (p *logging) Activate(ctx AgentContext) error {
+	ctx.Logger().Print(p.line)
+	return nil
+}
+
+// A plugin logs under its own name, which is what Name is for: the console
+// shows the source beside every line, and every plugin used to log as the
+// agent.
+func TestAPluginLogsUnderItsOwnName(t *testing.T) {
+	a, ring := ringAgent(t,
+		&logging{name: "backups", line: "a line from the backups plugin"},
+		&logging{name: "metrics", line: "a line from the metrics plugin"},
+	)
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	if got := find(t, ring, "from the backups plugin").Source; got != "[backups]" {
+		t.Errorf("the backups plugin logged as %q, want its own name", got)
+	}
+	if got := find(t, ring, "from the metrics plugin").Source; got != "[metrics]" {
+		t.Errorf("the metrics plugin logged as %q, want its own name", got)
+	}
+
+	// The agent's own lines keep the agent's name, so a plugin's channel is
+	// told apart from the lifecycle around it.
+	if got := find(t, ring, "Plugin activated: backups").Source; got != "[agent]" {
+		t.Errorf("the agent logged as %q, want the agent", got)
+	}
+}
+
+// A plugin that names itself nothing still has a channel, under whatever
+// PluginName calls it, rather than logging as "[]".
+func TestAPluginThatNamesItselfNothingIsChannelledByType(t *testing.T) {
+	p := &logging{name: "", line: "a line from an unnamed plugin"}
+	a, ring := ringAgent(t, p)
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	want := "[" + PluginName(p) + "]"
+	if got := find(t, ring, "from an unnamed plugin").Source; got != want {
+		t.Errorf("a plugin naming itself nothing logged as %q, want %q", got, want)
+	}
+}
+
+// The channel is the agent's sink, so a caller that supplied its own logger
+// still receives what the plugins write.
+func TestAPluginChannelWritesToTheSuppliedLogger(t *testing.T) {
+	var lines []string
+	logger := log.New(writerFunc(func(p []byte) (int, error) {
+		lines = append(lines, string(p))
+		return len(p), nil
+	}), "", 0)
+
+	a := New(Config{
+		Manager: nfc.NewMockManager(),
+		Logger:  logger,
+		Plugins: []Plugin{&logging{name: "backups", line: "a line from the backups plugin"}},
+	})
+	if err := a.Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	var found bool
+	for _, line := range lines {
+		if strings.Contains(line, "[backups] ") && strings.Contains(line, "from the backups plugin") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the supplied logger received %v, want the plugin's line under its name", lines)
+	}
+}
+
 // writerFunc adapts a function to io.Writer.
 type writerFunc func(p []byte) (int, error)
 

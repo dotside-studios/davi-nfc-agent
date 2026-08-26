@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `AgentContext.Logger` is the plugin's own log channel: the agent's log,
+  written under the plugin's name, so the console tells one plugin's
+  diagnostics from another's and from the agent's. `Plugin.Name` decides it,
+  and a plugin naming itself nothing is channelled under its type
+
 ### Fixed
 
 - What the agent logs reaches the console. `Config.Logs` was held on the agent

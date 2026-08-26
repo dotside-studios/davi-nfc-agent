@@ -223,7 +223,7 @@ The context carries what a plugin needs to wire itself in:
 | `ctx.Systray` | The menu the plugin's entries go on |
 | `ctx.Serve(srv)` | Publishes the listener the agent serves from |
 | `ctx.Mount(pattern, h)` | Adds a route to it |
-| `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Logs()` | The agent's log, identity, config directory and log ring |
+| `ctx.Logger()`, `ctx.Info()`, `ctx.ConfigDir()`, `ctx.Logs()` | The plugin's log channel, and the agent's identity, config directory and log ring |
 
 `ctx.Systray` is the top level of the tray's own menu, so a plugin's entry looks
 no different from one the tray declared itself. Entries land where the tray

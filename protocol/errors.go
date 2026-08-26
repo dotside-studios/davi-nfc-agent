@@ -55,6 +55,11 @@ const (
 	ErrCodeReadOnly         ErrorCode = "READ_ONLY"
 	ErrCodeCapacityExceeded ErrorCode = "CAPACITY_EXCEEDED"
 	ErrCodeInvalidData      ErrorCode = "INVALID_DATA"
+
+	// ErrCodeMultipleTags reports more than one tag in the field where the
+	// operation needs exactly one. Not retryable: the user has to separate
+	// them first.
+	ErrCodeMultipleTags ErrorCode = "MULTIPLE_TAGS"
 )
 
 // ErrorPayload is the payload of an error response. `code` carries the same

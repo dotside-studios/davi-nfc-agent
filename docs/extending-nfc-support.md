@@ -623,14 +623,17 @@ func (d *MyDevice) SupportsEvents() bool {
 
 When `SupportsEvents()` returns true, `BuildDeviceCapabilities()` will automatically set:
 - `CanPoll: false`
-- `CanTransceive: false`
 - `SupportsEvents: true`
+
+`CanTransceive` is unaffected: how a device reports scans says nothing about
+whether it can exchange bytes with the tag. Implement `DeviceTransceiver` to
+declare that.
 
 ### DeviceTransceiver Interface
 
-Polling devices default to `CanTransceive: true`. If your polling device's
-`Transceive` actually returns a `NotSupported` error, implement
-`DeviceTransceiver` so the reported capabilities match reality:
+Devices default to `CanTransceive: true`. If your device's `Transceive` actually
+returns a `NotSupported` error, implement `DeviceTransceiver` so the reported
+capabilities match reality:
 
 ```go
 func (d *MyDevice) SupportsTransceive() bool {

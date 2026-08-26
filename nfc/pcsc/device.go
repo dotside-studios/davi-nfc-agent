@@ -186,6 +186,13 @@ func (d *device) SupportedTagTypes() []string {
 	return []string{"MIFARE Classic", "DESFire", "Ultralight", "NTAG", "ISO14443-4"}
 }
 
+// SupportsTransceive reports that a PC/SC reader can exchange APDUs with the
+// tag (implements nfc.DeviceTransceiver). Declared rather than left to the
+// default so the answer does not depend on what else this device implements.
+func (d *device) SupportsTransceive() bool {
+	return true
+}
+
 // IsHealthy checks if the device is still connected (implements DeviceHealthChecker)
 func (d *device) IsHealthy() error {
 	d.mu.Lock()

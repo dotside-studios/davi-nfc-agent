@@ -20,6 +20,7 @@ const (
 	ErrCodeReadOnly
 	ErrCodeCapacityExceeded
 	ErrCodeInvalidData
+	ErrCodeMultipleTags
 )
 
 // NFCError provides structured error information for programmatic handling.
@@ -53,6 +54,17 @@ func (e *NFCError) Is(target error) bool {
 		return e.Code == t.Code
 	}
 	return false
+}
+
+// NewMultipleTagsError reports more than one tag in the field where the
+// operation needs exactly one. The user has to separate them, so repeating the
+// request unchanged will fail the same way.
+func NewMultipleTagsError(op string, count int) *NFCError {
+	return &NFCError{
+		Code:    ErrCodeMultipleTags,
+		Op:      op,
+		Message: fmt.Sprintf("multiple cards detected (%d tags), please present only one card", count),
+	}
 }
 
 // NewNotSupportedError creates an error for unsupported operations.

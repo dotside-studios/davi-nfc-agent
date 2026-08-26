@@ -48,6 +48,11 @@ type DeviceRegistry struct {
 
 	// changed carries the registry after every pairing and revocation.
 	changed event.Signal[[]PairedDevice]
+
+	// revoked carries the IDs whose credentials just stopped being valid.
+	// Separate from changed because a subscriber acting on a revocation needs
+	// to know who was revoked, and the registry no longer holds them.
+	revoked event.Signal[[]string]
 }
 
 // NewDeviceRegistry loads the registry from configDir.
@@ -88,6 +93,19 @@ func (r *DeviceRegistry) OnChange(fn func()) *event.Connection {
 		return nil
 	}
 	return r.changed.Connect(func([]PairedDevice) { fn() })
+}
+
+// OnRevoke registers fn to run with the IDs whose credentials were just
+// revoked, and returns the handle that removes it again.
+//
+// A token is only checked when a device connects, so revoking one does nothing
+// to a device already connected. Anything holding live sessions subscribes here
+// and ends the matching one.
+func (r *DeviceRegistry) OnRevoke(fn func(ids []string)) *event.Connection {
+	if fn == nil {
+		return nil
+	}
+	return r.revoked.Connect(fn)
 }
 
 // notifyChanged publishes the registry. Called with the lock released, since a
@@ -178,8 +196,9 @@ func (r *DeviceRegistry) Count() int {
 	return len(r.devices)
 }
 
-// Revoke removes a device. Its token stops working immediately; every other
-// device is unaffected.
+// Revoke removes a device. Its token stops working immediately, and any session
+// it already holds ends with it where something has subscribed to OnRevoke;
+// every other device is unaffected.
 func (r *DeviceRegistry) Revoke(id string) error {
 	r.mu.Lock()
 	_, existed := r.devices[id]
@@ -190,6 +209,7 @@ func (r *DeviceRegistry) Revoke(id string) error {
 	if !existed {
 		return fmt.Errorf("no such device: %s", id)
 	}
+	r.revoked.Emit([]string{id})
 	r.notifyChanged()
 	return err
 }
@@ -197,10 +217,17 @@ func (r *DeviceRegistry) Revoke(id string) error {
 // RevokeAll clears the registry, for a machine changing hands.
 func (r *DeviceRegistry) RevokeAll() error {
 	r.mu.Lock()
+	ids := make([]string, 0, len(r.devices))
+	for id := range r.devices {
+		ids = append(ids, id)
+	}
 	r.devices = make(map[string]*PairedDevice)
 	err := r.saveLocked()
 	r.mu.Unlock()
 
+	if len(ids) > 0 {
+		r.revoked.Emit(ids)
+	}
 	r.notifyChanged()
 	return err
 }

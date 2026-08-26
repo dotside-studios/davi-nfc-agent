@@ -230,7 +230,7 @@ func (s *Supervisor) watchReported() {
 // that reports its own scans has already read the tag, so this is where the two
 // paths meet rather than where one of them does its reading.
 func process(scan ScannedTag) NFCData {
-	data := NFCData{Device: scan.Device, Err: scan.Err}
+	data := NFCData{Device: scan.Device, Err: scan.Err, RemovedUID: scan.RemovedUID}
 	if scan.Tag != nil {
 		data.Card = NewCard(scan.Tag)
 	}

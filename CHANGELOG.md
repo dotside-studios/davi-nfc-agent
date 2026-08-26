@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `remotenfc.ServerOptions.Revocations` ends the session of a device whose
+  credential is revoked. Credentials are checked once, at the upgrade, so a
+  device revoked while connected kept streaming scans and accepting writes until
+  it reconnected, which for a heartbeating device is never.
+  `DeviceRegistry.OnRevoke` reports which devices lost their credential, and
+  `remotenfc.Manager.DisconnectDevice` closes the matching session with a
+  policy-violation close reason
+- `remotenfc.Manager.Dropped` counts the scans and removals that could not be
+  published within `ScanPublishTimeout`, so overflow is a number rather than a
+  log line
+- `MULTIPLE_TAGS` error code for more than one tag in the field where the
+  operation needs exactly one. Not retryable: the user has to separate them
+  first. Both guards raised an untyped `fmt.Errorf`, so a real and
+  user-actionable condition reached clients as an opaque string
+- `nfc.ScannedTag.RemovedUID` and `nfc.NFCData.RemovedUID` name the tag that
+  left. A removal named the device holding it and not the tag, so a consumer
+  watching several devices could not tell which tag went
+- `tls.PairingURI` and `BootstrapServer.PairingURI` carry the agent's address,
+  its public key pin and the pairing PIN. The agent prints one as a QR at
+  startup, to read off the kiosk screen, so a device can pin the pairing
+  connection to a value that never crossed the network
+- `tls.BootstrapServer.PairHandler` serves pairing, to mount on the agent's
+  listener as an `agent.Endpoint`
 - `logbuf.Channel` gives a package a logger under a name at a level, and
   `logbuf.Install` names the ring those write into. `nfc`, `nfc/remotenfc`,
   `nfc/multimanager`, `nfc/pcsc`, `server`, `server/clientserver`,
@@ -21,56 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level, and `logbuf.Ring.At` is the writer behind them. A line is a failure
   because the caller said so
 
-### Changed
-
-- `ServerPlugin.Authenticate` is the credential check for a device endpoint,
-  replacing `server.DeviceAuth` and `Agent.DeviceAuth`. A build passes
-  `servers.Authenticate()` where it passed `rt.Agent.DeviceAuth.Check`. It sits
-  beside `CheckOrigin` and resolves per request the same way, so it can be
-  handed to an endpoint built before the plugin activates; one taken from a
-  plugin that never activates admits nobody. `DeviceAuth` kept a second copy of
-  the paired-device requirement in step with the agent's by hand, and the check
-  now reads `Agent.RequirePairedDevice`, `Agent.APISecret` and
-  `Agent.TokenVerifier` directly
-- `logbuf` records a line at the level it was written at rather than guessing
-  one from the text. It matched words like "failed" anywhere in the formatted
-  line, so a config directory or device name carrying one read as an error, and
-  a failure phrased without one did not. Unmarked lines are info
-- `AgentContext.Logger` is the plugin's own log channel: the agent's log,
-  written under the plugin's name, so the console tells one plugin's
-  diagnostics from another's and from the agent's. `Plugin.Name` decides it,
-  and a plugin naming itself nothing is channelled under its type
-
-### Fixed
-
-- What the agent logs reaches the console. `Config.Logs` was held on the agent
-  and connected to nothing, so `Agent.Logger` wrote to stderr alone: an agent
-  started from a desktop launcher had nowhere to show its own diagnostics, and
-  the console's log tail carried the drivers' output and none of the agent's. A
-  logger supplied through `Config.Logger` is still used as it is
-
-### Fixed
-
-- Stopping a listener no longer races the mDNS advertiser it is taking down.
-  `grandcat/zeroconf` called `WaitGroup.Add` inside the goroutine its own
-  `mainloop` had already started, so `Shutdown` could pass `Wait` while a
-  receive goroutine was still reading, and returned claiming to have waited for
-  it. The package is unmaintained and its newest commit still has it, so this
-  moves to `libp2p/zeroconf/v2`, a fork of it that adds before starting the
-  goroutine. `Register` takes the same arguments, so nothing else changed
-
-### Fixed
-
-- The reader an operator picks now decides what a client can act on, not just
-  what it is shown. Scans from other readers were dropped while operations still
-  reached them, so a client shown one reader's tags could write, and irreversibly
-  lock, a tag it had never seen: an untargeted request took the first reader
-  holding one, which is the excluded reader whenever it is listed first. Naming
-  another reader, or a UID only another reader has seen, is refused for the same
-  reason. Devices that report their own scans, such as phones, are unaffected, as
-  they already were for scans
-
-### Added
 
 - `ServerPlugin.CheckOrigin` reports the origin check the listener applies, and
   `ServerPlugin.OriginPolicy` the same allowlist as a `server.OriginPolicy`, for
@@ -166,6 +139,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and revocation, and the lifecycle. Only the reader hardware is a stand-in
 
 ### Changed
+
+- Pairing is served from the agent's listener, at `/pair`, instead of the
+  cleartext bootstrap listener. The PIN travelled as a query parameter and the
+  response carried the device token and the agent's `publicKeyPin`, so an
+  observer on the LAN read the credential and an active attacker could
+  substitute a key pin of their own. A build mounts it with
+  `servers.Add(agent.Endpoint{Pattern: "/pair", Handler: pairing.Server.Server().PairHandler()})`.
+  The bootstrap listener keeps its port and stays cleartext, since it hands out
+  the certificate authority to a device that does not trust the agent's
+  certificate yet; it no longer routes `/pair`, and `/pair` refuses a cleartext
+  connection from anything but loopback wherever it is mounted
+- The device endpoint caps an inbound frame at `MaxDeviceMessageSize` (256 KB).
+  It set no read limit, so anything reaching the port could make the agent
+  allocate for a frame of any size
+- The device manager waits for room in its broadcast queue rather than
+  discarding scans and removals when it is full. It dropped them and returned
+  success, so the device was told it had succeeded and the only trace was a
+  warning line. The queue is 256 deep, up from 10, and a scan that still cannot
+  be published is a retryable `TAG_SEND_FAILED` the device can act on
+- `nfc.BuildDeviceCapabilities` no longer infers `CanTransceive: false` from
+  `SupportsEvents`. How a device reports a scan says nothing about whether it
+  can exchange bytes with a tag; only `DeviceTransceiver` decides that, and the
+  PC/SC device now declares it
+- `ServerPlugin.Authenticate` is the credential check for a device endpoint,
+  replacing `server.DeviceAuth` and `Agent.DeviceAuth`. A build passes
+  `servers.Authenticate()` where it passed `rt.Agent.DeviceAuth.Check`. It sits
+  beside `CheckOrigin` and resolves per request the same way, so it can be
+  handed to an endpoint built before the plugin activates; one taken from a
+  plugin that never activates admits nobody. `DeviceAuth` kept a second copy of
+  the paired-device requirement in step with the agent's by hand, and the check
+  now reads `Agent.RequirePairedDevice`, `Agent.APISecret` and
+  `Agent.TokenVerifier` directly
+- `logbuf` records a line at the level it was written at rather than guessing
+  one from the text. It matched words like "failed" anywhere in the formatted
+  line, so a config directory or device name carrying one read as an error, and
+  a failure phrased without one did not. Unmarked lines are info
+- `AgentContext.Logger` is the plugin's own log channel: the agent's log,
+  written under the plugin's name, so the console tells one plugin's
+  diagnostics from another's and from the agent's. `Plugin.Name` decides it,
+  and a plugin naming itself nothing is channelled under its type
+
 
 - `clientserver.Config` takes the scans and reader status to broadcast as
   signals and subscribes itself; `clientserver.Server.Close` takes the
@@ -343,7 +357,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `getLastTag()` are gone: they called endpoints this agent does not serve.
   Reconnection backs off from 250ms to 5s rather than retrying every 3s
 
+### Removed
+
+- `Agent.RestartServers` and the console's `agent.restartServers` action, with
+  the **restart listeners** control that called it. Both endpoints read the API
+  secret per connection now, so nothing needs rebuilding, and what the action
+  did was not what it offered: it replaced the client server without closing the
+  connections the old one held, leaving them open, receiving nothing, and absent
+  from the client list
+- `Events().Clients` and `ChangeClients`. An agent with no server plugin
+  registered has no clients to count, so the signal was only ever meaningful
+  through the plugin that now carries it
+- `Agent.Origins`, `Config.Origins`, `Agent.CheckOrigin`, `Events().Origins`,
+  `Events().Blocked`, `ChangeOrigins` and `ChangeBlocked`. Which browser origins
+  may connect is a question for what serves the connection, so it is the server
+  plugin's; a build with no plugin registered admits nobody by origin because it
+  admits nobody at all
+- `Config.DeviceEndpoint`, `Options.DeviceEndpoint` and
+  `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
+  the agent answers, `DeviceAuth.Check`, `TagModificationAllowed` and
+  `PublicKeyPin`, plus `servers.CheckOrigin()`, and mounts it as
+  `ServerPlugin.ServeMode[server.ModeDevice]` rather than handing the agent a
+  builder to call
+- `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
+  is the server plugin's, so the agent holds no server and hands over no routes.
+  What answers about the clients moved with it; see Changed
+- `clientserver.Config.OnTag`. It let an embedder observe a scan before the
+  clients saw it, which is what the agent used it for; the agent reports the
+  scan before handing it over now, so nothing sets it
+- `Agent.RemoteDevices` and `console.Host.RemoteDevices`. The agent reached past
+  its manager into the child holding phones for a count the console can take
+  from the devices it already lists. `Agent.OnlineDevices` answers from what the
+  manager reports, by the identity each device holds
+- `nfc.RemoteManager`, `nfc.ReaderLister` and `MultiManager.ListReaders`. Which
+  devices this agent can read from is what a driver declares about each of them,
+  rather than three interfaces asking whether a manager holds phones
+- `nfc.IsRemoteDevice`, `nfc.RemoteDeviceChecker`, `MultiManager.RemoteDevice`
+  and `Agent.IsReader`. They kept a phone from being pinned, back when the pin
+  named the device the agent opened and polled: a phone there became a
+  connection retried for the life of the process. Nothing opens the pin now
+- `server/tagrouter`. Resolving a client request to the tag it names is what the
+  client server does with the holder it was given, and the wire vocabulary it
+  answers in was never a source's to speak. `clientserver.Config` takes `Tags`
+  and `AllowTagModification`; `Config.Ops` still replaces the lot for a build
+  with its own. `Agent.Router` is gone with it
+- `tray.App.AttachConsole`, `console.Server.AttachTray` and the `console.Tray`
+  interface. The tray held a console it never read, and the console acted
+  through the tray so its menu would follow; the tray follows the agent's
+  events now. What is left is `console.Config.Quit`, since ending the program
+  is the program's
+- The tray's 500ms card poll and its direct subscription to the NFC manager's
+  device-change channel. Both are `Agent.Events()` subscriptions now
+- The settings file and everything that arbitrated with it. Preferences were
+  persisted to `settings.json` and read back at startup, which is what made three
+  shapes necessary for six values. The agent holds them now and nothing writes
+  them anywhere: `agent.Config` goes in, and a change made from the console or a
+  tray menu lasts as long as the agent runs. Gone with it: `settings.Store`,
+  `settings.Explicit`, `ApplySettings`, `SetExplicit`, `Runtime.Settings` and
+  `AgentContext.Settings`. `agent.Config` gains `Mode`, `CardTypes` and
+  `DevicePath`, which it could never carry
+- Package `settings`. `ParseMode` and `FormatMode` are `nfc.ParseReaderMode` and
+  `ReaderMode.String`; the console keeps its own `webui.Preferences`
+- Dead code in `deviceserver`: `Handle` had no callers, the `devices` map was
+  never read, and the fallback WebSocket loop ran only with no driver configured
+- The agent's callback registrations, replaced by `Agent.Events()`: `OnTag`,
+  `OnStateChange`, `OnClientsChange`, `OnPreferencesChange`, `OnServerRestart`
+  and the `ServerRestarts` channel. The channel had one consumer by
+  construction, and a second reader would have taken the signal from the first
+
 ### Fixed
+
+- What the agent logs reaches the console. `Config.Logs` was held on the agent
+  and connected to nothing, so `Agent.Logger` wrote to stderr alone: an agent
+  started from a desktop launcher had nowhere to show its own diagnostics, and
+  the console's log tail carried the drivers' output and none of the agent's. A
+  logger supplied through `Config.Logger` is still used as it is
+
+
+- Stopping a listener no longer races the mDNS advertiser it is taking down.
+  `grandcat/zeroconf` called `WaitGroup.Add` inside the goroutine its own
+  `mainloop` had already started, so `Shutdown` could pass `Wait` while a
+  receive goroutine was still reading, and returned claiming to have waited for
+  it. The package is unmaintained and its newest commit still has it, so this
+  moves to `libp2p/zeroconf/v2`, a fork of it that adds before starting the
+  goroutine. `Register` takes the same arguments, so nothing else changed
+
+
+- The reader an operator picks now decides what a client can act on, not just
+  what it is shown. Scans from other readers were dropped while operations still
+  reached them, so a client shown one reader's tags could write, and irreversibly
+  lock, a tag it had never seen: an untargeted request took the first reader
+  holding one, which is the excluded reader whenever it is listed first. Naming
+  another reader, or a UID only another reader has seen, is refused for the same
+  reason. Devices that report their own scans, such as phones, are unaffected, as
+  they already were for scans
+
 
 - Rotating the API secret revoked nothing on the device endpoint. `DeviceAuth`
   was built once with the secret the agent started with and never updated, so
@@ -445,74 +553,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A deliberately disconnected client auto-reconnects again: `connect()` did not
   clear the flag `disconnect()` sets
 - The protocol reference described NDEF records the agent never sent
-
-### Removed
-
-- `Agent.RestartServers` and the console's `agent.restartServers` action, with
-  the **restart listeners** control that called it. Both endpoints read the API
-  secret per connection now, so nothing needs rebuilding, and what the action
-  did was not what it offered: it replaced the client server without closing the
-  connections the old one held, leaving them open, receiving nothing, and absent
-  from the client list
-- `Events().Clients` and `ChangeClients`. An agent with no server plugin
-  registered has no clients to count, so the signal was only ever meaningful
-  through the plugin that now carries it
-- `Agent.Origins`, `Config.Origins`, `Agent.CheckOrigin`, `Events().Origins`,
-  `Events().Blocked`, `ChangeOrigins` and `ChangeBlocked`. Which browser origins
-  may connect is a question for what serves the connection, so it is the server
-  plugin's; a build with no plugin registered admits nobody by origin because it
-  admits nobody at all
-- `Config.DeviceEndpoint`, `Options.DeviceEndpoint` and
-  `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
-  the agent answers, `DeviceAuth.Check`, `TagModificationAllowed` and
-  `PublicKeyPin`, plus `servers.CheckOrigin()`, and mounts it as
-  `ServerPlugin.ServeMode[server.ModeDevice]` rather than handing the agent a
-  builder to call
-- `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
-  is the server plugin's, so the agent holds no server and hands over no routes.
-  What answers about the clients moved with it; see Changed
-- `clientserver.Config.OnTag`. It let an embedder observe a scan before the
-  clients saw it, which is what the agent used it for; the agent reports the
-  scan before handing it over now, so nothing sets it
-- `Agent.RemoteDevices` and `console.Host.RemoteDevices`. The agent reached past
-  its manager into the child holding phones for a count the console can take
-  from the devices it already lists. `Agent.OnlineDevices` answers from what the
-  manager reports, by the identity each device holds
-- `nfc.RemoteManager`, `nfc.ReaderLister` and `MultiManager.ListReaders`. Which
-  devices this agent can read from is what a driver declares about each of them,
-  rather than three interfaces asking whether a manager holds phones
-- `nfc.IsRemoteDevice`, `nfc.RemoteDeviceChecker`, `MultiManager.RemoteDevice`
-  and `Agent.IsReader`. They kept a phone from being pinned, back when the pin
-  named the device the agent opened and polled: a phone there became a
-  connection retried for the life of the process. Nothing opens the pin now
-- `server/tagrouter`. Resolving a client request to the tag it names is what the
-  client server does with the holder it was given, and the wire vocabulary it
-  answers in was never a source's to speak. `clientserver.Config` takes `Tags`
-  and `AllowTagModification`; `Config.Ops` still replaces the lot for a build
-  with its own. `Agent.Router` is gone with it
-- `tray.App.AttachConsole`, `console.Server.AttachTray` and the `console.Tray`
-  interface. The tray held a console it never read, and the console acted
-  through the tray so its menu would follow; the tray follows the agent's
-  events now. What is left is `console.Config.Quit`, since ending the program
-  is the program's
-- The tray's 500ms card poll and its direct subscription to the NFC manager's
-  device-change channel. Both are `Agent.Events()` subscriptions now
-- The settings file and everything that arbitrated with it. Preferences were
-  persisted to `settings.json` and read back at startup, which is what made three
-  shapes necessary for six values. The agent holds them now and nothing writes
-  them anywhere: `agent.Config` goes in, and a change made from the console or a
-  tray menu lasts as long as the agent runs. Gone with it: `settings.Store`,
-  `settings.Explicit`, `ApplySettings`, `SetExplicit`, `Runtime.Settings` and
-  `AgentContext.Settings`. `agent.Config` gains `Mode`, `CardTypes` and
-  `DevicePath`, which it could never carry
-- Package `settings`. `ParseMode` and `FormatMode` are `nfc.ParseReaderMode` and
-  `ReaderMode.String`; the console keeps its own `webui.Preferences`
-- Dead code in `deviceserver`: `Handle` had no callers, the `devices` map was
-  never read, and the fallback WebSocket loop ran only with no driver configured
-- The agent's callback registrations, replaced by `Agent.Events()`: `OnTag`,
-  `OnStateChange`, `OnClientsChange`, `OnPreferencesChange`, `OnServerRestart`
-  and the `ServerRestarts` channel. The channel had one consumer by
-  construction, and a second reader would have taken the signal from the first
 
 ## [1.1.2] - 2026-08-15
 

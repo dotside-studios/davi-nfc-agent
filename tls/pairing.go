@@ -2,6 +2,7 @@ package tls
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 )
 
@@ -45,15 +46,37 @@ func (s *BootstrapServer) SetPairingIssuer(issuer PairingIssuer, agentPort int) 
 	s.agentPort = agentPort
 }
 
+// PairHandler serves pairing, to mount on the agent's TLS listener.
+//
+// It is not on the bootstrap server's own listener, which is cleartext because
+// it hands out the certificate authority to a device that does not trust the
+// agent's certificate yet. Pairing issues a durable credential and the key pin
+// the device recognises the agent by, so it belongs on the listener already
+// serving the certificate that pin covers.
+func (s *BootstrapServer) PairHandler() http.Handler {
+	return http.HandlerFunc(s.handlePair)
+}
+
 // handlePair issues a per-device credential to a caller that knows the PIN.
 //
 // The PIN is proof the operator can see the kiosk, and it is rate-limited and
 // locks out after repeated failures, the same gate that protects the CA
 // download, reused because it answers the same question.
+//
+// The response carries a durable device token and the key pin the device will
+// recognise this agent by, so it is refused over a cleartext connection: an
+// observer would read the credential, and an active attacker could substitute a
+// pin of their own.
 func (s *BootstrapServer) handlePair(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "Pairing requires POST.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !pairingChannelIsPrivate(r) {
+		s.logger.Printf("Pairing refused for %s: the connection is not encrypted", r.RemoteAddr)
+		http.Error(w, "Pairing requires HTTPS: a credential issued in the clear is not one.", http.StatusUpgradeRequired)
 		return
 	}
 
@@ -94,4 +117,20 @@ func (s *BootstrapServer) handlePair(w http.ResponseWriter, r *http.Request) {
 		PublicKeyPin: issuer.PublicKeyPin(),
 		AgentPort:    agentPort,
 	})
+}
+
+// pairingChannelIsPrivate reports whether a credential may be issued over this
+// connection. TLS qualifies. So does loopback, where there is no network to
+// observe and an agent without a certificate can still pair its own machine.
+func pairingChannelIsPrivate(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

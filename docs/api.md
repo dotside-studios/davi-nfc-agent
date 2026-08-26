@@ -929,6 +929,16 @@ every client on the agent. A request that does name a tag is still checked.
 > The bundled JavaScript client fills in `uid` from the last tag it saw, so
 > `client.write({ records })` is already targeted and needs no change.
 
+**The reader the operator picked.** When a reader is selected in the console or
+the tray, the agent works with that one: its scans are the only ones sent, and
+its tag is the only one a request can reach. A request naming another reader, or
+a UID only another reader has seen, fails as though nothing were holding that
+tag, and `allowUntargeted` resolves among the selected reader alone. What a
+client is shown is what it can act on.
+
+Devices that report their own scans, such as paired phones, are not affected:
+the operator picked which reader to work with, not which phone.
+
 **Idempotency.** `writeRequest` and `lockRequest` also accept an
 `idempotencyKey`, passed through to the device. Reuse it when retrying after a
 lost response and a device that already applied it reports the previous outcome

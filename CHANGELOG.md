@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The reader an operator picks now decides what a client can act on, not just
+  what it is shown. Scans from other readers were dropped while operations still
+  reached them, so a client shown one reader's tags could write, and irreversibly
+  lock, a tag it had never seen: an untargeted request took the first reader
+  holding one, which is the excluded reader whenever it is listed first. Naming
+  another reader, or a UID only another reader has seen, is refused for the same
+  reason. Devices that report their own scans, such as phones, are unaffected, as
+  they already were for scans
+
 ### Added
 
 - `ServerPlugin.CheckOrigin` reports the origin check the listener applies, and

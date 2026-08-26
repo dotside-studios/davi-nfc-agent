@@ -71,11 +71,18 @@ narrower than the internal model it projects.
 
 **The write outcome.** Neither version's `deviceWriteResponse` carries a
 result, so the agent manufactures one (`nfc/remotenfc/deviceops.go:46`):
-`BytesWritten` = what we sent, `Attempts: 1`, and `Verified` from a
-`confirmable()` helper that is just `!ReadsAreSnapshot`. On the reader route
-`Verified` means "read back and compared". On the device route it means "could
-in principle have been". One field, two meanings, and the device route reports
-a verification nobody performed.
+`BytesWritten` is what we sent rather than what landed, `Attempts: 1` is an
+assumption, and `Verified` comes from a `confirmable()` helper that is just
+`!ReadsAreSnapshot`.
+
+`Verified` itself comes out right, and it is worth being precise about why:
+`remotenfc.Tag` declares `ReadsAreSnapshot = true` unconditionally
+(`nfc/remotenfc/tag.go:112`), so `confirmable()` is always false on this route
+and a device write is never reported as verified. The defect is narrower than
+"it lies" — it is that the device never says what it did, and the agent fills
+the gap with values it did not observe. A device that verified its own write
+has no way to say so, and one that needed three attempts is recorded as having
+needed one.
 
 **The `platform` allowlist** (v0 required `ios`/`android`/`web`) was removed in
 `#28`, correctly — it was the smartphone assumption encoded as an admission

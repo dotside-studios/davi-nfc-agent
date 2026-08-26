@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ServerPlugin.Authenticate` is the credential check for a device endpoint,
+  replacing `server.DeviceAuth` and `Agent.DeviceAuth`. A build passes
+  `servers.Authenticate()` where it passed `rt.Agent.DeviceAuth.Check`. It sits
+  beside `CheckOrigin` and resolves per request the same way, so it can be
+  handed to an endpoint built before the plugin activates; one taken from a
+  plugin that never activates admits nobody. `DeviceAuth` kept a second copy of
+  the paired-device requirement in step with the agent's by hand, and the check
+  now reads `Agent.RequirePairedDevice`, `Agent.APISecret` and
+  `Agent.TokenVerifier` directly
 - `logbuf` records a line at the level it was written at rather than guessing
   one from the text. It matched words like "failed" anywhere in the formatted
   line, so a config directory or device name carrying one read as an error, and

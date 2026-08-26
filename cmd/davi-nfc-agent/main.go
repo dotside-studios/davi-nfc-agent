@@ -88,7 +88,7 @@ func main() {
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
 		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         rt.Agent.DeviceAuth.Check,
+			Authenticate:         servers.Authenticate(),
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,

@@ -31,7 +31,8 @@ type ServerOptions struct {
 	// Authenticate admits or rejects a device before the upgrade, writing its
 	// own response when it rejects, and names the device it admitted. This
 	// driver speaks the device protocol and has no idea what a credential is
-	// here, so the check is supplied; see server.DeviceAuth for the agent's.
+	// here, so the check is supplied; see agent.ServerPlugin.Authenticate for
+	// the agent's.
 	//
 	// A device admitted under a name registers under it. An empty name
 	// identifies nobody, and the device is given one for the connection.

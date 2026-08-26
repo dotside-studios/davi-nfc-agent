@@ -155,6 +155,26 @@ func (a *Agent) SetPinnedDevice(devicePath string) {
 	a.firePreferencesChanged()
 }
 
+// pinAdmits reports whether the pin lets this agent work with a source. It
+// decides both what the agent reports and what it operates on, so a client is
+// not offered a tag it cannot reach or handed one it was never shown.
+//
+// The pin is a filter rather than a lock: the readers stay open and a scan from
+// one the operator is not asking for is dropped, wherever it was read.
+//
+// Only readers are filtered. A device that reports its own scans, such as a
+// phone, is not one the agent chose to read from, so pinning a reader says
+// nothing about it.
+func (a *Agent) pinAdmits(device string) bool {
+	pinned := a.CurrentPinnedDevice()
+	if pinned == "" || device == "" || device == pinned {
+		return true
+	}
+
+	readers := a.supervisor.Load()
+	return readers == nil || !readers.Operates(device)
+}
+
 // CurrentPinnedDevice is the reader the operator chose, empty for auto-detect.
 func (a *Agent) CurrentPinnedDevice() string {
 	a.settingsMu.RLock()

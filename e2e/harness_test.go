@@ -285,8 +285,10 @@ func (h *harness) dial(t *testing.T, path string, subprotocols []string) (*webso
 func (h *harness) client(t *testing.T) *websocket.Conn {
 	t.Helper()
 
+	// Signal.Connect rather than Connect: the property would replay the
+	// current count before the dial, and the wait below would pass on it.
 	registered := make(chan struct{}, 1)
-	sub := h.Servers.OnClientsChange(func(int) {
+	sub := h.Servers.Events().Clients.Signal.Connect(func(int) {
 		select {
 		case registered <- struct{}{}:
 		default:

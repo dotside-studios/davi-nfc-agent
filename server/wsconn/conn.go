@@ -39,9 +39,9 @@ func (sc *SafeConn) ReadMessage() (int, []byte, error) {
 	return sc.conn.ReadMessage()
 }
 
-// SetReadLimit caps the size of an inbound message. A peer that exceeds it
-// gets a close frame and the next read fails, ending the session. Reading is
-// single-goroutine, so this needs no lock.
+// SetReadLimit caps the size of an inbound message. A peer that exceeds it gets
+// a close frame and the next read fails. Reading is single-goroutine, so this
+// needs no lock.
 func (sc *SafeConn) SetReadLimit(limit int64) {
 	sc.conn.SetReadLimit(limit)
 }

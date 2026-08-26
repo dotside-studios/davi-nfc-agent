@@ -50,21 +50,19 @@ type ServerOptions struct {
 	// Revocations reports credentials that have stopped being valid, so the
 	// sessions holding them can be ended.
 	//
-	// Authenticate runs once, at the upgrade, so without this a device revoked
-	// while connected keeps streaming scans and keeps accepting writes until it
-	// chooses to reconnect — which for a heartbeating device is never. It sits
-	// beside Authenticate because it is the same relationship read the other
-	// way round, and because a missing subscription is otherwise invisible:
-	// everything works, and revocation quietly does not.
+	// Authenticate runs once, at the upgrade. Without this, a device revoked
+	// while connected keeps streaming scans and accepting writes until it
+	// reconnects, which for a heartbeating device is never. It sits beside
+	// Authenticate because a missing subscription is otherwise invisible:
+	// everything works and revocation quietly does not.
 	//
 	// Nil where credentials cannot be revoked one at a time, such as a single
 	// shared secret.
 	Revocations RevocationSource
 }
 
-// RevocationSource is the part of a credential store this driver needs: a way
-// to hear which devices have just lost their credential. See
-// agent.DeviceRegistry.
+// RevocationSource is the part of a credential store this driver needs: which
+// devices have just lost their credential. See agent.DeviceRegistry.
 type RevocationSource interface {
 	OnRevoke(fn func(ids []string)) *event.Connection
 }

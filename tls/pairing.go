@@ -48,12 +48,11 @@ func (s *BootstrapServer) SetPairingIssuer(issuer PairingIssuer, agentPort int) 
 
 // PairHandler serves pairing, to mount on the agent's TLS listener.
 //
-// It is not on the bootstrap server's own listener. That one is cleartext by
-// design, because it hands out the certificate authority to a device that does
-// not trust the agent's certificate yet. Pairing hands out a durable credential
-// and the key pin the device recognises the agent by afterwards, so it belongs
-// on the listener already serving the certificate that pin covers: one
-// certificate, and the pin delivered over a channel it authenticates.
+// It is not on the bootstrap server's own listener, which is cleartext because
+// it hands out the certificate authority to a device that does not trust the
+// agent's certificate yet. Pairing issues a durable credential and the key pin
+// the device recognises the agent by, so it belongs on the listener already
+// serving the certificate that pin covers.
 func (s *BootstrapServer) PairHandler() http.Handler {
 	return http.HandlerFunc(s.handlePair)
 }
@@ -65,10 +64,9 @@ func (s *BootstrapServer) PairHandler() http.Handler {
 // download, reused because it answers the same question.
 //
 // The response carries a durable device token and the key pin the device will
-// recognise this agent by afterwards, so it is refused over a cleartext
-// connection: an observer would read the credential, and an active attacker
-// could substitute a pin of their own, which is the one value whose purpose is
-// to make that impossible.
+// recognise this agent by, so it is refused over a cleartext connection: an
+// observer would read the credential, and an active attacker could substitute a
+// pin of their own.
 func (s *BootstrapServer) handlePair(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)

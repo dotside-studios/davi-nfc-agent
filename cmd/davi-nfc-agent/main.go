@@ -99,11 +99,11 @@ func main() {
 	// The pairing server, on a listener of its own, with the menu entries that
 	// hand out its address and PIN.
 	//
-	// Its own listener is cleartext, because it hands out the certificate
-	// authority to a device that does not trust the agent's certificate yet.
-	// Pairing itself issues a durable credential and the key pin a device
-	// recognises this agent by afterwards, so it is mounted below on the
-	// listener already serving the certificate that pin covers.
+	// That listener is cleartext: it hands out the certificate authority to a
+	// device that does not trust the agent's certificate yet. Pairing issues a
+	// durable credential and the key pin a device recognises this agent by, so
+	// it mounts on the listener already serving the certificate that pin
+	// covers.
 	var pairing *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
 		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `remotenfc.ServerOptions.Revocations` ends the session of a device whose
+  credential is revoked. Credentials are checked once, at the upgrade, so a
+  device revoked while connected kept streaming scans and accepting writes until
+  it reconnected, which for a heartbeating device is never.
+  `DeviceRegistry.OnRevoke` reports which devices lost their credential, and
+  `remotenfc.Manager.DisconnectDevice` closes the matching session with a
+  policy-violation close reason
+- `remotenfc.Manager.Dropped` counts the scans and removals that could not be
+  published within `ScanPublishTimeout`, so overflow is a number rather than a
+  log line
+- `MULTIPLE_TAGS` error code for more than one tag in the field where the
+  operation needs exactly one. Not retryable: the user has to separate them
+  first. Both guards raised an untyped `fmt.Errorf`, so a real and
+  user-actionable condition reached clients as an opaque string
+- `nfc.ScannedTag.RemovedUID` and `nfc.NFCData.RemovedUID` name the tag that
+  left. A removal named the device holding it and not the tag, so a consumer
+  watching several devices could not tell which tag went
+- `tls.PairingURI` and `BootstrapServer.PairingURI` carry the agent's address,
+  its public key pin and the pairing PIN. The agent prints one as a QR at
+  startup, to read off the kiosk screen, so a device can pin the pairing
+  connection to a value that never crossed the network
+- `tls.BootstrapServer.PairHandler` serves pairing, to mount on the agent's
+  listener as an `agent.Endpoint`
 - `logbuf.Channel` gives a package a logger under a name at a level, and
   `logbuf.Install` names the ring those write into. `nfc`, `nfc/remotenfc`,
   `nfc/multimanager`, `nfc/pcsc`, `server`, `server/clientserver`,
@@ -23,6 +46,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Pairing is served from the agent's listener, at `/pair`, instead of the
+  cleartext bootstrap listener. The PIN travelled as a query parameter and the
+  response carried the device token and the agent's `publicKeyPin`, so an
+  observer on the LAN read the credential and an active attacker could
+  substitute a key pin of their own. A build mounts it with
+  `servers.Add(agent.Endpoint{Pattern: "/pair", Handler: pairing.Server.Server().PairHandler()})`.
+  The bootstrap listener keeps its port and stays cleartext, since it hands out
+  the certificate authority to a device that does not trust the agent's
+  certificate yet; it no longer routes `/pair`, and `/pair` refuses a cleartext
+  connection from anything but loopback wherever it is mounted
+- The device endpoint caps an inbound frame at `MaxDeviceMessageSize` (256 KB).
+  It set no read limit, so anything reaching the port could make the agent
+  allocate for a frame of any size
+- The device manager waits for room in its broadcast queue rather than
+  discarding scans and removals when it is full. It dropped them and returned
+  success, so the device was told it had succeeded and the only trace was a
+  warning line. The queue is 256 deep, up from 10, and a scan that still cannot
+  be published is a retryable `TAG_SEND_FAILED` the device can act on
+- `nfc.BuildDeviceCapabilities` no longer infers `CanTransceive: false` from
+  `SupportsEvents`. How a device reports a scan says nothing about whether it
+  can exchange bytes with a tag; only `DeviceTransceiver` decides that, and the
+  PC/SC device now declares it
 - `ServerPlugin.Authenticate` is the credential check for a device endpoint,
   replacing `server.DeviceAuth` and `Agent.DeviceAuth`. A build passes
   `servers.Authenticate()` where it passed `rt.Agent.DeviceAuth.Check`. It sits

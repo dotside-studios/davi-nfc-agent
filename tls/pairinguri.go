@@ -12,13 +12,12 @@ import (
 // PairingScheme is the URI scheme a device handles to pair.
 const PairingScheme = "davi-pair"
 
-// PairingURI is everything a device needs to reach this agent and recognise it
-// before trusting anything it says.
+// PairingURI is what a device needs to reach this agent and recognise it before
+// trusting anything it says.
 //
-// It exists because the key pin used to be delivered by the pairing response
-// itself, over the channel it is there to protect. Carried out of band instead,
-// on a QR read off the kiosk screen, it authenticates the channel the
-// credential is issued over.
+// The key pin used to arrive only in the pairing response, over the channel it
+// exists to protect. Carried here instead, on a QR read off the kiosk screen,
+// it authenticates the channel the credential is issued over.
 type PairingURI struct {
 	Host    string // Address the device connects to
 	Port    int    // Pairing port
@@ -81,12 +80,12 @@ func ParsePairingURI(raw string) (PairingURI, error) {
 	}, nil
 }
 
-// TerminalQR renders the URI as text, for printing where the operator can read
-// it off the screen.
+// TerminalQR renders the URI as text, to print where the operator can read it
+// off the screen.
 //
-// Rendering locally is the point. A QR fetched over the network is only as
-// trustworthy as the connection that delivered it, which is the connection the
-// pin exists to authenticate.
+// Rendering locally is the point: a QR fetched over the network is only as
+// trustworthy as the connection that served it, which is the connection the pin
+// exists to authenticate.
 func (p PairingURI) TerminalQR() (string, error) {
 	code, err := qrcode.New(p.String(), qrcode.Medium)
 	if err != nil {

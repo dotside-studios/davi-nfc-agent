@@ -14,29 +14,24 @@ const (
 	GetTagsTimeout    = 500 * time.Millisecond // GetTags blocking timeout
 )
 
-// MaxDeviceMessageSize caps an inbound frame on the device endpoint.
+// MaxDeviceMessageSize caps an inbound frame on the device endpoint. A device
+// that exceeds it loses its session.
 //
 // The largest legitimate frame is a write carrying an NDEF message twice over:
-// the parsed records plus the base64 `ndefBytes` of the same message. A Type 4
-// tag's NDEF file runs to tens of kilobytes, so the ceiling is set well above
-// that rather than at any one tag's capacity — the point is to bound the
-// allocation a peer can provoke, not to enforce a tag limit the reader already
-// enforces. Anything larger is a bug or an attack, and a device that trips it
-// loses its session.
-//
-// The console endpoint sets 4 KB, which is right for a link that carries no
-// tag payloads and wrong here.
+// the parsed records plus the base64 ndefBytes of the same message. A Type 4
+// tag's NDEF file runs to tens of kilobytes, so the limit is set well above
+// that. It bounds the allocation a peer can provoke; the reader enforces the
+// tag's own capacity.
 const MaxDeviceMessageSize = 256 << 10
 
 // Scan publishing.
 //
 // ScanQueueDepth buffers scans and removals between the sessions reporting them
-// and the goroutine broadcasting them. It absorbs a burst; it does not absorb a
-// subscriber that is permanently behind.
+// and the goroutine broadcasting them. It absorbs a burst, not a subscriber
+// that is permanently behind.
 //
-// ScanPublishTimeout is how long a session waits for room in that queue before
-// giving up. Waiting applies backpressure to the one device whose scan it is,
-// which is why it can be this long: the other sessions are unaffected.
+// ScanPublishTimeout is how long a session waits for room before giving up.
+// Waiting blocks only the session whose scan it is, so it can be this long.
 const (
 	ScanQueueDepth     = 256
 	ScanPublishTimeout = 2 * time.Second

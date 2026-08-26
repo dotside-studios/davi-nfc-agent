@@ -35,7 +35,7 @@ type NFCData struct {
 	Err  error // Error that occurred during detection/reading
 
 	// RemovedUID names the tag that left, where the source knows it. Only
-	// meaningful when Card is nil. Without it a consumer watching several
+	// meaningful when Card is nil: without it a consumer watching several
 	// devices knows a tag went but not which one.
 	RemovedUID string
 }

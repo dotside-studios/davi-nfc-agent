@@ -100,7 +100,7 @@ func (r *DeviceRegistry) OnChange(fn func()) *event.Connection {
 //
 // A token is only checked when a device connects, so revoking one does nothing
 // to a device already connected. Anything holding live sessions subscribes here
-// and ends the matching one; see Agent.watchRevocations.
+// and ends the matching one.
 func (r *DeviceRegistry) OnRevoke(fn func(ids []string)) *event.Connection {
 	if fn == nil {
 		return nil

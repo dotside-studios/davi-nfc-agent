@@ -203,18 +203,16 @@ func (m *Manager) UnregisterDevice(deviceID string) error {
 	return nil
 }
 
-// DisconnectDevice ends a device's live session, reporting whether there was
-// one to end. The reason is sent as a WebSocket close reason so the device can
-// tell being turned away from losing its radio, and reconnect or stop
-// accordingly.
+// DisconnectDevice ends a device's live session, reporting whether there was one
+// to end. The reason goes out as the WebSocket close reason, so the device can
+// tell being turned away from losing its radio.
 //
-// Closing the socket is the whole teardown: the session goroutine's read fails,
-// and its deferred endSession unregisters the device, fails its pending
-// requests and clears its active tag. Doing that here as well would race it.
+// Closing the socket is the whole teardown: the session goroutine's read fails
+// and its deferred endSession unregisters the device, fails its pending requests
+// and clears its active tag. Repeating that here would race it.
 //
-// This is what makes a credential change take effect on a connected device.
-// Credentials are checked once, at the upgrade, so a session established before
-// the change outlives it otherwise.
+// Credentials are checked once, at the upgrade, so this is what makes a
+// credential change reach a device that is already connected.
 func (m *Manager) DisconnectDevice(deviceID, reason string) bool {
 	conn, ok := m.session(deviceID)
 	if !ok {
@@ -258,22 +256,19 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	// immediate write must find the device already holding the tag.
 	m.setActiveTag(deviceID, tag.UID(), tag)
 
-	// The device is heard from whether or not the scan can be published: it
-	// reported, and dropping it for a queue it cannot see would be wrong.
+	// The device is heard from whether or not the scan can be published: the
+	// queue is not something it can see.
 	device.UpdateLastSeen()
 
 	return m.publish(nfc.ScannedTag{Device: deviceID, Tag: tag})
 }
 
 // publish hands a scan or a removal to the broadcast loop, waiting up to
-// ScanPublishTimeout for room in the queue and returning an error if none
-// comes.
+// ScanPublishTimeout for room in the queue and returning an error if none comes.
 //
-// It used to discard on a full queue and return nil, so a scan the agent could
-// not accept was reported to nobody: the device was told it succeeded, and the
-// only trace was a log line. That is the wrong default at a door with a queue,
-// where the queue fills exactly when the taps matter most. The device is now
-// told, and the caller gets a retryable error to send on.
+// It used to discard on a full queue and return nil: the device was told it had
+// succeeded and the only trace was a log line. The caller now gets a retryable
+// error to send on.
 func (m *Manager) publish(scanned nfc.ScannedTag) error {
 	select {
 	case m.dataChan <- scanned:
@@ -298,7 +293,7 @@ func (m *Manager) publish(scanned nfc.ScannedTag) error {
 }
 
 // Dropped counts the scans and removals that could not be published within
-// ScanPublishTimeout since the manager started. A number that climbs means
+// ScanPublishTimeout since the manager started. A climbing number means
 // subscribers are not keeping up and taps are being lost.
 func (m *Manager) Dropped() uint64 { return m.dropped.Load() }
 

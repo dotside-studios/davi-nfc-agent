@@ -91,14 +91,12 @@ func NewBootstrapServer(manager CertificateAuthority, port int) *BootstrapServer
 // PairingURI is what a device scans to pair: the agent's TLS port, the key pin
 // that identifies it, and the code proving the holder can see the kiosk.
 //
-// It names the agent's port rather than this one. Pairing issues a durable
-// credential and the pin the device recognises the agent by afterwards, so it
-// runs on the listener already serving the certificate that pin covers. This
-// listener exists to hand out the CA to a device that does not trust that
-// certificate yet, which is why it is cleartext and why pairing is not on it.
+// It names the agent's port rather than this one, because pairing is served
+// there. This listener is cleartext, since it hands out the CA to a device that
+// does not trust the agent's certificate yet.
 //
-// host names the address the device should use; empty takes the first non
-// loopback address of this machine.
+// host names the address the device should use; empty takes the first
+// non-loopback address of this machine.
 func (s *BootstrapServer) PairingURI(host string) (PairingURI, error) {
 	if host == "" {
 		hosts, err := GetAllHosts()
@@ -202,10 +200,10 @@ func (s *BootstrapServer) Start() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Cleartext on purpose: this listener hands out the certificate authority
-	// to a device that has no reason to trust the agent's certificate yet.
-	// Nothing secret is served from it. Pairing is mounted on the agent's TLS
-	// listener instead; see PairHandler.
+	// Cleartext on purpose: this listener hands out the certificate authority to
+	// a device that has no reason to trust the agent's certificate yet, and
+	// nothing secret is served from it. Pairing is on the agent's TLS listener;
+	// see PairHandler.
 	s.logger.Printf("Pairing server: http://localhost:%d", s.port)
 	s.logger.Printf("Pairing PIN: %s", s.PIN())
 
@@ -236,7 +234,7 @@ func (s *BootstrapServer) Start() error {
 }
 
 // logPairingQR prints the pairing URI and a QR of it, for an operator to read
-// off the kiosk screen. This is the out-of-band channel the key pin travels on:
+// off the kiosk screen. This is the out-of-band channel the key pin travels on;
 // a QR fetched over the network carries no more authority than the connection
 // that served it.
 func (s *BootstrapServer) logPairingQR() {

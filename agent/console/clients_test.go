@@ -3,15 +3,42 @@
 package console
 
 import (
+	"io"
+	"log"
+	"net"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/gorilla/websocket"
 )
+
+// freePort reserves a port and hands it back, so a started agent binds
+// somewhere nothing else in the build is listening.
+func freePort(t *testing.T) int {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	defer func() { _ = l.Close() }()
+
+	_, port, err := net.SplitHostPort(l.Addr().String())
+	if err != nil {
+		t.Fatalf("read the reserved port: %v", err)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatalf("parse the reserved port: %v", err)
+	}
+	return n
+}
 
 // served is a running agent, the console reporting on it, and the address a
 // client connects to. The listener is not bound: its mux is served through
@@ -26,7 +53,14 @@ type served struct {
 func servedConsole(t *testing.T) served {
 	t.Helper()
 
-	a := quietAgent(t)
+	a := agent.New(agent.Config{
+		Manager: nfc.NewMockManager(),
+		Logger:  log.New(io.Discard, "", 0),
+
+		// A started agent binds for real, and this binary runs beside the
+		// others, so the default port is not this test's to take.
+		DevicePort: freePort(t),
+	})
 	servers := &agent.ServerPlugin{}
 	c := New(Config{Agent: a, Servers: servers})
 
@@ -88,8 +122,15 @@ func TestTheConsoleReportsTheServersClients(t *testing.T) {
 	if err := s.console.host.DisconnectClient(live[0].ID); err != nil {
 		t.Fatalf("DisconnectClient: %v", err)
 	}
-	if got := s.console.host.ClientCount(); got != 0 {
-		t.Errorf("ClientCount() = %d after disconnecting the only client, want 0", got)
+
+	// The roster clears when the closed connection's read loop notices, not
+	// when Disconnect returns.
+	deadline := time.Now().Add(3 * time.Second)
+	for s.console.host.ClientCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("ClientCount() = %d after disconnecting the only client, want 0", s.console.host.ClientCount())
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	if err := s.console.host.DisconnectClient(live[0].ID); err == nil {

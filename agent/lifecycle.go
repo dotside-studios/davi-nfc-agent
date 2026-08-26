@@ -9,8 +9,8 @@ import (
 
 // State is where the agent is in its lifecycle.
 //
-// Transitions are serialised: only one of Start, Stop or RestartServers runs at
-// a time, whichever goroutine asks.
+// Transitions are serialised: only one of Start or Stop runs at a time,
+// whichever goroutine asks.
 type State int32
 
 const (
@@ -66,23 +66,6 @@ type Component interface {
 	Stop() error
 }
 
-// Rebuildable is a component that captured configuration when it was built, so
-// a change to that configuration takes effect only once the component has been
-// stopped and started again. The client server is one: it admits clients by the
-// API secret it held when it was built.
-//
-// [Agent.RestartServers] stops and starts every registered component that is
-// one, in registration order, and leaves the rest running. A component that
-// follows its configuration while it runs implements only [Component].
-type Rebuildable interface {
-	Component
-
-	// Rebuildable declares the component one of these. It is never called: the
-	// agent stops and starts the component through Component, so there is one
-	// teardown path rather than two.
-	Rebuildable()
-}
-
 // State reports where the agent is. Safe from any goroutine, including from a
 // state hook.
 func (a *Agent) State() State { return State(a.state.Load()) }
@@ -129,27 +112,6 @@ func (a *Agent) Components() []Component {
 	out := make([]Component, len(a.components))
 	copy(out, a.components)
 	return out
-}
-
-// rebuildComponents stops and starts every [Rebuildable] component, leaving the
-// readers, the listener and everything else running. With none registered there
-// is nothing to rebuild.
-//
-// The caller holds the lifecycle lock.
-func (a *Agent) rebuildComponents() error {
-	for _, c := range a.components {
-		if _, ok := c.(Rebuildable); !ok {
-			continue
-		}
-
-		if err := c.Stop(); err != nil {
-			return fmt.Errorf("stopping %q to rebuild it: %w", c.Name(), err)
-		}
-		if err := c.Start(a.runCtx); err != nil {
-			return fmt.Errorf("rebuilding %q: %w", c.Name(), err)
-		}
-	}
-	return nil
 }
 
 // startComponents brings the registered components up in order. On the first

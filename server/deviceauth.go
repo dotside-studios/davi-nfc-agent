@@ -13,7 +13,7 @@ import (
 // remotenfc.ServerOptions.Authenticate, so the check lives inside the endpoint
 // rather than depending on whoever mounts it remembering to wrap it.
 type DeviceAuth struct {
-	apiSecret     string
+	secret        func() string
 	tokenVerifier TokenVerifier
 
 	// requirePaired is read on every upgrade and settable while the agent runs,
@@ -21,12 +21,22 @@ type DeviceAuth struct {
 	requirePaired atomic.Bool
 }
 
-// NewDeviceAuth builds the gate. An empty apiSecret means no shared secret is
-// required, which is the development default.
-func NewDeviceAuth(apiSecret string, verifier TokenVerifier, requirePaired bool) *DeviceAuth {
-	a := &DeviceAuth{apiSecret: apiSecret, tokenVerifier: verifier}
+// NewDeviceAuth builds the gate. secret is read on every request, so rotating
+// it takes effect without rebuilding what checks it; a nil secret, or one
+// returning empty, requires no shared secret, which is the development
+// default.
+func NewDeviceAuth(secret func() string, verifier TokenVerifier, requirePaired bool) *DeviceAuth {
+	a := &DeviceAuth{secret: secret, tokenVerifier: verifier}
 	a.requirePaired.Store(requirePaired)
 	return a
+}
+
+// apiSecret is the secret required right now.
+func (a *DeviceAuth) apiSecret() string {
+	if a.secret == nil {
+		return ""
+	}
+	return a.secret()
 }
 
 // SetRequirePaired turns the paired-device requirement on or off.
@@ -51,7 +61,7 @@ func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) (deviceID str
 		return id, true
 	}
 
-	id, ok := CheckAuth(w, r, a.apiSecret, a.tokenVerifier)
+	id, ok := CheckAuth(w, r, a.apiSecret(), a.tokenVerifier)
 	if !ok {
 		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return "", false

@@ -43,8 +43,6 @@ func (h *host) QuitAgent() {
 	h.quit()
 }
 
-func (h *host) RestartServers() error { return h.agent.RestartServers() }
-
 // AvailableDevices is the reader picker, so it lists what the agent reads from.
 // A phone reports what it scans for itself and is never read from here, so it
 // belongs in the paired devices rather than among the readers.

@@ -137,7 +137,6 @@ type Agent struct {
 	info                buildinfo.Info
 	logger              *log.Logger
 	manager             nfc.Manager
-	apiSecret           string
 	configDir           string
 	devices             *DeviceRegistry
 	devicePort          int
@@ -151,6 +150,11 @@ type Agent struct {
 	// would be lost with every restart.
 	readerMode   nfc.ReaderMode
 	pinnedDevice string
+
+	// apiSecret is guarded rather than settled, because rotating it replaces
+	// it while the agent runs. Whatever checks it reads it per request, so a
+	// rotation reaches the endpoints without anything being rebuilt.
+	apiSecret string
 
 	// settingsMu guards the settings state above. The console changes it from
 	// its own goroutines and reads it back for every snapshot it draws, and the
@@ -235,7 +239,7 @@ func New(cfg Config) *Agent {
 
 	// Built here rather than at start, so a caller can put its device endpoint
 	// behind it before anything runs.
-	a.DeviceAuth = server.NewDeviceAuth(cfg.APISecret, a.tokenVerifier(), a.requirePairedDevice)
+	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.tokenVerifier(), a.requirePairedDevice)
 
 	return a
 }
@@ -260,9 +264,16 @@ func (a *Agent) Readers() []string {
 	return readers
 }
 func (a *Agent) Logger() *log.Logger      { return a.logger }
-func (a *Agent) APISecret() string        { return a.apiSecret }
 func (a *Agent) ConfigDir() string        { return a.configDir }
 func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+
+// APISecret is the secret non-loopback connections must present. Read on every
+// upgrade by whatever checks it, so it follows a rotation.
+func (a *Agent) APISecret() string {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.apiSecret
+}
 
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none.
@@ -392,38 +403,12 @@ func (a *Agent) Shutdown() {
 	}
 }
 
-// RestartServers rebuilds every [Rebuildable] component, for a change one
-// captured when it was built, such as the API secret the client server holds.
-// The readers and the listener carry on, and a certificate reissued on disk is
-// not one of these: the listener binds again on its own.
-func (a *Agent) RestartServers() error {
-	a.lifecycleMu.Lock()
-
-	a.logger.Println("Restarting servers...")
-
-	err := a.rebuildComponents()
-
-	// Released before the listeners are told, as the state hooks are: a hook
-	// that touched the agent would otherwise wait for a lock its own caller
-	// holds.
-	a.lifecycleMu.Unlock()
-
-	if err != nil {
-		return err
-	}
-
-	a.logger.Println("Servers restarted successfully")
-	a.fireServerRestart()
-	return nil
-}
-
-// RotateAPISecret generates a fresh API secret, persists it under
-// ConfigDir, updates the running servers, and restarts them so the
-// new secret takes effect. Existing connections are dropped (clients
-// must re-handshake with the new secret).
+// RotateAPISecret generates a fresh API secret, persists it under ConfigDir
+// and returns it. It takes effect on the next connection to either endpoint,
+// since both read the secret per request; connections already open are not
+// dropped.
 //
-// Returns the new secret. Errors propagate from filesystem ops or
-// server restart; on error the previous secret remains in effect.
+// On error the previous secret remains in effect.
 func (a *Agent) RotateAPISecret() (string, error) {
 	if a.configDir == "" {
 		return "", errors.New("config dir not configured")
@@ -434,11 +419,11 @@ func (a *Agent) RotateAPISecret() (string, error) {
 		return "", err
 	}
 
+	a.settingsMu.Lock()
 	a.apiSecret = fresh
-	a.logger.Println("API secret rotated; restarting servers…")
-	if err := a.RestartServers(); err != nil {
-		return fresh, err
-	}
+	a.settingsMu.Unlock()
+
+	a.logger.Println("API secret rotated")
 	return fresh, nil
 }
 

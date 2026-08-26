@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -53,9 +54,9 @@ func TestALateClientSubscriberIsStillCalled(t *testing.T) {
 	}
 }
 
-// A subscriber follows the plugin rather than the server behind it, so a
-// restart that rebuilds the server does not silently drop it.
-func TestAClientSubscriberSurvivesARestart(t *testing.T) {
+// A subscriber follows the plugin rather than the server behind it, so
+// replacing that server does not silently drop it.
+func TestAClientSubscriberSurvivesTheServerBehindIt(t *testing.T) {
 	p := &ServerPlugin{}
 	a := serverAgent(t, p)
 
@@ -63,22 +64,29 @@ func TestAClientSubscriberSurvivesARestart(t *testing.T) {
 	sub := p.OnClientsChange(func(clients int) { got = clients })
 	defer sub.Disconnect()
 
-	if err := a.Start(""); err != nil {
+	// The component rather than the agent, so nothing binds a port: what is
+	// under test is which server the subscription is attached to.
+	clients := &clientsComponent{plugin: p, agent: a}
+	if err := clients.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer a.Stop()
+	first := p.serving()
 
-	if err := a.RestartServers(); err != nil {
-		t.Fatalf("RestartServers: %v", err)
+	if err := clients.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
 	}
+	if err := clients.Start(context.Background()); err != nil {
+		t.Fatalf("Start again: %v", err)
+	}
+	t.Cleanup(func() { _ = clients.Stop() })
 
-	if p.serving() == nil {
-		t.Fatal("no client server after the restart")
+	if p.serving() == first || p.serving() == nil {
+		t.Fatal("the server was not replaced")
 	}
 
 	p.clientChanges.Emit(2)
 	if got != 2 {
-		t.Errorf("after a restart the subscriber saw %d, want the count the running server reports", got)
+		t.Errorf("after the server was replaced the subscriber saw %d, want 2", got)
 	}
 
 	sub.Disconnect()

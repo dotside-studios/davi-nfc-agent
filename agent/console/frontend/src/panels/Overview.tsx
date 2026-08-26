@@ -86,13 +86,6 @@ function AgentPanel({ state }: { state: ControlState }) {
 
       <div className="row" style={{ marginTop: 6 }}>
         <ActionLink
-          run={() => act.mutateAsync({ name: 'agent.restartServers' })}
-          confirm={{ prompt: 'Restart the listeners? Connected clients and devices are dropped and must reconnect.' }}
-        >
-          restart listeners
-        </ActionLink>
-        <span className="sep">|</span>
-        <ActionLink
           danger
           run={() => act.mutateAsync({ name: 'agent.quit' })}
           confirm={{

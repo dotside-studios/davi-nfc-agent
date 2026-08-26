@@ -84,7 +84,7 @@ type stackConfig struct {
 func newStack(t *testing.T, cfg stackConfig) *stack {
 	t.Helper()
 
-	auth := server.NewDeviceAuth(cfg.APISecret, cfg.TokenVerifier, cfg.RequirePaired)
+	auth := server.NewDeviceAuth(func() string { return cfg.APISecret }, cfg.TokenVerifier, cfg.RequirePaired)
 	client := newFakeClient()
 
 	var remote *remotenfc.Manager

@@ -34,7 +34,7 @@ func newStrictServer(t *testing.T, strict bool) string {
 func serveGuardedEndpoint(t *testing.T, strict bool) (string, *server.DeviceAuth) {
 	t.Helper()
 
-	auth := server.NewDeviceAuth("shared-secret", tokenVerifier{valid: "paired-token"}, strict)
+	auth := server.NewDeviceAuth(func() string { return "shared-secret" }, tokenVerifier{valid: "paired-token"}, strict)
 
 	m := remotenfc.NewManager(30 * time.Second)
 	ts := httptest.NewServer(m.Handler(remotenfc.ServerOptions{Authenticate: auth.Check}))

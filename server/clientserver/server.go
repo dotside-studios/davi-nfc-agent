@@ -44,6 +44,15 @@ func New(config Config) *Server {
 	}
 }
 
+// apiSecret is the secret required right now, empty for a server admitting
+// connections without one.
+func (s *Server) apiSecret() string {
+	if s.config.APISecret == nil {
+		return ""
+	}
+	return s.config.APISecret()
+}
+
 // ServeWS handles a WebSocket connection request for a client. It performs its
 // own API-secret check and origin validation, so it is safe to call directly
 // from a shared listener (unified single-port mode).
@@ -163,7 +172,7 @@ func (s *Server) clientCount() int {
 
 // handleWebSocket handles WebSocket connections from clients.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.CheckAuth(w, r, s.config.APISecret, s.config.TokenVerifier); !ok {
+	if _, ok := server.CheckAuth(w, r, s.apiSecret(), s.config.TokenVerifier); !ok {
 		log.Printf("[client] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}

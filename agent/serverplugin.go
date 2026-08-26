@@ -650,16 +650,9 @@ type clientsComponent struct {
 
 func (c *clientsComponent) Name() string { return "clients" }
 
-var _ Rebuildable = (*clientsComponent)(nil)
-
-// Rebuildable marks the client server as rebuilt by a restart: it admits
-// clients by the API secret it held when it was built, so a rotated secret
-// takes effect only once this has been stopped and started again.
-func (c *clientsComponent) Rebuildable() {}
-
 func (c *clientsComponent) Start(context.Context) error {
 	srv := clientserver.New(clientserver.Config{
-		APISecret:            c.agent.apiSecret,
+		APISecret:            c.agent.APISecret,
 		OriginPolicy:         c.plugin.Origins,
 		TokenVerifier:        c.agent.tokenVerifier(),
 		Tags:                 c.agent,

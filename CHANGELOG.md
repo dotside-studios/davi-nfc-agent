@@ -15,9 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
   `OnClientsChange` report on and act on the clients connected right now. A
   subscription outlives the server behind it, so it survives a restart
-- `agent.Rebuildable` marks a component that captured its configuration when it
-  was built. `Agent.RestartServers` stops and starts those and leaves the rest
-  running, rather than reaching for the one component it knew by name
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened
@@ -100,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `server.NewDeviceAuth` and `clientserver.Config.APISecret` take the secret as
+  a function, read on every connection rather than captured. `RotateAPISecret`
+  no longer restarts anything: both endpoints see the new secret on the next
+  connection, and connections already open are left alone
 - The clients connected to an agent are the server plugin's, not the agent's.
   `Agent.ClientCount`, `Clients` and `DisconnectClient` are the same three
   methods on `ServerPlugin`, and `Events().Clients` is
@@ -263,6 +264,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rotating the API secret revoked nothing on the device endpoint. `DeviceAuth`
+  was built once with the secret the agent started with and never updated, so
+  after a rotation a device presenting the old secret was still admitted and one
+  presenting the secret the console had just shown the operator was refused.
+  Both endpoints read the secret per connection now
+- `Agent.apiSecret` was written by a rotation without holding the lock the
+  readers take
 - A paired device connects as itself. It registered under an identity minted per
   connection, so nothing could match it to the device that paired: the console
   showed every paired device offline while it was connected. The credential
@@ -359,6 +367,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Agent.RestartServers` and the console's `agent.restartServers` action, with
+  the **restart listeners** control that called it. Both endpoints read the API
+  secret per connection now, so nothing needs rebuilding, and what the action
+  did was not what it offered: it replaced the client server without closing the
+  connections the old one held, leaving them open, receiving nothing, and absent
+  from the client list
 - `Events().Clients` and `ChangeClients`. An agent with no server plugin
   registered has no clients to count, so the signal was only ever meaningful
   through the plugin that now carries it

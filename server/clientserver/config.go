@@ -9,9 +9,11 @@ import (
 // and TLS are owned by the unified server, so this carries only what the client
 // handlers need.
 type Config struct {
-	// APISecret is the API secret required for non-loopback connections.
-	// Empty means no auth (legacy / development mode).
-	APISecret string
+	// APISecret is the secret required from non-loopback connections, read on
+	// every one so a rotation takes effect without rebuilding the server. Nil,
+	// or one returning empty, requires no secret, which is the development
+	// default.
+	APISecret func() string
 
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]
 	// to disable origin checking entirely (NOT recommended).

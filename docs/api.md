@@ -49,8 +49,8 @@ pairing again.
 
 Each device holds its own credential, so one can be revoked from the tray under
 **Paired Devices** without disturbing the others. The shared API secret still
-works for devices configured with it, but rotating it logs out everything at
-once. Per-device tokens avoid that.
+works for devices configured with it, but rotating it locks out every device
+configured with it, each on its next connection. Per-device tokens avoid that.
 
 Wrong PINs lock pairing after five attempts until the agent restarts.
 

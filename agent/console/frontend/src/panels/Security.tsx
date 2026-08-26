@@ -167,7 +167,7 @@ function CredentialsSection({ state }: { state: ControlState }) {
             run={() => act.mutateAsync({ name: 'security.rotateAPISecret' })}
             confirm={{
               prompt:
-                'Rotate the API secret?\n\nEvery client and device using the old secret will be disconnected and must be reconfigured. Paired devices hold their own credentials and are not affected.',
+                'Rotate the API secret?\n\nEvery client and device using the old secret must be reconfigured before it next connects. Connections already open are not dropped. Paired devices hold their own credentials and are not affected.',
               phrase: 'rotate',
             }}
           >

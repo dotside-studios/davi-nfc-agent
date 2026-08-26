@@ -21,14 +21,17 @@ import (
 )
 
 // serverAgent is an agent whose listener comes from the plugin under test.
-// Nothing binds: the routes are exercised through the mux.
+// Most tests here reach the routes through the mux and bind nothing, but a
+// started agent binds for real, so the port is one nothing else holds: package
+// test binaries run beside each other and the default port is one address.
 func serverAgent(t *testing.T, p *ServerPlugin, extra ...Plugin) *Agent {
 	t.Helper()
 
 	return New(Config{
-		Manager: nfc.NewMockManager(),
-		Logger:  log.New(io.Discard, "", 0),
-		Plugins: append([]Plugin{p}, extra...),
+		Manager:    nfc.NewMockManager(),
+		Logger:     log.New(io.Discard, "", 0),
+		DevicePort: freePort(t),
+		Plugins:    append([]Plugin{p}, extra...),
 	})
 }
 
@@ -353,15 +356,6 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if servers.serving() != before {
 		t.Error("rebinding rebuilt the client server; only the listener should have moved")
 	}
-
-	// RestartServers is the one that rebuilds it, which is what an API secret
-	// rotation needs.
-	if err := rt.Agent.RestartServers(); err != nil {
-		t.Fatalf("RestartServers: %v", err)
-	}
-	if servers.serving() == before {
-		t.Error("RestartServers left the old client server in place")
-	}
 }
 
 // A plugin with no listener says so rather than reporting a rebind that did not
@@ -419,15 +413,12 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 		t.Fatal("no readers after Start")
 	}
 
-	if err := rt.Agent.RestartServers(); err != nil {
-		t.Fatalf("RestartServers: %v", err)
-	}
 	if err := servers.Rebind(); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
 
 	if rt.Agent.Supervisor() != readers {
-		t.Error("the readers were replaced by a restart of the servers")
+		t.Error("the readers were replaced by a rebind of the listener")
 	}
 }
 

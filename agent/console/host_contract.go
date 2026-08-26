@@ -18,7 +18,6 @@ type Host interface {
 	StartAgent() error
 	StopAgent()
 	QuitAgent()
-	RestartServers() error
 
 	AvailableDevices() []string
 	AllCardTypes() []string

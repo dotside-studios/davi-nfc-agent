@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `event.Property[T]` is a `Signal[T]` that also reports the value it carries:
+  connecting calls the handler with the current value before returning, so a
+  subscriber draws its first frame from the signal it follows instead of reading
+  the emitter separately. `Signal.Connect` on the same field connects without
+  that first call
+- `Events().State`, `Preferences`, `Servers`, `Readers` and `Devices` are
+  `event.Property`. `Tag`, `Reader` and `Any` carry traffic and stay
+  `event.Signal`. `Events().Devices` reports an empty list on an agent built
+  without a registry rather than staying silent
+- `ServerPlugin.Events` reports the connected client count and the allowlist as
+  properties, and `ServerPlugin.OriginState` reads the allowlist as one value:
+  the allowed origins, those refused since startup, and the session-wide bypass
+- `Agent.ApplyPreferences` changes the preferences as one value and answers with
+  what the agent holds afterwards. The single-field setters (`SetReaderMode`,
+  `SetCardTypeFilter`, `SetPinnedDevice`, `SetDevicePort`,
+  `SetRequirePairedDevice`, `SetReaderFeedback`) are wrappers over it and keep
+  their behaviour
 - `remotenfc.ServerOptions.Revocations` ends the session of a device whose
   credential is revoked. Credentials are checked once, at the upgrade, so a
   device revoked while connected kept streaming scans and accepting writes until
@@ -140,6 +157,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ServerPlugin.OnOriginsChange` returns an `*event.Connection`, so a subscriber
+  can stop following. Both it and `OnClientsChange` are deprecated in favour of
+  `ServerPlugin.Events`; neither replays on connect, as before
 - Pairing is served from the agent's listener, at `/pair`, instead of the
   cleartext bootstrap listener. The PIN travelled as a query parameter and the
   response carried the device token and the agent's `publicKeyPin`, so an
@@ -427,6 +447,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A preference change announces once, with every field in place.
+  `console.host.ApplyPreferences` called six setters in turn and each raised
+  `Events().Preferences` and `Events().Any`, so one `settings.save` emitted up
+  to six values and the intermediate ones carried combinations nobody asked for,
+  such as a new mode beside the old card types. The console coalesced them; the
+  tray redrew per emission
 - What the agent logs reaches the console. `Config.Logs` was held on the agent
   and connected to nothing, so `Agent.Logger` wrote to stderr alone: an agent
   started from a desktop launcher had nowhere to show its own diagnostics, and

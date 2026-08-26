@@ -12,7 +12,6 @@ import (
 func TestAPreferenceChangedElsewhereRedrawsTheMenu(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	agent.SetReaderMode(nfc.ModeWriteOnly)
 
@@ -30,7 +29,6 @@ func TestADevicePairedElsewhereRedrawsTheMenu(t *testing.T) {
 	}
 	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	if _, _, err := registry.Pair("phone", "android"); err != nil {
 		t.Fatalf("Pair: %v", err)
@@ -47,7 +45,6 @@ func TestADevicePairedElsewhereRedrawsTheMenu(t *testing.T) {
 func TestTheCardLinesFollowTheReader(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	agent.Events().Tag.Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
 	if got := app.mCardUID.Title(); got != "Card UID: 04A1B2C3" {
@@ -64,7 +61,6 @@ func TestTheCardLinesFollowTheReader(t *testing.T) {
 func TestAStopElsewhereReachesTheControls(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	agent.Events().State.Emit(nfcagent.StateRunning)
 	if app.mStatus.Title() != "Running" {
@@ -88,7 +84,6 @@ func TestAStopElsewhereReachesTheControls(t *testing.T) {
 func TestAReaderPickedElsewhereMovesTheTick(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 	app.applyReaders([]string{"mock:usb:001", "ACS ACR122U 00"})
 
 	if err := agent.Start("ACS ACR122U 00"); err != nil {

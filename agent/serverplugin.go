@@ -8,6 +8,7 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
@@ -150,18 +151,52 @@ type ServerPlugin struct {
 	failures *log.Logger
 	agent    *Agent
 
-	// clientChanges republishes what the client server reports, so a subscriber
-	// connects to the plugin rather than to whichever server this build put
-	// behind it.
-	clientChanges event.Signal[int]
+	// events is what the plugin reports, published by Events. It republishes
+	// what the server and the store behind it report, so a subscriber connects
+	// to the plugin rather than to whichever of them this build put there.
+	events     ServerEvents
+	eventsOnce sync.Once
 
 	// The allowlist entries, redrawn from the store rather than from clicks.
 	origins        *traymenu.List[originRow]
 	originAllowAny *traymenu.Item
+}
 
-	// originWatchers are registered before the store exists; see
-	// OnOriginsChange.
-	originWatchers []func()
+// ServerEvents is what the server plugin reports. Both are [event.Property], so
+// connecting answers with the current value: a console built alongside the
+// plugin draws its first page without reading the plugin separately, and
+// without missing what changed in between.
+type ServerEvents struct {
+	// Clients carries the connected count after each connect and disconnect,
+	// and 0 while nothing is serving them.
+	Clients event.Property[int]
+
+	// Origins carries the allowlist after each change and after a refused
+	// connection, which are the two things that alter what an operator is
+	// shown.
+	Origins event.Property[OriginState]
+}
+
+// OriginState is the allowlist as something displaying it reads it.
+type OriginState struct {
+	// Allowed are the origins on the list, Blocked those refused since the
+	// agent started.
+	Allowed []string
+	Blocked []string
+
+	// CheckDisabled reports the session-wide bypass, which admits any origin
+	// until the agent restarts.
+	CheckDisabled bool
+}
+
+// Events is what the plugin reports. Live before the plugin activates, so a
+// console built alongside it subscribes without waiting.
+func (p *ServerPlugin) Events() *ServerEvents {
+	p.eventsOnce.Do(func() {
+		p.events.Clients.Current = p.ClientCount
+		p.events.Origins.Current = p.OriginState
+	})
+	return &p.events
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -584,20 +619,21 @@ func (p *ServerPlugin) DisconnectClient(id string) error {
 }
 
 // OnClientsChange calls fn with the connected count after each connect and
-// disconnect. The connection it returns removes it. A console built alongside
-// this plugin subscribes before there is a server to subscribe to.
+// disconnect. The connection it returns removes it.
+//
+// Deprecated: use Events().Clients, which also reports the current count.
 func (p *ServerPlugin) OnClientsChange(fn func(int)) *event.Connection {
 	if p == nil {
 		return nil
 	}
-	return p.clientChanges.Connect(fn)
+	return p.Events().Clients.Signal.Connect(fn)
 }
 
 // serveModes republishes what the client server reports, so a subscriber
 // connects to the plugin rather than to the server the build mounted.
 func (p *ServerPlugin) serveModes() {
 	if srv := p.serving(); srv != nil {
-		srv.OnClientsChange(p.clientChanges.Emit)
+		srv.OnClientsChange(p.Events().Clients.Emit)
 	}
 }
 

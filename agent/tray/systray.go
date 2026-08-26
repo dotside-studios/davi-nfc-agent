@@ -142,10 +142,6 @@ func (s *App) setupUI() {
 
 	s.setupDevicesMenu()
 
-	// The menus open on what the agent is set to, which is not always the
-	// default: what the launcher set was decided before the tray existed.
-	s.SyncPreferencesToMenu(s.agent.Preferences())
-
 	s.menu.AddSeparator()
 
 	// Both start disabled: the agent is auto-starting, and Stop becomes

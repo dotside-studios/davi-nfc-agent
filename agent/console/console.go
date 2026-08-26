@@ -69,8 +69,8 @@ func New(cfg Config) *Server {
 	// tray, a page refused, or a client connecting reaches an open page the
 	// same way.
 	if cfg.Servers != nil {
-		cfg.Servers.OnOriginsChange(s.NotifyChange)
-		cfg.Servers.OnClientsChange(func(int) { s.NotifyChange() })
+		cfg.Servers.Events().Origins.Connect(func(agent.OriginState) { s.NotifyChange() })
+		cfg.Servers.Events().Clients.Connect(func(int) { s.NotifyChange() })
 	}
 
 	return s

@@ -33,8 +33,6 @@ func (s *App) setupDevicesMenu() {
 		traymenu.Tooltip("Every paired device must pair again. Use when the machine changes hands."),
 		traymenu.OnClick(s.handleRevokeAllDevices),
 	)
-
-	s.refreshDevicesMenu()
 }
 
 // refreshDevicesMenu redraws the submenu from the registry.

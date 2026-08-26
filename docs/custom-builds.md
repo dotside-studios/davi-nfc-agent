@@ -345,8 +345,10 @@ The clients connected right now are reported through the plugin:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
 answer from whatever is under `server.ModeClient`, when it is a
 `*clientserver.Server`, and report nothing when it is not.
-`servers.OnClientsChange(fn)` follows the count and takes a subscriber before
-the plugin activates, which is when a console is built.
+`servers.Events().Clients` follows the count and takes a subscriber before the
+plugin activates, which is when a console is built. `servers.Events().Origins`
+does the same for the allowlist, carrying the allowed and refused origins and
+the session-wide bypass.
 
 A build that registers no server plugin serves no HTTP and runs no client
 server, which is what a program driving the readers directly wants. It still
@@ -575,6 +577,14 @@ it runs on every emission; the connection it returns removes it again.
 | `Devices` | The paired devices, after a pairing or a revocation |
 | `Tag` | Every scan the agent broadcasts |
 | `Any` | The kind of every change above, except scans and reader status |
+
+`State`, `Preferences`, `Servers`, `Readers` and `Devices` are
+`event.Property`: connecting calls the handler with the current value before
+returning, so a subscriber draws its first frame without reading the agent
+separately and cannot miss a change in between. `Signal.Connect` on the same
+field connects without that first call, for a subscriber that wants the next
+value rather than this one. `Tag`, `Reader` and `Any` carry traffic and have no
+current value to report.
 
 ```go
 conn := rt.Agent.Events().Preferences.Connect(func(p agent.Preferences) {

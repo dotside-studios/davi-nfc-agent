@@ -36,6 +36,9 @@ type Server struct {
 	// to take back.
 	scans  *event.Connection
 	status *event.Connection
+
+	// changed carries the connected count after each connect and disconnect.
+	changed event.Signal[int]
 }
 
 // New creates a client server, subscribed to whatever it was given to
@@ -162,12 +165,18 @@ func (s *Server) Disconnect(clientID string) bool {
 	return true
 }
 
-// notifyChange tells any observer that the client list moved.
-func (s *Server) notifyChange() {
-	if s.config.OnChange != nil {
-		s.config.OnChange(s.clientCount())
-	}
+// OnClientsChange calls fn with the connected count after each connect and
+// disconnect, so an observer refreshes without polling. The connection it
+// returns removes it.
+//
+// Handlers run on the connection's own goroutine, off the hot path, so one must
+// not block.
+func (s *Server) OnClientsChange(fn func(clients int)) *event.Connection {
+	return s.changed.Connect(fn)
 }
+
+// notifyChange tells any observer that the client list moved.
+func (s *Server) notifyChange() { s.changed.Emit(s.clientCount()) }
 
 // countOperation records that a client issued a write or lock.
 func (s *Server) countOperation(conn *wsconn.SafeConn, kind string) {

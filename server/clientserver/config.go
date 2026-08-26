@@ -52,10 +52,4 @@ type Config struct {
 	// Nil for a server fed by hand through Broadcast and BroadcastDeviceStatus.
 	Scans        *event.Signal[nfc.NFCData]
 	ReaderStatus *event.Signal[nfc.DeviceStatus]
-
-	// OnChange, when set, is called with the number of connected clients
-	// whenever one connects or disconnects, so an observer can refresh without
-	// polling. Called off the hot path but on the connection's own goroutine,
-	// so it must not block.
-	OnChange func(clients int)
 }

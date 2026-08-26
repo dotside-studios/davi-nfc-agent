@@ -641,8 +641,11 @@ func (c *clientsComponent) Start(context.Context) error {
 		AllowTagModification: c.agent.TagModificationAllowed,
 		Scans:                &c.agent.events.Tag,
 		ReaderStatus:         &c.agent.events.Reader,
-		OnChange:             c.plugin.clientChanges.Emit,
 	})
+
+	// Republished through the plugin, so a subscriber follows the plugin rather
+	// than whichever server is running.
+	srv.OnClientsChange(c.plugin.clientChanges.Emit)
 
 	c.plugin.clients.Store(srv)
 	return nil

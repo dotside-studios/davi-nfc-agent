@@ -3,7 +3,6 @@ package clientserver
 import (
 	"context"
 	"encoding/json"
-	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -15,10 +14,13 @@ import (
 // agent is not running. A client asking for a write before the agent starts
 // gets an answer rather than a panic.
 func (s *Server) ops() server.TagOps {
-	if s.config.Ops == nil {
+	if s.config.Ops != nil {
+		return s.config.Ops
+	}
+	if s.config.Tags == nil {
 		return stoppedOps{}
 	}
-	return s.config.Ops
+	return newTagOps(s.config)
 }
 
 // stoppedOps answers every operation with the same refusal.
@@ -65,6 +67,6 @@ func (s *Server) reply(conn *wsconn.SafeConn, requestID, msgType string, payload
 		Payload: payload,
 	})
 	if err != nil {
-		log.Printf("[client] Failed to send %s: %v", msgType, err)
+		clientFail.Printf("Failed to send %s: %v", msgType, err)
 	}
 }

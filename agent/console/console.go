@@ -4,7 +4,6 @@ package console
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -31,6 +30,11 @@ type Config struct {
 	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 	Trust   *agent.TrustPlugin
+
+	// Quit ends the program the agent runs in, for the console's own quit
+	// control. Nil stops the agent and leaves the program running, which is
+	// what a service with no way out of its own wants.
+	Quit func()
 }
 
 // New builds the console from cfg, and follows what changes it: an origin
@@ -44,6 +48,7 @@ func New(cfg Config) *Server {
 		servers: cfg.Servers,
 		pairing: cfg.Pairing,
 		trust:   cfg.Trust,
+		quit:    cfg.Quit,
 	}
 	info := a.Info()
 	s := newServer(serverConfig{
@@ -54,24 +59,19 @@ func New(cfg Config) *Server {
 		Dev:     info.IsDev(),
 	})
 
-	// Both stores are optional configuration, so an agent built without them
-	// still gets a console; it just has less to follow.
-	if origins := a.Origins(); origins != nil {
-		origins.OnChange(s.NotifyChange)
-	}
-	if devices := a.Devices(); devices != nil {
-		devices.OnChange(s.NotifyChange)
-	}
-	a.OnClientsChange(s.NotifyChange)
+	// Every change the agent reports, whatever made it: an open page shows
+	// what the agent is set to rather than what it was set to when the page
+	// loaded, including changes made from the tray.
+	a.Events().Any.Connect(func(agent.Change) { s.NotifyChange() })
 
-	// A preference changed anywhere, including from the tray, so an open page
-	// shows what the agent is set to rather than what it was set to when the
-	// page loaded.
-	a.OnPreferencesChange(s.NotifyChange)
-
-	// A rebound listener is an address change, and the certificate the page
-	// reports on is reissued by the same events that cause one.
-	a.OnServerRestart(s.NotifyChange)
+	// The allowlist and the connected clients are the server's rather than the
+	// agent's, so they are followed separately: an origin allowed from the
+	// tray, a page refused, or a client connecting reaches an open page the
+	// same way.
+	if cfg.Servers != nil {
+		cfg.Servers.OnOriginsChange(s.NotifyChange)
+		cfg.Servers.OnClientsChange(func(int) { s.NotifyChange() })
+	}
 
 	return s
 }
@@ -104,10 +104,10 @@ func (s *Server) Endpoints() []agent.Endpoint {
 				menu.Add("  Copy Control Center URL",
 					traymenu.OnClick(func() {
 						if err := clipboard.Copy(url); err != nil {
-							log.Printf("Failed to copy the control center URL: %v", err)
+							consoleFail.Printf("Failed to copy the control center URL: %v", err)
 							return
 						}
-						log.Printf("Copied the control center URL to the clipboard")
+						consoleLog.Printf("Copied the control center URL to the clipboard")
 					}),
 				)
 				menu.Add("  Open Control Center",
@@ -123,19 +123,19 @@ func (s *Server) Endpoints() []agent.Endpoint {
 func (s *Server) open() {
 	url, err := s.ConsoleURL()
 	if err != nil {
-		log.Printf("Failed to prepare control center URL: %v", err)
+		consoleFail.Printf("Failed to prepare control center URL: %v", err)
 		return
 	}
 
 	if err := openBrowser(url); err != nil {
 		// Falling back to the clipboard keeps this usable on a machine with no
 		// registered browser handler, which is common on minimal Linux desktops.
-		log.Printf("Failed to open a browser: %v", err)
+		consoleWarn.Printf("Failed to open a browser: %v", err)
 		if copyErr := clipboard.Copy(url); copyErr != nil {
-			log.Printf("Control center URL (expires shortly): %s", url)
+			consoleLog.Printf("Control center URL (expires shortly): %s", url)
 			return
 		}
-		log.Printf("Control center URL copied to clipboard; it expires shortly")
+		consoleLog.Printf("Control center URL copied to clipboard; it expires shortly")
 	}
 }
 
@@ -168,18 +168,4 @@ func (s *Server) Assets() http.Handler {
 		return nil
 	}
 	return frontendHandler()
-}
-
-// AttachTray gives the console a tray to act through, so a change made in the
-// console moves the tray's menu state too. Without one the console drives the
-// agent directly, as a headless run wants.
-func (s *Server) AttachTray(t Tray) {
-	if s == nil {
-		return
-	}
-	// Only this package's own adapter routes through a tray. A Host supplied
-	// from elsewhere decides for itself what an action reaches.
-	if h, ok := s.host.(*host); ok {
-		h.app = t
-	}
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"log"
 )
 
 // dispatch routes a console action to the code that performs it. Named actions
@@ -22,9 +21,6 @@ func (c *Server) dispatch(req action) (any, error) {
 		c.host.StopAgent()
 		return nil, nil
 
-	case "agent.restartServers":
-		return nil, c.host.RestartServers()
-
 	case "agent.quit":
 		// Deferred so the response reaches the console before the process exits.
 		go c.host.QuitAgent()
@@ -37,9 +33,9 @@ func (c *Server) dispatch(req action) (any, error) {
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, err
 		}
-		if err := c.host.SelectDevice(params.DevicePath); err != nil {
-			return nil, err
-		}
+		// The pin is a filter, so choosing a device is a preference change
+		// rather than a restart: the clients connected stay connected, and a
+		// device that is not here yet matches nothing until it is.
 		c.host.ApplyPreferences(func(s *agent.Preferences) { s.DevicePath = params.DevicePath })
 		return nil, nil
 
@@ -136,7 +132,7 @@ func (c *Server) dispatch(req action) (any, error) {
 		}
 		if params.Enabled {
 			// Never persisted, matching the tray.
-			log.Printf("Warning: origin checking disabled for this session from the control center; any site the operator visits can drive the reader")
+			consoleWarn.Printf("Origin checking disabled for this session from the control center; any site the operator visits can drive the reader")
 		}
 		c.host.SetOriginCheckDisabled(params.Enabled)
 		return nil, nil

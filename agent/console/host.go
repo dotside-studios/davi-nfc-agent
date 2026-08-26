@@ -7,117 +7,71 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
-// host adapts the agent to Host. Every reach the console makes into the
-// agent is a method here. app is the tray, when there is one: actions that
-// must also move the tray's menu go through it rather than straight to the
-// agent.
+// host adapts the agent to Host. Every reach the console makes into the agent
+// is a method here.
 type host struct {
 	agent   *agent.Agent
 	servers *agent.ServerPlugin
 	pairing *agent.PairingPlugin
 	trust   *agent.TrustPlugin
-	app     Tray
+
+	// quit ends the program the agent runs in, supplied by whoever owns it.
+	quit func()
 }
 
 var _ Host = (*host)(nil)
 
-func (h *host) Running() bool     { return h.agent.Reader() != nil }
+func (h *host) Running() bool     { return h.agent.Running() }
 func (h *host) ConfigDir() string { return h.agent.ConfigDir() }
 
 func (h *host) StartAgent() error {
 	return h.agent.Start(h.agent.CurrentDevicePath())
 }
 
-func (h *host) StopAgent() {
-	if h.app != nil {
-		// Through the tray, so its menu state follows.
-		h.app.StopAgent()
+func (h *host) StopAgent() { h.agent.Stop() }
+
+// QuitAgent ends the program the agent runs in, which is the host's to end. A
+// build that supplied no way out stops the agent instead.
+func (h *host) QuitAgent() {
+	if h.quit == nil {
+		h.agent.Shutdown()
 		return
 	}
-	h.agent.Stop()
+	h.quit()
 }
 
-func (h *host) QuitAgent() {
-	if h.app != nil {
-		h.app.Quit()
-	}
-}
-
-func (h *host) RestartServers() error { return h.agent.RestartServers() }
-
-func (h *host) AvailableDevices() []string {
-	if h.agent.Manager() == nil {
-		return nil
-	}
-	// The reader picker, so it offers only what can actually be one. A phone
-	// appearing here reads as a reader to choose, and choosing it pins the
-	// reader to a device that is never opened.
-	devices, err := nfc.ListReaders(h.agent.Manager())
-	if err != nil {
-		return nil
-	}
-	return devices
-}
+// AvailableDevices is the reader picker, so it lists what the agent reads from.
+// A phone reports what it scans for itself and is never read from here, so it
+// belongs in the paired devices rather than among the readers.
+func (h *host) AvailableDevices() []string { return h.agent.Readers() }
 
 func (h *host) AllCardTypes() []string { return nfc.GetAllCardTypes() }
 
 func (h *host) CurrentCard() (uid, cardType string, present bool) {
-	if h.agent.ClientServer == nil {
-		return "", "", false
-	}
-	card := h.agent.ClientServer.GetLastCard()
+	card := h.agent.LastCard()
 	if card == nil {
 		return "", "", false
 	}
 	return card.UID, card.Type, true
 }
 
-func (h *host) RemoteDevices() (total, active int) {
-	mgr := h.remoteManager()
-	if mgr == nil {
-		return 0, 0
-	}
-	return mgr.GetDeviceCount(), mgr.GetActiveDeviceCount()
-}
-
-func (h *host) SelectDevice(devicePath string) error {
-	if h.app == nil {
-		return errors.New("device cannot be changed from here")
-	}
-	// Refused rather than accepted and quietly ignored: the picker does not
-	// offer a phone, so one arriving here came from somewhere that should hear
-	// why it cannot be the reader.
-	if nfc.IsRemoteDevice(h.agent.Manager(), devicePath) {
-		return errors.New("a phone reports its scans over the device bridge and cannot be selected as the reader")
-	}
-	h.app.SwitchDevice(devicePath)
-	return nil
-}
-
 // Port is the port being served, not the one configured. A port saved in the
-// console is bound only once the listener has been restarted, and until then
-// the console must not hand out a URL nothing is listening on.
+// console reaches the listener only when one is next built, and until then the
+// console must not hand out a URL nothing is listening on.
 func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
 func (h *host) LocalIPs() []string { return agent.LocalIPs() }
 
-func (h *host) ClientCount() int {
-	if h.agent.ClientServer == nil {
-		return 0
-	}
-	return h.agent.ClientServer.ClientCount()
-}
+func (h *host) ClientCount() int { return h.servers.ClientCount() }
 
 func (h *host) Clients() []Client {
-	if h.agent.ClientServer == nil {
-		return nil
-	}
-	live := h.agent.ClientServer.Clients()
+	live := h.servers.Clients()
+
 	out := make([]Client, 0, len(live))
 	for _, c := range live {
 		out = append(out, Client{
@@ -133,15 +87,7 @@ func (h *host) Clients() []Client {
 	return out
 }
 
-func (h *host) DisconnectClient(id string) error {
-	if h.agent.ClientServer == nil {
-		return errors.New("agent is not running")
-	}
-	if !h.agent.ClientServer.Disconnect(id) {
-		return errors.New("no such client: it may have already disconnected")
-	}
-	return nil
-}
+func (h *host) DisconnectClient(id string) error { return h.servers.DisconnectClient(id) }
 
 func (h *host) APISecret() string    { return h.agent.APISecret() }
 func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
@@ -197,12 +143,8 @@ func (h *host) PairedDevices() []PairedDevice {
 	// Paired is a stored credential; online is a live session. The console
 	// shows both so an absent device reads as absent rather than broken.
 	online := make(map[string]bool)
-	if mgr := h.remoteManager(); mgr != nil {
-		if ids, err := mgr.ListDevices(); err == nil {
-			for _, id := range ids {
-				online[id] = true
-			}
-		}
+	for _, id := range h.agent.OnlineDevices() {
+		online[id] = true
 	}
 
 	paired := h.agent.Devices().List()
@@ -234,41 +176,50 @@ func (h *host) RevokeAllDevices() error {
 	return h.agent.Devices().RevokeAll()
 }
 
-func (h *host) AllowedOrigins() []string {
-	if h.agent.Origins() == nil {
+// The allowlist belongs to what serves the connections it admits, so these ask
+// the server plugin. A build with none has no origins to show.
+func (h *host) origins() *server.OriginStore {
+	if h.servers == nil {
 		return nil
 	}
-	return h.agent.Origins().List()
+	return h.servers.Origins
+}
+
+func (h *host) AllowedOrigins() []string {
+	if h.origins() == nil {
+		return nil
+	}
+	return h.origins().List()
 }
 
 func (h *host) BlockedOrigins() []string {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return nil
 	}
-	return h.agent.Origins().Blocked()
+	return h.origins().Blocked()
 }
 
 func (h *host) OriginCheckDisabled() bool {
-	return h.agent.Origins() != nil && h.agent.Origins().IsSessionAllowAny()
+	return h.origins() != nil && h.origins().IsSessionAllowAny()
 }
 
 func (h *host) AllowOrigin(origin string) error {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins().Allow(origin)
+	return h.origins().Allow(origin)
 }
 
 func (h *host) RevokeOrigin(origin string) error {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins().Revoke(origin)
+	return h.origins().Revoke(origin)
 }
 
 func (h *host) SetOriginCheckDisabled(on bool) {
-	if h.agent.Origins() != nil {
-		h.agent.Origins().SessionAllowAny(on)
+	if h.origins() != nil {
+		h.origins().SessionAllowAny(on)
 	}
 }
 
@@ -292,30 +243,5 @@ func (h *host) ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferenc
 	h.agent.SetRequirePairedDevice(next.RequirePairedDevice)
 	h.agent.SetReaderFeedback(next.ReaderFeedback)
 
-	applied := h.agent.Preferences()
-	if h.app != nil {
-		h.app.SyncPreferencesToMenu(applied)
-	}
-	return applied
-}
-
-// remoteManager returns the remote device manager, held either directly or
-// behind the multi-manager.
-func (h *host) remoteManager() *remotenfc.Manager {
-	if h.agent.Manager() == nil {
-		return nil
-	}
-	if m, ok := h.agent.Manager().(*remotenfc.Manager); ok {
-		return m
-	}
-	if mm, ok := h.agent.Manager().(interface {
-		GetManager(string) (nfc.Manager, bool)
-	}); ok {
-		if mgr, exists := mm.GetManager(nfc.ManagerTypeSmartphone); exists {
-			if m, ok := mgr.(*remotenfc.Manager); ok {
-				return m
-			}
-		}
-	}
-	return nil
+	return h.agent.Preferences()
 }

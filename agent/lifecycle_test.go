@@ -54,13 +54,13 @@ func TestReaderIsSafeToReadWhileTheLifecycleMoves(t *testing.T) {
 		wg.Add(4)
 		go func() { defer wg.Done(); _ = a.Start("") }()
 		go func() { defer wg.Done(); a.Stop() }()
-		go func() { defer wg.Done(); _ = a.Reader() }()
+		go func() { defer wg.Done(); _ = a.Supervisor() }()
 		go func() { defer wg.Done(); _ = a.CurrentDevicePath() }()
 	}
 	wg.Wait()
 
 	a.Stop()
-	if got := a.Reader(); got != nil {
+	if got := a.Supervisor(); got != nil {
 		t.Errorf("Reader() = %v after Stop, want nil", got)
 	}
 }
@@ -71,7 +71,7 @@ func TestStateTransitions(t *testing.T) {
 
 	var mu sync.Mutex
 	var seen []State
-	a.OnStateChange(func(s State) {
+	a.Events().State.Connect(func(s State) {
 		mu.Lock()
 		defer mu.Unlock()
 		seen = append(seen, s)
@@ -214,7 +214,7 @@ func TestComponentFailureAbortsStart(t *testing.T) {
 	if !good.stopped {
 		t.Error("a component started before the failure should be stopped again")
 	}
-	if a.Reader() != nil {
+	if a.Supervisor() != nil {
 		t.Error("a failed Start must not leave a reader open")
 	}
 }
@@ -251,4 +251,36 @@ func TestDuplicateComponentRejected(t *testing.T) {
 		t.Errorf("Components() = %d, want 1", n)
 	}
 	_ = time.Now
+}
+
+// A stop ends what feeds the servers. It used to repeat their teardown inline
+// and leave out the cancel, so the goroutine draining the reader survived every
+// stop and a start after it added another.
+func TestStopEndsWhatFeedsTheServers(t *testing.T) {
+	a := runningAgent(t, 9474)
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	readers := a.Supervisor()
+	if readers == nil {
+		t.Fatal("the agent started without readers")
+	}
+
+	seen := make(chan struct{}, 1)
+	a.Events().Tag.Connect(func(nfc.NFCData) {
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+	})
+
+	a.Stop()
+	readers.Scans().Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
+
+	select {
+	case <-seen:
+		t.Error("a scan reached the clients after the agent stopped")
+	case <-time.After(300 * time.Millisecond):
+	}
 }

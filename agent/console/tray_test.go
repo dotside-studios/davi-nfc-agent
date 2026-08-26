@@ -3,69 +3,54 @@
 package console
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// fakeTray records what the console asked the tray to do.
-type fakeTray struct {
-	stopped  int
-	quit     int
-	switched []string
-	synced   []agent.Preferences
+// Quitting is the program's to do, so the console asks whoever owns it. A build
+// that supplied no way out stops the agent instead of leaving the page's quit
+// control doing nothing.
+func TestTheConsoleQuitsThroughTheProgram(t *testing.T) {
+	quits := 0
+	c := New(Config{Agent: quietAgent(t), Quit: func() { quits++ }})
+
+	c.host.QuitAgent()
+
+	if quits != 1 {
+		t.Errorf("the program was asked to quit %d times, want 1", quits)
+	}
 }
 
-func (f *fakeTray) StopAgent()                     { f.stopped++ }
-func (f *fakeTray) Quit()                          { f.quit++ }
-func (f *fakeTray) SwitchDevice(devicePath string) { f.switched = append(f.switched, devicePath) }
-func (f *fakeTray) SyncPreferencesToMenu(next agent.Preferences) {
-	f.synced = append(f.synced, next)
-}
-
-// An action taken in the console has to move the tray's menu, or the two
-// surfaces disagree about what the agent is doing. Without a tray the console
-// drives the agent directly, as a headless run wants.
-func TestTheConsoleActsThroughTheTrayWhenItHasOne(t *testing.T) {
+// Choosing a device narrows what the agent serves to it. The pin is a filter,
+// so the agent is not restarted for it: a page that picks a reader used to
+// disconnect every client, including its own connection, on the way.
+func TestChoosingADeviceIsAPreferenceNotARestart(t *testing.T) {
 	a := quietAgent(t)
 	c := New(Config{Agent: a})
 
-	tray := &fakeTray{}
-	c.AttachTray(tray)
-
-	c.host.StopAgent()
-	if tray.stopped != 1 {
-		t.Errorf("tray saw %d stops, want 1", tray.stopped)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
+	t.Cleanup(a.Stop)
 
-	c.host.QuitAgent()
-	if tray.quit != 1 {
-		t.Errorf("tray saw %d quits, want 1", tray.quit)
-	}
+	serving := a.Supervisor()
 
-	if err := c.host.SelectDevice("ACS ACR122U 00"); err != nil {
-		t.Fatalf("SelectDevice: %v", err)
-	}
-	if len(tray.switched) != 1 || tray.switched[0] != "ACS ACR122U 00" {
-		t.Errorf("tray switched to %v, want one switch to the named reader", tray.switched)
+	if _, err := c.dispatch(action{
+		Action: "reader.selectDevice",
+		Params: json.RawMessage(`{"devicePath": "ACS ACR122U 00"}`),
+	}); err != nil {
+		t.Fatalf("reader.selectDevice: %v", err)
 	}
 
-	c.host.ApplyPreferences(func(p *agent.Preferences) { p.Mode = nfc.ModeReadOnly })
-	if len(tray.synced) == 0 {
-		t.Fatal("a preference change did not reach the tray's menu")
+	if got := a.CurrentDevicePath(); got != "ACS ACR122U 00" {
+		t.Errorf("the agent is on %q, want the device that was chosen", got)
 	}
-	if got := tray.synced[len(tray.synced)-1].Mode; got != nfc.ModeReadOnly {
-		t.Errorf("tray synced mode = %v, want %v", got, nfc.ModeReadOnly)
-	}
-}
-
-// With no tray attached, selecting a reader is refused rather than silently
-// doing nothing: the console cannot move a selection it does not own.
-func TestSelectingAReaderNeedsATray(t *testing.T) {
-	c := New(Config{Agent: quietAgent(t)})
-	if err := c.host.SelectDevice("ACS ACR122U 00"); err == nil {
-		t.Error("SelectDevice succeeded with no tray attached")
+	if a.Supervisor() != serving {
+		t.Error("the agent was restarted to change which device it serves")
 	}
 }
 
@@ -88,6 +73,63 @@ func TestAnOpenPageIsWokenByAPreferenceChangedElsewhere(t *testing.T) {
 	}
 }
 
+// The allowlist is the server's rather than the agent's, and the console is
+// built before the plugin has a store, so an origin refused or allowed while
+// running still has to reach an open page.
+func TestAnOpenPageIsWokenByTheAllowlist(t *testing.T) {
+	a := quietAgent(t)
+	servers := &agent.ServerPlugin{}
+	c := New(Config{Agent: a, Servers: servers})
+
+	if err := a.Plugins.Add(servers); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	menu := traymenu.New(traymenu.Discard())
+	t.Cleanup(menu.Close)
+	if err := a.Activate(menu); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	woken, done := c.subscribe()
+	t.Cleanup(done)
+
+	servers.Origins.RecordBlocked("https://evil.example")
+
+	select {
+	case <-woken:
+	default:
+		t.Fatal("a refused origin did not reach the open page")
+	}
+}
+
+// Every open page is woken, and one that closes stops being woken without
+// taking the others with it.
+func TestEveryOpenPageIsWoken(t *testing.T) {
+	c := New(Config{Agent: quietAgent(t)})
+
+	first, closeFirst := c.subscribe()
+	second, closeSecond := c.subscribe()
+	t.Cleanup(closeSecond)
+
+	c.NotifyChange()
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("pages woken %d and %d times, want both", len(first), len(second))
+	}
+	<-first
+	<-second
+
+	closeFirst()
+	closeFirst() // closing twice is what a deferred close after an early return does
+
+	c.NotifyChange()
+	if len(first) != 0 {
+		t.Error("a closed page was still woken")
+	}
+	if len(second) != 1 {
+		t.Error("closing one page stopped the others being woken")
+	}
+}
+
 // A build with no console holds a nil *Server, which console_nowebui.go
 // promises every method tolerates. The stubs there do; these are the ones the
 // real build has to match, so the promise holds under either tag.
@@ -95,7 +137,6 @@ func TestANilConsoleToleratesEveryCall(t *testing.T) {
 	var c *Server
 
 	c.NotifyChange()
-	c.AttachTray(nil)
 
 	if got := c.Endpoints(); got != nil {
 		t.Errorf("Endpoints() = %v, want nil", got)

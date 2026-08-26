@@ -160,8 +160,29 @@ func (m *Manager) isCardPresentLocked(ctx scardContext, readerName string) (bool
 	return (state & statePresent) != 0, nil
 }
 
-// ListDevices lists available PC/SC readers
-func (m *Manager) ListDevices() ([]string, error) {
+// readerTransport is what any PC/SC reader can do: it is opened, polled and
+// spoken to directly.
+var readerTransport = nfc.DeviceCapabilities{
+	CanPoll:       true,
+	CanTransceive: true,
+	DeviceType:    "pcsc",
+}
+
+// Devices lists the contactless readers PC/SC offers.
+func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
+	readers, err := m.listReaders()
+	if err != nil {
+		return nil, err
+	}
+
+	listings := make([]nfc.DeviceListing, 0, len(readers))
+	for _, reader := range readers {
+		listings = append(listings, nfc.DeviceListing{Path: reader, ID: reader, Capabilities: readerTransport})
+	}
+	return listings, nil
+}
+
+func (m *Manager) listReaders() ([]string, error) {
 	var readers []string
 	var lastErr error
 
@@ -212,7 +233,7 @@ func (m *Manager) DeviceChanges() <-chan struct{} {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			readers, err := m.ListDevices()
+			readers, err := m.listReaders()
 			if err != nil {
 				continue
 			}

@@ -6,15 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 )
 
@@ -31,9 +30,9 @@ type Server struct {
 	dev       bool
 	startedAt time.Time
 
-	mu        sync.Mutex
-	listeners map[int]chan struct{}
-	listenerN int
+	// changed wakes the connected consoles. Each holds a channel of its own,
+	// so one that is slow to read does not hold up the rest.
+	changed event.Signal[struct{}]
 }
 
 // newServer builds the console API over a host.
@@ -46,7 +45,6 @@ func newServer(config serverConfig) *Server {
 		version:   config.Version,
 		dev:       config.Dev,
 		startedAt: time.Now(),
-		listeners: make(map[int]chan struct{}),
 	}
 }
 
@@ -71,7 +69,7 @@ func (c *Server) Handler() http.Handler {
 func (c *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if reason := c.auth.authorize(r); reason != "" {
-			log.Printf("Control request refused (%s): %s %s", reason, r.Method, r.URL.Path)
+			consoleWarn.Printf("Control request refused (%s): %s %s", reason, r.Method, r.URL.Path)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -168,7 +166,7 @@ func (c *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	result, err := c.dispatch(req)
 	if err != nil {
-		log.Printf("Control action %q failed: %v", req.Action, err)
+		consoleWarn.Printf("Control action %q failed: %v", req.Action, err)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -188,33 +186,22 @@ func (c *Server) NotifyChange() {
 	if c == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, ch := range c.listeners {
+	c.changed.Emit(struct{}{})
+}
+
+// subscribe returns a channel woken on every change, and what stops it. The
+// buffer of one coalesces: a console that has not read yet is already going to
+// be handed the whole state.
+func (c *Server) subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+
+	conn := c.changed.Connect(func(struct{}) {
 		select {
 		case ch <- struct{}{}:
 		default:
 		}
-	}
-}
-
-func (c *Server) subscribe() (<-chan struct{}, func()) {
-	ch := make(chan struct{}, 1)
-
-	c.mu.Lock()
-	id := c.listenerN
-	c.listenerN++
-	c.listeners[id] = ch
-	c.mu.Unlock()
-
-	var once sync.Once
-	return ch, func() {
-		once.Do(func() {
-			c.mu.Lock()
-			delete(c.listeners, id)
-			c.mu.Unlock()
-		})
-	}
+	})
+	return ch, conn.Disconnect
 }
 
 // upgrader upgrades the console's live connection. CheckOrigin is the
@@ -238,7 +225,7 @@ type envelope struct {
 func (c *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Control WebSocket upgrade failed: %v", err)
+		consoleFail.Printf("Control WebSocket upgrade failed: %v", err)
 		return
 	}
 	defer func() { _ = conn.Close() }()

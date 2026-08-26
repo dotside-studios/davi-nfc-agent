@@ -18,14 +18,11 @@ type Host interface {
 	StartAgent() error
 	StopAgent()
 	QuitAgent()
-	RestartServers() error
 
 	AvailableDevices() []string
 	AllCardTypes() []string
 	// CurrentCard reports the tag on the reader, if any.
 	CurrentCard() (uid, cardType string, present bool)
-	RemoteDevices() (total, active int)
-	SelectDevice(devicePath string) error
 
 	Port() int
 	BootstrapPort() int

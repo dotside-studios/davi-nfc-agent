@@ -10,14 +10,13 @@ package listener
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 )
 
 // Config holds configuration for the unified server.
@@ -133,7 +132,7 @@ func (s *Server) Mount(pattern string, handler http.Handler) error {
 // reissued, and rebuilding it there would lose whatever else was mounted on the
 // port, a control center included.
 func (s *Server) Start() error {
-	log.Printf("[unified] Starting the agent's listener on port %d...", s.config.Port)
+	listenerLog.Printf("Starting the agent's listener on port %d...", s.config.Port)
 
 	s.mu.Lock()
 	if s.httpServer != nil {
@@ -162,19 +161,19 @@ func (s *Server) Start() error {
 	go func() {
 		var err error
 		if s.config.TLSEnabled() {
-			log.Printf("[unified] Listening on :%d (TLS)", s.config.Port)
+			listenerLog.Printf("Listening on :%d (TLS)", s.config.Port)
 			err = httpServer.ServeTLS(listener, s.config.CertFile, s.config.KeyFile)
 		} else {
-			log.Printf("[unified] Listening on :%d", s.config.Port)
+			listenerLog.Printf("Listening on :%d", s.config.Port)
 			err = httpServer.Serve(listener)
 		}
 		if err != nil && err != http.ErrServerClosed {
-			log.Printf("[unified] HTTP server error: %v", err)
+			listenerFail.Printf("HTTP server error: %v", err)
 		}
 	}()
 
 	if err := s.startMDNS(); err != nil {
-		log.Printf("[unified] Warning: Failed to start mDNS: %v", err)
+		listenerWarn.Printf("Failed to start mDNS: %v", err)
 	}
 
 	return nil
@@ -300,6 +299,6 @@ func (s *Server) startMDNS() error {
 	}
 	s.mdnsServer = registered
 	s.mu.Unlock()
-	log.Printf("[unified] mDNS service registered: %s on port %d", server.MDNSDeviceServiceType, s.config.Port)
+	listenerLog.Printf("mDNS service registered: %s on port %d", server.MDNSDeviceServiceType, s.config.Port)
 	return nil
 }

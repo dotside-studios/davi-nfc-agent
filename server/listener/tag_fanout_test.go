@@ -6,10 +6,26 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/gorilla/websocket"
 )
 
 // dial opens a connection to the unified server and fails the test if it cannot.
+// awaitClient waits for the server to have registered the connection. A scan
+// broadcast before that reaches nobody, and the handshake returns first.
+func awaitClient(t *testing.T, clients *clientserver.Server) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if clients.ClientCount() > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the client server never registered the connection")
+}
+
 func dial(t *testing.T, url string) *websocket.Conn {
 	t.Helper()
 
@@ -70,9 +86,11 @@ func registerDevice(t *testing.T, conn *websocket.Conn) string {
 // control center among them, which speaks the same client endpoint as any other
 // consumer. This is the whole path: device socket, manager, bridge, fanout.
 func TestPhoneScanReachesAClient(t *testing.T) {
-	base := newTestServer(t)
+	base, clients := newTestServer(t)
 
 	client := dial(t, base+"/ws")
+	awaitClient(t, clients)
+
 	device := dial(t, base+"/ws?mode=device")
 	deviceID := registerDevice(t, device)
 

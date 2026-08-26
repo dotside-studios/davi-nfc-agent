@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -12,19 +13,55 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
+	"github.com/gorilla/websocket"
 )
 
-// serverAgent is an agent whose listener comes from the plugin under test.
-// Nothing binds: the routes are exercised through the mux.
+// serverAgent is an agent whose listener comes from the plugin under test, with
+// the client server declared on it the way a build declares one.
+//
+// Most tests here reach the routes through the mux and bind nothing, but a
+// started agent binds for real, so the port is one nothing else holds: package
+// test binaries run beside each other and the default port is one address.
 func serverAgent(t *testing.T, p *ServerPlugin, extra ...Plugin) *Agent {
 	t.Helper()
 
-	return New(Config{
-		Manager: nfc.NewMockManager(),
-		Logger:  log.New(io.Discard, "", 0),
-		Plugins: append([]Plugin{p}, extra...),
+	a := New(Config{
+		Manager:    nfc.NewMockManager(),
+		Logger:     log.New(io.Discard, "", 0),
+		DevicePort: freePort(t),
+	})
+	serveClients(p, a)
+
+	if err := a.Plugins.Add(append([]Plugin{p}, extra...)...); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	return a
+}
+
+// serveClients declares the client server on the plugin, as cmd does. Nothing
+// mounts one for a build that does not ask for it, so a test that wants clients
+// served says so.
+func serveClients(p *ServerPlugin, a *Agent) {
+	if p.ServeMode == nil {
+		p.ServeMode = map[string]http.Handler{}
+	}
+	if p.ServeMode[server.ModeClient] != nil {
+		return
+	}
+
+	p.ServeMode[server.ModeClient] = clientserver.New(clientserver.Config{
+		APISecret:            a.APISecret,
+		OriginPolicy:         p.OriginPolicy(),
+		TokenVerifier:        a.TokenVerifier(),
+		Tags:                 a,
+		AllowTagModification: a.TagModificationAllowed,
+		Scans:                &a.events.Tag,
+		ReaderStatus:         &a.events.Reader,
 	})
 }
 
@@ -292,7 +329,7 @@ func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
 	}
 
 	rebound := make(chan struct{}, 1)
-	rt.Agent.OnServerRestart(func() {
+	rt.Agent.Events().Servers.Connect(func(int) {
 		select {
 		case rebound <- struct{}{}:
 		default:
@@ -330,6 +367,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 	servers := &ServerPlugin{}
+	serveClients(servers, rt.Agent)
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -338,7 +376,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	}
 	defer rt.Agent.Stop()
 
-	before := rt.Agent.ClientServer
+	before := servers.serving()
 	if before == nil {
 		t.Fatal("no client server after Start")
 	}
@@ -346,17 +384,8 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if err := servers.Rebind(); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
-	if rt.Agent.ClientServer != before {
+	if servers.serving() != before {
 		t.Error("rebinding rebuilt the client server; only the listener should have moved")
-	}
-
-	// RestartServers is the one that rebuilds it, which is what an API secret
-	// rotation needs.
-	if err := rt.Agent.RestartServers(); err != nil {
-		t.Fatalf("RestartServers: %v", err)
-	}
-	if rt.Agent.ClientServer == before {
-		t.Error("RestartServers left the old client server in place")
 	}
 }
 
@@ -410,20 +439,17 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 	}
 	defer rt.Agent.Stop()
 
-	reader := rt.Agent.Reader()
-	if reader == nil {
-		t.Fatal("no reader after Start")
+	readers := rt.Agent.Supervisor()
+	if readers == nil {
+		t.Fatal("no readers after Start")
 	}
 
-	if err := rt.Agent.RestartServers(); err != nil {
-		t.Fatalf("RestartServers: %v", err)
-	}
 	if err := servers.Rebind(); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
 
-	if rt.Agent.Reader() != reader {
-		t.Error("the reader was replaced by a restart of the servers")
+	if rt.Agent.Supervisor() != readers {
+		t.Error("the readers were replaced by a rebind of the listener")
 	}
 }
 
@@ -527,16 +553,16 @@ func names(a *Agent) []string {
 	return out
 }
 
-// The agent's own routes are data it hands over, and whatever serves it mounts
-// them ahead of its own, so nothing can displace them.
+// What the agent is reached on is mounted before the endpoints, so nothing can
+// displace it.
 func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
-	patterns := map[string]bool{}
-	for _, route := range quietAgent(t).Routes() {
-		patterns[route.Pattern] = true
+	p := &ServerPlugin{}
+	if err := serverAgent(t, p).Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
 	}
-	for _, want := range []string{"/ws", "/health", "/api/v1/health"} {
-		if !patterns[want] {
-			t.Errorf("Routes() does not carry %q", want)
+	for _, pattern := range []string{"/ws", "/health", "/api/v1/health"} {
+		if code := get(t, p.Listener(), pattern); code == http.StatusNotFound {
+			t.Errorf("%s is not served", pattern)
 		}
 	}
 
@@ -605,4 +631,156 @@ func TestAnUnmanagedCertificateDoesNotStartAWatch(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(rt.Agent.Shutdown)
+}
+
+// A device that connects to an agent built with no device driver has no device
+// protocol to speak to. The connection used to be accepted and then ignored:
+// the device registered, got "no handler for message type" logged at it, and
+// waited for a reply that could never come. It reaches the client server now,
+// which answers it.
+func TestADeviceConnectingWithoutADriverIsAnswered(t *testing.T) {
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	ts := httptest.NewServer(p.Listener().Handler())
+	defer ts.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws?mode=device", nil)
+	if err != nil {
+		t.Fatalf("a device connection was refused with no driver to serve it: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := conn.WriteJSON(protocol.WebSocketRequest{Type: "registerDevice"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var out protocol.WebSocketResponse
+	if err := conn.ReadJSON(&out); err != nil {
+		t.Fatalf("the device was left waiting for an answer: %v", err)
+	}
+	if out.Success {
+		t.Errorf("registering a device succeeded with no driver: %+v", out)
+	}
+}
+
+// mark is a handler that answers with a code, so a test can tell which one a
+// connection reached.
+func mark(code int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(code) })
+}
+
+// The plugin serves the client connections and mounts the routes they arrive
+// on. A build with none registered serves no HTTP at all, which is what a
+// program driving the readers directly wants.
+func TestTheClientServerBelongsToThePlugin(t *testing.T) {
+	var none *ServerPlugin
+	if got := none.ClientCount(); got != 0 {
+		t.Errorf("ClientCount() = %d with no plugin registered, want 0", got)
+	}
+	if got := none.Clients(); got != nil {
+		t.Errorf("Clients() = %v with no plugin registered, want nil", got)
+	}
+	if err := none.DisconnectClient("whoever"); err == nil {
+		t.Error("DisconnectClient succeeded with nothing serving clients")
+	}
+
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	serving := p.serving()
+	if serving == nil {
+		t.Error("the plugin is running no client server")
+	}
+	if code := get(t, p.Listener(), "/health"); code != http.StatusOK {
+		t.Errorf("GET /health = %d, want 200", code)
+	}
+
+	// It belongs to the plugin, not the run: a client stays connected across a
+	// stop rather than being left holding a server nothing reports to.
+	a.Stop()
+	if p.serving() != serving {
+		t.Error("stopping the agent replaced the client server")
+	}
+}
+
+// The health check answers what the listener is serving, including how many
+// clients it holds: a probe reads it to tell a live agent from a bound port.
+func TestTheHealthCheckCountsTheClients(t *testing.T) {
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if got := health(t, p).Clients; got != 0 {
+		t.Errorf("/health reports %d clients with none connected, want 0", got)
+	}
+
+	clientOf(t, p.serving())
+
+	got := health(t, p)
+	if got.Status != "ok" || got.Type != "agent" {
+		t.Errorf("/health reports %+v, want an agent reporting itself up", got)
+	}
+	if got.Clients != 1 {
+		t.Errorf("/health reports %d clients with one connected, want 1", got.Clients)
+	}
+}
+
+// health reads the health check through the listener's mux.
+func health(t *testing.T, p *ServerPlugin) struct {
+	Status  string `json:"status"`
+	Type    string `json:"type"`
+	Clients int    `json:"clients"`
+} {
+	t.Helper()
+
+	var got struct {
+		Status  string `json:"status"`
+		Type    string `json:"type"`
+		Clients int    `json:"clients"`
+	}
+
+	rec := httptest.NewRecorder()
+	p.Listener().Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /health = %d, want 200", rec.Code)
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding /health: %v", err)
+	}
+	return got
+}
+
+// ServeMode is what a build names its own handlers with. What it names replaces
+// what the plugin would have mounted, clients included.
+func TestServeModeReplacesWhatThePluginWouldMount(t *testing.T) {
+	p := &ServerPlugin{ServeMode: map[string]http.Handler{
+		server.ModeClient: mark(http.StatusTeapot),
+		server.ModeDevice: mark(299),
+	}}
+	a := serverAgent(t, p)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if code := get(t, p.Listener(), "/ws"); code != http.StatusTeapot {
+		t.Errorf("a client connection got %d, want the handler ServeMode named", code)
+	}
+	if code := get(t, p.Listener(), "/ws?mode=device"); code != 299 {
+		t.Errorf("a device connection got %d, want the handler ServeMode named", code)
+	}
 }

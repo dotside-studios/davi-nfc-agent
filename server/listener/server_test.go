@@ -1,14 +1,13 @@
 package listener_test
 
 import (
-	"context"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -18,21 +17,23 @@ import (
 )
 
 // newTestServer wires a unified server with its background workers running and
-// exposes it over an httptest listener. It returns the ws:// base URL.
-func newTestServer(t *testing.T) string {
+// exposes it over an httptest listener. It returns the ws:// base URL and the
+// client server behind it, so a test can wait for its own connection to be
+// registered before expecting a broadcast.
+func newTestServer(t *testing.T) (string, *clientserver.Server) {
 	t.Helper()
 
 	deviceMgr := remotenfc.NewManager(30 * time.Second)
 
 	// The device endpoint is the driver's handler behind the credential check,
 	// which is how the agent mounts it.
-	auth := server.NewDeviceAuth("", nil, false)
+	auth := server.NewDeviceAuth(nil, nil, false)
 	device := deviceMgr.Handler(remotenfc.ServerOptions{Authenticate: auth.Check})
 	client := clientserver.New(clientserver.Config{})
 
 	u := listener.New(listener.Config{})
 	if err := u.Mount("/ws", server.CORS(server.RouteByMode(
-		http.HandlerFunc(client.ServeWS),
+		client,
 		map[string]http.Handler{server.ModeDevice: device},
 	))); err != nil {
 		t.Fatalf("mount /ws: %v", err)
@@ -40,18 +41,24 @@ func newTestServer(t *testing.T) string {
 
 	// The driver feeds the client server directly, which is what the agent
 	// wires up.
-	ctx, cancel := context.WithCancel(context.Background())
-	go pumpTo(ctx, deviceMgr.Data(), client)
+	deviceMgr.Scans().Connect(func(scan nfc.ScannedTag) {
+		// What the supervisor does with a raw scan, which is what
+		// stands between the driver and the clients in a real agent.
+		data := nfc.NFCData{Device: scan.Device, Err: scan.Err}
+		if scan.Tag != nil {
+			data.Card = nfc.NewCard(scan.Tag)
+		}
+		client.Broadcast(data)
+	})
 
 	ts := httptest.NewServer(u.Handler())
 
 	t.Cleanup(func() {
 		ts.Close()
-		cancel()
 		deviceMgr.Close()
 	})
 
-	return "ws" + strings.TrimPrefix(ts.URL, "http")
+	return "ws" + strings.TrimPrefix(ts.URL, "http"), client
 }
 
 // dialAndProbe connects to the given ws URL, sends a bogus-typed message, and
@@ -93,7 +100,7 @@ func dialAndProbe(t *testing.T, wsURL string) string {
 // (?mode=device) to the device handler and everything else to the client
 // handler, using the handler-specific error codes as the signal.
 func TestWSDispatch(t *testing.T) {
-	base := newTestServer(t)
+	base, _ := newTestServer(t)
 
 	// Client connection: unknown message type -> client handler's UNKNOWN_TYPE.
 	if code := dialAndProbe(t, base+"/ws"); code != "UNKNOWN_TYPE" {
@@ -104,20 +111,5 @@ func TestWSDispatch(t *testing.T) {
 	// yields the device handler's INVALID_MESSAGE_TYPE.
 	if code := dialAndProbe(t, base+"/ws?mode=device"); code != "INVALID_MESSAGE_TYPE" {
 		t.Errorf("device /ws?mode=device routed to wrong handler: got code %q, want INVALID_MESSAGE_TYPE", code)
-	}
-}
-
-// pumpTo forwards a driver's scans to the client server.
-func pumpTo(ctx context.Context, src <-chan nfc.NFCData, sink *clientserver.Server) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-src:
-			if !ok {
-				return
-			}
-			sink.Broadcast(data)
-		}
 	}
 }

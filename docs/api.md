@@ -49,8 +49,8 @@ pairing again.
 
 Each device holds its own credential, so one can be revoked from the tray under
 **Paired Devices** without disturbing the others. The shared API secret still
-works for devices configured with it, but rotating it logs out everything at
-once. Per-device tokens avoid that.
+works for devices configured with it, but rotating it locks out every device
+configured with it, each on its next connection. Per-device tokens avoid that.
 
 Wrong PINs lock pairing after five attempts until the agent restarts.
 
@@ -929,6 +929,16 @@ every client on the agent. A request that does name a tag is still checked.
 > The bundled JavaScript client fills in `uid` from the last tag it saw, so
 > `client.write({ records })` is already targeted and needs no change.
 
+**The reader the operator picked.** When a reader is selected in the console or
+the tray, the agent works with that one: its scans are the only ones sent, and
+its tag is the only one a request can reach. A request naming another reader, or
+a UID only another reader has seen, fails as though nothing were holding that
+tag, and `allowUntargeted` resolves among the selected reader alone. What a
+client is shown is what it can act on.
+
+Devices that report their own scans, such as paired phones, are not affected:
+the operator picked which reader to work with, not which phone.
+
 **Idempotency.** `writeRequest` and `lockRequest` also accept an
 `idempotencyKey`, passed through to the device. Reuse it when retrying after a
 lost response and a device that already applied it reports the previous outcome
@@ -1145,4 +1155,3 @@ Something happened at the tag. These mirror the agent's internal error codes.
 - [JavaScript client](javascript-client.md): the browser and Node.js client library
 - [Device setup](device-setup.md): pairing a phone or a reader
 - [Control Center](control-center.md): the built-in web console
-- [Device bridge protocols](device-bridge-protocols.md): what a phone or browser implements

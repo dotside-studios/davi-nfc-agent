@@ -1,18 +1,13 @@
 package agent
 
 import (
-	"net/http"
-
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"log"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
@@ -32,8 +27,8 @@ const (
 // which would ask for no TLS and port 0.
 //
 // Setup resolves what it can: a blank ConfigDir becomes the platform default, a
-// blank APISecret is loaded or generated, and the origin allowlist and paired
-// devices are read from disk. What it cannot resolve it passes through, so a
+// blank APISecret is loaded or generated, and the paired devices are read from
+// disk. What it cannot resolve it passes through, so a
 // field here that names an agent setting arrives on the agent unchanged.
 type Options struct {
 	DevicePath string
@@ -58,14 +53,6 @@ type Options struct {
 	AllowedOrigins      string
 	InstallCA           bool
 	RequirePairedDevice bool
-
-	// RemoteOps and RemoteScans connect a driver of paired devices, and
-	// DeviceEndpoint serves their connections. All three come from a driver the
-	// caller built; leaving them nil is an agent that serves its own reader
-	// only. See agent.Config.
-	RemoteOps      server.DeviceOps
-	RemoteScans    <-chan nfc.NFCData
-	DeviceEndpoint func(DeviceEndpointOptions) http.Handler
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
 	// may carry, and ReaderFeedback has the reader announce what it does. They
@@ -98,8 +85,8 @@ func DefaultOptions() *Options {
 }
 
 // Runtime is what Setup built. It carries only what is not already reachable
-// through the agent: the origin and device stores live on Agent, and reads of
-// those go through rt.Agent so there is one copy to keep true.
+// through the agent: the device registry lives on Agent, and reads of it go
+// through rt.Agent so there is one copy to keep true.
 type Runtime struct {
 	Agent *Agent
 
@@ -122,6 +109,11 @@ type Runtime struct {
 	// fallback; put them on [ServerPlugin.Config].
 	CertFile string
 	KeyFile  string
+
+	// AllowedOrigins is what Options named, parsed. Put it on
+	// [ServerPlugin.AllowedOrigins]: the allowlist belongs to what serves the
+	// connections it admits.
+	AllowedOrigins []string
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -133,7 +125,7 @@ type Runtime struct {
 // needs to know about both.
 func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	info := opts.Info.OrDefault()
-	log.Printf("Starting %s %s", info.Name, info.FullVersion())
+	agentLog.Printf("Starting %s %s", info.Name, info.FullVersion())
 
 	// Resolve the config directory once, for both the TLS manager and the
 	// persistent API secret.
@@ -152,12 +144,12 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		tlsMgr = tls.NewManager(configDir)
 		tlsMgr.UseCA(opts.InstallCA)
 		if _, _, err := tlsMgr.EnsureCertificates(); err != nil {
-			log.Printf("Warning: Auto-TLS failed: %v (running without TLS)", err)
+			agentWarn.Printf("Auto-TLS failed: %v (running without TLS)", err)
 			tlsMgr = nil
 		} else if pin, err := tlsMgr.PublicKeyPin(); err == nil {
 			// Native devices authenticate the agent by this value rather than
 			// by a trust store, so log it where a first run will show it.
-			log.Printf("Agent public key pin: %s", pin)
+			agentLog.Printf("Agent public key pin: %s", pin)
 			agentPublicKeyPin = pin
 		}
 	}
@@ -170,11 +162,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	if apiSecret == "" {
 		secret, fresh, err := loadOrCreateAPISecret(configDir)
 		if err != nil {
-			log.Printf("Warning: failed to load API secret: %v (running without auth)", err)
+			agentWarn.Printf("failed to load API secret: %v (running without auth)", err)
 		} else {
 			apiSecret = secret
 			if fresh {
-				log.Printf("Generated new API secret at %s", configDir)
+				agentLog.Printf("Generated new API secret at %s", configDir)
 			}
 		}
 	}
@@ -183,35 +175,14 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// one can be revoked without logging out the rest.
 	devices, err := NewDeviceRegistry(configDir)
 	if err != nil {
-		log.Printf("Warning: failed to load paired devices: %v", err)
+		agentWarn.Printf("failed to load paired devices: %v", err)
 		devices, _ = NewDeviceRegistry("")
-	}
-
-	// The allowlist persists in the config dir and starts with the first-party
-	// consoles, so the shipped console connects on a fresh install. Anything
-	// passed on the command line is added to it.
-	origins, err := NewOriginStore(configDir)
-	if err != nil {
-		log.Printf("Warning: failed to load origin allowlist: %v", err)
-		origins, _ = NewOriginStore("")
-	}
-	for _, origin := range ParseAllowedOrigins(opts.AllowedOrigins) {
-		if origin == "*" {
-			log.Printf("Warning: -allowed-origins \"*\" disables the origin check; any site the operator visits can drive the reader")
-			origins.SessionAllowAny(true)
-			continue
-		}
-		if err := origins.Allow(origin); err != nil {
-			log.Printf("Warning: failed to allow origin %q: %v", origin, err)
-		}
 	}
 
 	// Asked for on the command line or in the environment, as opposed to
 	// remembered from a previous run. The distinction matters below: a stored
 	// preference may raise the requirement but not withdraw one set here.
 	askedForPairing := opts.RequirePairedDevice || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
-
-	// Load persisted preferences. Explicit flags still win: something that
 
 	devicePort := opts.DevicePort
 	if devicePort == 0 {
@@ -221,9 +192,9 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}
 
 	if askedForPairing {
-		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		agentLog.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
 		if devices.Count() == 0 {
-			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
+			agentWarn.Printf("no devices are paired yet, so every device connection will be refused until one pairs")
 		}
 	}
 
@@ -241,15 +212,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}
 
 	a := New(Config{
-		RemoteOps:           opts.RemoteOps,
-		RemoteScans:         opts.RemoteScans,
-		DeviceEndpoint:      opts.DeviceEndpoint,
 		Manager:             manager,
 		Info:                info,
 		DevicePort:          devicePort,
 		APISecret:           apiSecret,
 		ConfigDir:           configDir,
-		Origins:             origins,
 		Devices:             devices,
 		PublicKeyPin:        agentPublicKeyPin,
 		Logs:                opts.Logs,
@@ -267,6 +234,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Certificates: tlsMgr,
 		CertFile:     certFile,
 		KeyFile:      keyFile,
+
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}, nil
 }
 
@@ -281,39 +250,4 @@ func DefaultConfigDir(dirName string) string {
 		configDir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(configDir, dirName)
-}
-
-// ParseAllowedOrigins turns the comma-separated flag (or DAVI_NFC_ALLOWED_ORIGINS)
-// into the host:port list CheckOrigin matches against.
-//
-// Full URLs are accepted and reduced to their host:port, because that is what
-// people paste and the alternative is a silently ignored entry: an origin that
-// does not match is indistinguishable from one that was never configured.
-func ParseAllowedOrigins(flagValue string) []string {
-	raw := flagValue
-	if raw == "" {
-		raw = os.Getenv("DAVI_NFC_ALLOWED_ORIGINS")
-	}
-	if raw == "" {
-		return nil
-	}
-
-	var origins []string
-	for _, entry := range strings.Split(raw, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		if entry == "*" {
-			origins = append(origins, entry)
-			continue
-		}
-		if strings.Contains(entry, "://") {
-			if u, err := url.Parse(entry); err == nil && u.Host != "" {
-				entry = u.Host
-			}
-		}
-		origins = append(origins, strings.TrimSuffix(entry, "/"))
-	}
-	return origins
 }

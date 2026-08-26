@@ -8,7 +8,7 @@ import (
 
 // newFeedbackTestReader builds a reader on a mock device presenting one tag,
 // and returns both so a test can assert on what the device was told.
-func newFeedbackTestReader(t *testing.T, tag Tag) (*NFCReader, *MockDevice) {
+func newFeedbackTestReader(t *testing.T, tag Tag) (*deviceReader, *MockDevice) {
 	t.Helper()
 
 	manager := NewMockManager()
@@ -18,9 +18,9 @@ func newFeedbackTestReader(t *testing.T, tag Tag) (*NFCReader, *MockDevice) {
 	device.SetTags([]Tag{tag})
 	manager.MockDevice = device
 
-	reader, err := NewNFCReader("mock:usb:001", manager, 5*time.Second)
+	reader, err := newDeviceReader("mock:usb:001", manager, 5*time.Second)
 	if err != nil {
-		t.Fatalf("NewNFCReader() failed: %v", err)
+		t.Fatalf("newDeviceReader() failed: %v", err)
 	}
 	t.Cleanup(reader.Close)
 

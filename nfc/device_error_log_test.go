@@ -110,12 +110,12 @@ func TestPoll_ReportsAnUnopenableReaderOnce(t *testing.T) {
 	manager.DevicesList = []string{"mock:usb:001"}
 	manager.OpenDeviceError = errors.New("device not found: mock:usb:001")
 
-	var reader *NFCReader
+	var reader *deviceReader
 	out := captureLog(t, func() {
 		var err error
-		reader, err = NewNFCReaderWithClock("mock:usb:001", manager, 5*time.Second, NewFakeClock(time.Now()))
+		reader, err = newDeviceReaderWithClock("mock:usb:001", manager, 5*time.Second, NewFakeClock(time.Now()))
 		if err != nil {
-			t.Fatalf("NewNFCReaderWithClock: %v", err)
+			t.Fatalf("newDeviceReaderWithClock: %v", err)
 		}
 		for range 20 {
 			reader.doPoll()
@@ -136,9 +136,9 @@ func TestPoll_ReportsAgainAfterTheReaderWorked(t *testing.T) {
 	manager.MockDevice = NewMockDevice()
 	manager.OpenDeviceError = errors.New("device not found: mock:usb:001")
 
-	reader, err := NewNFCReaderWithClock("mock:usb:001", manager, 5*time.Second, NewFakeClock(time.Now()))
+	reader, err := newDeviceReaderWithClock("mock:usb:001", manager, 5*time.Second, NewFakeClock(time.Now()))
 	if err != nil {
-		t.Fatalf("NewNFCReaderWithClock: %v", err)
+		t.Fatalf("newDeviceReaderWithClock: %v", err)
 	}
 	defer reader.Close()
 

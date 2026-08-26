@@ -1,6 +1,7 @@
 package clientserver
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
@@ -9,9 +10,11 @@ import (
 // and TLS are owned by the unified server, so this carries only what the client
 // handlers need.
 type Config struct {
-	// APISecret is the API secret required for non-loopback connections.
-	// Empty means no auth (legacy / development mode).
-	APISecret string
+	// APISecret is the secret required from non-loopback connections, read on
+	// every one so a rotation takes effect without rebuilding the server. Nil,
+	// or one returning empty, requires no secret, which is the development
+	// default.
+	APISecret func() string
 
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]
 	// to disable origin checking entirely (NOT recommended).
@@ -26,21 +29,27 @@ type Config struct {
 	// secret.
 	TokenVerifier server.TokenVerifier
 
-	// Ops performs the tag operations a client asks for. Nil refuses them,
-	// which is what an agent that is not running does.
+	// Tags answers for every tag the agent can reach, which is the supervisor:
+	// the readers it polls and the devices that report their own scans. The
+	// server resolves the tag a request names against it.
+	Tags nfc.TagHolder
+
+	// AllowTagModification reports whether writes, locks and raw exchanges are
+	// allowed, which is the agent's mode rather than any one source's. Nil
+	// allows them, and the source enforces its own policy either way.
+	AllowTagModification func() bool
+
+	// Ops replaces the operations the server would perform over Tags, for a
+	// build that has its own. Nil uses Tags; with neither, operations are
+	// refused, which is what an agent that is not running does.
 	Ops server.TagOps
 
-	// OnChange, when set, is called whenever a client connects or disconnects
-	// so an observer can refresh without polling. Called off the hot path but
-	// on the connection's own goroutine, so it must not block.
-	OnChange func()
-
-	// OnTag, when set, is called for every scan before it is broadcast, so a
-	// program embedding the agent can act on cards without pretending to be a
-	// WebSocket client. It observes rather than intercepts: the scan is
-	// broadcast either way, and returning changes nothing.
+	// Scans carries every tag to broadcast, and ReaderStatus every change in a
+	// reader's status. The server connects to both when it is built and
+	// disconnects in Close, so a server that has been replaced stops receiving
+	// rather than broadcasting to clients nothing is reading.
 	//
-	// Called on the goroutine draining the bridge, so it must not block --
-	// that goroutine also feeds every connected client.
-	OnTag func(nfc.NFCData)
+	// Nil for a server fed by hand through Broadcast and BroadcastDeviceStatus.
+	Scans        *event.Signal[nfc.NFCData]
+	ReaderStatus *event.Signal[nfc.DeviceStatus]
 }

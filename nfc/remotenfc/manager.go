@@ -2,12 +2,12 @@ package remotenfc
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/google/uuid"
@@ -19,14 +19,14 @@ import (
 // It owns both the device registry and the sessions behind it, so a
 // registration and its connection cannot outlive one another.
 type Manager struct {
-	devices           map[string]*Device // deviceID -> device
-	mu                sync.RWMutex       // Protects devices and the policy fields
-	cleanupTicker     *time.Ticker       // Periodic sweep for silent devices
-	stopCleanup       chan struct{}      // Stop cleanup goroutine
-	inactivityTimeout time.Duration      // Device timeout duration
-	closed            bool               // Whether Close() has been called
-	dataChan          chan nfc.NFCData   // Broadcasts tag data to the server
-	deviceChangeChan  chan struct{}      // Signals registration and unregistration
+	devices           map[string]*Device  // deviceID -> device
+	mu                sync.RWMutex        // Protects devices and the policy fields
+	cleanupTicker     *time.Ticker        // Periodic sweep for silent devices
+	stopped           chan struct{}       // Closed by Close, ending the manager's goroutines
+	inactivityTimeout time.Duration       // Device timeout duration
+	closed            bool                // Whether Close() has been called
+	dataChan          chan nfc.ScannedTag // Scans, drained onto scans
+	deviceChangeChan  chan struct{}       // Signals registration and unregistration
 
 	// Policy supplied by the agent through Handler.
 	publicKeyPin         func() string
@@ -46,6 +46,11 @@ type Manager struct {
 
 	// reqSeq labels each request to a device.
 	reqSeq atomic.Uint64
+
+	// scans is what subscribers connect to. The channel in front of it keeps a
+	// device's read loop off the subscribers: a scan is buffered and dropped
+	// here rather than at the socket.
+	scans event.Signal[nfc.ScannedTag]
 }
 
 // NewManager creates a new smartphone manager.
@@ -57,9 +62,9 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 	m := &Manager{
 		devices:           make(map[string]*Device),
 		inactivityTimeout: inactivityTimeout,
-		stopCleanup:       make(chan struct{}),
-		dataChan:          make(chan nfc.NFCData, 10), // Buffered to prevent blocking
-		deviceChangeChan:  make(chan struct{}, 1),     // Buffered to prevent blocking
+		stopped:           make(chan struct{}),
+		dataChan:          make(chan nfc.ScannedTag, 10), // Buffered to prevent blocking
+		deviceChangeChan:  make(chan struct{}, 1),        // Buffered to prevent blocking
 		sessions:          make(map[string]*wsconn.SafeConn),
 		sessionConn:       make(map[*wsconn.SafeConn]string),
 		pending:           make(map[string]pendingRequest),
@@ -67,6 +72,7 @@ func NewManager(inactivityTimeout time.Duration) *Manager {
 
 	// Start cleanup routine
 	m.startCleanupRoutine()
+	go m.publishScans()
 
 	return m
 }
@@ -95,23 +101,39 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return device, nil
 }
 
-// ListDevices returns list of connected smartphone device connection strings.
-func (m *Manager) ListDevices() ([]string, error) {
+// deviceTransport is what any device on the bridge can do: it reports its own
+// scans rather than being opened and polled. What a device declares at
+// registration refines it; see [Device.PhoneCapabilities].
+var deviceTransport = nfc.DeviceCapabilities{
+	SupportsEvents: true,
+	DeviceType:     "smartphone",
+}
+
+// Devices lists the devices connected right now, by the identity each holds.
+// An aggregate adds the prefix naming this manager.
+func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	devices := make([]string, 0, len(m.devices))
+	listings := make([]nfc.DeviceListing, 0, len(m.devices))
 	for deviceID, device := range m.devices {
 		if device.IsActive() {
-			devices = append(devices, fmt.Sprintf("smartphone:%s", deviceID))
+			listings = append(listings, nfc.DeviceListing{Path: deviceID, ID: deviceID, Capabilities: deviceTransport})
 		}
 	}
 
-	return devices, nil
+	return listings, nil
 }
 
-// RegisterDevice creates and registers a new smartphone device.
+// RegisterDevice registers a device under an identity of this manager's own.
 func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error) {
+	return m.registerDevice("", req)
+}
+
+// registerDevice registers a device under the identity it was admitted with,
+// minting one when it was admitted under none. A paired device holds an
+// identity already; a fresh one per connection cannot be matched to it.
+func (m *Manager) registerDevice(deviceID string, req DeviceRegistrationRequest) (*Device, error) {
 	// Validate request
 	if req.DeviceName == "" {
 		return nil, fmt.Errorf("device name is required")
@@ -122,8 +144,16 @@ func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error)
 		req.Platform = "unknown"
 	}
 
-	// Generate unique device ID
-	deviceID := uuid.New().String()
+	if deviceID == "" {
+		deviceID = uuid.New().String()
+	}
+
+	// Drop the session this one replaces here: the connection it belongs to
+	// ends after this registration and would take the new session with it.
+	if conn, ok := m.session(deviceID); ok {
+		m.removeSession(deviceID)
+		_ = conn.Close()
+	}
 
 	// Create device
 	device := NewDevice(deviceID, req)
@@ -133,7 +163,7 @@ func (m *Manager) RegisterDevice(req DeviceRegistrationRequest) (*Device, error)
 	m.devices[deviceID] = device
 	m.mu.Unlock()
 
-	log.Printf("[smartphone] Device registered: %s (%s, %s)", device.String(), req.Platform, req.AppVersion)
+	managerLog.Printf("Device registered: %s (%s, %s)", device.String(), req.Platform, req.AppVersion)
 
 	// Notify listeners
 	m.notifyDeviceChange()
@@ -156,10 +186,10 @@ func (m *Manager) UnregisterDevice(deviceID string) error {
 
 	// Close the device
 	if err := device.Close(); err != nil {
-		log.Printf("[smartphone] Error closing device %s: %v", deviceID, err)
+		managerFail.Printf("Error closing device %s: %v", deviceID, err)
 	}
 
-	log.Printf("[smartphone] Device unregistered: %s", device.String())
+	managerLog.Printf("Device unregistered: %s", device.String())
 
 	// Notify listeners
 	m.notifyDeviceChange()
@@ -195,12 +225,10 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	// immediate write must find the device already holding the tag.
 	m.setActiveTag(deviceID, tag.UID(), tag)
 
-	// Create Card and broadcast via data channel
-	card := nfc.NewCard(tag)
 	select {
-	case m.dataChan <- nfc.NFCData{Card: card, Err: nil}:
+	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: tag}:
 	default:
-		log.Printf("[smartphone] Data channel full, dropping tag data for device %s", deviceID)
+		managerWarn.Printf("Data channel full, dropping tag data for device %s", deviceID)
 	}
 
 	// Update heartbeat
@@ -209,9 +237,22 @@ func (m *Manager) SendTagData(deviceID string, tagData TagData) error {
 	return nil
 }
 
-// Data returns a channel that provides NFCData as tags are scanned.
-func (m *Manager) Data() <-chan nfc.NFCData {
-	return m.dataChan
+// Scans carries every tag the registered devices report, as reported. What is
+// read off the tag is the supervisor's, not this driver's.
+func (m *Manager) Scans() *event.Signal[nfc.ScannedTag] { return &m.scans }
+
+// publishScans hands what the devices reported to the subscribers. It runs on a
+// goroutine of its own so a slow subscriber holds up neither the socket a scan
+// arrived on nor the other devices.
+func (m *Manager) publishScans() {
+	for {
+		select {
+		case <-m.stopped:
+			return
+		case data := <-m.dataChan:
+			m.scans.Emit(data)
+		}
+	}
 }
 
 // SendTagRemoved broadcasts a tag removal event via the data channel.
@@ -226,10 +267,10 @@ func (m *Manager) SendTagRemoved(deviceID string, data TagRemovedData) error {
 
 	// Broadcast removal via data channel (Card: nil signals removal)
 	select {
-	case m.dataChan <- nfc.NFCData{Card: nil, Err: nil}:
-		log.Printf("[smartphone] Tag removed: device=%s, UID=%s", deviceID, data.UID)
+	case m.dataChan <- nfc.ScannedTag{Device: deviceID, Tag: nil}:
+		managerLog.Printf("Tag removed: device=%s, UID=%s", deviceID, data.UID)
 	default:
-		log.Printf("[smartphone] Data channel full, dropping tag removal for device %s", deviceID)
+		managerWarn.Printf("Data channel full, dropping tag removal for device %s", deviceID)
 	}
 
 	// Update heartbeat
@@ -266,7 +307,7 @@ func (m *Manager) Close() {
 	if m.cleanupTicker != nil {
 		m.cleanupTicker.Stop()
 	}
-	close(m.stopCleanup)
+	close(m.stopped)
 
 	// Drop the sessions first so their serve loops exit; each unregisters the
 	// device it owned on the way out.
@@ -284,13 +325,13 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	for deviceID, device := range m.devices {
 		if err := device.Close(); err != nil {
-			log.Printf("[smartphone] Error closing device %s: %v", deviceID, err)
+			managerFail.Printf("Error closing device %s: %v", deviceID, err)
 		}
 	}
 	m.devices = make(map[string]*Device)
 	m.mu.Unlock()
 
-	log.Printf("[smartphone] Manager closed")
+	managerLog.Printf("Manager closed")
 }
 
 // startCleanupRoutine starts a background goroutine to cleanup inactive devices.
@@ -302,7 +343,7 @@ func (m *Manager) startCleanupRoutine() {
 			select {
 			case <-m.cleanupTicker.C:
 				m.cleanupInactiveDevices()
-			case <-m.stopCleanup:
+			case <-m.stopped:
 				return
 			}
 		}
@@ -322,7 +363,7 @@ func (m *Manager) cleanupInactiveDevices() {
 	var stale []string
 	for deviceID, device := range m.devices {
 		if since := now.Sub(device.LastSeen()); since > m.inactivityTimeout {
-			log.Printf("[smartphone] Device silent for %v, dropping: %s", since, device.String())
+			managerWarn.Printf("Device silent for %v, dropping: %s", since, device.String())
 			stale = append(stale, deviceID)
 		}
 	}
@@ -335,7 +376,7 @@ func (m *Manager) cleanupInactiveDevices() {
 			continue
 		}
 		if err := m.UnregisterDevice(deviceID); err != nil {
-			log.Printf("[smartphone] Failed to unregister silent device %s: %v", deviceID, err)
+			managerFail.Printf("Failed to unregister silent device %s: %v", deviceID, err)
 		}
 	}
 }
@@ -374,8 +415,3 @@ func (m *Manager) notifyDeviceChange() {
 		// Channel full, skip (previous notification not yet consumed)
 	}
 }
-
-// RemoteDevices reports that this manager's devices are phones rather than
-// readers attached to this machine, so none of them is a candidate to be the
-// agent's own reader.
-func (m *Manager) RemoteDevices() bool { return true }

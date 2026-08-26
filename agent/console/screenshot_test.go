@@ -108,7 +108,7 @@ func TestScreenshotHarness(t *testing.T) {
 func seedLog(ring *logbuf.Ring) {
 	logger := log.New(ring, "", log.LstdFlags)
 	agentLog := log.New(ring, "[agent] ", log.LstdFlags)
-	unified := log.New(ring, "[unified] ", log.LstdFlags)
+	listener := log.New(ring, "[listener] ", log.LstdFlags)
 	device := log.New(ring, "[device] ", log.LstdFlags)
 	client := log.New(ring, "[client] ", log.LstdFlags)
 
@@ -117,9 +117,9 @@ func seedLog(ring *logbuf.Ring) {
 	logger.Print("[multi] Manager registered: hardware")
 	logger.Print("[multi] Manager registered: smartphone")
 	agentLog.Print("Auto-selected NFC device: ACS ACR1252U 01 00")
-	unified.Print("Starting NFC Agent server on port 9470 (device + client)...")
-	unified.Print("Listening on :9470 (TLS)")
-	unified.Print("mDNS service registered: _nfc-device._tcp on port 9470")
+	listener.Print("Starting NFC Agent server on port 9470 (device + client)...")
+	listener.Print("Listening on :9470 (TLS)")
+	listener.Print("mDNS service registered: _nfc-device._tcp on port 9470")
 	client.Print("Client connected: 8f3a1c2d (total: 1)")
 	device.Print("Device registered: Ned's iPhone (iOS 17.4)")
 	logger.Print("Warning: certificate does not cover 192.168.1.44; clients reaching the agent there cannot verify it")

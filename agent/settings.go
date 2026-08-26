@@ -26,7 +26,7 @@ type Preferences struct {
 	DevicePath string
 
 	// Port is the port the agent is set to serve on. A listener keeps the one
-	// it is bound on until it is restarted.
+	// it was built with.
 	Port int
 
 	RequirePairedDevice bool
@@ -107,8 +107,8 @@ func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
 	a.readerMode = mode
 	a.settingsMu.Unlock()
 
-	if reader := a.reader.Load(); reader != nil {
-		reader.SetMode(mode)
+	if readers := a.supervisor.Load(); readers != nil {
+		readers.SetMode(mode)
 	}
 	a.firePreferencesChanged()
 }
@@ -116,8 +116,8 @@ func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
 // CurrentReaderMode is the mode the reader is in, or the one the next reader
 // will start in while there is none.
 func (a *Agent) CurrentReaderMode() nfc.ReaderMode {
-	if reader := a.reader.Load(); reader != nil {
-		return reader.GetMode()
+	if readers := a.supervisor.Load(); readers != nil {
+		return readers.Mode()
 	}
 	a.settingsMu.RLock()
 	defer a.settingsMu.RUnlock()
@@ -141,8 +141,8 @@ func (a *Agent) SetCardTypeFilter(cardTypes []string) {
 func (a *Agent) CardTypeFilter() []string { return a.cardTypes.list() }
 
 // SetPinnedDevice records the reader the operator chose, empty for auto-detect.
-// Recording the choice does not start that reader: selecting one restarts it,
-// which is the explicit action's job.
+// It filters what the agent reports rather than choosing what is opened: every
+// reader the manager offers stays open.
 func (a *Agent) SetPinnedDevice(devicePath string) {
 	if a.CurrentPinnedDevice() == devicePath {
 		return
@@ -155,6 +155,26 @@ func (a *Agent) SetPinnedDevice(devicePath string) {
 	a.firePreferencesChanged()
 }
 
+// pinAdmits reports whether the pin lets this agent work with a source. It
+// decides both what the agent reports and what it operates on, so a client is
+// not offered a tag it cannot reach or handed one it was never shown.
+//
+// The pin is a filter rather than a lock: the readers stay open and a scan from
+// one the operator is not asking for is dropped, wherever it was read.
+//
+// Only readers are filtered. A device that reports its own scans, such as a
+// phone, is not one the agent chose to read from, so pinning a reader says
+// nothing about it.
+func (a *Agent) pinAdmits(device string) bool {
+	pinned := a.CurrentPinnedDevice()
+	if pinned == "" || device == "" || device == pinned {
+		return true
+	}
+
+	readers := a.supervisor.Load()
+	return readers == nil || !readers.Operates(device)
+}
+
 // CurrentPinnedDevice is the reader the operator chose, empty for auto-detect.
 func (a *Agent) CurrentPinnedDevice() string {
 	a.settingsMu.RLock()
@@ -162,8 +182,8 @@ func (a *Agent) CurrentPinnedDevice() string {
 	return a.pinnedDevice
 }
 
-// SetDevicePort records the port to serve on. The listener keeps the port it is
-// bound on until it is rebound, which ServingPort reports.
+// SetDevicePort records the port to serve on. A listener keeps the port it was
+// built with, so what is being served on is [ServerPlugin.Port].
 func (a *Agent) SetDevicePort(port int) {
 	if port <= 0 || port == a.DevicePort() {
 		return
@@ -176,12 +196,12 @@ func (a *Agent) SetDevicePort(port int) {
 	a.firePreferencesChanged()
 }
 
-// adoptReaderSettings hands a freshly built reader the preferences the agent
-// holds. Start creates the reader long after they were set, so without this a
-// read-only agent comes back from every restart able to write.
+// adoptReaderSettings hands the readers the preferences the agent holds. Start
+// opens them long after those were set, so without this a read-only agent comes
+// back from every restart able to write.
 func (a *Agent) adoptReaderSettings() {
-	reader := a.reader.Load()
-	if reader == nil {
+	readers := a.supervisor.Load()
+	if readers == nil {
 		return
 	}
 
@@ -189,8 +209,8 @@ func (a *Agent) adoptReaderSettings() {
 	mode, feedback := a.readerMode, a.readerFeedback
 	a.settingsMu.RUnlock()
 
-	reader.SetMode(mode)
-	reader.SetFeedback(feedback)
+	readers.SetMode(mode)
+	readers.SetFeedback(feedback)
 }
 
 // normalizeCardTypes drops blanks and duplicates and sorts what is left, so two

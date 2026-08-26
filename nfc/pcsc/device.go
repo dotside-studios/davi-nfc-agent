@@ -3,7 +3,6 @@ package pcsc
 import (
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -70,7 +69,7 @@ func newDevice(ctx scardContext, card scardCard, readerName string) (*device, er
 	// Get UID
 	uid, err := dev.getUID()
 	if err != nil {
-		log.Printf("Warning: could not get UID: %v", err)
+		pcscWarn.Printf("could not get UID: %v", err)
 	} else {
 		dev.uid = uid
 	}
@@ -135,7 +134,7 @@ func (d *device) startCardMonitor() {
 					continue
 				}
 				// Other errors may indicate reader disconnection
-				log.Printf("cardMonitor: error %v, treating as removal", err)
+				pcscWarn.Printf("cardMonitor: error %v, treating as removal", err)
 				select {
 				case d.cardRemoved <- struct{}{}:
 				default:

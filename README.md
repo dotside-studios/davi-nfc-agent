@@ -33,6 +33,9 @@ platform.
 - **Assembled from plugins**: One method registers a background component, a
   route and a tray entry. The listener and the pairing server are plugins
   themselves
+- **Subscribable**: Scans, lifecycle state, preferences, connected clients,
+  pairings and blocked origins are published as typed signals, so an embedding
+  program follows the agent without polling it
 - **Cross-platform**: Linux, macOS and Windows
 
 ## Supported Devices

@@ -3,6 +3,7 @@ package agent
 import (
 	"log"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
@@ -178,6 +179,7 @@ func TestSetupPassesOptionsThroughToTheAgent(t *testing.T) {
 	opts.DevicePort = 9487
 	opts.ReaderFeedback = true
 	opts.RequirePairedDevice = true
+	opts.AllowedOrigins = "console.example, shop.example"
 	opts.Logs = logbuf.New(16)
 
 	rt, err := Setup(opts, nfc.NewMockManager())
@@ -212,5 +214,12 @@ func TestSetupPassesOptionsThroughToTheAgent(t *testing.T) {
 	}
 	if got := a.ConfigDir(); got != opts.ConfigDir {
 		t.Errorf("config dir = %q, want %q", got, opts.ConfigDir)
+	}
+
+	// The allowlist is the server plugin's, so Setup parses what the flags
+	// named and leaves it on the Runtime for the plugin to serve behind.
+	want := []string{"console.example", "shop.example"}
+	if got := rt.AllowedOrigins; !slices.Equal(got, want) {
+		t.Errorf("Runtime.AllowedOrigins = %v, want %v", got, want)
 	}
 }

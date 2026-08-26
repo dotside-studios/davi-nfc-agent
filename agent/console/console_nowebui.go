@@ -25,6 +25,7 @@ type Config struct {
 	Servers *agent.ServerPlugin
 	Pairing *agent.PairingPlugin
 	Trust   *agent.TrustPlugin
+	Quit    func()
 }
 
 // New reports that there is no console in this build.
@@ -36,12 +37,10 @@ func (s *Server) Routes() http.Handler { return nil }
 func (s *Server) Endpoints() []agent.Endpoint { return nil }
 func (s *Server) Assets() http.Handler        { return nil }
 
-// NotifyChange is what the origin and device stores call on every change.
+// NotifyChange is what the agent's changes call to wake an open page.
 func (s *Server) NotifyChange() {}
 
 // ConsoleURL exists so the tray compiles; this build has no console to open.
 func (s *Server) ConsoleURL() (string, error) {
 	return "", errors.New("console: built with -tags nowebui")
 }
-
-func (s *Server) AttachTray(Tray) {}

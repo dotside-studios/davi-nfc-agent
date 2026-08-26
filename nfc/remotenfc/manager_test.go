@@ -208,17 +208,17 @@ func TestManagerOpenDevice(t *testing.T) {
 	}
 }
 
-func TestManagerListDevices(t *testing.T) {
+func TestManagerDevices(t *testing.T) {
 	m := NewManager(30 * time.Second)
 	defer m.Close()
 
 	// Initially empty
-	devices, err := m.ListDevices()
+	devices, err := m.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() failed: %v", err)
+		t.Errorf("Devices() failed: %v", err)
 	}
 	if len(devices) != 0 {
-		t.Errorf("ListDevices() should return empty list, got %d devices", len(devices))
+		t.Errorf("Devices() should return empty list, got %d devices", len(devices))
 	}
 
 	// Register multiple devices
@@ -234,18 +234,21 @@ func TestManagerListDevices(t *testing.T) {
 		}
 	}
 
-	devices, err = m.ListDevices()
+	devices, err = m.Devices()
 	if err != nil {
-		t.Errorf("ListDevices() failed: %v", err)
+		t.Errorf("Devices() failed: %v", err)
 	}
 	if len(devices) != 3 {
-		t.Errorf("ListDevices() should return 3 devices, got %d", len(devices))
+		t.Errorf("Devices() should return 3 devices, got %d", len(devices))
 	}
 
-	// Check format
+	// Named by identity, and not a device this agent opens and reads from.
 	for _, device := range devices {
-		if len(device) < len("smartphone:") {
-			t.Errorf("Device string should have 'smartphone:' prefix, got: %s", device)
+		if device.Path == "" {
+			t.Error("a device was listed with no identity")
+		}
+		if device.Capabilities.CanPoll {
+			t.Errorf("device %s was offered as a reader to open", device.Path)
 		}
 	}
 }
@@ -460,5 +463,54 @@ func TestPlatformDescribesTheDeviceRatherThanAdmittingIt(t *testing.T) {
 	// A device name is still required: it names the row an operator sees.
 	if _, err := m.RegisterDevice(DeviceRegistrationRequest{Platform: "ios"}); err == nil {
 		t.Error("RegisterDevice with no device name was admitted, want an error")
+	}
+}
+
+// A phone's scan names the phone, so a consumer knows which device presented
+// the tag without asking the tag what it came from.
+func TestAPhoneScanNamesItsDevice(t *testing.T) {
+	m := NewManager(time.Minute)
+	defer m.Close()
+
+	device, err := m.RegisterDevice(DeviceRegistrationRequest{
+		DeviceName: "Phone",
+		Platform:   "android",
+		AppVersion: "1.0.0",
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
+	}
+
+	seen := make(chan nfc.ScannedTag, 4)
+	m.Scans().Connect(func(scan nfc.ScannedTag) {
+		select {
+		case seen <- scan:
+		default:
+		}
+	})
+
+	if err := m.SendTagData(device.DeviceID(), TagData{
+		DeviceID:   device.DeviceID(),
+		UID:        "04A1B2C3",
+		Technology: "ISO14443A",
+		Type:       "NTAG215",
+		ScannedAt:  time.Now(),
+	}); err != nil {
+		t.Fatalf("SendTagData: %v", err)
+	}
+
+	select {
+	case got := <-seen:
+		if got.Device != device.DeviceID() {
+			t.Errorf("the scan names device %q, want %q", got.Device, device.DeviceID())
+		}
+		if got.Tag == nil {
+			t.Fatal("the scan carries no tag, want the one the device reported")
+		}
+		if uid := got.Tag.UID(); uid != "04:A1:B2:C3" {
+			t.Errorf("the scan carries tag %q, want the reported UID normalized", uid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the scan never reached a subscriber")
 	}
 }

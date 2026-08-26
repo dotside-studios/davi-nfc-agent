@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"net/http"
 	"sync/atomic"
 )
@@ -13,7 +12,7 @@ import (
 // remotenfc.ServerOptions.Authenticate, so the check lives inside the endpoint
 // rather than depending on whoever mounts it remembering to wrap it.
 type DeviceAuth struct {
-	apiSecret     string
+	secret        func() string
 	tokenVerifier TokenVerifier
 
 	// requirePaired is read on every upgrade and settable while the agent runs,
@@ -21,12 +20,22 @@ type DeviceAuth struct {
 	requirePaired atomic.Bool
 }
 
-// NewDeviceAuth builds the gate. An empty apiSecret means no shared secret is
-// required, which is the development default.
-func NewDeviceAuth(apiSecret string, verifier TokenVerifier, requirePaired bool) *DeviceAuth {
-	a := &DeviceAuth{apiSecret: apiSecret, tokenVerifier: verifier}
+// NewDeviceAuth builds the gate. secret is read on every request, so rotating
+// it takes effect without rebuilding what checks it; a nil secret, or one
+// returning empty, requires no shared secret, which is the development
+// default.
+func NewDeviceAuth(secret func() string, verifier TokenVerifier, requirePaired bool) *DeviceAuth {
+	a := &DeviceAuth{secret: secret, tokenVerifier: verifier}
 	a.requirePaired.Store(requirePaired)
 	return a
+}
+
+// apiSecret is the secret required right now.
+func (a *DeviceAuth) apiSecret() string {
+	if a.secret == nil {
+		return ""
+	}
+	return a.secret()
 }
 
 // SetRequirePaired turns the paired-device requirement on or off.
@@ -38,18 +47,23 @@ func (a *DeviceAuth) RequirePaired() bool { return a.requirePaired.Load() }
 // Check admits or rejects one request, writing the rejection itself. This is
 // the form a driver takes, so the credential is checked inside the endpoint
 // rather than only by whoever remembered to wrap it.
-func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) bool {
+//
+// It names the paired device it admitted, so the driver registers it under the
+// identity it paired with rather than minting one per connection.
+func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool) {
 	if a.requirePaired.Load() {
-		if !CheckPairedDevice(w, r, a.tokenVerifier) {
-			log.Printf("[device] Connection rejected from %s: no paired-device credential", r.RemoteAddr)
-			return false
+		id, ok := CheckPairedDevice(w, r, a.tokenVerifier)
+		if !ok {
+			deviceWarn.Printf("Connection rejected from %s: no paired-device credential", r.RemoteAddr)
+			return "", false
 		}
-		return true
+		return id, true
 	}
 
-	if !CheckAuth(w, r, a.apiSecret, a.tokenVerifier) {
-		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
-		return false
+	id, ok := CheckAuth(w, r, a.apiSecret(), a.tokenVerifier)
+	if !ok {
+		deviceWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
+		return "", false
 	}
-	return true
+	return id, true
 }

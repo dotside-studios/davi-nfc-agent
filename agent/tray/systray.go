@@ -1,11 +1,7 @@
 package tray
 
 import (
-	"log"
-	"time"
-
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/agent/console"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -21,7 +17,6 @@ const readerSlotCount = 12
 type App struct {
 	agent         *agent.Agent
 	initialDevice string
-	console       *console.Server // nil if the control center is not built in
 
 	// menu is the tray itself. Items declare their own click handlers as they
 	// are added, so there is no central event loop to keep in step with them.
@@ -46,10 +41,6 @@ type App struct {
 	mRevokeAllDevices *traymenu.Item
 	mRequirePaired    *traymenu.Item
 	pairedDevices     *traymenu.List[string]
-
-	// Origin allowlist menu items
-	mOriginAllowAny *traymenu.Item
-	origins         *traymenu.List[originRow]
 
 	// Reader feedback toggle
 	mReaderFeedback *traymenu.Item
@@ -103,10 +94,8 @@ func (s *App) Run() {
 // onReady is called when the systray is ready
 func (s *App) onReady() {
 	s.setupUI()
+	s.subscribe()
 	s.autoStartAgent()
-	s.startCardInfoUpdater()
-	s.startOriginWatcher()
-	s.startDeviceWatcher()
 }
 
 // onExit is called when the systray is exiting
@@ -152,7 +141,6 @@ func (s *App) setupUI() {
 	s.menu.AddSeparator()
 
 	s.setupDevicesMenu()
-	s.setupOriginsMenu()
 
 	// The menus open on what the agent is set to, which is not always the
 	// default: what the launcher set was decided before the tray existed.
@@ -228,67 +216,18 @@ func (s *App) setupCardFilterMenu() {
 // the tray already shows a start that did not happen.
 func (s *App) activatePlugins() {
 	if err := s.agent.Activate(s.menu); err != nil {
-		log.Printf("[systray] %v", err)
+		trayFail.Printf("%v", err)
 	}
 }
 
 // autoStartAgent starts the agent automatically
 func (s *App) autoStartAgent() {
-	// Set up device change listener
-	s.setupDeviceChangeListener()
-
 	go func() {
 		// Start with initial device (may be empty for auto-discovery)
-		if err := s.agent.Start(s.initialDevice); err == nil {
-			s.showRunning()
-		} else {
+		if err := s.agent.Start(s.initialDevice); err != nil {
 			s.showStopped("Failed to Start")
 		}
 		s.updateDeviceList()
-	}()
-}
-
-// setupDeviceChangeListener sets up automatic device list refresh on device changes
-func (s *App) setupDeviceChangeListener() {
-	notifier, ok := s.agent.Manager().(nfc.DeviceChangeNotifier)
-	if !ok {
-		return
-	}
-
-	go func() {
-		for range notifier.DeviceChanges() {
-			log.Printf("[systray] Device change detected, refreshing device list")
-			s.updateDeviceList()
-		}
-	}()
-}
-
-// startCardInfoUpdater starts a goroutine to update card information
-func (s *App) startCardInfoUpdater() {
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		lastUID := ""
-		lastType := ""
-
-		for range ticker.C {
-			var card *nfc.Card
-			if s.agent.ClientServer != nil {
-				card = s.agent.ClientServer.GetLastCard()
-			}
-
-			uid, cardType := s.getCardInfo(card)
-
-			if uid != lastUID {
-				s.updateCardUID(uid)
-				lastUID = uid
-			}
-
-			if cardType != lastType {
-				s.updateCardType(cardType)
-				lastType = cardType
-			}
-		}
 	}()
 }
 
@@ -301,15 +240,11 @@ func (s *App) handleStartAgent() {
 		return
 	}
 
-	s.showRunning()
 	s.updateDeviceList() // Refresh to show current device
 }
 
 // StopAgent stops the agent
-func (s *App) StopAgent() {
-	s.agent.Stop()
-	s.showStopped("Stopped")
-}
+func (s *App) StopAgent() { s.agent.Stop() }
 
 // showRunning puts the menu into the state of a running agent: addresses that
 // mean something, and Stop as the control that can be clicked.
@@ -339,7 +274,7 @@ func (s *App) handleModeSwitch(mode nfc.ReaderMode) {
 	// From the agent, not from the click: a mode the launcher holds leaves the
 	// tick where it was rather than showing a mode the reader is not in.
 	s.SyncPreferencesToMenu(s.agent.Preferences())
-	log.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
+	trayLog.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
 }
 
 // modeName is the label a reader mode goes by in the menu.
@@ -363,14 +298,10 @@ func (s *App) applyCardTypes(types []string) {
 
 // SwitchDevice switches to a different NFC device
 func (s *App) SwitchDevice(deviceName string) {
-	// Restart agent with new device
-	s.agent.Stop()
-	if err := s.agent.Start(deviceName); err == nil {
-		s.showRunning()
-	} else {
-		s.showStopped("Failed to Start")
-	}
-
+	// The pin is a filter, so this is a preference change rather than a
+	// restart: every reader goes on being read, and the clients connected stay
+	// connected while the operator changes their mind.
+	s.agent.SetPinnedDevice(deviceName)
 	s.markCurrentReader()
 }
 
@@ -386,19 +317,16 @@ func (s *App) markCurrentReader() {
 }
 
 // updateDeviceList refreshes the list of available devices
-func (s *App) updateDeviceList() {
-	devices, err := s.agent.Manager().ListDevices()
-	if err != nil {
-		log.Printf("Error listing devices: %v", err)
-		return
-	}
+func (s *App) updateDeviceList() { s.applyReaders(s.agent.Readers()) }
 
+// applyReaders redraws the reader picker from the readers the agent reports.
+func (s *App) applyReaders(devices []string) {
 	// Get current device from agent (source of truth)
 	currentDevice := s.agent.CurrentDevicePath()
 
 	// If agent is running but no device selected, auto-select first available
-	if s.agent.Reader() != nil && currentDevice == "" && len(devices) > 0 {
-		log.Printf("[systray] Auto-selecting discovered device: %s", devices[0])
+	if s.agent.Running() && currentDevice == "" && len(devices) > 0 {
+		trayLog.Printf("Auto-selecting discovered device: %s", devices[0])
 		s.SwitchDevice(devices[0])
 		currentDevice = s.agent.CurrentDevicePath()
 	}
@@ -414,7 +342,7 @@ func (s *App) updateDeviceList() {
 	}
 
 	if dropped := s.readers.Set(rows); dropped > 0 {
-		log.Printf("[systray] %d more readers are attached than the menu can show", dropped)
+		trayWarn.Printf("%d more readers are attached than the menu can show", dropped)
 	}
 }
 
@@ -434,15 +362,6 @@ func (s *App) updateStatus(status string) {
 		// Starting or other states
 		s.menu.SetIcon(iconData)
 	}
-}
-
-// getCardInfo extracts UID and type from a card
-func (s *App) getCardInfo(card *nfc.Card) (uid, cardType string) {
-	if card != nil {
-		uid = card.UID
-		cardType = card.Type
-	}
-	return
 }
 
 // updateCardUID updates the card UID display

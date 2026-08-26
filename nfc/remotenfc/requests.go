@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -164,6 +163,23 @@ func (m *Manager) addSession(deviceID string, conn *wsconn.SafeConn) {
 	m.sessionConn[conn] = deviceID
 }
 
+// removeSessionFor drops a device's session when it is still this connection's,
+// reporting whether it did. A device that comes back replaces its own session,
+// which the connection it replaced must not then remove.
+func (m *Manager) removeSessionFor(conn *wsconn.SafeConn, deviceID string) bool {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
+	if m.sessions[deviceID] != conn {
+		delete(m.sessionConn, conn)
+		return false
+	}
+
+	delete(m.sessionConn, conn)
+	delete(m.sessions, deviceID)
+	return true
+}
+
 func (m *Manager) removeSession(deviceID string) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
@@ -294,7 +310,7 @@ func (m *Manager) handleDeviceResponse(deviceID string, req protocol.WebSocketRe
 	m.pendingMu.Unlock()
 
 	if !ok {
-		log.Printf("[device] Unmatched %s from %s: %s", req.Type, deviceID, requestID)
+		deviceWarn.Printf("Unmatched %s from %s: %s", req.Type, deviceID, requestID)
 		return nil
 	}
 

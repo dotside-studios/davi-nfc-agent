@@ -2,7 +2,6 @@ package pcsc
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
@@ -83,7 +82,7 @@ func (d *device) Signal(s nfc.Signal) error {
 	transmitErr := d.signalOverTransmit(cmd)
 	if transmitErr == nil {
 		d.feedback = feedbackTransmit
-		log.Printf("Reader %s: sending LED and buzzer commands over the card connection, because this machine's PC/SC stack would not carry them as escape commands (%v)", d.readerName, controlErr)
+		pcscLog.Printf("Reader %s: sending LED and buzzer commands over the card connection, because this machine's PC/SC stack would not carry them as escape commands (%v)", d.readerName, controlErr)
 		return nil
 	}
 

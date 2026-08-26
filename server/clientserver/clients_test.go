@@ -14,7 +14,7 @@ import (
 func dial(t *testing.T, s *Server, origin string) *websocket.Conn {
 	t.Helper()
 
-	ts := httptest.NewServer(http.HandlerFunc(s.ServeWS))
+	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
 
 	header := http.Header{}
@@ -45,10 +45,14 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatal("condition not met within 2s")
 }
 
-func newTestServer(onChange func()) *Server {
+func newTestServer(onChange func(clients int)) *Server {
 	// No origin policy and no secret: the test dials from an ephemeral port, and
 	// what is under test is the session bookkeeping, not admission.
-	return New(Config{AllowedOrigins: []string{"*"}, OnChange: onChange})
+	s := New(Config{AllowedOrigins: []string{"*"}})
+	if onChange != nil {
+		s.OnClientsChange(onChange)
+	}
+	return s
 }
 
 func TestClientsReportsConnectionDetail(t *testing.T) {
@@ -153,20 +157,26 @@ func TestWriteAndLockAreCountedPerClient(t *testing.T) {
 	}
 }
 
-func TestOnChangeFiresForConnectAndDisconnect(t *testing.T) {
-	calls := make(chan struct{}, 8)
-	s := newTestServer(func() { calls <- struct{}{} })
+func TestOnChangeReportsTheCountOnConnectAndDisconnect(t *testing.T) {
+	calls := make(chan int, 8)
+	s := newTestServer(func(clients int) { calls <- clients })
 
 	dial(t, s, "https://app.example.com")
 	select {
-	case <-calls:
+	case got := <-calls:
+		if got != 1 {
+			t.Errorf("OnChange reported %d clients on connect, want 1", got)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnChange did not fire on connect")
 	}
 
 	s.Disconnect(s.Clients()[0].ID)
 	select {
-	case <-calls:
+	case got := <-calls:
+		if got != 0 {
+			t.Errorf("OnChange reported %d clients on disconnect, want 0", got)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnChange did not fire on disconnect")
 	}

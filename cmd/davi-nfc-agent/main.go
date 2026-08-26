@@ -1,16 +1,12 @@
 // Package main wires the agent together and runs it behind a system tray.
 //
-// It is deliberately thin. The agent itself lives in package agent, the control
-// center in agent/console and the tray in agent/tray; this command is the only
-// place that knows about all three, the one place that picks an NFC backend,
-// and the one place that touches process-wide state: the flag set and the
-// standard logger. Keeping those here is what lets the agent be embedded in a
-// program with a command line and a logger of its own.
+// It is the only place that knows about the agent, the console and the tray at
+// once, the one that picks an NFC backend, and the one that touches the flag
+// set and the standard logger. See docs/custom-builds.md.
 package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +22,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -34,36 +32,27 @@ func main() {
 
 	if showVersion {
 		fmt.Println(buildinfo.BuildInfo())
-		// Which PC/SC backend this binary was built with; the first thing to
-		// know when a reader is not being detected.
+		// The first thing to know when a reader is not being detected.
 		fmt.Printf("  PC/SC: %s\n", pcsc.Backend)
 		os.Exit(0)
 	}
 
-	// Capture log output in memory before anything else logs. Started from a
-	// desktop launcher there is no stderr to read, so without this the agent's
-	// diagnostics are discarded as they are produced. Installed here, before
-	// Setup, so the startup sequence lands in the ring the console reads.
+	// Before anything else logs: started from a desktop launcher there is no
+	// stderr to read, and the console reads this ring.
+	//
+	// Install names it to the packages reporting on their own channels, and
+	// Options hands the same ring to the agent for its own log and its
+	// plugins'. The standard logger keeps stderr alone: a line that reached the
+	// ring both ways would be shown twice, at two levels.
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
-	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
+	logbuf.Install(opts.Logs)
 
-	// The driver serving phones. Built here, because this is what decides the
-	// agent should serve them at all: it is handed over as an interface, a
-	// channel of scans and a handler, so the agent names no device protocol.
+	// The driver serving phones. What it scans and what it holds reach the
+	// agent through the manager below; its endpoint is served alongside the
+	// clients, below.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-	opts.RemoteOps = devices
-	opts.RemoteScans = devices.Data()
-	opts.DeviceEndpoint = func(o agent.DeviceEndpointOptions) http.Handler {
-		return devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         o.Authenticate,
-			CheckOrigin:          o.CheckOrigin,
-			AllowTagModification: o.AllowTagModification,
-			PublicKeyPin:         o.PublicKeyPin,
-		})
-	}
 
-	// Hardware readers and phones behind one manager, which is what the agent
-	// opens its reader from.
+	// Hardware readers and phones behind one manager.
 	manager := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
@@ -75,43 +64,60 @@ func main() {
 	}
 
 	// The certificate this agent serves, and the entry that makes browsers
-	// accept it. It adds the tray entry; what the certificate is for goes to
-	// each plugin as the narrow type that plugin needs.
+	// accept it.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
 
-	// The listener and everything on it. Setup does not build one: what this
-	// agent serves is this program's decision, and registering no server
-	// plugin at all leaves an agent that drives the reader and serves nothing.
-	// Setup already resolved which certificate to serve, the one named on the
-	// command line or the one it manages.
+	// The listener and everything on it. Setup resolved which certificate to
+	// serve; registering no server plugin leaves an agent that serves nothing.
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
+
+	// The two halves of /ws, both built here. The agent decides who is admitted
+	// and what is allowed; each protocol decides what its own side may say.
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeClient: clientserver.New(clientserver.Config{
+			APISecret:            rt.Agent.APISecret,
+			OriginPolicy:         servers.OriginPolicy(),
+			TokenVerifier:        rt.Agent.TokenVerifier(),
+			Tags:                 rt.Agent,
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			Scans:                &rt.Agent.Events().Tag,
+			ReaderStatus:         &rt.Agent.Events().Reader,
+		}),
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that
-	// hand out its address and PIN. The agent does not hold one, so this is
-	// where it is built and where it is handed to the console.
+	// hand out its address and PIN.
 	var pairing *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
 		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
 	}
 
+	app := tray.New(rt)
+
 	// The control center, served from the same listener. Nil in a -tags nowebui
-	// build, where there is none compiled in and Endpoints is empty, so this
-	// program needs no build tag of its own.
+	// build, where Endpoints is empty.
 	controlCenter := console.New(console.Config{
 		Agent:   rt.Agent,
 		Logs:    rt.Logs,
 		Servers: servers,
 		Pairing: pairing,
 		Trust:   trust,
+		Quit:    app.Quit,
 	})
 	servers.Add(controlCenter.Endpoints()...)
 
 	// The server goes on first: it publishes the listener the rest mount on,
-	// and plugins are activated in the order they were added, which is also the
-	// order their entries appear in the tray.
+	// and activation order is the order their entries appear in the tray.
 	plugins := []agent.Plugin{servers}
 	if pairing != nil {
 		plugins = append(plugins, pairing)
@@ -122,16 +128,11 @@ func main() {
 		log.Fatalf("Failed to register a plugin: %v", err)
 	}
 
-	app := tray.New(rt)
-	app.AttachConsole(controlCenter)
-
-	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		// The pairing server is a component the plugin registered, so the
-		// tray's quit path takes it down with everything else.
+		// Quitting the tray stops the agent and every component with it.
 		app.Quit()
 	}()
 

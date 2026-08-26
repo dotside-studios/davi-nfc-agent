@@ -126,22 +126,57 @@ func TestUnparseableLineIsKeptWhole(t *testing.T) {
 	}
 }
 
-func TestInferLevel(t *testing.T) {
-	cases := []struct {
-		message string
-		want    Level
-	}{
-		{"Server started on port 9470", LevelInfo},
-		{"Warning: Auto-TLS failed", LevelError}, // "failed" outranks "warning"
-		{"Warning: no devices are paired yet", LevelWarn},
-		{"Error listing NFC devices", LevelError},
-		{"origin rejected: evil.example.com", LevelError},
-		{"retrying write after transient failure", LevelError},
+// A line's level is where its logger writes, not what its text says. It used to
+// be guessed by looking for words like "failed" anywhere in the formatted line,
+// so a config directory or device name carrying one read as an error.
+func TestALinesLevelIsWhereItWasWritten(t *testing.T) {
+	r := New(16)
+
+	errors := log.New(r.At(LevelError), "[backups] ", 0)
+	warnings := log.New(r.At(LevelWarn), "[backups] ", 0)
+	plain := log.New(r, "[backups] ", 0)
+
+	errors.Print("could not reach the store")
+	warnings.Print("the store is nearly full")
+	plain.Print("a scan from device ErrorProneReader7 failed to be a failure")
+
+	got := r.Entries()
+	if len(got) != 3 {
+		t.Fatalf("the ring holds %d entries, want 3", len(got))
 	}
-	for _, tc := range cases {
-		if got := inferLevel(tc.message); got != tc.want {
-			t.Errorf("inferLevel(%q) = %q, want %q", tc.message, got, tc.want)
+	want := []Level{LevelError, LevelWarn, LevelInfo}
+	for i, level := range want {
+		if got[i].Level != level {
+			t.Errorf("entry %d (%q) is %q, want %q", i, got[i].Message, got[i].Level, level)
 		}
+	}
+}
+
+// Each leveled writer buffers its own partial line, so a logger that ends
+// mid-line does not hand its tail to whatever writes next.
+func TestAPartialLineKeepsItsOwnLevel(t *testing.T) {
+	r := New(16)
+	errors, info := r.At(LevelError), r.At(LevelInfo)
+
+	if _, err := errors.Write([]byte("half an error")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := info.Write([]byte("a whole info line\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := errors.Write([]byte(" and its other half\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got := r.Entries()
+	if len(got) != 2 {
+		t.Fatalf("the ring holds %v, want two entries", got)
+	}
+	if got[0].Level != LevelInfo || got[0].Message != "a whole info line" {
+		t.Errorf("first entry is %q at %q, want the info line", got[0].Message, got[0].Level)
+	}
+	if got[1].Level != LevelError || got[1].Message != "half an error and its other half" {
+		t.Errorf("second entry is %q at %q, want the error rejoined", got[1].Message, got[1].Level)
 	}
 }
 

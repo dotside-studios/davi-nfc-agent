@@ -73,10 +73,10 @@ import "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 manager := pcsc.NewManager()
 
 // List available NFC readers
-devices, err := manager.ListDevices()
+devices, err := manager.Devices()
 
 // Open a device
-device, err := manager.OpenDevice(devices[0])
+device, err := manager.OpenDevice(devices[0].Path)
 defer device.Close()
 ```
 
@@ -133,7 +133,7 @@ if fb, ok := device.(nfc.FeedbackDevice); ok {
 }
 ```
 
-`NFCReader.SetFeedback(true)` has the reader signal its own reads, writes and
+`Supervisor.SetFeedback(true)` has the readers signal their own reads, writes and
 locks. The signal plays in the background and a reader that cannot show it
 reports a not-supported error, so nothing about the operation changes.
 
@@ -287,8 +287,8 @@ import (
 func main() {
     // Initialize manager and device
     manager := pcsc.NewManager()
-    devices, _ := manager.ListDevices()
-    device, _ := manager.OpenDevice(devices[0])
+    devices, _ := manager.Devices()
+    device, _ := manager.OpenDevice(devices[0].Path)
     defer device.Close()
 
     // Get tags
@@ -369,8 +369,8 @@ if ultralight, ok := tag.(*nfc.UltralightTag); ok {
 
 ```go
 manager := pcsc.NewManager()
-devices, _ := manager.ListDevices()
-device, _ := manager.OpenDevice(devices[0])
+devices, _ := manager.Devices()
+device, _ := manager.OpenDevice(devices[0].Path)
 defer device.Close()
 
 for {

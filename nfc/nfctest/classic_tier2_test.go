@@ -48,7 +48,7 @@ func TestClassicEmulator_CustomKeyAuthentication(t *testing.T) {
 	}
 }
 
-// TestPipeline_ClassicCustomKeysThroughReader verifies NFCReader.SetClassicKeys
+// TestPipeline_ClassicCustomKeysThroughReader verifies deviceReader.SetClassicKeys
 // is injected into the tag so a non-default-keyed card can be written and
 // verified through the full reader pipeline.
 func TestPipeline_ClassicCustomKeysThroughReader(t *testing.T) {
@@ -59,7 +59,7 @@ func TestPipeline_ClassicCustomKeysThroughReader(t *testing.T) {
 	reader := NewEmulatedReader(t, card)
 	reader.SetClassicKeys([][]byte{custom})
 
-	result, err := reader.WriteMessageWithResult(textMessage("custom keyed"),
+	result, err := reader.WriteMessage(textMessage("custom keyed"),
 		nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("write with custom keys: %v", err)
@@ -77,7 +77,7 @@ func TestPipeline_ClassicForceInitializeFormatsBlankCard(t *testing.T) {
 	card := Classic1K("04112233")
 	reader := NewEmulatedReader(t, card)
 
-	result, err := reader.WriteMessageWithResult(textMessage("formatted"),
+	result, err := reader.WriteMessage(textMessage("formatted"),
 		nfc.WriteOptions{Overwrite: true, Index: -1, ForceInitialize: true})
 	if err != nil {
 		t.Fatalf("force-initialize write: %v", err)

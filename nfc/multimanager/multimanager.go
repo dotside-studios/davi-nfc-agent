@@ -3,10 +3,10 @@ package multimanager
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -22,11 +22,14 @@ type MultiManager struct {
 	stopForward      chan struct{}          // Stop channel forwarding
 	closeOnce        sync.Once              // Close is idempotent
 
-	// listErrMu guards lastListErr, which holds the last ListDevices error
-	// reported per manager so a persistent one is logged once rather than on
-	// every poll. ListDevices is polled continuously by the tray, the console
-	// and the device watcher, so an unavailable reader would otherwise be the
-	// only thing in the log.
+	// scans is every child's scans as one signal, so whatever consumes them
+	// subscribes here rather than to each manager it happens to know about.
+	// Raw, as the children report them: reading the tag is the supervisor's.
+	scans event.Signal[nfc.ScannedTag]
+
+	// listErrMu guards lastListErr, the last listing error reported per manager,
+	// so a persistent one is logged once rather than on every poll. The tray,
+	// the console and the device watcher all poll the list.
 	listErrMu   sync.Mutex
 	lastListErr map[string]string
 }
@@ -56,23 +59,27 @@ func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 
 	for _, entry := range entries {
 		if entry.Name == "" || entry.Manager == nil {
-			log.Printf("[multi] Skipping invalid manager entry: name=%s, manager=%v", entry.Name, entry.Manager)
+			multiWarn.Printf("Skipping invalid manager entry: name=%s, manager=%v", entry.Name, entry.Manager)
 			continue
 		}
 
 		if _, exists := mm.managers[entry.Name]; exists {
-			log.Printf("[multi] Skipping duplicate manager: %s", entry.Name)
+			multiWarn.Printf("Skipping duplicate manager: %s", entry.Name)
 			continue
 		}
 
 		mm.managers[entry.Name] = entry.Manager
 		mm.managerOrder = append(mm.managerOrder, entry.Name)
-		log.Printf("[multi] Manager registered: %s", entry.Name)
+		multiLog.Printf("Manager registered: %s", entry.Name)
 
 		// Start forwarding device changes from child managers
 		if notifier, ok := entry.Manager.(nfc.DeviceChangeNotifier); ok {
 			go mm.forwardDeviceChanges(notifier.DeviceChanges())
 		}
+
+		// A child that reports scans reports them through here. No goroutine:
+		// the child publishes on its own, and this passes it on.
+		nfc.OnScan(entry.Manager, mm.scans.Emit)
 	}
 
 	return mm
@@ -82,25 +89,6 @@ func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 func (mm *MultiManager) GetManager(name string) (nfc.Manager, bool) {
 	manager, exists := mm.managers[name]
 	return manager, exists
-}
-
-// RemoteDevice reports whether a device path names one held by a manager whose
-// devices are remote, meaning a phone rather than a reader attached to this
-// machine. It answers from the path's manager prefix, so a device that is not
-// currently connected is still recognized for what it is.
-func (mm *MultiManager) RemoteDevice(devicePath string) bool {
-	name, _, found := strings.Cut(devicePath, ":")
-	if !found {
-		return false
-	}
-
-	manager, exists := mm.managers[name]
-	if !exists {
-		return false
-	}
-
-	remote, ok := manager.(nfc.RemoteManager)
-	return ok && remote.RemoteDevices()
 }
 
 // OpenDevice opens a device using the appropriate manager.
@@ -154,55 +142,39 @@ func (mm *MultiManager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	return nil, fmt.Errorf("no device found: %s", deviceStr)
 }
 
-// ListDevices aggregates device lists from all managers.
-// Each device is prefixed with its manager name for disambiguation.
-// Errors from individual managers are logged but do not fail the overall operation.
-func (mm *MultiManager) ListDevices() ([]string, error) {
-	return mm.list(false)
-}
+// Devices aggregates what every manager offers, prefixing each path with the
+// manager it came from and carrying the child's description through unchanged.
+//
+// A manager that cannot list is logged and left out: one unavailable backend
+// must not hide the others.
+func (mm *MultiManager) Devices() ([]nfc.DeviceListing, error) {
+	var all []nfc.DeviceListing
 
-// ListReaders returns only the devices that can serve as this agent's reader,
-// leaving out the ones held by a manager whose devices are remote. A phone
-// reports its scans over the device bridge and is never opened as a reader, so
-// listing one as a candidate offers a choice that can only fail.
-func (mm *MultiManager) ListReaders() ([]string, error) {
-	return mm.list(true)
-}
-
-func (mm *MultiManager) list(readersOnly bool) ([]string, error) {
-	var allDevices []string
-
-	// In registration order. The result picks the agent's reader when none is
-	// pinned, so map order would let that vary between runs.
+	// In registration order: map order would vary between runs.
 	for _, name := range mm.managerOrder {
-		manager := mm.managers[name]
-
-		if readersOnly {
-			if remote, ok := manager.(nfc.RemoteManager); ok && remote.RemoteDevices() {
-				continue
-			}
-		}
-
-		devices, err := manager.ListDevices()
+		listings, err := mm.managers[name].Devices()
 		if err != nil {
 			mm.logListError(name, err)
 			continue
 		}
 		mm.clearListError(name)
 
-		// Prepend manager name to each device (if not already prefixed)
-		for _, device := range devices {
-			if !strings.Contains(device, ":") {
-				// No prefix - add manager name
-				allDevices = append(allDevices, fmt.Sprintf("%s:%s", name, device))
-			} else {
-				// Already prefixed (or contains colon) - keep as-is
-				allDevices = append(allDevices, device)
-			}
+		for _, listing := range listings {
+			listing.Path = qualify(name, listing.Path)
+			all = append(all, listing)
 		}
 	}
 
-	return allDevices, nil
+	return all, nil
+}
+
+// qualify prefixes a path with the manager holding it, leaving an already
+// qualified one alone.
+func qualify(manager, path string) string {
+	if strings.Contains(path, ":") {
+		return path
+	}
+	return fmt.Sprintf("%s:%s", manager, path)
 }
 
 // Close stops forwarding and closes every manager that can be closed.
@@ -216,12 +188,107 @@ func (mm *MultiManager) Close() {
 
 		for name, manager := range mm.managers {
 			if closer, ok := manager.(interface{ Close() }); ok {
-				log.Printf("[multi] Closing manager: %s", name)
+				multiLog.Printf("Closing manager: %s", name)
 				closer.Close()
 			}
 		}
 	})
 }
+
+// TagOn reports the tag a device is holding, asking the child managers whose
+// devices hold their own. An empty deviceID asks each in turn for its most
+// recent scan, so a build with one such manager answers exactly as it would.
+func (mm *MultiManager) TagOn(deviceID string) (string, string, bool) {
+	for _, holder := range mm.holders() {
+		if holding, uid, ok := holder.TagOn(deviceID); ok {
+			return holding, uid, true
+		}
+	}
+	return "", "", false
+}
+
+// DevicesHoldingTags lists every device holding a tag, across the managers that
+// have any.
+func (mm *MultiManager) DevicesHoldingTags() []string {
+	var out []string
+	for _, holder := range mm.holders() {
+		out = append(out, holder.DevicesHoldingTags()...)
+	}
+	return out
+}
+
+// WriteTag asks the manager whose device is holding the tag to encode onto it.
+func (mm *MultiManager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.WriteTag(deviceID, tagUID, msg, lock, idempotencyKey)
+}
+
+// LockTag asks the manager whose device is holding the tag to make it
+// permanently read-only.
+func (mm *MultiManager) LockTag(deviceID, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.LockTag(deviceID, tagUID, idempotencyKey)
+}
+
+// TagCapabilities reports what the tag a device is holding supports.
+func (mm *MultiManager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapabilities, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.TagCapabilities(deviceID, tagUID)
+}
+
+// TransceiveTag asks the manager whose device is holding the tag to exchange
+// raw bytes with it.
+func (mm *MultiManager) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+	holder, err := mm.holderFor(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return holder.TransceiveTag(deviceID, tagUID, data, raw)
+}
+
+// holders lists the child managers whose devices hold tags, in registration
+// order.
+func (mm *MultiManager) holders() []nfc.TagHolder {
+	var out []nfc.TagHolder
+	for _, name := range mm.managerOrder {
+		if holder := nfc.TagsHeldBy(mm.managers[name]); holder != nil {
+			out = append(out, holder)
+		}
+	}
+	return out
+}
+
+// holderFor picks the manager an operation goes to. A single one takes every
+// operation, so its own refusal is what the caller sees; with more than one the
+// device holding the tag decides.
+func (mm *MultiManager) holderFor(deviceID string) (nfc.TagHolder, error) {
+	holders := mm.holders()
+	switch len(holders) {
+	case 0:
+		return nil, fmt.Errorf("no manager holds tags for device %s", deviceID)
+	case 1:
+		return holders[0], nil
+	}
+
+	for _, holder := range holders {
+		if _, _, ok := holder.TagOn(deviceID); ok {
+			return holder, nil
+		}
+	}
+	return nil, fmt.Errorf("no device %s is holding a tag", deviceID)
+}
+
+// Scans carries what every child manager's devices report, as reported.
+func (mm *MultiManager) Scans() *event.Signal[nfc.ScannedTag] { return &mm.scans }
 
 // DeviceChanges returns a channel that signals when devices are registered or unregistered
 // in any of the child managers.
@@ -249,7 +316,7 @@ func (mm *MultiManager) forwardDeviceChanges(ch <-chan struct{}) {
 	}
 }
 
-// logListError reports a manager's ListDevices failure the first time it is
+// logListError reports a manager's listing failure the first time it is
 // seen, and again only if the reason changes. Returns whether it logged.
 func (mm *MultiManager) logListError(name string, err error) bool {
 	reason := err.Error()
@@ -265,7 +332,7 @@ func (mm *MultiManager) logListError(name string, err error) bool {
 	if repeat {
 		return false
 	}
-	log.Printf("[multi] manager '%s' failed to list devices: %v", name, err)
+	multiWarn.Printf("manager '%s' failed to list devices: %v", name, err)
 	return true
 }
 
@@ -279,6 +346,6 @@ func (mm *MultiManager) clearListError(name string) {
 	mm.listErrMu.Unlock()
 
 	if wasFailing {
-		log.Printf("[multi] manager '%s' is listing devices again", name)
+		multiLog.Printf("manager '%s' is listing devices again", name)
 	}
 }

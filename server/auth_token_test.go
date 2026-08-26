@@ -31,14 +31,14 @@ func TestCheckAuthAcceptsDeviceToken(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=device-token", "192.168.1.20:5000")
-	if !CheckAuth(w, r, "shared-secret", verifier) {
+	if _, ok := CheckAuth(w, r, "shared-secret", verifier); !ok {
 		t.Error("a paired device's token was rejected")
 	}
 
 	// Bearer is equivalent to the query parameter.
 	w, r = authReq(t, "/ws", "192.168.1.20:5000")
 	r.Header.Set("Authorization", "Bearer device-token")
-	if !CheckAuth(w, r, "shared-secret", verifier) {
+	if _, ok := CheckAuth(w, r, "shared-secret", verifier); !ok {
 		t.Error("a token presented as a Bearer header was rejected")
 	}
 }
@@ -49,7 +49,7 @@ func TestCheckAuthRejectsRevokedToken(t *testing.T) {
 	verifier := fakeVerifier{valid: "still-paired", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=revoked-token", "192.168.1.20:5000")
-	if CheckAuth(w, r, "shared-secret", verifier) {
+	if _, ok := CheckAuth(w, r, "shared-secret", verifier); ok {
 		t.Error("a revoked token was accepted")
 	}
 	if w.Code != http.StatusUnauthorized {
@@ -63,7 +63,7 @@ func TestCheckAuthStillAcceptsSharedSecret(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=shared-secret", "192.168.1.20:5000")
-	if !CheckAuth(w, r, "shared-secret", verifier) {
+	if _, ok := CheckAuth(w, r, "shared-secret", verifier); !ok {
 		t.Error("the shared secret was rejected")
 	}
 }
@@ -74,21 +74,21 @@ func TestCheckAuthTokenWithoutSharedSecret(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=device-token", "192.168.1.20:5000")
-	if !CheckAuth(w, r, "", verifier) {
+	if _, ok := CheckAuth(w, r, "", verifier); !ok {
 		t.Error("a token was rejected when no shared secret is set")
 	}
 }
 
 func TestCheckAuthLoopbackBypassUnchanged(t *testing.T) {
 	w, r := authReq(t, "/ws", "127.0.0.1:5000")
-	if !CheckAuth(w, r, "shared-secret", nil) {
+	if _, ok := CheckAuth(w, r, "shared-secret", nil); !ok {
 		t.Error("loopback bypass regressed")
 	}
 }
 
 func TestCheckAuthRejectsNothing(t *testing.T) {
 	w, r := authReq(t, "/ws", "192.168.1.20:5000")
-	if CheckAuth(w, r, "shared-secret", fakeVerifier{valid: "device-token"}) {
+	if _, ok := CheckAuth(w, r, "shared-secret", fakeVerifier{valid: "device-token"}); ok {
 		t.Error("a request with no credential was accepted")
 	}
 	if w.Code != http.StatusUnauthorized {
@@ -113,7 +113,7 @@ func TestCheckPairedDeviceAdmitsOnlyTokens(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=device-token", "192.168.1.20:5000")
-	if !CheckPairedDevice(w, r, verifier) {
+	if _, ok := CheckPairedDevice(w, r, verifier); !ok {
 		t.Error("a paired device was rejected")
 	}
 }
@@ -123,7 +123,7 @@ func TestCheckPairedDeviceRejectsSharedSecret(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=shared-secret", "192.168.1.20:5000")
-	if CheckPairedDevice(w, r, verifier) {
+	if _, ok := CheckPairedDevice(w, r, verifier); ok {
 		t.Error("the shared secret still admitted a device under strict mode")
 	}
 	if w.Code != http.StatusUnauthorized {
@@ -136,7 +136,7 @@ func TestCheckPairedDeviceRejectsLoopback(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws", "127.0.0.1:5000")
-	if CheckPairedDevice(w, r, verifier) {
+	if _, ok := CheckPairedDevice(w, r, verifier); ok {
 		t.Error("loopback bypassed the paired-device requirement")
 	}
 }
@@ -144,7 +144,7 @@ func TestCheckPairedDeviceRejectsLoopback(t *testing.T) {
 // With nothing able to verify a token, strict mode fails closed.
 func TestCheckPairedDeviceFailsClosedWithoutVerifier(t *testing.T) {
 	w, r := authReq(t, "/ws?secret=anything", "127.0.0.1:5000")
-	if CheckPairedDevice(w, r, nil) {
+	if _, ok := CheckPairedDevice(w, r, nil); ok {
 		t.Error("strict mode admitted a request with no way to verify it")
 	}
 }

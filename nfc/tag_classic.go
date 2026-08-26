@@ -19,7 +19,7 @@ type pcscClassicTag struct {
 
 	// candidateKeys holds additional authentication keys to try (beyond the
 	// built-in defaults) when reading or writing this tag. Configured via
-	// SetCandidateKeys, typically from NFCReader.SetClassicKeys, so production
+	// SetCandidateKeys, typically from deviceReader.SetClassicKeys, so production
 	// cards that don't use default keys can still be accessed. Guarded by keyMu
 	// because the reader injects keys from both its poll and write paths, which
 	// can run on different goroutines for the same tag.

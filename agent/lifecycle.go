@@ -9,8 +9,8 @@ import (
 
 // State is where the agent is in its lifecycle.
 //
-// Transitions are serialised: only one of Start, Stop or RestartServers runs at
-// a time, whichever goroutine asks.
+// Transitions are serialised: only one of Start or Stop runs at a time,
+// whichever goroutine asks.
 type State int32
 
 const (
@@ -45,8 +45,9 @@ func (s State) String() string {
 }
 
 // Component is a part of the agent's runtime whose lifetime follows the
-// agent's own. Register one with Use and the agent starts it once the reader
-// and servers are up, and stops it before taking them down again.
+// agent's own. Register one with Use and the agent starts it once the readers
+// are open, in registration order, and stops it in reverse before closing
+// them.
 //
 // This is what the agent hangs anything extra from: a metrics exporter, a
 // watchdog, a bridge to some other system. The context passed to Start is
@@ -74,21 +75,6 @@ func (a *Agent) State() State { return State(a.state.Load()) }
 // deciding what to do next should ask the agent to do it and handle the error,
 // rather than checking first.
 func (a *Agent) Running() bool { return a.State() == StateRunning }
-
-// OnStateChange registers fn to run on every settled lifecycle transition, in
-// registration order.
-//
-// Hooks run after the transition completes and outside the lifecycle lock, so a
-// hook may call State, and may call Start or Stop without deadlocking, though
-// doing so from a hook is a good way to write a loop.
-func (a *Agent) OnStateChange(fn func(State)) {
-	if fn == nil {
-		return
-	}
-	a.hooksMu.Lock()
-	defer a.hooksMu.Unlock()
-	a.stateHooks = append(a.stateHooks, fn)
-}
 
 // Use registers a component to run alongside the agent. Components must be
 // registered before Start; registering while the agent is running returns an
@@ -129,18 +115,6 @@ func (a *Agent) Components() []Component {
 	return out
 }
 
-// fireState runs the state hooks. Called with the lifecycle lock released.
-func (a *Agent) fireState(s State) {
-	a.hooksMu.Lock()
-	hooks := make([]func(State), len(a.stateHooks))
-	copy(hooks, a.stateHooks)
-	a.hooksMu.Unlock()
-
-	for _, fn := range hooks {
-		fn(s)
-	}
-}
-
 // startComponents brings the registered components up in order. On the first
 // failure it stops the ones already started and reports which failed.
 func (a *Agent) startComponents(ctx context.Context) error {
@@ -165,17 +139,17 @@ func (a *Agent) stopComponentRange(last int) {
 	}
 }
 
-// Start opens the reader, brings up the servers, then starts any registered
-// components. It is safe to call from any goroutine: a second caller either
+// Start opens the readers, then starts the registered components, the
+// listener among them. It is safe to call from any goroutine: a second caller either
 // waits for the first to finish or is told the agent is already running.
 func (a *Agent) Start(devicePath string) error {
 	a.lifecycleMu.Lock()
 
 	if State(a.state.Load()) != StateStopped {
-		reader := a.reader.Load()
+		running := a.CurrentDevicePath()
 		a.lifecycleMu.Unlock()
-		if reader != nil && devicePath == reader.DevicePath() {
-			a.logger.Printf("NFC reader already running on device: %s", devicePath)
+		if devicePath != "" && devicePath == running {
+			a.logger.Printf("The readers are already running, on %s", devicePath)
 			return nil
 		}
 		return fmt.Errorf("agent: cannot start while %s", a.State())
@@ -219,7 +193,7 @@ func (a *Agent) Start(devicePath string) error {
 }
 
 // Stop takes the agent back down: components first, in reverse order, then the
-// servers and the reader.
+// readers.
 func (a *Agent) Stop() {
 	a.lifecycleMu.Lock()
 
@@ -252,9 +226,6 @@ type atomicState = atomic.Int32
 type lifecycle struct {
 	lifecycleMu sync.Mutex
 	state       atomicState
-
-	hooksMu    sync.Mutex
-	stateHooks []func(State)
 
 	components []Component
 	runCtx     context.Context

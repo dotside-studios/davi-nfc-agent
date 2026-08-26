@@ -255,13 +255,13 @@ func TestDeviceManager_EventChannelBuffering(t *testing.T) {
 	}
 }
 
-// TestNFCReader_HandlesDeviceEvents tests that NFCReader properly handles device events
-func TestNFCReader_HandlesDeviceEvents(t *testing.T) {
+// TestReader_HandlesDeviceEvents tests that deviceReader properly handles device events
+func TestReader_HandlesDeviceEvents(t *testing.T) {
 	mockManager := NewMockManager()
 	fakeClock := NewFakeClock(time.Now())
-	reader, err := NewNFCReaderWithClock("mock:usb:001", mockManager, 5*time.Second, fakeClock)
+	reader, err := newDeviceReaderWithClock("mock:usb:001", mockManager, 5*time.Second, fakeClock)
 	if err != nil {
-		t.Fatalf("Failed to create NFCReader: %v", err)
+		t.Fatalf("Failed to create deviceReader: %v", err)
 	}
 
 	// Start the reader

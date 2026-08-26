@@ -184,7 +184,7 @@ func TestDESFire_WrappedStatusNotPlainISO(t *testing.T) {
 
 func TestPipeline_NTAGWriteVerify(t *testing.T) {
 	reader := NewEmulatedReader(t, NTAG215("04A1B2C3D4E5F6"))
-	result, err := reader.WriteMessageWithResult(textMessage("emulated"), nfc.WriteOptions{Overwrite: true, Index: -1})
+	result, err := reader.WriteMessage(textMessage("emulated"), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("WriteMessageWithResult: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestPipeline_NTAGWriteVerify(t *testing.T) {
 func TestPipeline_NTAGWriteThenLock(t *testing.T) {
 	card := NTAG215("04A1B2C3D4E5F6")
 	reader := NewEmulatedReader(t, card)
-	result, err := reader.WriteMessageWithResult(textMessage("lock me"), nfc.WriteOptions{Overwrite: true, Index: -1, Lock: true})
+	result, err := reader.WriteMessage(textMessage("lock me"), nfc.WriteOptions{Overwrite: true, Index: -1, Lock: true})
 	if err != nil {
 		t.Fatalf("write+lock: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestPipeline_NTAGWriteThenLock(t *testing.T) {
 
 func TestPipeline_ClassicWriteVerify(t *testing.T) {
 	reader := NewEmulatedReader(t, Classic1K("04112233"))
-	result, err := reader.WriteMessageWithResult(textMessage("classic"), nfc.WriteOptions{Overwrite: true, Index: -1})
+	result, err := reader.WriteMessage(textMessage("classic"), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("WriteMessageWithResult: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestPipeline_ClassicWriteVerify(t *testing.T) {
 
 func TestPipeline_DESFireWriteVerify(t *testing.T) {
 	reader := NewEmulatedReader(t, DESFire("04DE5F1RE0"))
-	result, err := reader.WriteMessageWithResult(textMessage("desfire"), nfc.WriteOptions{Overwrite: true, Index: -1})
+	result, err := reader.WriteMessage(textMessage("desfire"), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("WriteMessageWithResult: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestPipeline_DESFireWriteVerify(t *testing.T) {
 
 func TestPipeline_NTAGLargePayloadMultiPage(t *testing.T) {
 	reader := NewEmulatedReader(t, NTAG215("04A1B2C3D4E5F6"))
-	result, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("a", 200)), nfc.WriteOptions{Overwrite: true, Index: -1})
+	result, err := reader.WriteMessage(textMessage(strings.Repeat("a", 200)), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("multi-page write: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestPipeline_NTAGLargePayloadMultiPage(t *testing.T) {
 
 func TestPipeline_ClassicMultiSector(t *testing.T) {
 	reader := NewEmulatedReader(t, Classic1K("04112233"))
-	result, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("y", 120)), nfc.WriteOptions{Overwrite: true, Index: -1})
+	result, err := reader.WriteMessage(textMessage(strings.Repeat("y", 120)), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("multi-sector write: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestPipeline_ClassicMultiSector(t *testing.T) {
 
 func TestPipeline_OversizedWriteRejected(t *testing.T) {
 	reader := NewEmulatedReader(t, NTAG213("04A1B2C3D4E5F6"))
-	if _, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("z", 300)), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
+	if _, err := reader.WriteMessage(textMessage(strings.Repeat("z", 300)), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
 		t.Error("expected oversized write to be rejected")
 	}
 }
@@ -265,7 +265,7 @@ func TestPipeline_RetryRecoversFromTransientFailure(t *testing.T) {
 	card := NTAG215("04A1B2C3D4E5F6")
 	memOf(card).failWrites = 1 // set before the reader (and its poll) exists
 	reader := NewEmulatedReader(t, card)
-	result, err := reader.WriteMessageWithResult(textMessage("retry me"), nfc.WriteOptions{Overwrite: true, Index: -1})
+	result, err := reader.WriteMessage(textMessage("retry me"), nfc.WriteOptions{Overwrite: true, Index: -1})
 	if err != nil {
 		t.Fatalf("expected retry to recover: %v", err)
 	}
@@ -281,27 +281,27 @@ func TestPipeline_VerificationCatchesBadWrite(t *testing.T) {
 	card := NTAG215("04A1B2C3D4E5F6")
 	memOf(card).corrupt = true
 	reader := NewEmulatedReader(t, card)
-	if _, err := reader.WriteMessageWithResult(textMessage("oops"), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
+	if _, err := reader.WriteMessage(textMessage("oops"), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
 		t.Error("verification should have caught the corrupted write")
 	}
 }
 
 func TestPipeline_WriteAfterLockFails(t *testing.T) {
 	reader := NewEmulatedReader(t, NTAG215("04A1B2C3D4E5F6"))
-	if _, err := reader.WriteMessageWithResult(textMessage("first"), nfc.WriteOptions{Overwrite: true, Index: -1, Lock: true}); err != nil {
+	if _, err := reader.WriteMessage(textMessage("first"), nfc.WriteOptions{Overwrite: true, Index: -1, Lock: true}); err != nil {
 		t.Fatalf("write+lock: %v", err)
 	}
-	if _, err := reader.WriteMessageWithResult(textMessage("second"), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
+	if _, err := reader.WriteMessage(textMessage("second"), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
 		t.Error("expected a write to a locked tag to fail")
 	}
 }
 
 func TestPipeline_EraseThroughReader(t *testing.T) {
 	reader := NewEmulatedReader(t, NTAG215("04A1B2C3D4E5F6"))
-	if _, err := reader.WriteMessageWithResult(textMessage("data"), nfc.WriteOptions{Overwrite: true, Index: -1}); err != nil {
+	if _, err := reader.WriteMessage(textMessage("data"), nfc.WriteOptions{Overwrite: true, Index: -1}); err != nil {
 		t.Fatalf("initial write: %v", err)
 	}
-	result, err := reader.EraseCard()
+	result, err := reader.Erase()
 	if err != nil {
 		t.Fatalf("EraseCard: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestFacade_PreloadThenAppendThroughReader(t *testing.T) {
 	card := NTAG215("04A1B2C3D4E5F6").WithText("hello")
 	reader := NewEmulatedReader(t, card)
 
-	if _, err := reader.WriteMessageWithResult(textMessage("world"), nfc.WriteOptions{Overwrite: false, Index: -1}); err != nil {
+	if _, err := reader.WriteMessage(textMessage("world"), nfc.WriteOptions{Overwrite: false, Index: -1}); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
@@ -339,12 +339,12 @@ func TestFacade_PresentAndRemove(t *testing.T) {
 	reader := NewEmulatedReader(t)
 
 	reader.Present(NTAG215("04A1B2C3D4E5F6").WithText("hi"))
-	if _, err := reader.WriteMessageWithResult(textMessage("x"), nfc.WriteOptions{Overwrite: true, Index: -1}); err != nil {
+	if _, err := reader.WriteMessage(textMessage("x"), nfc.WriteOptions{Overwrite: true, Index: -1}); err != nil {
 		t.Fatalf("write to presented card: %v", err)
 	}
 
 	reader.Remove("04A1B2C3D4E5F6")
-	if _, err := reader.WriteMessageWithResult(textMessage("y"), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
+	if _, err := reader.WriteMessage(textMessage("y"), nfc.WriteOptions{Overwrite: true, Index: -1}); err == nil {
 		t.Error("expected write to fail with no card present")
 	}
 }

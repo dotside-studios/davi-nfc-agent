@@ -309,7 +309,7 @@ func TestCloseIsIdempotentAndStopsClicks(t *testing.T) {
 	menu.Close()
 
 	// Repeated because a click racing a close used to be delivered about half
-	// the time: done and the event queue were selected on together, and Go
+	// the time: done and the click queue were selected on together, and Go
 	// picks at random when both are ready.
 	for i := 0; i < 50; i++ {
 		item.Click() // must return rather than block

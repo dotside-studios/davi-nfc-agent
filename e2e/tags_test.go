@@ -325,7 +325,7 @@ func TestReadOnlyModeRefusesAWriteToAPhone(t *testing.T) {
 	})
 	awaitFrame(t, client, server.WSMessageTypeTagData)
 
-	h.Agent.Reader().SetMode(nfc.ModeReadOnly)
+	h.Agent.Supervisor().SetMode(nfc.ModeReadOnly)
 
 	send(t, client, protocol.WebSocketRequest{
 		ID:   "write-3",

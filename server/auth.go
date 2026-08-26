@@ -32,7 +32,8 @@ func IsLoopbackRequest(r *http.Request) bool {
 //
 // If wantSecret is empty, no auth is performed (legacy mode).
 func CheckAPISecret(w http.ResponseWriter, r *http.Request, wantSecret string) bool {
-	return CheckAuth(w, r, wantSecret, nil)
+	_, ok := CheckAuth(w, r, wantSecret, nil)
+	return ok
 }
 
 // TokenVerifier recognizes per-device credentials issued at pairing.
@@ -52,29 +53,33 @@ type TokenVerifier interface {
 // Returns true if the request should proceed; if false the response has
 // already been written. The credential is read from query (?secret=) and
 // Authorization: Bearer.
-func CheckAuth(w http.ResponseWriter, r *http.Request, wantSecret string, verifier TokenVerifier) bool {
+//
+// deviceID names the paired device the credential belongs to, and is empty for
+// an admission that identifies nobody: the shared secret, or the loopback
+// bypass.
+func CheckAuth(w http.ResponseWriter, r *http.Request, wantSecret string, verifier TokenVerifier) (deviceID string, ok bool) {
 	presented := presentedCredential(r)
 
 	// A paired device is admitted on its own credential, whatever the shared
 	// secret is set to, which is what makes per-device revocation meaningful.
 	if verifier != nil && presented != "" {
-		if _, ok := verifier.VerifyToken(presented); ok {
-			return true
+		if id, ok := verifier.VerifyToken(presented); ok {
+			return id, true
 		}
 	}
 
 	if wantSecret == "" {
-		return true
+		return "", true
 	}
 	if IsLoopbackRequest(r) {
-		return true
+		return "", true
 	}
 
 	if subtle.ConstantTimeCompare([]byte(presented), []byte(wantSecret)) != 1 {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return false
+		return "", false
 	}
-	return true
+	return "", true
 }
 
 // CheckPairedDevice admits only a device holding a credential issued at
@@ -84,20 +89,20 @@ func CheckAuth(w http.ResponseWriter, r *http.Request, wantSecret string, verifi
 // devices that matter have paired. It is deliberately not used for browser
 // clients: a browser has no way to pair, and is gated by the origin allowlist
 // instead.
-func CheckPairedDevice(w http.ResponseWriter, r *http.Request, verifier TokenVerifier) bool {
+func CheckPairedDevice(w http.ResponseWriter, r *http.Request, verifier TokenVerifier) (deviceID string, ok bool) {
 	if verifier == nil {
 		// Nothing can be verified, so nothing can be admitted. Failing closed
 		// is the only safe reading of "require a paired device".
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return false
+		return "", false
 	}
 
-	if _, ok := verifier.VerifyToken(presentedCredential(r)); ok {
-		return true
+	if id, ok := verifier.VerifyToken(presentedCredential(r)); ok {
+		return id, true
 	}
 
 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
-	return false
+	return "", false
 }
 
 // presentedCredential extracts the credential from the query string or an

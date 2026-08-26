@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -99,7 +98,7 @@ func BuildNDEFMessage(writeReq WriteRequest) (*nfc.NDEFMessage, error) {
 		return nil, fmt.Errorf("failed to build NDEF message: %w", err)
 	}
 
-	log.Printf("WriteRequest: Writing %d NDEF record(s) (complete overwrite)", len(recordBuilders))
+	deviceLog.Printf("WriteRequest: Writing %d NDEF record(s) (complete overwrite)", len(recordBuilders))
 	return ndefMsg, nil
 }
 
@@ -198,31 +197,6 @@ func uriWithScheme(scheme, content string) (nfc.NDEFRecordBuilder, error) {
 		content = scheme + content
 	}
 	return &nfc.NDEFURI{Content: content}, nil
-}
-
-// HandleWriteRequest processes a write request and performs the NFC write operation.
-// This always performs a complete overwrite of the NDEF message on the card.
-// It returns a WriteResult describing the verified outcome of the write.
-func HandleWriteRequest(reader *nfc.NFCReader, writeReq WriteRequest) (*nfc.WriteResult, error) {
-	// Build complete NDEF message
-	ndefMsg, err := BuildNDEFMessage(writeReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build NDEF message: %w", err)
-	}
-
-	// Write with overwrite option (complete replacement)
-	result, err := reader.WriteMessageWithResult(ndefMsg, nfc.WriteOptions{
-		Overwrite: true,
-		Index:     -1,
-		Lock:      writeReq.Lock,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("write failed: %w", err)
-	}
-
-	log.Printf("WriteRequest: Successfully wrote NDEF message to card (verified=%v, attempts=%d)",
-		result.Verified, result.Attempts)
-	return result, nil
 }
 
 // BuildNDEFInput converts a write request into the record form sent to remote

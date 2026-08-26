@@ -92,6 +92,7 @@ func main() {
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
+			Revocations:          rt.Agent.Devices(),
 		}),
 	}
 

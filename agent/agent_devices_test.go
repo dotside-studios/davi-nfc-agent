@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -205,5 +206,76 @@ func TestEveryDeviceSubscriberIsNotified(t *testing.T) {
 
 	if first != 2 || second != 1 {
 		t.Errorf("after Disconnect subscribers fired %d and %d times, want 2 and 1", first, second)
+	}
+}
+
+// A token is only checked when a device connects, so a subscriber needs to know
+// which device was revoked in order to end the session it already holds.
+func TestRevokeNamesTheDevice(t *testing.T) {
+	registry, err := NewDeviceRegistry(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDeviceRegistry: %v", err)
+	}
+
+	var revoked [][]string
+	defer registry.OnRevoke(func(ids []string) { revoked = append(revoked, ids) }).Disconnect()
+
+	device, _, err := registry.Pair("First", "android")
+	if err != nil {
+		t.Fatalf("Pair: %v", err)
+	}
+	if _, _, err := registry.Pair("Second", "ios"); err != nil {
+		t.Fatalf("Pair second: %v", err)
+	}
+	if len(revoked) != 0 {
+		t.Fatalf("pairing reported a revocation: %v", revoked)
+	}
+
+	if err := registry.Revoke(device.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if len(revoked) != 1 || len(revoked[0]) != 1 || revoked[0][0] != device.ID {
+		t.Fatalf("Revoke reported %v, want one emission naming %s", revoked, device.ID)
+	}
+
+	// Revoking a device that is not there changes nothing, so it announces
+	// nothing: a subscriber would otherwise tear down a session on a typo.
+	_ = registry.Revoke("no-such-device")
+	if len(revoked) != 1 {
+		t.Fatalf("revoking an unknown device reported %v", revoked)
+	}
+}
+
+// RevokeAll names every device it revoked, so every live session goes with it.
+func TestRevokeAllNamesEveryDevice(t *testing.T) {
+	registry, err := NewDeviceRegistry(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDeviceRegistry: %v", err)
+	}
+
+	var revoked []string
+	defer registry.OnRevoke(func(ids []string) { revoked = append(revoked, ids...) }).Disconnect()
+
+	first, _, _ := registry.Pair("First", "android")
+	second, _, _ := registry.Pair("Second", "ios")
+
+	if err := registry.RevokeAll(); err != nil {
+		t.Fatalf("RevokeAll: %v", err)
+	}
+
+	sort.Strings(revoked)
+	want := []string{first.ID, second.ID}
+	sort.Strings(want)
+	if len(revoked) != 2 || revoked[0] != want[0] || revoked[1] != want[1] {
+		t.Fatalf("RevokeAll reported %v, want %v", revoked, want)
+	}
+
+	// An empty registry has nothing to announce.
+	revoked = nil
+	if err := registry.RevokeAll(); err != nil {
+		t.Fatalf("RevokeAll on an empty registry: %v", err)
+	}
+	if len(revoked) != 0 {
+		t.Fatalf("RevokeAll on an empty registry reported %v", revoked)
 	}
 }

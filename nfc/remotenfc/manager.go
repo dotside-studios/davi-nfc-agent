@@ -11,6 +11,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
 // Manager implements nfc.Manager for phones and other networked devices, and
@@ -31,6 +32,7 @@ type Manager struct {
 	// Policy supplied by the agent through Handler.
 	publicKeyPin         func() string
 	allowTagModification func() bool
+	revocations          *event.Connection // Ends the session of a revoked device
 
 	sessions    map[string]*wsconn.SafeConn // deviceID -> connection
 	sessionConn map[*wsconn.SafeConn]string // reverse lookup
@@ -197,6 +199,33 @@ func (m *Manager) UnregisterDevice(deviceID string) error {
 	return nil
 }
 
+// DisconnectDevice ends a device's live session, reporting whether there was
+// one to end. The reason is sent as a WebSocket close reason so the device can
+// tell being turned away from losing its radio, and reconnect or stop
+// accordingly.
+//
+// Closing the socket is the whole teardown: the session goroutine's read fails,
+// and its deferred endSession unregisters the device, fails its pending
+// requests and clears its active tag. Doing that here as well would race it.
+//
+// This is what makes a credential change take effect on a connected device.
+// Credentials are checked once, at the upgrade, so a session established before
+// the change outlives it otherwise.
+func (m *Manager) DisconnectDevice(deviceID, reason string) bool {
+	conn, ok := m.session(deviceID)
+	if !ok {
+		return false
+	}
+
+	// Best effort: a device that has already gone away cannot be told why.
+	_ = conn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, reason))
+	_ = conn.Close()
+
+	managerLog.Printf("Device session ended by the agent: %s (%s)", deviceID, reason)
+	return true
+}
+
 // GetDevice retrieves a device by ID.
 func (m *Manager) GetDevice(deviceID string) (*Device, bool) {
 	m.mu.RLock()
@@ -301,7 +330,12 @@ func (m *Manager) Close() {
 		return
 	}
 	m.closed = true
+	// Nothing left to revoke a session from.
+	revocations := m.revocations
+	m.revocations = nil
 	m.mu.Unlock()
+
+	revocations.Disconnect()
 
 	// Stop cleanup routine
 	if m.cleanupTicker != nil {

@@ -17,14 +17,22 @@ func serveManager(t *testing.T, timeout time.Duration) (*Manager, string) {
 
 	m := NewManager(timeout)
 	// Exercising the protocol, not the credential.
-	ts := httptest.NewServer(m.Handler(ServerOptions{AllowUnauthenticated: true}))
+	return m, newDeviceServer(t, m, ServerOptions{AllowUnauthenticated: true})
+}
+
+// newDeviceServer mounts a manager's device endpoint and returns the URL a
+// device dials, closing both when the test ends.
+func newDeviceServer(t *testing.T, m *Manager, opts ServerOptions) string {
+	t.Helper()
+
+	ts := httptest.NewServer(m.Handler(opts))
 
 	t.Cleanup(func() {
 		ts.Close()
 		m.Close()
 	})
 
-	return m, "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
+	return "ws" + strings.TrimPrefix(ts.URL, "http") + "?mode=device"
 }
 
 // connectDevice registers a device and returns its connection and ID.

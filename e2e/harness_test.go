@@ -118,6 +118,7 @@ func start(t *testing.T, opts options) *harness {
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
+			Revocations:          rt.Agent.Devices(),
 		}),
 	}
 

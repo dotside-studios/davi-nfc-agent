@@ -114,6 +114,28 @@ func (a *Agent) Components() []Component {
 	return out
 }
 
+// restartClients stops and starts whatever is serving clients, leaving the
+// readers and the listener alone. A component that serves them registers
+// itself; with none, there is nothing to rebuild.
+//
+// The caller holds the lifecycle lock.
+func (a *Agent) restartClients() error {
+	for _, c := range a.components {
+		clients, ok := c.(*clientsComponent)
+		if !ok {
+			continue
+		}
+
+		if err := clients.Stop(); err != nil {
+			return err
+		}
+		if err := clients.Start(a.runCtx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // startComponents brings the registered components up in order. On the first
 // failure it stops the ones already started and reports which failed.
 func (a *Agent) startComponents(ctx context.Context) error {

@@ -13,27 +13,30 @@ import (
 
 // ClientCount is how many clients are connected.
 func (a *Agent) ClientCount() int {
-	if a.ClientServer == nil {
+	serving := a.clients.Load()
+	if serving == nil {
 		return 0
 	}
-	return a.ClientServer.ClientCount()
+	return serving.ClientCount()
 }
 
 // Clients lists the connected clients, most recently connected first.
 func (a *Agent) Clients() []clientserver.ClientInfo {
-	if a.ClientServer == nil {
+	serving := a.clients.Load()
+	if serving == nil {
 		return nil
 	}
-	return a.ClientServer.Clients()
+	return serving.Clients()
 }
 
 // DisconnectClient drops one client's connection. It reports an error for a
 // client that is not connected, which includes one that just left.
 func (a *Agent) DisconnectClient(id string) error {
-	if a.ClientServer == nil {
+	serving := a.clients.Load()
+	if serving == nil {
 		return errors.New("agent is not running")
 	}
-	if !a.ClientServer.Disconnect(id) {
+	if !serving.Disconnect(id) {
 		return errors.New("no such client: it may have already disconnected")
 	}
 	return nil

@@ -2,11 +2,17 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -105,12 +111,25 @@ type ServerPlugin struct {
 	// which Setup resolves onto Runtime.
 	Certificates tlspkg.CertificateWatcher
 
+	// ServeMode names the handler serving each connection mode on /ws. A
+	// connection declaring none is a client, and takes the entry under
+	// server.ModeClient; server.ModeDevice is the device driver's endpoint.
+	//
+	// Both are mounted for you: the client server the plugin runs for the agent
+	// under the first, and whatever built the device endpoint under the second.
+	// An entry here replaces what would have been mounted.
+	ServeMode map[string]http.Handler
+
 	// The entries whose labels follow what is being served.
 	device *traymenu.Item
 	client *traymenu.Item
 	secret *traymenu.Item
 	logger *log.Logger
 	agent  *Agent
+
+	// clients is the server running for the agent, replaced by every start and
+	// read by the routes mounted before it existed.
+	clients atomic.Pointer[clientserver.Server]
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -165,11 +184,16 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if p.Server == nil {
 		p.Server = listener.New(p.config(ctx.Agent))
 	}
-	// The agent's own routes go on first, so an endpoint cannot displace /ws
-	// or the health checks.
-	for _, route := range ctx.Agent.Routes() {
-		if err := p.Server.Mount(route.Pattern, route.Handler); err != nil {
-			return fmt.Errorf("the agent's own route %q: %w", route.Pattern, err)
+	// What the agent is reached on goes first, so an endpoint cannot displace
+	// /ws or the health checks.
+	routes := map[string]http.Handler{
+		"/ws":            p.wsHandler(ctx.Agent),
+		"/health":        p.healthHandler(),
+		"/api/v1/health": p.healthHandler(),
+	}
+	for _, pattern := range []string{"/ws", "/health", "/api/v1/health"} {
+		if err := p.Server.Mount(pattern, server.CORS(routes[pattern])); err != nil {
+			return fmt.Errorf("the agent's own route %q: %w", pattern, err)
 		}
 	}
 	if err := ctx.Serve(p.Server); err != nil {
@@ -192,8 +216,12 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 		return err
 	}
 
-	// Last, so it is the first thing to come down: nothing new arrives while
-	// what answers it is being torn down. Components stop in reverse.
+	// The client server comes up before the listener and goes down after it:
+	// components stop in reverse, and nothing new arrives while what answers it
+	// is being torn down.
+	if err := ctx.Use(&clientsComponent{plugin: p, agent: ctx.Agent}); err != nil {
+		return err
+	}
 	return ctx.Use(&listenerComponent{server: p.Server, agent: ctx.Agent})
 }
 
@@ -465,4 +493,102 @@ func (p *ServerPlugin) menuTitle() string {
 		return p.MenuTitle
 	}
 	return "Server URLs"
+}
+
+// wsHandler routes a connection to the handler for the mode it declares. A
+// connection arriving before the agent is serving is told so rather than left
+// waiting on a handler that does not exist yet.
+func (p *ServerPlugin) wsHandler(a *Agent) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		byMode := map[string]http.Handler{}
+		for mode, handler := range p.ServeMode {
+			byMode[mode] = handler
+		}
+		if _, named := byMode[server.ModeDevice]; !named && a.deviceEndpoint != nil {
+			byMode[server.ModeDevice] = a.deviceEndpoint
+		}
+
+		clients := byMode[server.ModeClient]
+		delete(byMode, server.ModeClient)
+		if clients == nil {
+			if running := p.clients.Load(); running != nil {
+				clients = http.HandlerFunc(running.ServeWS)
+			}
+		}
+		if clients == nil {
+			http.Error(w, "agent is not running", http.StatusServiceUnavailable)
+			return
+		}
+
+		server.RouteByMode(clients, byMode).ServeHTTP(w, r)
+	})
+}
+
+// healthHandler reports that the agent is up and how many clients it is
+// serving. Mounted at both /health and /api/v1/health: the two spellings
+// predate each other and clients in the wild use both.
+func (p *ServerPlugin) healthHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		clients := 0
+		if running := p.clients.Load(); running != nil {
+			clients = running.ClientCount()
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":    "ok",
+			"type":      "agent",
+			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			"clients":   clients,
+		})
+	})
+}
+
+// clientsComponent runs the client server for as long as the agent is running.
+// It subscribes to what the agent reports rather than being fed, so the scans a
+// client receives are the ones the agent passed its own filters.
+type clientsComponent struct {
+	plugin *ServerPlugin
+	agent  *Agent
+
+	tags   *event.Connection
+	status *event.Connection
+}
+
+func (c *clientsComponent) Name() string { return "clients" }
+
+func (c *clientsComponent) Start(context.Context) error {
+	srv := clientserver.New(clientserver.Config{
+		APISecret:            c.agent.apiSecret,
+		AllowedOrigins:       c.agent.allowedOrigins,
+		OriginPolicy:         c.agent.originPolicy(),
+		TokenVerifier:        c.agent.tokenVerifier(),
+		Tags:                 c.agent,
+		AllowTagModification: c.agent.TagModificationAllowed,
+		OnChange:             c.agent.fireClientsChanged,
+	})
+
+	c.tags = c.agent.events.Tag.Connect(srv.Broadcast)
+	c.status = c.agent.events.Reader.Connect(func(status nfc.DeviceStatus) {
+		srv.BroadcastDeviceStatus(status)
+	})
+
+	c.plugin.clients.Store(srv)
+	c.agent.clients.Store(srv)
+	return nil
+}
+
+func (c *clientsComponent) Stop() error {
+	c.tags.Disconnect()
+	c.status.Disconnect()
+	c.tags, c.status = nil, nil
+
+	c.plugin.clients.Store(nil)
+	c.agent.clients.Store(nil)
+	return nil
 }

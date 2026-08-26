@@ -13,6 +13,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/gorilla/websocket"
@@ -340,7 +341,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	}
 	defer rt.Agent.Stop()
 
-	before := rt.Agent.ClientServer
+	before := rt.Agent.clients.Load()
 	if before == nil {
 		t.Fatal("no client server after Start")
 	}
@@ -348,7 +349,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if err := servers.Rebind(); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
-	if rt.Agent.ClientServer != before {
+	if rt.Agent.clients.Load() != before {
 		t.Error("rebinding rebuilt the client server; only the listener should have moved")
 	}
 
@@ -357,7 +358,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	if err := rt.Agent.RestartServers(); err != nil {
 		t.Fatalf("RestartServers: %v", err)
 	}
-	if rt.Agent.ClientServer == before {
+	if rt.Agent.clients.Load() == before {
 		t.Error("RestartServers left the old client server in place")
 	}
 }
@@ -529,16 +530,16 @@ func names(a *Agent) []string {
 	return out
 }
 
-// The agent's own routes are data it hands over, and whatever serves it mounts
-// them ahead of its own, so nothing can displace them.
+// What the agent is reached on is mounted before the endpoints, so nothing can
+// displace it.
 func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
-	patterns := map[string]bool{}
-	for _, route := range quietAgent(t).Routes() {
-		patterns[route.Pattern] = true
+	p := &ServerPlugin{}
+	if err := serverAgent(t, p).Activate(nil); err != nil {
+		t.Fatalf("Activate: %v", err)
 	}
-	for _, want := range []string{"/ws", "/health", "/api/v1/health"} {
-		if !patterns[want] {
-			t.Errorf("Routes() does not carry %q", want)
+	for _, pattern := range []string{"/ws", "/health", "/api/v1/health"} {
+		if code := get(t, p.Listener(), pattern); code == http.StatusNotFound {
+			t.Errorf("%s is not served", pattern)
 		}
 	}
 
@@ -643,5 +644,65 @@ func TestADeviceConnectingWithoutADriverIsAnswered(t *testing.T) {
 	}
 	if out.Success {
 		t.Errorf("registering a device succeeded with no driver: %+v", out)
+	}
+}
+
+// mark is a handler that answers with a code, so a test can tell which one a
+// connection reached.
+func mark(code int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(code) })
+}
+
+// The plugin serves the client connections and mounts the routes they arrive
+// on. A build with none registered serves no HTTP at all, which is what a
+// program driving the readers directly wants.
+func TestTheClientServerBelongsToThePlugin(t *testing.T) {
+	bare := quietAgent(t)
+	if err := bare.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := bare.ClientCount(); got != 0 {
+		t.Errorf("ClientCount() = %d with nothing serving clients", got)
+	}
+	bare.Stop()
+
+	p := &ServerPlugin{}
+	a := serverAgent(t, p)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if a.clients.Load() == nil {
+		t.Error("the plugin is running no client server")
+	}
+	if code := get(t, p.Listener(), "/health"); code != http.StatusOK {
+		t.Errorf("GET /health = %d, want 200", code)
+	}
+
+	a.Stop()
+	if a.clients.Load() != nil {
+		t.Error("the client server outlived the run")
+	}
+}
+
+// ServeMode is what a build names its own handlers with. What it names replaces
+// what the plugin would have mounted.
+func TestServeModeReplacesWhatThePluginWouldMount(t *testing.T) {
+	p := &ServerPlugin{ServeMode: map[string]http.Handler{
+		server.ModeClient: mark(http.StatusTeapot),
+		server.ModeDevice: mark(299),
+	}}
+	a := serverAgent(t, p)
+	if err := a.Start(""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer a.Stop()
+
+	if code := get(t, p.Listener(), "/ws"); code != http.StatusTeapot {
+		t.Errorf("a client connection got %d, want the handler ServeMode named", code)
+	}
+	if code := get(t, p.Listener(), "/ws?mode=device"); code != 299 {
+		t.Errorf("a device connection got %d, want the handler ServeMode named", code)
 	}
 }

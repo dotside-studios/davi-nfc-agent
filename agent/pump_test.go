@@ -498,12 +498,14 @@ func await(t *testing.T, seen chan string, want string) bool {
 // and stops reaching the server a restart replaced: the subscriptions belong to
 // the run, so a scan after one used to reach both servers.
 func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
-	a := newPumpAgent(t)
+	// Serving clients is the plugin's, so an agent with none has nobody to
+	// report to.
+	a := serverAgent(t, &ServerPlugin{})
 
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	replaced := a.ClientServer
+	replaced := a.clients.Load()
 	stale := clientOf(t, replaced)
 
 	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
@@ -521,7 +523,7 @@ func TestWhatTheAgentReportsReachesTheClientsOfTheRunningServer(t *testing.T) {
 	}
 	defer a.Stop()
 
-	if a.ClientServer == replaced {
+	if a.clients.Load() == replaced {
 		t.Fatal("the restart kept the server it was meant to replace")
 	}
 

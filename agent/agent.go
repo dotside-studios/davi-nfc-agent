@@ -132,14 +132,13 @@ type Config struct {
 // its configuration is fixed from that point, and the exported fields below are
 // the parts that come and go as it runs.
 type Agent struct {
-	// ClientServer fans a scan out to every connected client and performs what
-	// clients ask of a tag, and DeviceAuth gates the device endpoint. Both are
-	// nil until Start.
-	ClientServer *clientserver.Server
+	// DeviceAuth gates the device endpoint. Built with the agent, so a caller
+	// can put its device endpoint behind it before anything runs.
+	DeviceAuth *server.DeviceAuth
 
-	// serving is what the mounted routes dispatch to, replaced on every start
-	// and cleared on stop.
-	serving atomic.Pointer[endpoints]
+	// clients is what serves the clients connected right now, published by
+	// whatever is running one. Nil while the agent is not serving.
+	clients atomic.Pointer[clientserver.Server]
 
 	// lastCard is the most recent scan the agent reported, kept here rather
 	// than in the client server it is reported through: the servers are rebuilt
@@ -150,7 +149,6 @@ type Agent struct {
 	// Atomic because the handlers read it from their own goroutines, and Stop
 	// holds the lifecycle lock while the server waits for them to finish.
 	supervisor atomic.Pointer[nfc.Supervisor]
-	DeviceAuth *server.DeviceAuth
 
 	// Plugins is the plugin list, added to before the agent starts and
 	// activated once, on the first Start or by a host that activates them
@@ -200,11 +198,6 @@ type Agent struct {
 	// a device reported it.
 	readerScans  *event.Connection
 	readerStatus *event.Connection
-
-	// The client server's subscriptions to what the agent reports, held for the
-	// same reason: they belong to the run, not to the agent.
-	clientTags   *event.Connection
-	clientStatus *event.Connection
 
 	// events is the subscription surface, published by Events. Signals are
 	// safe from any goroutine, so it needs no lock of its own.
@@ -376,10 +369,11 @@ func (a *Agent) startLocked(devicePath string) error {
 	a.supervisor.Store(readers)
 	a.adoptReaderSettings()
 
-	// Start the servers using shared code
-	if err := a.startServers(); err != nil {
-		return err
-	}
+	// The agent reports what its readers scan, and what serves clients
+	// subscribes to that. The readers are not started here: their lifetime is
+	// the agent's, not a server's.
+	a.readerScans = readers.Scans().Connect(a.forwardScan)
+	a.readerStatus = readers.Status().Connect(a.fireReaderStatus)
 
 	// After them, so what the readers publish already has somewhere to go.
 	if err := readers.Start(); err != nil {
@@ -393,13 +387,15 @@ func (a *Agent) startLocked(devicePath string) error {
 // lifecycle lock and owns the state transition; see Stop. It is safe to call on
 // a partly started agent, so an aborted Start is recoverable.
 func (a *Agent) stopLocked() {
-	if a.supervisor.Load() == nil && a.serving.Load() == nil {
+	if a.supervisor.Load() == nil && a.readerScans == nil {
 		return
 	}
 
 	a.logger.Println("Stopping agent...")
 
-	a.stopServers()
+	a.readerScans.Disconnect()
+	a.readerStatus.Disconnect()
+	a.readerScans, a.readerStatus = nil, nil
 
 	if readers := a.supervisor.Load(); readers != nil {
 		readers.Stop()
@@ -437,25 +433,16 @@ func (a *Agent) Shutdown() {
 	}
 }
 
-// RestartServers rebuilds what the agent serves: the router, the client server
-// and the tag sources feeding them. The reader and the listener carry on.
-//
-// For a change the serving state captured when it was built, such as the API
-// secret the client server holds. A certificate reissued on disk is not one of
-// those: the listener binds again on its own, and nothing here is rebuilt.
+// RestartServers rebuilds the client server, for a change it captured when it
+// was built, such as the API secret it holds. The readers and the listener
+// carry on, and a certificate reissued on disk is not one of those: the
+// listener binds again on its own.
 func (a *Agent) RestartServers() error {
 	a.lifecycleMu.Lock()
 
 	a.logger.Println("Restarting servers...")
 
-	// Stop servers
-	a.stopServers()
-
-	// Brief pause to allow ports to be released
-	time.Sleep(100 * time.Millisecond)
-
-	// Restart servers
-	err := a.startServers()
+	err := a.restartClients()
 
 	// Released before the listeners are told, as the state hooks are: a hook
 	// that touched the agent would otherwise wait for a lock its own caller
@@ -468,72 +455,6 @@ func (a *Agent) RestartServers() error {
 
 	a.logger.Println("Servers restarted successfully")
 	a.fireServerRestart()
-	return nil
-}
-
-// stopServers stops only the HTTP/WebSocket servers (not the NFC reader).
-func (a *Agent) stopServers() {
-	a.readerScans.Disconnect()
-	a.readerStatus.Disconnect()
-	a.clientTags.Disconnect()
-	a.clientStatus.Disconnect()
-	a.readerScans, a.readerStatus = nil, nil
-	a.clientTags, a.clientStatus = nil, nil
-
-	a.ClientServer = nil
-
-	a.serving.Store(nil)
-}
-
-// startServers starts the HTTP/WebSocket servers.
-func (a *Agent) startServers() error {
-	readers := a.supervisor.Load()
-	if readers == nil {
-		return errors.New("the readers are not initialized")
-	}
-
-	// A client request resolves to the tag it names, which the agent answers
-	// for wherever it is: on a reader it polls, or on a device that reported
-	// it. Asked of the agent rather than of the readers it happens to hold, so
-	// what governs a scan governs an operation on that tag too.
-	a.ClientServer = clientserver.New(clientserver.Config{
-		APISecret:            a.apiSecret,
-		AllowedOrigins:       a.allowedOrigins,
-		OriginPolicy:         a.originPolicy(),
-		TokenVerifier:        a.tokenVerifier(),
-		Tags:                 a,
-		AllowTagModification: a.TagModificationAllowed,
-		OnChange:             a.fireClientsChanged,
-	})
-
-	// The agent reports what its readers scan, and what serves clients
-	// subscribes to that rather than being fed: a plugin following the agent
-	// sees the same stream a client does.
-	//
-	// The readers are not started here. Their lifetime is the agent's, not the
-	// servers': starting them on every restart left a second worker polling the
-	// same reader, racing the first and scanning every card twice. See
-	// startLocked, which starts the ones it opened.
-	a.readerScans = readers.Scans().Connect(a.forwardScan)
-	a.readerStatus = readers.Status().Connect(a.fireReaderStatus)
-
-	// Connected to the server being built rather than read from a field, so a
-	// restart leaves nothing feeding the one it replaced.
-	sink := a.ClientServer
-	a.clientTags = a.events.Tag.Connect(sink.Broadcast)
-	a.clientStatus = a.events.Reader.Connect(sink.BroadcastDeviceStatus)
-
-	// Published as a pair, so a request never sees a client from one start
-	// beside a device from the next.
-	a.serving.Store(&endpoints{
-		client: http.HandlerFunc(a.ClientServer.ServeWS),
-		device: a.deviceEndpoint,
-	})
-
-	// Nothing is bound here. The listener is a component of whoever serves it,
-	// so it comes up once this has, and goes down before it; an agent with none
-	// registered serves no HTTP at all, which is what a program driving the
-	// reader directly wants.
 	return nil
 }
 

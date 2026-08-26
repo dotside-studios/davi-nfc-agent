@@ -277,10 +277,23 @@ servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks}
 servers.Add(agent.Endpoint{Name: "queue drain", Component: drain})
 ```
 
-`agent.Routes` is mounted first and reserves what the agent serves of its own:
-`/ws`, where devices and clients both connect, and `/health` with
-`/api/v1/health` beside it. An endpoint on one of those paths fails the start,
-as two endpoints on one path do, rather than leaving the mux to decide.
+The plugin mounts what the agent is reached on first and reserves it: `/ws`,
+where devices and clients both connect, and `/health` with `/api/v1/health`
+beside it. An endpoint on one of those paths fails the start, as two endpoints
+on one path do, rather than leaving the mux to decide.
+
+The plugin runs the client server behind `/ws` and routes a connection by the
+mode it declares. `ServeMode` replaces either handler:
+
+```go
+servers.ServeMode = map[string]http.Handler{
+	server.ModeDevice: devices.Handler(remotenfc.ServerOptions{ ... }),
+}
+```
+
+A build that registers no server plugin serves no HTTP and runs no client
+server, which is what a program driving the readers directly wants. It still
+gets every scan through `Agent.Events()`.
 
 The listener is bound by a component the plugin registers, so it comes up once
 the agent is serving and goes down before it. Give it `Certificates` and a

@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `agent.ServerPlugin` serves the clients. It runs the client server, mounts
+  `/ws` and the health checks itself, and routes a connection by the mode it
+  declares; `ServeMode` names a handler for either mode, such as a device
+  driver's endpoint. An agent with no server plugin registered runs no client
+  server and serves no HTTP, and still reports every scan through `Events()`
 - The agent reports what its readers scan and what serves clients subscribes,
   rather than the agent pushing scans into a server it built. `Events().Tag`
   fires from the agent's own path now, so a plugin following the agent sees the
@@ -334,6 +339,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
+  is the server plugin's, so the agent holds no server and hands over no routes.
+  `Agent.ClientCount`, `Clients` and `DisconnectClient` answer from whatever is
+  serving, and report nothing when nothing is
 - `clientserver.Config.OnTag`. It let an embedder observe a scan before the
   clients saw it, which is what the agent used it for; the agent reports the
   scan before handing it over now, so nothing sets it

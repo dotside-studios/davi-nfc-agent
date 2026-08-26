@@ -30,5 +30,10 @@ func requestMode(r *http.Request) string {
 	return r.URL.Query().Get("mode")
 }
 
-// ModeDevice is the mode a device declares.
-const ModeDevice = "device"
+// ModeDevice is the mode a device declares. ModeClient is the absence of one:
+// browsers are the older half of the protocol and say nothing, so a connection
+// naming no mode is a client.
+const (
+	ModeDevice = "device"
+	ModeClient = ""
+)

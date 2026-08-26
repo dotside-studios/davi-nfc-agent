@@ -1,8 +1,6 @@
 package tray
 
 import (
-	"log"
-
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -218,7 +216,7 @@ func (s *App) setupCardFilterMenu() {
 // the tray already shows a start that did not happen.
 func (s *App) activatePlugins() {
 	if err := s.agent.Activate(s.menu); err != nil {
-		log.Printf("[systray] %v", err)
+		trayFail.Printf("%v", err)
 	}
 }
 
@@ -276,7 +274,7 @@ func (s *App) handleModeSwitch(mode nfc.ReaderMode) {
 	// From the agent, not from the click: a mode the launcher holds leaves the
 	// tick where it was rather than showing a mode the reader is not in.
 	s.SyncPreferencesToMenu(s.agent.Preferences())
-	log.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
+	trayLog.Printf("Reader mode is now %s", modeName(s.agent.CurrentReaderMode()))
 }
 
 // modeName is the label a reader mode goes by in the menu.
@@ -328,7 +326,7 @@ func (s *App) applyReaders(devices []string) {
 
 	// If agent is running but no device selected, auto-select first available
 	if s.agent.Running() && currentDevice == "" && len(devices) > 0 {
-		log.Printf("[systray] Auto-selecting discovered device: %s", devices[0])
+		trayLog.Printf("Auto-selecting discovered device: %s", devices[0])
 		s.SwitchDevice(devices[0])
 		currentDevice = s.agent.CurrentDevicePath()
 	}
@@ -344,7 +342,7 @@ func (s *App) applyReaders(devices []string) {
 	}
 
 	if dropped := s.readers.Set(rows); dropped > 0 {
-		log.Printf("[systray] %d more readers are attached than the menu can show", dropped)
+		trayWarn.Printf("%d more readers are attached than the menu can show", dropped)
 	}
 }
 

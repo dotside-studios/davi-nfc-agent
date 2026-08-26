@@ -4,7 +4,6 @@ package console
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -105,10 +104,10 @@ func (s *Server) Endpoints() []agent.Endpoint {
 				menu.Add("  Copy Control Center URL",
 					traymenu.OnClick(func() {
 						if err := clipboard.Copy(url); err != nil {
-							log.Printf("Failed to copy the control center URL: %v", err)
+							consoleFail.Printf("Failed to copy the control center URL: %v", err)
 							return
 						}
-						log.Printf("Copied the control center URL to the clipboard")
+						consoleLog.Printf("Copied the control center URL to the clipboard")
 					}),
 				)
 				menu.Add("  Open Control Center",
@@ -124,19 +123,19 @@ func (s *Server) Endpoints() []agent.Endpoint {
 func (s *Server) open() {
 	url, err := s.ConsoleURL()
 	if err != nil {
-		log.Printf("Failed to prepare control center URL: %v", err)
+		consoleFail.Printf("Failed to prepare control center URL: %v", err)
 		return
 	}
 
 	if err := openBrowser(url); err != nil {
 		// Falling back to the clipboard keeps this usable on a machine with no
 		// registered browser handler, which is common on minimal Linux desktops.
-		log.Printf("Failed to open a browser: %v", err)
+		consoleWarn.Printf("Failed to open a browser: %v", err)
 		if copyErr := clipboard.Copy(url); copyErr != nil {
-			log.Printf("Control center URL (expires shortly): %s", url)
+			consoleLog.Printf("Control center URL (expires shortly): %s", url)
 			return
 		}
-		log.Printf("Control center URL copied to clipboard; it expires shortly")
+		consoleLog.Printf("Control center URL copied to clipboard; it expires shortly")
 	}
 }
 

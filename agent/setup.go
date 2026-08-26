@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 
@@ -126,7 +125,7 @@ type Runtime struct {
 // needs to know about both.
 func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	info := opts.Info.OrDefault()
-	log.Printf("Starting %s %s", info.Name, info.FullVersion())
+	agentLog.Printf("Starting %s %s", info.Name, info.FullVersion())
 
 	// Resolve the config directory once, for both the TLS manager and the
 	// persistent API secret.
@@ -145,12 +144,12 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		tlsMgr = tls.NewManager(configDir)
 		tlsMgr.UseCA(opts.InstallCA)
 		if _, _, err := tlsMgr.EnsureCertificates(); err != nil {
-			log.Printf("Warning: Auto-TLS failed: %v (running without TLS)", err)
+			agentWarn.Printf("Auto-TLS failed: %v (running without TLS)", err)
 			tlsMgr = nil
 		} else if pin, err := tlsMgr.PublicKeyPin(); err == nil {
 			// Native devices authenticate the agent by this value rather than
 			// by a trust store, so log it where a first run will show it.
-			log.Printf("Agent public key pin: %s", pin)
+			agentLog.Printf("Agent public key pin: %s", pin)
 			agentPublicKeyPin = pin
 		}
 	}
@@ -163,11 +162,11 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	if apiSecret == "" {
 		secret, fresh, err := loadOrCreateAPISecret(configDir)
 		if err != nil {
-			log.Printf("Warning: failed to load API secret: %v (running without auth)", err)
+			agentWarn.Printf("failed to load API secret: %v (running without auth)", err)
 		} else {
 			apiSecret = secret
 			if fresh {
-				log.Printf("Generated new API secret at %s", configDir)
+				agentLog.Printf("Generated new API secret at %s", configDir)
 			}
 		}
 	}
@@ -176,7 +175,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// one can be revoked without logging out the rest.
 	devices, err := NewDeviceRegistry(configDir)
 	if err != nil {
-		log.Printf("Warning: failed to load paired devices: %v", err)
+		agentWarn.Printf("failed to load paired devices: %v", err)
 		devices, _ = NewDeviceRegistry("")
 	}
 
@@ -193,9 +192,9 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}
 
 	if askedForPairing {
-		log.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		agentLog.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
 		if devices.Count() == 0 {
-			log.Printf("Warning: no devices are paired yet, so every device connection will be refused until one pairs")
+			agentWarn.Printf("no devices are paired yet, so every device connection will be refused until one pairs")
 		}
 	}
 

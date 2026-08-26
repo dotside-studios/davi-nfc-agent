@@ -2,7 +2,6 @@ package nfc
 
 import (
 	"fmt"
-	"log"
 	"sort"
 	"sync"
 	"time"
@@ -140,7 +139,7 @@ func (s *Supervisor) Devices() []string {
 func (s *Supervisor) reconcile() {
 	devices, err := ListReaders(s.manager)
 	if err != nil {
-		log.Printf("[supervisor] Listing readers failed: %v", err)
+		supervisorFail.Printf("Listing readers failed: %v", err)
 		return
 	}
 
@@ -180,7 +179,7 @@ func (s *Supervisor) reconcile() {
 	for _, device := range opened {
 		reader, err := newDeviceReader(device, s.manager, s.timeout)
 		if err != nil {
-			log.Printf("[supervisor] Cannot open reader %s: %v", device, err)
+			supervisorFail.Printf("Cannot open reader %s: %v", device, err)
 			continue
 		}
 		reader.SetMode(mode)

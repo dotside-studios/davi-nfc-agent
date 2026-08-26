@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -70,7 +69,7 @@ func (c *Server) Handler() http.Handler {
 func (c *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if reason := c.auth.authorize(r); reason != "" {
-			log.Printf("Control request refused (%s): %s %s", reason, r.Method, r.URL.Path)
+			consoleWarn.Printf("Control request refused (%s): %s %s", reason, r.Method, r.URL.Path)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -167,7 +166,7 @@ func (c *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	result, err := c.dispatch(req)
 	if err != nil {
-		log.Printf("Control action %q failed: %v", req.Action, err)
+		consoleWarn.Printf("Control action %q failed: %v", req.Action, err)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -226,7 +225,7 @@ type envelope struct {
 func (c *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Control WebSocket upgrade failed: %v", err)
+		consoleFail.Printf("Control WebSocket upgrade failed: %v", err)
 		return
 	}
 	defer func() { _ = conn.Close() }()

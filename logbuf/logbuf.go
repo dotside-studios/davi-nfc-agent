@@ -4,14 +4,15 @@
 package logbuf
 
 import (
+	"io"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Level is the severity inferred for a log line. The agent logs without levels,
-// so this is recovered from the text. It is good enough to drive a filter, but
-// not to be relied on for control flow.
+// Level is the severity a log line was recorded at. A line arrives at
+// [LevelInfo] unless it was written to a writer from [Ring.At], so what a line
+// is depends on where its logger writes, not on what its text happens to say.
 type Level string
 
 const (
@@ -67,11 +68,42 @@ func New(capacity int) *Ring {
 // Write implements io.Writer, recording each complete line as an entry. It
 // never reports an error, which would propagate into the code trying to log.
 func (r *Ring) Write(p []byte) (int, error) {
+	return r.write(p, LevelInfo, &r.partial)
+}
+
+// At returns a writer recording everything written to it at level, for a
+// logger whose lines are all one severity:
+//
+//	errors := log.New(ring.At(logbuf.LevelError), "[backups] ", log.LstdFlags)
+//
+// Each writer buffers its own partial line, so one that ends mid-line does not
+// take the level of whatever writes next.
+func (r *Ring) At(level Level) io.Writer {
+	return &levelWriter{ring: r, level: level}
+}
+
+// levelWriter records at one level. Its own partial buffer is what keeps the
+// levels from bleeding into each other.
+type levelWriter struct {
+	ring  *Ring
+	level Level
+
+	mu      sync.Mutex
+	partial []byte
+}
+
+func (w *levelWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ring.write(p, w.level, &w.partial)
+}
+
+func (r *Ring) write(p []byte, level Level, partial *[]byte) (int, error) {
 	n := len(p)
 
 	r.mu.Lock()
-	r.partial = append(r.partial, p...)
-	buf := r.partial
+	*partial = append(*partial, p...)
+	buf := *partial
 
 	var complete [][]byte
 	for {
@@ -82,8 +114,8 @@ func (r *Ring) Write(p []byte) (int, error) {
 		complete = append(complete, buf[:idx])
 		buf = buf[idx+1:]
 	}
-	// Copied because buf aliases r.partial's array.
-	r.partial = append([]byte(nil), buf...)
+	// Copied because buf aliases the partial buffer's array.
+	*partial = append([]byte(nil), buf...)
 
 	added := make([]Entry, 0, len(complete))
 	for _, line := range complete {
@@ -91,7 +123,7 @@ func (r *Ring) Write(p []byte) (int, error) {
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		added = append(added, r.appendLocked(text))
+		added = append(added, r.appendLocked(text, level))
 	}
 
 	subs := make([]chan Entry, 0, len(r.subs))
@@ -115,15 +147,15 @@ func (r *Ring) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// appendLocked records one line. Caller holds the write lock.
-func (r *Ring) appendLocked(text string) Entry {
+// appendLocked records one line at level. Caller holds the write lock.
+func (r *Ring) appendLocked(text string, level Level) Entry {
 	ts, source, message := parseLine(text)
 
 	r.seq++
 	e := Entry{
 		Seq:     r.seq,
 		Time:    ts,
-		Level:   inferLevel(message),
+		Level:   level,
 		Source:  source,
 		Message: message,
 	}
@@ -217,28 +249,6 @@ func parseLine(line string) (time.Time, string, string) {
 	}
 
 	return now, source, rest
-}
-
-// inferLevel guesses a severity from the message text.
-func inferLevel(message string) Level {
-	lower := strings.ToLower(message)
-	switch {
-	case strings.Contains(lower, "error"),
-		strings.Contains(lower, "failed"),
-		strings.Contains(lower, "failure"),
-		strings.Contains(lower, "panic"),
-		strings.Contains(lower, "fatal"),
-		strings.Contains(lower, "refused"),
-		strings.Contains(lower, "rejected"):
-		return LevelError
-	case strings.Contains(lower, "warn"),
-		strings.Contains(lower, "deprecat"),
-		strings.Contains(lower, "retry"),
-		strings.Contains(lower, "retrying"):
-		return LevelWarn
-	default:
-		return LevelInfo
-	}
 }
 
 // indexByte is strings.IndexByte without the conversion.

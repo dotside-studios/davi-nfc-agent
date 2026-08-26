@@ -2,8 +2,8 @@ package agent
 
 import (
 	"fmt"
-	"log"
 
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -15,7 +15,7 @@ func (a *Agent) forwardScan(data nfc.NFCData) {
 	}
 
 	if data.Err != nil {
-		log.Printf("Error: %v", data.Err)
+		a.LoggerAt(logbuf.LevelError).Printf("A reader reported an error: %v", data.Err)
 		a.reportTag(data)
 		return
 	}
@@ -25,7 +25,7 @@ func (a *Agent) forwardScan(data nfc.NFCData) {
 	}
 
 	if !a.cardTypes.isAllowed(data.Card.Type) {
-		log.Printf("Card type '%s' not in allowed list, ignoring", data.Card.Type)
+		a.logger.Printf("Card type '%s' not in allowed list, ignoring", data.Card.Type)
 		a.reportTag(nfc.NFCData{
 			Device: data.Device,
 			Err:    fmt.Errorf("card type '%s' not allowed by filter", data.Card.Type),

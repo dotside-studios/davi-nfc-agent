@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"net/http"
 	"sync/atomic"
 )
@@ -55,7 +54,7 @@ func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) (deviceID str
 	if a.requirePaired.Load() {
 		id, ok := CheckPairedDevice(w, r, a.tokenVerifier)
 		if !ok {
-			log.Printf("[device] Connection rejected from %s: no paired-device credential", r.RemoteAddr)
+			deviceWarn.Printf("Connection rejected from %s: no paired-device credential", r.RemoteAddr)
 			return "", false
 		}
 		return id, true
@@ -63,7 +62,7 @@ func (a *DeviceAuth) Check(w http.ResponseWriter, r *http.Request) (deviceID str
 
 	id, ok := CheckAuth(w, r, a.apiSecret(), a.tokenVerifier)
 	if !ok {
-		log.Printf("[device] WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
+		deviceWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return "", false
 	}
 	return id, true

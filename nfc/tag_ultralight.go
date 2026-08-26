@@ -2,7 +2,6 @@ package nfc
 
 import (
 	"fmt"
-	"log"
 )
 
 type pcscUltralightTag struct {
@@ -99,7 +98,7 @@ func (t *pcscUltralightTag) ReadData() ([]byte, error) {
 			if IsCardRemovedError(err) {
 				return nil, err
 			}
-			log.Printf("Error reading page %d: %v", page, err)
+			readerFail.Printf("Error reading page %d: %v", page, err)
 			lastError = err
 			break
 		}

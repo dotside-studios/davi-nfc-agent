@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"io"
 	"log"
 	"os"
 	"sync"
@@ -52,8 +53,12 @@ type Config struct {
 	// configuration lands in this agent's directory.
 	Info buildinfo.Info
 
-	// Logger receives the agent's diagnostics. Nil installs one writing to
-	// stderr with an [agent] prefix.
+	// Logger receives the agent's diagnostics, and is what the plugins log
+	// through, each under its own name. Nil installs one writing to stderr, and
+	// to Logs when there is one, with an [agent] prefix.
+	//
+	// A logger supplied here is used as it is: where it writes, and whether the
+	// console can read it back, is then the caller's to arrange.
 	Logger *log.Logger
 
 	// DevicePort is the single listener serving both devices and clients.
@@ -143,6 +148,7 @@ type Agent struct {
 	requirePairedDevice bool
 	readerFeedback      bool
 	logs                *logbuf.Ring
+	suppliedLogger      bool
 
 	// Preferences. Held on the agent as well as on the reader, because Start
 	// builds a new reader each time: a preference that only reached the reader
@@ -200,8 +206,9 @@ func New(cfg Config) *Agent {
 	}
 
 	logger := cfg.Logger
+	suppliedLogger := logger != nil
 	if logger == nil {
-		logger = log.New(os.Stderr, "[agent] ", log.LstdFlags)
+		logger = log.New(logSink(cfg.Logs, logbuf.LevelInfo), "[agent] ", log.LstdFlags)
 	}
 
 	port := cfg.DevicePort
@@ -224,6 +231,7 @@ func New(cfg Config) *Agent {
 		readerFeedback:      cfg.ReaderFeedback,
 		cardTypes:           newCardTypeFilter(cfg.CardTypes),
 		logs:                cfg.Logs,
+		suppliedLogger:      suppliedLogger,
 		done:                make(chan struct{}),
 		Plugins:             &PluginSet{},
 	}
@@ -241,6 +249,38 @@ func New(cfg Config) *Agent {
 	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.TokenVerifier(), a.requirePairedDevice)
 
 	return a
+}
+
+// logSink is where a logger the agent builds for itself writes: the process's
+// stderr, and the ring the console reads back, when the caller supplied one.
+//
+// Without this the agent's own diagnostics, and every plugin's, reach stderr
+// alone, which a program started from a desktop launcher has nowhere to show.
+func logSink(logs *logbuf.Ring, level logbuf.Level) io.Writer {
+	if logs == nil {
+		return os.Stderr
+	}
+	return io.MultiWriter(os.Stderr, logs.At(level))
+}
+
+// LoggerAt is [Agent.Logger] writing at level, for the lines the agent knows
+// the severity of rather than leaving the console to read it off the text.
+//
+// It reports the agent's own logger when a caller supplied one through
+// [Config.Logger]: what that logger does with a level is the caller's, and the
+// agent does not wrap it to guess.
+func (a *Agent) LoggerAt(level logbuf.Level) *log.Logger {
+	if a.logs == nil || a.suppliedLogger {
+		return a.logger
+	}
+	return log.New(logSink(a.logs, level), a.logger.Prefix(), a.logger.Flags())
+}
+
+// pluginLogger is the log channel a plugin writes on: the agent's own sink at
+// level, under the plugin's name in place of the agent's prefix, which is what
+// makes [logbuf.Entry.Source] tell them apart.
+func (a *Agent) pluginLogger(name string, level logbuf.Level) *log.Logger {
+	return log.New(a.LoggerAt(level).Writer(), "["+name+"] ", a.logger.Flags())
 }
 
 // Configuration readers. These exist because the tray and the console display

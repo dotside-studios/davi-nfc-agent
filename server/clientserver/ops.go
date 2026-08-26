@@ -3,7 +3,6 @@ package clientserver
 import (
 	"context"
 	"encoding/json"
-	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
@@ -68,6 +67,6 @@ func (s *Server) reply(conn *wsconn.SafeConn, requestID, msgType string, payload
 		Payload: payload,
 	})
 	if err != nil {
-		log.Printf("[client] Failed to send %s: %v", msgType, err)
+		clientFail.Printf("Failed to send %s: %v", msgType, err)
 	}
 }

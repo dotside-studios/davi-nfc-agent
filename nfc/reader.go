@@ -3,7 +3,6 @@ package nfc
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -146,7 +145,7 @@ func (r *deviceReader) SetMode(mode ReaderMode) {
 	r.statusMux.Lock()
 	defer r.statusMux.Unlock()
 	r.mode = mode
-	log.Printf("Reader mode changed to: %v", mode)
+	readerLog.Printf("Reader mode changed to: %v", mode)
 }
 
 // GetMode returns the current reader mode.
@@ -164,9 +163,9 @@ func (r *deviceReader) SetFeedback(on bool) {
 		return
 	}
 	if on {
-		log.Println("Reader feedback enabled: the reader will flash and beep at what it reads and writes")
+		readerLog.Println("Reader feedback enabled: the reader will flash and beep at what it reads and writes")
 	} else {
-		log.Println("Reader feedback disabled")
+		readerLog.Println("Reader feedback disabled")
 	}
 }
 
@@ -215,13 +214,13 @@ func (r *deviceReader) reportSignalError(err error) {
 	r.statusMux.Unlock()
 
 	if message != "" && !repeat {
-		log.Printf("Reader feedback failed: %v", err)
+		readerFail.Printf("Reader feedback failed: %v", err)
 	}
 }
 
 // Close releases resources. Does not stop the worker, use Stop() for that.
 func (r *deviceReader) Close() {
-	log.Println("deviceReader Close called (resource cleanup).")
+	readerLog.Println("deviceReader Close called (resource cleanup).")
 	r.deviceManager.Close()
 	// Note: Channels dataChan, statusChan are not closed here as they might be read by other goroutines.
 	// They are managed by the lifecycle of the deviceReader user.
@@ -229,24 +228,24 @@ func (r *deviceReader) Close() {
 
 // Stop gracefully shuts down the deviceReader worker and waits for it to complete.
 func (r *deviceReader) Stop() {
-	log.Println("Stopping deviceReader...")
+	readerLog.Println("Stopping deviceReader...")
 	select {
 	case <-r.stopChan:
-		log.Println("Stop channel already closed or closing.")
+		readerWarn.Println("Stop channel already closed or closing.")
 		return // Already stopping or stopped
 	default:
 		close(r.stopChan)
-		log.Println("Stop channel successfully closed, waiting for worker to finish...")
+		readerLog.Println("Stop channel successfully closed, waiting for worker to finish...")
 	}
 	// Wait for the worker to finish
 	r.workerWg.Wait()
-	log.Println("deviceReader worker stopped successfully.")
+	readerLog.Println("deviceReader worker stopped successfully.")
 	// Worker's defer will handle device closing and final status.
 }
 
 // Start begins the NFC reading process in a separate goroutine.
 func (r *deviceReader) Start() {
-	log.Println("deviceReader Start called, starting worker.")
+	readerLog.Println("deviceReader Start called, starting worker.")
 	r.workerWg.Add(1)
 	go r.worker()
 }
@@ -298,36 +297,36 @@ func (r *deviceReader) readCardPresent() bool {
 func (r *deviceReader) handleDeviceEvent(event DeviceEvent) {
 	switch event.Type {
 	case DeviceConnected:
-		log.Printf("Device event: Connected - %s", event.Message)
+		readerLog.Printf("Device event: Connected - %s", event.Message)
 		r.LogDeviceInfo()
 		r.broadcastDeviceStatus() // Use default message
 
 	case DeviceDisconnected:
-		log.Printf("Device event: Disconnected - %s", event.Message)
+		readerWarn.Printf("Device event: Disconnected - %s", event.Message)
 		r.broadcastDeviceStatus("Device disconnected")
 
 	case DeviceReconnecting:
-		log.Printf("Device event: Reconnecting - %s", event.Message)
+		readerWarn.Printf("Device event: Reconnecting - %s", event.Message)
 		r.broadcastDeviceStatus(fmt.Sprintf("Reconnecting: %s", event.Message))
 
 	case DeviceReconnectFailed:
-		log.Printf("Device event: Reconnect failed - %s", event.Message)
+		readerFail.Printf("Device event: Reconnect failed - %s", event.Message)
 		r.broadcastDeviceStatus(fmt.Sprintf("Connection failed: %s", event.Message))
 
 	case CooldownStarted:
-		log.Printf("Device event: Cooldown started - %s", event.Message)
+		readerWarn.Printf("Device event: Cooldown started - %s", event.Message)
 		r.broadcastDeviceStatus("Device in cooldown")
 
 	case CooldownEnded:
-		log.Printf("Device event: Cooldown ended - %s", event.Message)
+		readerLog.Printf("Device event: Cooldown ended - %s", event.Message)
 		r.broadcastDeviceStatus("Attempting reconnection after cooldown")
 
 	case DeviceError:
-		log.Printf("Device event: Error - %s", event.Message)
+		readerFail.Printf("Device event: Error - %s", event.Message)
 		// Error already handled by DeviceManager
 
 	default:
-		log.Printf("Device event: Unknown type %d - %s", event.Type, event.Message)
+		readerWarn.Printf("Device event: Unknown type %d - %s", event.Type, event.Message)
 	}
 }
 
@@ -339,9 +338,9 @@ func (r *deviceReader) handleCardCheck() {
 		r.setCardPresent(currentCacheCardPresent)
 		if currentCacheCardPresent {
 			uid := r.cache.GetLastScanned()
-			log.Printf("Card presence changed via cache: DETECTED (UID: %s)", uid)
+			readerLog.Printf("Card presence changed via cache: DETECTED (UID: %s)", uid)
 		} else {
-			log.Println("Card presence changed via cache: REMOVED/timed out")
+			readerLog.Println("Card presence changed via cache: REMOVED/timed out")
 		}
 	}
 }
@@ -357,7 +356,7 @@ func (r *deviceReader) handleDeviceErrors(err error) bool {
 
 	// Handle card removal specially - close device to allow reconnection
 	if IsCardRemovedError(err) {
-		log.Println("Card was removed, closing device for reconnection")
+		readerLog.Println("Card was removed, closing device for reconnection")
 		r.deviceManager.Close()
 		r.setCardPresent(false)
 		r.broadcastDeviceStatus("Card removed, waiting for new card")
@@ -368,7 +367,7 @@ func (r *deviceReader) handleDeviceErrors(err error) bool {
 	// Closing would cause immediate reconnection to the same unsupported tag
 	if IsUnsupportedTagError(err) {
 		// Error is only returned once per card by the device, so just log it
-		log.Printf("Unsupported tag detected: %v - waiting for card removal", err)
+		readerWarn.Printf("Unsupported tag detected: %v - waiting for card removal", err)
 		r.setCardPresent(true) // Card is present, just not supported
 		r.broadcastDeviceStatus("Unsupported tag, please use a different card")
 		// Don't close - the card removal detection will handle when the card is removed
@@ -401,7 +400,7 @@ func (r *deviceReader) handleDeviceErrors(err error) bool {
 
 	// For unhandled errors, send to data channel
 	if !recognized {
-		log.Printf("Unhandled error from getTags: %v. Sending to dataChan.", err)
+		readerFail.Printf("Unhandled error from getTags: %v. Sending to dataChan.", err)
 		r.dataChan <- NFCData{Device: r.DevicePath(), Card: nil, Err: fmt.Errorf("get tags error: %v", err)}
 		r.clock.Sleep(UnhandledErrorRetryInterval)
 	}
@@ -442,20 +441,20 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 		if _, err := card.ReadMessage(); err != nil {
 			// Check if this is a card removal error - if so, close the device
 			if IsCardRemovedError(err) {
-				log.Println("Card was removed during read, closing device for reconnection")
+				readerLog.Println("Card was removed during read, closing device for reconnection")
 				r.deviceManager.Close()
 				r.setCardPresent(false)
 				r.broadcastDeviceStatus("Card removed, waiting for new card")
 				return
 			}
-			log.Printf("Error reading data for card UID %s (Type: %s): %v", uid, card.Type, err)
+			readerFail.Printf("Error reading data for card UID %s (Type: %s): %v", uid, card.Type, err)
 			// Send card with error
 			r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: err}
 			continue
 		}
 
 		if r.cache.HasChanged(uid) {
-			log.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
+			readerLog.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
 			r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: nil}
 			r.signal(SignalSuccess)
 		}
@@ -465,8 +464,8 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 }
 
 func (r *deviceReader) worker() {
-	log.Println("deviceReader worker started.")
-	defer log.Println("deviceReader worker stopped.")
+	readerLog.Println("deviceReader worker started.")
+	defer readerLog.Println("deviceReader worker stopped.")
 
 	r.cardCheckTicker = r.clock.NewTicker(CardCheckTickerInterval)
 	pollTicker := r.clock.NewTicker(DefaultPollingInterval)
@@ -477,7 +476,7 @@ func (r *deviceReader) worker() {
 		r.deviceManager.Close()
 		r.broadcastDeviceStatus("Worker stopped, device disconnected.")
 		r.workerWg.Done()
-		log.Println("Worker goroutine finished.")
+		readerLog.Println("Worker goroutine finished.")
 	}()
 
 	for {
@@ -522,7 +521,7 @@ func (r *deviceReader) pollOnce() {
 		return
 	case <-r.clock.After(5 * time.Second):
 		// Poll taking too long - continue anyway to stay responsive
-		log.Println("Poll operation taking longer than expected")
+		readerWarn.Println("Poll operation taking longer than expected")
 	}
 }
 
@@ -551,7 +550,7 @@ func (r *deviceReader) doPoll() {
 				return // No devices available yet
 			}
 			// Auto-select the first available device
-			log.Printf("Device discovered, auto-selecting: %s", devices[0])
+			readerLog.Printf("Device discovered, auto-selecting: %s", devices[0])
 			r.deviceManager.SetDevicePath(devices[0])
 		}
 		if err := r.deviceManager.TryConnect(); err != nil {
@@ -562,7 +561,7 @@ func (r *deviceReader) doPoll() {
 			// that will not reappear, otherwise fills the log at the polling
 			// rate with the same line.
 			if !IsNoCardError(err) && !r.deviceManager.recordError(err) {
-				log.Printf("Connection attempt failed: %v", err)
+				readerFail.Printf("Connection attempt failed: %v", err)
 			}
 		} else {
 			r.deviceManager.clearLastError()
@@ -599,7 +598,7 @@ func (r *deviceReader) broadcastDeviceStatus(customMessage ...string) {
 	select {
 	case r.statusChan <- status:
 	default:
-		log.Println("Warning: Device status channel full or no listener.")
+		readerWarn.Println("Warning: Device status channel full or no listener.")
 	}
 }
 
@@ -612,7 +611,7 @@ func (r *deviceReader) LogDeviceInfo() {
 	name := dev.String()
 	connString := dev.Connection()
 	devicePath := r.deviceManager.DevicePath()
-	log.Printf("Connected NFC device: %s (Connection: %s, Path: %s)", name, connString, devicePath)
+	readerLog.Printf("Connected NFC device: %s (Connection: %s, Path: %s)", name, connString, devicePath)
 }
 
 // GetLastScannedData retrieves the last scanned UID from the cache.
@@ -791,7 +790,7 @@ func (r *deviceReader) prepareCardForWrite(expectUID string) (*Card, error) {
 	currentPresentCardUID := r.cache.GetLastScanned()
 	if currentPresentCardUID == "" {
 		// Cache is empty (e.g., first write in write-only mode)
-		log.Printf("Cache empty, using sole detected tag UID: %s", tag.UID())
+		readerLog.Printf("Cache empty, using sole detected tag UID: %s", tag.UID())
 		r.cache.UpdateLastSeenTime(tag.UID())
 		r.cache.HasChanged(tag.UID())
 	} else if currentPresentCardUID != tag.UID() {
@@ -820,7 +819,7 @@ func (r *deviceReader) prepareCardForWrite(expectUID string) (*Card, error) {
 // snapshot is written once and reported unverified, because reading it back
 // would compare against data the write could not have changed.
 func writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions, clock Clock) (*WriteResult, error) {
-	log.Printf("writeMessageToCard (UID: %s, Type: %s): overwrite=%v, index=%d",
+	readerLog.Printf("writeMessageToCard (UID: %s, Type: %s): overwrite=%v, index=%d",
 		card.UID, card.Type, opts.Overwrite, opts.Index)
 
 	// Resolve the final NDEF message to write (overwrite vs partial merge).
@@ -853,7 +852,7 @@ func writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions, clock C
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		if attempt > 1 {
-			log.Printf("writeMessageToCard (UID: %s): retry attempt %d/%d (last error: %v)",
+			readerWarn.Printf("writeMessageToCard (UID: %s): retry attempt %d/%d (last error: %v)",
 				card.UID, attempt, attempts, lastErr)
 			clock.Sleep(time.Duration(attempt-1) * WriteRetryBackoff)
 		}
@@ -870,7 +869,7 @@ func writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions, clock C
 
 		// If verification is disabled, treat a clean write as success.
 		if !verify {
-			log.Printf("writeMessageToCard (UID: %s): write completed (unverified, attempt %d)", card.UID, attempt)
+			readerLog.Printf("writeMessageToCard (UID: %s): write completed (unverified, attempt %d)", card.UID, attempt)
 			return newWriteResult(card, len(data), false, attempt, lockedByWrite), nil
 		}
 
@@ -884,7 +883,7 @@ func writeMessageToCard(card *Card, msg *NDEFMessage, opts WriteOptions, clock C
 			continue
 		}
 		if verified {
-			log.Printf("writeMessageToCard (UID: %s): write verified successfully (attempt %d)", card.UID, attempt)
+			readerLog.Printf("writeMessageToCard (UID: %s): write verified successfully (attempt %d)", card.UID, attempt)
 			return newWriteResult(card, len(data), true, attempt, lockedByWrite), nil
 		}
 		lastErr = fmt.Errorf("write verification mismatch: data read back does not match data written")
@@ -908,7 +907,7 @@ func resolveWriteMessage(card *Card, msg *NDEFMessage, opts WriteOptions) (*NDEF
 		// Card is blank, non-NDEF, or unreadable: a full overwrite is the only
 		// safe option.
 		if !opts.Overwrite {
-			log.Printf("resolveWriteMessage (UID: %s): card has no usable NDEF data, forcing overwrite", card.UID)
+			readerLog.Printf("resolveWriteMessage (UID: %s): card has no usable NDEF data, forcing overwrite", card.UID)
 		}
 		opts.Overwrite = true
 	}
@@ -918,15 +917,15 @@ func resolveWriteMessage(card *Card, msg *NDEFMessage, opts WriteOptions) (*NDEF
 	}
 
 	// Partial update: merge new records into the existing message.
-	log.Printf("resolveWriteMessage (UID: %s): merging records for partial update", card.UID)
+	readerLog.Printf("resolveWriteMessage (UID: %s): merging records for partial update", card.UID)
 	cachedBuilder := cachedNdef.ToBuilder()
 	newBuilder := msg.ToBuilder()
 
 	if opts.Index <= -1 || opts.Index >= len(cachedBuilder.Records) {
-		log.Printf("resolveWriteMessage (UID: %s): appending %d new record(s)", card.UID, len(newBuilder.Records))
+		readerLog.Printf("resolveWriteMessage (UID: %s): appending %d new record(s)", card.UID, len(newBuilder.Records))
 		cachedBuilder.Records = append(cachedBuilder.Records, newBuilder.Records...)
 	} else {
-		log.Printf("resolveWriteMessage (UID: %s): replacing record at index %d", card.UID, opts.Index)
+		readerLog.Printf("resolveWriteMessage (UID: %s): replacing record at index %d", card.UID, opts.Index)
 		if len(newBuilder.Records) > 0 {
 			cachedBuilder.Records[opts.Index] = newBuilder.Records[0]
 		}
@@ -951,7 +950,7 @@ func writeOnce(card *Card, data []byte, opts WriteOptions) (locked bool, err err
 		if advWriter, ok := card.tag.(AdvancedWriter); ok {
 			return false, advWriter.WriteDataWithOptions(data, TagWriteOptions{ForceInitialize: true})
 		}
-		log.Printf("writeOnce (UID: %s): ForceInitialize requested but tag doesn't support AdvancedWriter, using standard write", card.UID)
+		readerLog.Printf("writeOnce (UID: %s): ForceInitialize requested but tag doesn't support AdvancedWriter, using standard write", card.UID)
 	}
 
 	card.LastAccessed = time.Now()
@@ -1036,7 +1035,7 @@ func (r *deviceReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOption
 			r.statusMux.Unlock()
 		}()
 
-		log.Printf("Attempting to write NDEF message to card UID: %s, Type: %s", card.UID, card.Type)
+		readerLog.Printf("Attempting to write NDEF message to card UID: %s, Type: %s", card.UID, card.Type)
 		res, err := WriteMessage(card, msg, opts, r.clock)
 		if err != nil {
 			r.signal(SignalFailure)
@@ -1045,7 +1044,7 @@ func (r *deviceReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOption
 
 		result = res
 
-		log.Printf("Successfully wrote NDEF message to card UID: %s (verified=%v, attempts=%d, locked=%v)",
+		readerLog.Printf("Successfully wrote NDEF message to card UID: %s (verified=%v, attempts=%d, locked=%v)",
 			card.UID, res.Verified, res.Attempts, res.Locked)
 		r.signal(SignalSuccess)
 		return nil
@@ -1114,7 +1113,7 @@ func lockCard(card *Card) (*LockResult, error) {
 		return nil, NewWriteError(fmt.Sprintf("lockCard (UID: %s)", card.UID), err)
 	}
 
-	log.Printf("lockCard (UID: %s, Type: %s): tag locked read-only", card.UID, card.Type)
+	readerLog.Printf("lockCard (UID: %s, Type: %s): tag locked read-only", card.UID, card.Type)
 	return &LockResult{UID: card.UID, TagType: card.Type, Locked: true}, nil
 }
 

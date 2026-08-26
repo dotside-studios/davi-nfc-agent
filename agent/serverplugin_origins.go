@@ -28,7 +28,7 @@ func (p *ServerPlugin) loadOrigins(ctx AgentContext) {
 
 	store, err := server.NewOriginStore(ctx.ConfigDir())
 	if err != nil {
-		p.logf("Failed to load the origin allowlist: %v", err)
+		p.failf("Failed to load the origin allowlist: %v", err)
 		store, _ = server.NewOriginStore("")
 	}
 
@@ -39,7 +39,7 @@ func (p *ServerPlugin) loadOrigins(ctx AgentContext) {
 			continue
 		}
 		if err := store.Allow(origin); err != nil {
-			p.logf("Failed to allow origin %q: %v", origin, err)
+			p.failf("Failed to allow origin %q: %v", origin, err)
 		}
 	}
 
@@ -155,7 +155,7 @@ func (p *ServerPlugin) refreshOrigins() {
 func (p *ServerPlugin) toggleOrigin(row originRow) {
 	if row.blocked {
 		if err := p.Origins.Allow(row.origin); err != nil {
-			p.logf("Failed to allow origin %q: %v", row.origin, err)
+			p.failf("Failed to allow origin %q: %v", row.origin, err)
 			return
 		}
 		p.logf("Allowed origin: %s", row.origin)
@@ -163,7 +163,7 @@ func (p *ServerPlugin) toggleOrigin(row originRow) {
 	}
 
 	if err := p.Origins.Revoke(row.origin); err != nil {
-		p.logf("Failed to revoke origin %q: %v", row.origin, err)
+		p.failf("Failed to revoke origin %q: %v", row.origin, err)
 		return
 	}
 	p.logf("Revoked origin: %s", row.origin)

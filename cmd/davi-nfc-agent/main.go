@@ -7,7 +7,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -40,8 +39,13 @@ func main() {
 
 	// Before anything else logs: started from a desktop launcher there is no
 	// stderr to read, and the console reads this ring.
+	//
+	// Install names it to the packages reporting on their own channels, and
+	// Options hands the same ring to the agent for its own log and its
+	// plugins'. The standard logger keeps stderr alone: a line that reached the
+	// ring both ways would be shown twice, at two levels.
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
-	log.SetOutput(io.MultiWriter(os.Stderr, opts.Logs))
+	logbuf.Install(opts.Logs)
 
 	// The driver serving phones. What it scans and what it holds reach the
 	// agent through the manager below; its endpoint is served alongside the

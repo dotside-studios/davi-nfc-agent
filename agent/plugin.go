@@ -154,6 +154,13 @@ type AgentContext struct {
 	// A plugin with more than one entry should group them under a submenu of
 	// its own: ctx.Systray.Section("Backups").
 	Systray traymenu.Container
+
+	// logger is the plugin's own log channel, set when the agent activates it.
+	// See [AgentContext.Logger].
+	logger *log.Logger
+
+	// name is what the plugin is called, for the channels LoggerAt builds.
+	name string
 }
 
 // Use registers components to start and stop with the agent, in the order the
@@ -198,8 +205,38 @@ func (ctx AgentContext) Mount(pattern string, handler http.Handler) error {
 	return m.Mount(pattern, handler)
 }
 
-// Logger is the agent's log, displayed by the control center.
-func (ctx AgentContext) Logger() *log.Logger { return ctx.Agent.Logger() }
+// Logger is the plugin's log channel: the agent's log, written under the
+// plugin's own name, so the console can tell one plugin's diagnostics from
+// another's and from the agent's.
+//
+//	[server] 2006/01/02 15:04:05 Rebinding the listener...
+//
+// It is what [Plugin.Name] is for; a plugin that names itself nothing is
+// channelled under its type, as [PluginName] reports it. A caller holding a
+// context the agent did not hand out logs as the agent does.
+//
+// Lines written here are recorded at [logbuf.LevelInfo]. For the ones whose
+// severity the plugin knows, see [AgentContext.LoggerAt].
+func (ctx AgentContext) Logger() *log.Logger {
+	if ctx.logger != nil {
+		return ctx.logger
+	}
+	return ctx.Agent.Logger()
+}
+
+// LoggerAt is the plugin's channel writing at level, so what the console shows
+// as a failure is what the plugin called one:
+//
+//	failures := ctx.LoggerAt(logbuf.LevelError)
+//	failures.Printf("could not reach the store: %v", err)
+//
+// The severity is the caller's to state. Nothing reads it back off the text.
+func (ctx AgentContext) LoggerAt(level logbuf.Level) *log.Logger {
+	if ctx.name == "" {
+		return ctx.Agent.LoggerAt(level)
+	}
+	return ctx.Agent.pluginLogger(ctx.name, level)
+}
 
 // Info is what this build calls itself, for a plugin that presents a name.
 func (ctx AgentContext) Info() buildinfo.Info { return ctx.Agent.Info() }
@@ -247,7 +284,14 @@ func (a *Agent) activateLocked(systray traymenu.Container) error {
 
 	for _, p := range plugins {
 		name := PluginName(p)
-		if err := p.Activate(ctx); err != nil {
+
+		// Each plugin activates with its own log channel, so what it reports is
+		// marked out from what the agent and the other plugins report.
+		activating := ctx
+		activating.name = name
+		activating.logger = a.pluginLogger(name, logbuf.LevelInfo)
+
+		if err := p.Activate(activating); err != nil {
 			a.activateErr = fmt.Errorf("agent: plugin %q: %w", name, err)
 			a.logger.Printf("Plugin %q failed to activate: %v", name, err)
 			return a.activateErr

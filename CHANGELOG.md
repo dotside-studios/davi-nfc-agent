@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `logbuf.Channel` gives a package a logger under a name at a level, and
+  `logbuf.Install` names the ring those write into. `nfc`, `nfc/remotenfc`,
+  `nfc/multimanager`, `nfc/pcsc`, `server`, `server/clientserver`,
+  `server/listener`, `agent` and the tray and console report on channels
+  rather than writing a prefix into each call, so what the console shows as a
+  source is declared once and what it shows as a failure is what the caller
+  called one. The listener reports under `listener`, having kept `unified` since
+  `server/unifiedserver` was renamed
+- `AgentContext.LoggerAt` and `Agent.LoggerAt` write on a channel at a stated
+  level, and `logbuf.Ring.At` is the writer behind them. A line is a failure
+  because the caller said so
+
+### Changed
+
+- `logbuf` records a line at the level it was written at rather than guessing
+  one from the text. It matched words like "failed" anywhere in the formatted
+  line, so a config directory or device name carrying one read as an error, and
+  a failure phrased without one did not. Unmarked lines are info
+- `AgentContext.Logger` is the plugin's own log channel: the agent's log,
+  written under the plugin's name, so the console tells one plugin's
+  diagnostics from another's and from the agent's. `Plugin.Name` decides it,
+  and a plugin naming itself nothing is channelled under its type
+
+### Fixed
+
+- What the agent logs reaches the console. `Config.Logs` was held on the agent
+  and connected to nothing, so `Agent.Logger` wrote to stderr alone: an agent
+  started from a desktop launcher had nowhere to show its own diagnostics, and
+  the console's log tail carried the drivers' output and none of the agent's. A
+  logger supplied through `Config.Logger` is still used as it is
+
 ### Fixed
 
 - Stopping a listener no longer races the mDNS advertiser it is taking down.

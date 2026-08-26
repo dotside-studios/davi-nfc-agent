@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
+	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
@@ -142,11 +143,12 @@ type ServerPlugin struct {
 	ServeMode map[string]http.Handler
 
 	// The entries whose labels follow what is being served.
-	device *traymenu.Item
-	client *traymenu.Item
-	secret *traymenu.Item
-	logger *log.Logger
-	agent  *Agent
+	device   *traymenu.Item
+	client   *traymenu.Item
+	secret   *traymenu.Item
+	logger   *log.Logger
+	failures *log.Logger
+	agent    *Agent
 
 	// clientChanges republishes what the client server reports, so a subscriber
 	// connects to the plugin rather than to whichever server this build put
@@ -213,6 +215,7 @@ func (p *ServerPlugin) Port() int {
 // A control center missing its API is worse than one that is not there.
 func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	p.logger = ctx.Logger()
+	p.failures = ctx.LoggerAt(logbuf.LevelError)
 	p.agent = ctx.Agent
 	p.loadOrigins(ctx)
 	p.serveModes()
@@ -354,7 +357,7 @@ func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
 		traymenu.OnClick(func() {
 			fresh, err := ctx.Agent.RotateAPISecret()
 			if err != nil {
-				p.logf("Failed to rotate the API secret: %v", err)
+				p.failf("Failed to rotate the API secret: %v", err)
 				return
 			}
 			p.logf("API secret rotated; it is required from the next connection")
@@ -423,6 +426,16 @@ func (p *ServerPlugin) logf(format string, args ...any) {
 	}
 }
 
+// failf reports something that did not work. The severity is stated here rather
+// than left for the console to read off the words.
+func (p *ServerPlugin) failf(format string, args ...any) {
+	if p.failures != nil {
+		p.failures.Printf(format, args...)
+		return
+	}
+	p.logf(format, args...)
+}
+
 // register wires one endpoint: its route and its lifetime. Its menu entries
 // come later, with the addresses; see serverURLs.
 func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint) error {
@@ -463,6 +476,7 @@ func (p *ServerPlugin) watchCertificates(ctx AgentContext) error {
 		certificates: p.Certificates,
 		rebind:       p.Rebind,
 		logf:         ctx.Logger().Printf,
+		failf:        ctx.LoggerAt(logbuf.LevelError).Printf,
 	})
 }
 
@@ -472,6 +486,7 @@ type certificateWatch struct {
 	certificates tlspkg.CertificateWatcher
 	rebind       func() error
 	logf         func(format string, args ...any)
+	failf        func(format string, args ...any)
 }
 
 func (w *certificateWatch) Name() string { return "certificate watch" }
@@ -490,7 +505,7 @@ func (w *certificateWatch) Start(ctx context.Context) error {
 				}
 				w.logf("Certificate reissued; rebinding the listener")
 				if err := w.rebind(); err != nil {
-					w.logf("Failed to rebind the listener: %v", err)
+					w.failf("Failed to rebind the listener: %v", err)
 				}
 			}
 		}

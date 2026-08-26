@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stopping a listener no longer races the mDNS advertiser it is taking down.
+  `grandcat/zeroconf` called `WaitGroup.Add` inside the goroutine its own
+  `mainloop` had already started, so `Shutdown` could pass `Wait` while a
+  receive goroutine was still reading, and returned claiming to have waited for
+  it. The package is unmaintained and its newest commit still has it, so this
+  moves to `libp2p/zeroconf/v2`, a fork of it that adds before starting the
+  goroutine. `Register` takes the same arguments, so nothing else changed
+
+### Fixed
+
 - The reader an operator picks now decides what a client can act on, not just
   what it is shown. Scans from other readers were dropped while operations still
   reached them, so a client shown one reader's tags could write, and irreversibly

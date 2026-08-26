@@ -596,7 +596,6 @@ your tag supports:
 | `SupportsTransceive()` | DeviceTransceiver | Whether device supports raw transceive |
 | `IsHealthy()` | DeviceHealthChecker | Connection health validation |
 | `Close()` | (bare method) | Cleanup on shutdown, called by MultiManager |
-| `RemoteDevices()` | RemoteManager | Devices are remote, so none is a candidate reader |
 
 ### DeviceInfoProvider Interface
 

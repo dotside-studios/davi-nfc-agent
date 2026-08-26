@@ -177,7 +177,7 @@ func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 
 	listings := make([]nfc.DeviceListing, 0, len(readers))
 	for _, reader := range readers {
-		listings = append(listings, nfc.DeviceListing{Path: reader, Capabilities: readerTransport})
+		listings = append(listings, nfc.DeviceListing{Path: reader, ID: reader, Capabilities: readerTransport})
 	}
 	return listings, nil
 }

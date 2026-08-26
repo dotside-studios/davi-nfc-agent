@@ -106,7 +106,6 @@ func (h *fakeHost) AvailableDevices() []string { return h.available }
 func (h *fakeHost) AllCardTypes() []string     { return h.cardTypes }
 
 func (h *fakeHost) CurrentCard() (string, string, bool) { return h.cardUID, h.cardType, h.cardOn }
-func (h *fakeHost) RemoteDevices() (int, int)           { return 0, 0 }
 
 func (h *fakeHost) Port() int          { return h.port }
 func (h *fakeHost) BootstrapPort() int { return h.bootstrapPort }

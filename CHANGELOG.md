@@ -97,7 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agent.DeviceEndpointOptions.Authenticate` take that shape. A device admitted
   under a name registers under it; an empty name identifies nobody
 - `nfc.Manager.ListDevices` is `Devices`, returning `nfc.DeviceListing`: the
-  path, and what the driver knows the device can do before anything opens it.
+  path, the identity the device holds with its driver, and what the driver
+  knows it can do before anything opens it.
   `Capabilities.CanPoll` is what a reader list is built from, so a device that
   reports its own scans is left out by declaring itself rather than by the
   agent asking whether it is a phone. `nfc.DevicePaths` lists paths alone
@@ -109,6 +110,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting the agent, which dropped every connected client to change a
   preference. A phone can be chosen like any other device: filtering to one is
   the same operation whatever is holding the tag
+- The console counts the devices it lists. "Remote devices" was the phone
+  driver's own count of what it had registered, beside a panel built from the
+  pairing registry; both come from the paired devices now, so a device shown
+  offline is not counted as active
 - The agent remembers the last scan rather than reading it back out of the
   client server, which kept it for nobody else. It survives a restart now: the
   servers are rebuilt, and the card on the reader is still there.
@@ -324,6 +329,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Agent.RemoteDevices` and `console.Host.RemoteDevices`. The agent reached past
+  its manager into the child holding phones for a count the console can take
+  from the devices it already lists. `Agent.OnlineDevices` answers from what the
+  manager reports, by the identity each device holds
 - `nfc.RemoteManager`, `nfc.ReaderLister` and `MultiManager.ListReaders`. Which
   devices this agent can read from is what a driver declares about each of them,
   rather than three interfaces asking whether a manager holds phones

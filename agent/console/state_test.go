@@ -90,3 +90,23 @@ func TestPreferencesComeOnlyFromTheAgentsSettings(t *testing.T) {
 		}
 	}
 }
+
+// The overview counts the devices the console lists. The count used to be the
+// driver's own, beside a panel built from the pairing registry, so a device
+// shown offline could still be counted as active.
+func TestTheOverviewCountsTheDevicesItLists(t *testing.T) {
+	host := newFakeHost()
+	host.devices = []PairedDevice{
+		{ID: "phone-1", Name: "Operator iPhone", Online: true},
+		{ID: "phone-2", Name: "Spare", Online: false},
+	}
+	c := &Server{host: host}
+
+	info := c.buildReaderInfo()
+	if info.RemoteDevices != 2 {
+		t.Errorf("RemoteDevices = %d, want the paired devices", info.RemoteDevices)
+	}
+	if info.RemoteActive != 1 {
+		t.Errorf("RemoteActive = %d, want the one that is online", info.RemoteActive)
+	}
+}

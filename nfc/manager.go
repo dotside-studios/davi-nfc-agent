@@ -28,8 +28,14 @@ type Manager interface {
 // more when it connects refines it; what an opened device reports is its own,
 // through [GetDeviceCapabilities].
 type DeviceListing struct {
-	// Path names the device to OpenDevice.
+	// Path names the device to OpenDevice, qualified by the manager holding it
+	// when an aggregate lists several.
 	Path string
+
+	// ID is the identity the device holds with its driver: for one that paired,
+	// the identity it paired with. A driver with no identity of its own answers
+	// with the path, which is what a reader is known by.
+	ID string
 
 	// Capabilities is what the driver knows the device can do. CanPoll is the
 	// one a consumer must respect: a device that reports its own scans is not

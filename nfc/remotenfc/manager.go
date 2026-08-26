@@ -122,7 +122,7 @@ func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 	listings := make([]nfc.DeviceListing, 0, len(m.devices))
 	for deviceID, device := range m.devices {
 		if device.IsActive() {
-			listings = append(listings, nfc.DeviceListing{Path: deviceID, Capabilities: deviceTransport})
+			listings = append(listings, nfc.DeviceListing{Path: deviceID, ID: deviceID, Capabilities: deviceTransport})
 		}
 	}
 

@@ -81,6 +81,7 @@ func (m *MockManager) Devices() ([]DeviceListing, error) {
 	for _, path := range m.DevicesList {
 		listings = append(listings, DeviceListing{
 			Path:         path,
+			ID:           path,
 			Capabilities: DeviceCapabilities{CanPoll: true, CanTransceive: true, DeviceType: "mock"},
 		})
 	}

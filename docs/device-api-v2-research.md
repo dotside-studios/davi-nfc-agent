@@ -6,12 +6,14 @@ that came out of it, written down so the design conversation starts from a
 fixed text rather than from memory. The decisions taken so far are §12 to
 §14.
 
-It follows [device-bridge-protocols.md](device-bridge-protocols.md), the survey
-of prior art. It also follows a `device-bridge-plan.md` that no longer exists —
-it sequenced the phased work that produced v1 and was deleted as stale once
-those phases landed, so the "Phase N" references below are historical and
-resolve against the git history and the changelog rather than a file. Where the
-survey is about *our* protocol, this one is about the semantics underneath it — what the tags, the platforms and the
+It followed two documents that no longer exist: `device-bridge-protocols.md`,
+a survey of prior art, and `device-bridge-plan.md`, which sequenced the phased
+work that produced v1. Both were deleted from master once their work had
+landed, so this file is now the only surviving one in that chain and is written
+to stand alone. References below to "the survey" and to "Phase N" are
+historical and resolve against the git history and the changelog rather than
+against a file. Where those two were about *our* protocol, this one is about
+the semantics underneath it — what the tags, the platforms and the
 hardware actually offer, and therefore what a wire protocol can honestly carry.
 
 ## 0. Scope, and the test a design has to pass
@@ -58,7 +60,7 @@ capability field is `omitempty`. Three things were genuinely narrowed.
 `NDEFBytes` / `IdempotencyKey` / `TagUID` (`nfc/remotenfc/wire.go:115`), and the
 call sites hard-code the rest: `nfc/remotenfc/tag.go:207` and `:227` pass
 `{Overwrite: true, Index: -1}`, and `writeTag` forwards only `opts.Lock`
-(`nfc/remotenfc/requests.go:341`). Append-at-index, force-initialising a
+(`nfc/remotenfc/requests.go:357`). Append-at-index, force-initialising a
 Classic card, and retry/verify policy are now unreachable over the bridge.
 
 The honest qualifier: v0 never implemented the write path at all, and the
@@ -68,12 +70,12 @@ headroom, not a working feature — but the shape was right, and the wire is now
 narrower than the internal model it projects.
 
 **The write outcome.** Neither version's `deviceWriteResponse` carries a
-result, so the agent manufactures one (`server/tagrouter/ops.go:65`):
+result, so the agent manufactures one (`nfc/remotenfc/deviceops.go:46`):
 `BytesWritten` = what we sent, `Attempts: 1`, and `Verified` from a
-`verifiable()` helper that is just `!ReadsAreSnapshot`. On the reader route `Verified` means "read back
-and compared". On the device route it means "could in principle have been". One
-field, two meanings, and the device route reports a verification nobody
-performed.
+`confirmable()` helper that is just `!ReadsAreSnapshot`. On the reader route
+`Verified` means "read back and compared". On the device route it means "could
+in principle have been". One field, two meanings, and the device route reports
+a verification nobody performed.
 
 **The `platform` allowlist** (v0 required `ios`/`android`/`web`) was removed in
 `#28`, correctly — it was the smartphone assumption encoded as an admission
@@ -100,9 +102,10 @@ it. The mechanism has five gaps worth recording before v2 touches any of it:
    device. The survey recommended TR-03112-6's OOB-code → PAKE → per-device
    credential; what shipped went straight to a shared-secret-per-device.
 3. **Paired identity is discarded at the door.** `CheckAuth` and
-   `CheckPairedDevice` throw away the returned device ID (`server/auth.go:61`,
-   `:95`) and `RegisterDevice` mints a fresh UUID per connection, so the tray's
-   paired list and the connected-device list are separate identity spaces.
+   `CheckPairedDevice` threw away the returned device ID and `RegisterDevice`
+   minted a fresh UUID per connection, so the tray's paired list and the
+   connected-device list were separate identity spaces. **Fixed on master in
+   `#40`**; see §14 item 3.
 4. **Revocation is not immediate.** Auth is checked once at upgrade; `Revoke`
    does not close live sessions.
 5. **Headless devices cannot pair** without an operator relaying a PIN. See
@@ -113,15 +116,16 @@ it. The mechanism has five gaps worth recording before v2 touches any of it:
 | | Local reader | Device bridge | Client API |
 |---|---|---|---|
 | Arrival | poll ~100 ms, `HasChanged(uid)` — "UID differs from last" | explicit `tagScanned` | `tagData` broadcast |
-| Removal | **inferred**: last seen >1 s ago (`nfc/cache.go:57`) | explicit `tagRemoved`, **with UID** | `NFCData{Card: nil}` — **unnamed** |
+| Removal | **inferred**: last seen >1 s ago (`nfc/cache.go:57`) | explicit `tagRemoved`, **with UID** | a nil tag — names the *holder*, not the tag |
 | Concurrency | `soleTag` refuses >1 tag (`nfc/reader.go:1144`) | one tag per device; `setActiveTag` replaces | n/a |
 | Presence | `deviceStatus.cardPresent` | none — device-level only | the reader's only |
 
 The bridge has the better lifecycle — it is the only source that knows a tag
 left, and which one — and the agent narrows it on the way out:
-`SendTagRemoved` receives `data.UID` and broadcasts `Card: nil`
-(`nfc/remotenfc/manager.go:218`). A client watching a phone cannot tell which
-tag departed, or whether it was its own.
+`SendTagRemoved` receives `data.UID` and broadcasts a nil tag
+(`nfc/remotenfc/manager.go:259`). Master's `ScannedTag` now carries a `Device`,
+so a removal says which holder it came from — but still not which tag left, so
+a client watching a phone cannot tell whether the departed tag was its own.
 
 ### 2.1 Where this is going: edges at the device, state at the agent
 
@@ -249,7 +253,7 @@ a different class from "retry now".
 
 ## 6. Identity: UID is load-bearing and unsound
 
-`resolveRoute` (`server/tagrouter/resolve.go:33`) is good design — it resolves
+`resolveRoute` (`server/clientserver/tagresolve.go:33`) is good design — it resolves
 *which holder has this tag* at request time rather than preferring a source.
 But it addresses by UID, and UID is not an identity: MIFARE Classic and DESFire
 ship random IDs, Web NFC's `serialNumber` may be the empty string, and a
@@ -289,7 +293,7 @@ writing `example.com/c/$uid` onto a card is a real use case here. Three
 hazards:
 
 - **Spelling.** Our canonical form is colon-separated uppercase
-  (`ParseUID`, `nfc/remotenfc/convert.go:40` → `04:A2:24:52:9F:5C:80`), Android
+  (`ParseUID`, `nfc/remotenfc/convert.go:12` → `04:A2:24:52:9F:5C:80`), Android
   hands out a `byte[]`, ESPHome prints `74-10-37-94`, PC/SC gives raw bytes. A
   mismatch between whoever writes the value and whoever looks it up is silent
   and surfaces much later as "not found". Pick one canonical spelling for
@@ -363,7 +367,7 @@ express intents.
 - **Outputs are first-class**: `CMD_LED`, `CMD_BUZ`, `CMD_TEXT`, `CMD_OUT`
   (relay/strike). The reader is an actuator, not only a sensor.
 - **`REPLY_BUSY` and `REPLY_NAK`** — explicit backpressure and negative ack.
-  We have a 10-deep channel (`nfc/remotenfc/manager.go:61`) and then
+  We have a 10-deep channel (`nfc/remotenfc/manager.go:66`) and then
   unspecified behaviour.
 - **`CMD_MFG` / `REPLY_MFGREP`** — a sanctioned vendor-extension channel, so
   proprietary features do not fork the protocol.
@@ -396,7 +400,7 @@ typed into a screen.
 
 Consequences: frames must fit a 2–4 KB max fragment (base64 raw-data dumps are
 hostile), and the device endpoint currently sets **no read limit at all** —
-only the web UI does (`agent/console/server.go:263`, 4 KB). `-auto-tls=false` already
+only the web UI does (`agent/console/server.go:250`, 4 KB). `-auto-tls=false` already
 gives a plain-`ws://` path, which is the honest escape hatch for a constrained
 board on a trusted network.
 
@@ -545,8 +549,13 @@ Checkable rules, each traceable to something above.
   was the right call even though its mechanism needs work (§1.1).
 - **Designing for the phone and treating everything else as degraded.** That
   assumption produced `smartphone:{id}`, the platform allowlist, and a
-  manager-wide `RemoteDevices() → true` (`nfc/remotenfc/manager.go:381`) that
-  locks a real PN532 reader out of ever being a reader.
+  manager-wide `RemoteDevices() → true` that locked a real PN532 reader out of
+  ever being a reader. The last of those has since been fixed on master, in
+  exactly the direction rules 1 and 2 argue for: `Manager.Devices` returns a
+  `DeviceListing` per device carrying what the driver knows before it is
+  opened, and `CanPoll` gates opening, so a device that reports its own scans
+  is excluded by saying what it is rather than by the agent inferring it from
+  the kind of manager it came from (`nfc/manager.go:25`).
 
 The last one is the summary: v1 is a phone protocol that other devices are
 allowed to use. v2 should be a holder-agnostic protocol that phones happen to
@@ -734,11 +743,12 @@ human-facing setup page, and could eventually become a Control Center route.
 Fewer ports, one certificate, and the pairing endpoint sits where the device is
 about to connect anyway.
 
-**3. Session identity is paired identity.** The agent resolves the presented
-credential to the paired device ID and uses it as the session's identity rather
-than minting a fresh UUID; `deviceName` in the handshake drops to a display
-hint the paired name overrides. Closes gap 3, and is nearly free — the ID is
-already returned by `VerifyToken` and discarded at `server/auth.go:61`.
+**3. Session identity is paired identity — landed.** The agent resolves the
+presented credential to the paired device ID and registers the device under it
+rather than minting a fresh UUID per connection, so a returning device meets
+its own previous session and the console stops showing paired devices offline
+while they are connected. Implemented on master in `#40`: `CheckPairedDevice`
+now returns the identity it admitted (`server/auth.go:92`). Gap 3 is closed.
 
 **4. Revocation closes live sessions.** The registry's `OnChange` already
 exists; wiring it to drop sessions whose device was revoked closes gap 4.
@@ -776,8 +786,8 @@ Most of this does not need the protocol rewrite, and holding security fixes for
 one would be the wrong trade:
 
 - **Now, independent of v2:** the QR carries the SPKI hash and pairing moves to
-  pinned TLS on the agent port; revocation closes sessions; session identity
-  becomes paired identity.
+  pinned TLS on the agent port, and revocation closes live sessions. Session
+  identity has already landed (item 3).
 - **With v2:** `pairing=required` in the mDNS TXT record, the informative
   refusal (§12), and the device declaring its credential type in the handshake.
 - **Demand-driven:** keypair possession proof, and the operator-gated install
@@ -800,8 +810,11 @@ the attended assumption was a choice rather than an oversight.
 
 1. **Handles or UIDs?** Handles change every client-facing request shape too.
 2. **Which query verbs earn their round trip?** A *status* query looks worth
-   it; a *read* query should stay optional — the survey's round-trip argument
-   (§5.1 there) applies to us the moment we use it.
+   it; a *read* query should stay optional. The survey's round-trip argument
+   applies to us the moment we use one: reading NDEF off a MIFARE Classic 1K is
+   sixty-odd card exchanges — single-digit milliseconds locally, one to three
+   seconds of tag-in-field time over WiFi. Our protocol does the tag stack at
+   the edge and sends one message; a query verb spends that saving.
 3. **One tag per holder, or a declared `maxSimultaneousTags`?** A PN532 holds
    two; `soleTag` refuses two.
 4. **Does the device report write results**, and does `Verified` then split
@@ -825,8 +838,9 @@ the attended assumption was a choice rather than an oversight.
 
 ## References
 
-Primary sources checked for this document, beyond those in
-[device-bridge-protocols.md](device-bridge-protocols.md):
+Primary sources checked for this document. The deleted survey carried its own
+list, covering VPCD, TR-03112-6, CTAP hybrid, Web NFC, NCI and NFCGate; that is
+in its final revision in the git history.
 
 - [Android `android.nfc.tech.Ndef`](https://www.iut-fbleau.fr/docs/android/reference/android/nfc/tech/Ndef.html)
   — constants, methods, exceptions

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
 // Quitting is the program's to do, so the console asks whoever owns it. A build
@@ -68,6 +70,35 @@ func TestAnOpenPageIsWokenByAPreferenceChangedElsewhere(t *testing.T) {
 	case <-woken:
 	default:
 		t.Fatal("a preference change did not reach the open page")
+	}
+}
+
+// The allowlist is the server's rather than the agent's, and the console is
+// built before the plugin has a store, so an origin refused or allowed while
+// running still has to reach an open page.
+func TestAnOpenPageIsWokenByTheAllowlist(t *testing.T) {
+	a := quietAgent(t)
+	servers := &agent.ServerPlugin{}
+	c := New(Config{Agent: a, Servers: servers})
+
+	if err := a.Plugins.Add(servers); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+	menu := traymenu.New(traymenu.Discard())
+	t.Cleanup(menu.Close)
+	if err := a.Activate(menu); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	woken, done := c.subscribe()
+	t.Cleanup(done)
+
+	servers.Origins.RecordBlocked("https://evil.example")
+
+	select {
+	case <-woken:
+	default:
+		t.Fatal("a refused origin did not reach the open page")
 	}
 }
 

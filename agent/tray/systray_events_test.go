@@ -5,7 +5,6 @@ import (
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // The tray used to sync its menus only from its own clicks, so a mode picked in
@@ -81,27 +80,6 @@ func TestAStopElsewhereReachesTheControls(t *testing.T) {
 	}
 	if got := app.mCardType.Title(); got != "Card Type: None" {
 		t.Errorf("card type is %q on a stopped agent, want none", got)
-	}
-}
-
-// An origin allowed from the console shows as allowed in the tray, without the
-// operator reopening the menu.
-func TestAnOriginAllowedElsewhereRedrawsTheMenu(t *testing.T) {
-	store, err := server.NewOriginStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewOriginStore: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Origins: store})
-	app, _ := newTestTray(t, agent)
-	app.subscribe()
-
-	if err := store.Allow("console.example"); err != nil {
-		t.Fatalf("Allow: %v", err)
-	}
-
-	row := findOriginRow(t, app, "console.example")
-	if !row.Checked() {
-		t.Error("the allowed origin is not ticked in the menu")
 	}
 }
 

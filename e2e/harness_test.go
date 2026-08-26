@@ -96,16 +96,17 @@ func start(t *testing.T, opts options) *harness {
 	// the agent's.
 	trust := &agent.TrustPlugin{Manager: rt.Certificates}
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
-		ServeMode: map[string]http.Handler{
-			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-				Authenticate:         rt.Agent.DeviceAuth.Check,
-				CheckOrigin:          rt.Agent.CheckOrigin(),
-				AllowTagModification: rt.Agent.TagModificationAllowed,
-				PublicKeyPin:         rt.Agent.PublicKeyPin,
-			}),
-		},
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
 	}
 	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)

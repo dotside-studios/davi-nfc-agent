@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `Agent.CheckOrigin` reports the origin check the agent applies, for whatever
-  serves a WebSocket endpoint on its behalf
+- `ServerPlugin.CheckOrigin` reports the origin check the listener applies, for
+  whatever serves a WebSocket endpoint beside it. `ServerPlugin.OnOriginsChange`
+  follows the allowlist from something built before the plugin activates
 - The agent operates every reader through `nfc.Supervisor` rather than opening
   one at startup. `Agent.Reader` is `Agent.Supervisor`, and mode, feedback and
   Classic keys are set on the supervisor, which applies them to a reader opened
@@ -54,8 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `traymenu.Discard` and `traymenu.Section` as a `Container`
 - Subscriptions: `Agent.Events()` publishes what the agent reports as typed
   signals, connected to at any time and disconnected through the handle each
-  connection returns. `State`, `Preferences`, `Clients`, `Servers`, `Devices`,
-  `Origins`, `Blocked` and `Tag` carry the new value; `Any` carries an
+  connection returns. `State`, `Preferences`, `Clients`, `Servers`, `Devices`
+  and `Tag` carry the new value; `Any` carries an
   `agent.Change` naming what moved, for a surface that redraws. A plugin gets
   the same surface as `ctx.Events`
 - `Events().Tag` carries every scan the agent broadcasts, so a program embedding
@@ -94,6 +95,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `agent.OriginStore` and `agent.ParseAllowedOrigins` are `server.OriginStore`
+  and `server.ParseAllowedOrigins`, beside the origin checks that read them, and
+  the allowlist is `agent.ServerPlugin`'s: it builds the store under the agent's
+  config directory, seeds it from `ServerPlugin.AllowedOrigins`, consults it on
+  every upgrade and owns the tray's **Allowed Origins** section. `Setup` parses
+  what the flags named onto `Runtime.AllowedOrigins` for the plugin to serve
+  behind. An agent serving nothing holds no allowlist
 - `agent.ServerPlugin` serves the clients. It runs the client server, mounts
   `/ws` and the health checks itself, and routes a connection by the mode it
   declares; `ServeMode` names a handler for either mode, such as a device
@@ -341,10 +349,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `Agent.Origins`, `Config.Origins`, `Agent.CheckOrigin`, `Events().Origins`,
+  `Events().Blocked`, `ChangeOrigins` and `ChangeBlocked`. Which browser origins
+  may connect is a question for what serves the connection, so it is the server
+  plugin's; a build with no plugin registered admits nobody by origin because it
+  admits nobody at all
 - `Config.DeviceEndpoint`, `Options.DeviceEndpoint` and
   `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
-  the agent answers, `DeviceAuth.Check`, `CheckOrigin`, `TagModificationAllowed`
-  and `PublicKeyPin`, and mounts it as `ServerPlugin.ServeMode[server.ModeDevice]`
+  the agent answers, `DeviceAuth.Check`, `TagModificationAllowed` and
+  `PublicKeyPin`, plus `servers.CheckOrigin()`, and mounts it as
+  `ServerPlugin.ServeMode[server.ModeDevice]`
   rather than handing the agent a builder to call
 - `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
   is the server plugin's, so the agent holds no server and hands over no routes.

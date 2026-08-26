@@ -65,20 +65,21 @@ func main() {
 	// The listener and everything on it. Setup resolved which certificate to
 	// serve; registering no server plugin leaves an agent that serves nothing.
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
 
-		// The device endpoint is the driver's wire behind the agent's policy.
-		// Neither names the other's types: the agent decides who is admitted
-		// and what is allowed, the driver decides what a device may say.
-		ServeMode: map[string]http.Handler{
-			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-				Authenticate:         rt.Agent.DeviceAuth.Check,
-				CheckOrigin:          rt.Agent.CheckOrigin(),
-				AllowTagModification: rt.Agent.TagModificationAllowed,
-				PublicKeyPin:         rt.Agent.PublicKeyPin,
-			}),
-		},
+	// The device endpoint is the driver's wire behind this build's policy: who
+	// is admitted and what is allowed is decided here, what a device may say is
+	// the driver's.
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that

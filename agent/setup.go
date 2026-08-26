@@ -86,8 +86,8 @@ func DefaultOptions() *Options {
 }
 
 // Runtime is what Setup built. It carries only what is not already reachable
-// through the agent: the origin and device stores live on Agent, and reads of
-// those go through rt.Agent so there is one copy to keep true.
+// through the agent: the device registry lives on Agent, and reads of it go
+// through rt.Agent so there is one copy to keep true.
 type Runtime struct {
 	Agent *Agent
 
@@ -110,6 +110,11 @@ type Runtime struct {
 	// fallback; put them on [ServerPlugin.Config].
 	CertFile string
 	KeyFile  string
+
+	// AllowedOrigins is what Options named, parsed. Put it on
+	// [ServerPlugin.AllowedOrigins]: the allowlist belongs to what serves the
+	// connections it admits.
+	AllowedOrigins []string
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -175,25 +180,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		devices, _ = NewDeviceRegistry("")
 	}
 
-	// The allowlist persists in the config dir and starts with the first-party
-	// consoles, so the shipped console connects on a fresh install. Anything
-	// passed on the command line is added to it.
-	origins, err := server.NewOriginStore(configDir)
-	if err != nil {
-		log.Printf("Warning: failed to load origin allowlist: %v", err)
-		origins, _ = server.NewOriginStore("")
-	}
-	for _, origin := range server.ParseAllowedOrigins(opts.AllowedOrigins) {
-		if origin == "*" {
-			log.Printf("Warning: -allowed-origins \"*\" disables the origin check; any site the operator visits can drive the reader")
-			origins.SessionAllowAny(true)
-			continue
-		}
-		if err := origins.Allow(origin); err != nil {
-			log.Printf("Warning: failed to allow origin %q: %v", origin, err)
-		}
-	}
-
 	// Asked for on the command line or in the environment, as opposed to
 	// remembered from a previous run. The distinction matters below: a stored
 	// preference may raise the requirement but not withdraw one set here.
@@ -234,7 +220,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		DevicePort:          devicePort,
 		APISecret:           apiSecret,
 		ConfigDir:           configDir,
-		Origins:             origins,
 		Devices:             devices,
 		PublicKeyPin:        agentPublicKeyPin,
 		Logs:                opts.Logs,
@@ -252,6 +237,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Certificates: tlsMgr,
 		CertFile:     certFile,
 		KeyFile:      keyFile,
+
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}, nil
 }
 

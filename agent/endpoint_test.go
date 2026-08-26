@@ -7,8 +7,8 @@ import (
 )
 
 // What a device endpoint is built from is the agent's to answer, whoever
-// mounts it: who is admitted, which origins, what the mode allows, and the pin
-// a device recognises this agent by later.
+// mounts it: who is admitted, what the mode allows, and the pin a device
+// recognises this agent by later.
 func TestTheAgentAnswersWhatADeviceEndpointNeeds(t *testing.T) {
 	rt, err := Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
@@ -18,9 +18,6 @@ func TestTheAgentAnswersWhatADeviceEndpointNeeds(t *testing.T) {
 
 	if a.DeviceAuth == nil {
 		t.Error("no credential check: an endpoint built from this would serve anyone")
-	}
-	if a.CheckOrigin() == nil {
-		t.Error("no origin check")
 	}
 	if !a.TagModificationAllowed() {
 		t.Error("no mode gate: read-only would not reach a device")

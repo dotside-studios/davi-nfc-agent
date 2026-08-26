@@ -78,6 +78,9 @@ func (e Endpoint) name() string {
 //		{Name: "control center", Pattern: "/", Handler: console.Assets()},
 //	}})
 //
+// It also decides who may connect: the origin allowlist is its own, since a
+// build serving nothing admits nobody.
+//
 // An agent with none of these registered serves no HTTP at all, which is what a
 // program driving the reader directly wants.
 //
@@ -111,6 +114,15 @@ type ServerPlugin struct {
 	// which Setup resolves onto Runtime.
 	Certificates tlspkg.CertificateWatcher
 
+	// Origins is the allowlist of pages permitted to connect, consulted on
+	// every upgrade. Nil builds one from the agent's config directory, seeded
+	// with AllowedOrigins.
+	Origins *server.OriginStore
+
+	// AllowedOrigins seeds a store built here, for a build passing through what
+	// it was told on the command line. Ignored when Origins is set.
+	AllowedOrigins []string
+
 	// ServeMode names the handler serving each connection mode on /ws. A
 	// connection declaring none is a client, and takes the entry under
 	// server.ModeClient; server.ModeDevice is the device driver's endpoint.
@@ -130,6 +142,14 @@ type ServerPlugin struct {
 	// clients is the server running for the agent, replaced by every start and
 	// read by the routes mounted before it existed.
 	clients atomic.Pointer[clientserver.Server]
+
+	// The allowlist entries, redrawn from the store rather than from clicks.
+	origins        *traymenu.List[originRow]
+	originAllowAny *traymenu.Item
+
+	// originWatchers are registered before the store exists; see
+	// OnOriginsChange.
+	originWatchers []func()
 }
 
 var _ Plugin = (*ServerPlugin)(nil)
@@ -181,6 +201,9 @@ func (p *ServerPlugin) Port() int {
 // It stops at the first endpoint it cannot register, failing the agent's start.
 // A control center missing its API is worse than one that is not there.
 func (p *ServerPlugin) Activate(ctx AgentContext) error {
+	p.logger = ctx.Logger()
+	p.loadOrigins(ctx)
+
 	if p.Server == nil {
 		p.Server = listener.New(p.config(ctx.Agent))
 	}
@@ -203,7 +226,6 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if err := p.watchCertificates(ctx); err != nil {
 		return err
 	}
-	p.logger = ctx.Logger()
 	p.agent = ctx.Agent
 
 	for _, endpoint := range p.Endpoints {
@@ -215,6 +237,7 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 	if err := p.serverURLs(ctx); err != nil {
 		return err
 	}
+	p.originsMenu(ctx)
 
 	// The client server comes up before the listener and goes down after it:
 	// components stop in reverse, and nothing new arrives while what answers it
@@ -495,6 +518,20 @@ func (p *ServerPlugin) menuTitle() string {
 	return "Server URLs"
 }
 
+// CheckOrigin admits or rejects an upgrade by Origin, for whatever else this
+// build serves on the agent's behalf, such as a device driver's endpoint.
+//
+// It reads the allowlist per request, so it can be handed over before the
+// plugin has one and follows an origin allowed while the agent runs.
+func (p *ServerPlugin) CheckOrigin() func(r *http.Request) bool {
+	return func(r *http.Request) bool {
+		if p.Origins == nil {
+			return server.CheckOrigin(nil)(r)
+		}
+		return server.CheckOriginPolicy(p.Origins)(r)
+	}
+}
+
 // wsHandler routes a connection to the handler for the mode it declares. A
 // connection arriving before the agent is serving is told so rather than left
 // waiting on a handler that does not exist yet.
@@ -562,8 +599,7 @@ func (c *clientsComponent) Name() string { return "clients" }
 func (c *clientsComponent) Start(context.Context) error {
 	srv := clientserver.New(clientserver.Config{
 		APISecret:            c.agent.apiSecret,
-		AllowedOrigins:       c.agent.allowedOrigins,
-		OriginPolicy:         c.agent.originPolicy(),
+		OriginPolicy:         c.plugin.Origins,
 		TokenVerifier:        c.agent.tokenVerifier(),
 		Tags:                 c.agent,
 		AllowTagModification: c.agent.TagModificationAllowed,

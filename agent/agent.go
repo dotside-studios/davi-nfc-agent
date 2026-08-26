@@ -3,7 +3,6 @@ package agent
 import (
 	"errors"
 	"log"
-	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -69,19 +68,6 @@ type Config struct {
 
 	// ConfigDir is where the API secret and other state persist.
 	ConfigDir string
-
-	// AllowedOrigins extends the same-origin policy on both WebSocket
-	// endpoints. A browser page served from anywhere other than the agent's
-	// own host:port, which is every hosted console, needs its origin listed
-	// here, or the upgrade is rejected as cross-site.
-	//
-	// Ignored when Origins is set, which is the normal path.
-	AllowedOrigins []string
-
-	// Origins is the live allowlist. Unlike AllowedOrigins its contents can
-	// change while the agent runs, and it reports rejections so they can be
-	// surfaced. The store is mutable; which store is in use is not.
-	Origins *server.OriginStore
 
 	// Devices holds the paired devices and their per-device credentials.
 	Devices *DeviceRegistry
@@ -158,8 +144,6 @@ type Agent struct {
 	manager             nfc.Manager
 	apiSecret           string
 	configDir           string
-	allowedOrigins      []string
-	origins             *server.OriginStore
 	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
@@ -233,8 +217,6 @@ func New(cfg Config) *Agent {
 		manager:             cfg.Manager,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
-		allowedOrigins:      cfg.AllowedOrigins,
-		origins:             cfg.Origins,
 		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
@@ -282,11 +264,10 @@ func (a *Agent) Readers() []string {
 	}
 	return readers
 }
-func (a *Agent) Logger() *log.Logger          { return a.logger }
-func (a *Agent) APISecret() string            { return a.apiSecret }
-func (a *Agent) ConfigDir() string            { return a.configDir }
-func (a *Agent) Origins() *server.OriginStore { return a.origins }
-func (a *Agent) Devices() *DeviceRegistry     { return a.devices }
+func (a *Agent) Logger() *log.Logger      { return a.logger }
+func (a *Agent) APISecret() string        { return a.apiSecret }
+func (a *Agent) ConfigDir() string        { return a.configDir }
+func (a *Agent) Devices() *DeviceRegistry { return a.devices }
 
 // Logs is the ring the agent's log is captured in, or nil when the program
 // installed none.
@@ -517,19 +498,6 @@ func (a *Agent) CurrentDevicePath() string {
 	return ""
 }
 
-// CheckOrigin admits or rejects an upgrade by Origin, preferring the live
-// policy over the static allowlist so the tray can admit one without restarting
-// the listener.
-//
-// Handed to whatever serves a WebSocket endpoint for the agent, such as a
-// device driver's.
-func (a *Agent) CheckOrigin() func(r *http.Request) bool {
-	if policy := a.originPolicy(); policy != nil {
-		return server.CheckOriginPolicy(policy)
-	}
-	return server.CheckOrigin(a.allowedOrigins)
-}
-
 // SetRequirePairedDevice changes the paired-device requirement on the running
 // device server, so the policy can be tried without a restart.
 func (a *Agent) SetRequirePairedDevice(on bool) {
@@ -565,21 +533,11 @@ func (a *Agent) SetReaderFeedback(on bool) {
 }
 
 // tokenVerifier returns the device registry as a token verifier, or nil when
-// there is none. As with originPolicy, a typed nil would satisfy the interface
-// and defeat the caller's nil check.
+// there is none: a typed nil would satisfy the interface and defeat the
+// caller's nil check.
 func (a *Agent) tokenVerifier() server.TokenVerifier {
 	if a.devices == nil {
 		return nil
 	}
 	return a.devices
-}
-
-// originPolicy returns the live allowlist as an origin policy, or nil to fall
-// back to the static AllowedOrigins list. Returning a typed nil would satisfy
-// the interface and defeat that fallback, so the check is explicit.
-func (a *Agent) originPolicy() server.OriginPolicy {
-	if a.origins == nil {
-		return nil
-	}
-	return a.origins
 }

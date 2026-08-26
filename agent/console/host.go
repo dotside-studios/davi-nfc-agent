@@ -7,6 +7,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // host adapts the agent to Host. Every reach the console makes into the agent
@@ -177,41 +178,50 @@ func (h *host) RevokeAllDevices() error {
 	return h.agent.Devices().RevokeAll()
 }
 
-func (h *host) AllowedOrigins() []string {
-	if h.agent.Origins() == nil {
+// The allowlist belongs to what serves the connections it admits, so these ask
+// the server plugin. A build with none has no origins to show.
+func (h *host) origins() *server.OriginStore {
+	if h.servers == nil {
 		return nil
 	}
-	return h.agent.Origins().List()
+	return h.servers.Origins
+}
+
+func (h *host) AllowedOrigins() []string {
+	if h.origins() == nil {
+		return nil
+	}
+	return h.origins().List()
 }
 
 func (h *host) BlockedOrigins() []string {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return nil
 	}
-	return h.agent.Origins().Blocked()
+	return h.origins().Blocked()
 }
 
 func (h *host) OriginCheckDisabled() bool {
-	return h.agent.Origins() != nil && h.agent.Origins().IsSessionAllowAny()
+	return h.origins() != nil && h.origins().IsSessionAllowAny()
 }
 
 func (h *host) AllowOrigin(origin string) error {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins().Allow(origin)
+	return h.origins().Allow(origin)
 }
 
 func (h *host) RevokeOrigin(origin string) error {
-	if h.agent.Origins() == nil {
+	if h.origins() == nil {
 		return errors.New("no origin store")
 	}
-	return h.agent.Origins().Revoke(origin)
+	return h.origins().Revoke(origin)
 }
 
 func (h *host) SetOriginCheckDisabled(on bool) {
-	if h.agent.Origins() != nil {
-		h.agent.Origins().SessionAllowAny(on)
+	if h.origins() != nil {
+		h.origins().SessionAllowAny(on)
 	}
 }
 

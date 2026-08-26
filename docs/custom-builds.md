@@ -71,19 +71,21 @@ func main() {
 	// decides what this agent serves. Setup resolved which certificate to
 	// serve; Certificates is what rebinds the listener when it is reissued.
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
 
-		// The driver's wire behind the agent's policy: the agent decides who is
-		// admitted and what is allowed, the driver decides what a device says.
-		ServeMode: map[string]http.Handler{
-			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-				Authenticate:         rt.Agent.DeviceAuth.Check,
-				CheckOrigin:          rt.Agent.CheckOrigin(),
-				AllowTagModification: rt.Agent.TagModificationAllowed,
-				PublicKeyPin:         rt.Agent.PublicKeyPin,
-			}),
-		},
+	// The driver's wire behind the agent's policy: the agent decides who is
+	// admitted and what is allowed, the server which origins may connect, the
+	// driver what a device says.
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
 	}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
@@ -119,9 +121,9 @@ func main() {
 
 `agent.Setup` performs the work the flags imply: it resolves the config
 directory, loads or generates the TLS certificate and the API secret, and reads
-the paired devices and the origin allowlist. It returns an `*agent.Runtime`
-holding the configured agent, the certificate manager, the log ring and the
-reader path to open.
+the paired devices. It returns an `*agent.Runtime` holding the configured agent,
+the certificate manager, the log ring, the reader path to open and the origins
+the flags named, for the server plugin to serve behind.
 
 The listener, the pairing server and the control center are plugins the program
 registers, not part of `Setup`. An agent with none of them drives the reader and
@@ -254,15 +256,16 @@ none leaves an agent that drives the reader and serves nothing.
 
 | Plugin | Owns |
 |---|---|
-| `agent.ServerPlugin` | The listener, everything mounted on it, and the tray's **Server URLs** submenu |
+| `agent.ServerPlugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
 | `agent.PairingPlugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
 | `agent.TrustPlugin` | The entry that installs the local certificate authority |
 
 ```go
 trust := &agent.TrustPlugin{Manager: rt.Certificates}
 servers := &agent.ServerPlugin{
-	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-	Certificates: rt.Certificates,
+	Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+	Certificates:   rt.Certificates,
+	AllowedOrigins: rt.AllowedOrigins,
 }
 pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
 
@@ -294,6 +297,12 @@ servers.ServeMode = map[string]http.Handler{
 	server.ModeDevice: devices.Handler(remotenfc.ServerOptions{ ... }),
 }
 ```
+
+The allowlist of browser origins is the plugin's too, since it decides which
+upgrades it admits. `AllowedOrigins` seeds it and the store persists under the
+config directory; `Origins` supplies one built elsewhere. `servers.CheckOrigin()`
+is the same decision for a handler mounted beside it, read per request rather
+than fixed when the handler was built.
 
 A build that registers no server plugin serves no HTTP and runs no client
 server, which is what a program driving the readers directly wants. It still
@@ -438,19 +447,21 @@ func main() {
 	// out for a service that reads cards and serves no HTTP. Setup resolved
 	// the certificate; blank leaves the listener serving plain HTTP.
 	servers := &agent.ServerPlugin{
-		Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates: rt.Certificates,
+		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
+		Certificates:   rt.Certificates,
+		AllowedOrigins: rt.AllowedOrigins,
+	}
 
-		// The driver's wire behind the agent's policy: the agent decides who is
-		// admitted and what is allowed, the driver decides what a device says.
-		ServeMode: map[string]http.Handler{
-			server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-				Authenticate:         rt.Agent.DeviceAuth.Check,
-				CheckOrigin:          rt.Agent.CheckOrigin(),
-				AllowTagModification: rt.Agent.TagModificationAllowed,
-				PublicKeyPin:         rt.Agent.PublicKeyPin,
-			}),
-		},
+	// The driver's wire behind the agent's policy: the agent decides who is
+	// admitted and what is allowed, the server which origins may connect, the
+	// driver what a device says.
+	servers.ServeMode = map[string]http.Handler{
+		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
+			Authenticate:         rt.Agent.DeviceAuth.Check,
+			CheckOrigin:          servers.CheckOrigin(),
+			AllowTagModification: rt.Agent.TagModificationAllowed,
+			PublicKeyPin:         rt.Agent.PublicKeyPin,
+		}),
 	}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		log.Fatal(err)
@@ -518,8 +529,6 @@ it runs on every emission; the connection it returns removes it again.
 | `Reader` | The reader's status: connected, and whether a card is on it |
 | `Readers` | The readers that can be picked, when the set changes |
 | `Devices` | The paired devices, after a pairing or a revocation |
-| `Origins` | The allowlist, after an edit |
-| `Blocked` | Each origin refused a connection |
 | `Tag` | Every scan the agent broadcasts |
 | `Any` | The kind of every change above, except scans and reader status |
 

@@ -1,8 +1,6 @@
 package tray
 
 import (
-	"log"
-
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
@@ -18,11 +16,6 @@ func (s *App) subscribe() {
 	events.Tag.Connect(s.showCard)
 	events.Reader.Connect(s.showReaderStatus)
 	events.Devices.Connect(func([]agent.PairedDevice) { s.refreshDevicesMenu() })
-	events.Origins.Connect(func([]string) { s.refreshOriginsMenu() })
-	events.Blocked.Connect(func(origin string) {
-		log.Printf("[systray] Blocked connection from %s: allow it under Allowed Origins to let it use the reader", origin)
-		s.refreshOriginsMenu()
-	})
 }
 
 // showState follows the agent's lifecycle, including a stop the tray did not

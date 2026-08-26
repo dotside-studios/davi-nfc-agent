@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
@@ -643,9 +642,6 @@ func (p *ServerPlugin) healthHandler() http.Handler {
 type clientsComponent struct {
 	plugin *ServerPlugin
 	agent  *Agent
-
-	tags   *event.Connection
-	status *event.Connection
 }
 
 func (c *clientsComponent) Name() string { return "clients" }
@@ -657,12 +653,9 @@ func (c *clientsComponent) Start(context.Context) error {
 		TokenVerifier:        c.agent.tokenVerifier(),
 		Tags:                 c.agent,
 		AllowTagModification: c.agent.TagModificationAllowed,
+		Scans:                &c.agent.events.Tag,
+		ReaderStatus:         &c.agent.events.Reader,
 		OnChange:             c.plugin.clientChanges.Emit,
-	})
-
-	c.tags = c.agent.events.Tag.Connect(srv.Broadcast)
-	c.status = c.agent.events.Reader.Connect(func(status nfc.DeviceStatus) {
-		srv.BroadcastDeviceStatus(status)
 	})
 
 	c.plugin.clients.Store(srv)
@@ -670,10 +663,8 @@ func (c *clientsComponent) Start(context.Context) error {
 }
 
 func (c *clientsComponent) Stop() error {
-	c.tags.Disconnect()
-	c.status.Disconnect()
-	c.tags, c.status = nil, nil
-
-	c.plugin.clients.Store(nil)
+	if srv := c.plugin.clients.Swap(nil); srv != nil {
+		srv.Close()
+	}
 	return nil
 }

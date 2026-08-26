@@ -97,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `clientserver.Config` takes the scans and reader status to broadcast as
+  signals and subscribes itself; `clientserver.Server.Close` takes the
+  subscriptions back. Building one is the whole wiring, rather than building one
+  and then connecting it to what feeds it
 - `server.NewDeviceAuth` and `clientserver.Config.APISecret` take the secret as
   a function, read on every connection rather than captured. `RotateAPISecret`
   no longer restarts anything: both endpoints see the new secret on the next

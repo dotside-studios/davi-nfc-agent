@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -30,18 +31,43 @@ type Server struct {
 	// Client connections (multiple allowed)
 	clients    map[*wsconn.SafeConn]*clientSession
 	clientsMux sync.RWMutex
+
+	// What Config.Scans and Config.ReaderStatus were connected with, for Close
+	// to take back.
+	scans  *event.Connection
+	status *event.Connection
 }
 
-// New creates a client server. It has no lifetime of its own: connections are
-// served as they arrive and scans are handed to it by whatever produced them.
+// New creates a client server, subscribed to whatever it was given to
+// broadcast. Connections are served as they arrive; Close takes the
+// subscriptions back.
 func New(config Config) *Server {
-	return &Server{
+	s := &Server{
 		config:  config,
 		clients: make(map[*wsconn.SafeConn]*clientSession),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: originChecker(config),
 		},
 	}
+
+	if config.Scans != nil {
+		s.scans = config.Scans.Connect(s.Broadcast)
+	}
+	if config.ReaderStatus != nil {
+		s.status = config.ReaderStatus.Connect(s.BroadcastDeviceStatus)
+	}
+	return s
+}
+
+// Close ends the subscriptions the server was built with. Connections already
+// open are left alone: they are held by the listener, which closes them when it
+// stops.
+//
+// Safe to call more than once, and on a server built with nothing to subscribe
+// to.
+func (s *Server) Close() {
+	s.scans.Disconnect()
+	s.status.Disconnect()
 }
 
 // apiSecret is the secret required right now, empty for a server admitting

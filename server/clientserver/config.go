@@ -1,6 +1,7 @@
 package clientserver
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
@@ -42,6 +43,15 @@ type Config struct {
 	// build that has its own. Nil uses Tags; with neither, operations are
 	// refused, which is what an agent that is not running does.
 	Ops server.TagOps
+
+	// Scans carries every tag to broadcast, and ReaderStatus every change in a
+	// reader's status. The server connects to both when it is built and
+	// disconnects in Close, so a server that has been replaced stops receiving
+	// rather than broadcasting to clients nothing is reading.
+	//
+	// Nil for a server fed by hand through Broadcast and BroadcastDeviceStatus.
+	Scans        *event.Signal[nfc.NFCData]
+	ReaderStatus *event.Signal[nfc.DeviceStatus]
 
 	// OnChange, when set, is called with the number of connected clients
 	// whenever one connects or disconnects, so an observer can refresh without

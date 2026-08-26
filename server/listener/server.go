@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 )
 
 // Config holds configuration for the unified server.

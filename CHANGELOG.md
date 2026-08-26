@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever serves a WebSocket endpoint beside it. Both resolve per request, so
   they can be handed to something built before the plugin activates. `ServerPlugin.OnOriginsChange`
   follows the allowlist from something built before the plugin activates
+- `Agent.TokenVerifier` reports the per-device credentials the agent issued at
+  pairing, for whatever admits a connection presenting one
 - `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
   `OnClientsChange` report on and act on the clients connected right now. A
   subscription outlives the server behind it, so it survives a restart

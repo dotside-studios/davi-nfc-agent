@@ -636,7 +636,7 @@ func (c *clientsComponent) Start(context.Context) error {
 	srv := clientserver.New(clientserver.Config{
 		APISecret:            c.agent.APISecret,
 		OriginPolicy:         c.plugin.OriginPolicy(),
-		TokenVerifier:        c.agent.tokenVerifier(),
+		TokenVerifier:        c.agent.TokenVerifier(),
 		Tags:                 c.agent,
 		AllowTagModification: c.agent.TagModificationAllowed,
 		Scans:                &c.agent.events.Tag,

@@ -239,7 +239,7 @@ func New(cfg Config) *Agent {
 
 	// Built here rather than at start, so a caller can put its device endpoint
 	// behind it before anything runs.
-	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.tokenVerifier(), a.requirePairedDevice)
+	a.DeviceAuth = server.NewDeviceAuth(a.APISecret, a.TokenVerifier(), a.requirePairedDevice)
 
 	return a
 }
@@ -512,10 +512,13 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	a.firePreferencesChanged()
 }
 
-// tokenVerifier returns the device registry as a token verifier, or nil when
-// there is none: a typed nil would satisfy the interface and defeat the
-// caller's nil check.
-func (a *Agent) tokenVerifier() server.TokenVerifier {
+// TokenVerifier recognises the per-device credentials this agent issued at
+// pairing, for whatever admits a connection presenting one. Nil on an agent
+// built without a registry, which admits nobody on a credential.
+//
+// Take it from here rather than from Devices: a nil registry assigned to the
+// interface is not a nil interface, and the caller's nil check would miss it.
+func (a *Agent) TokenVerifier() server.TokenVerifier {
 	if a.devices == nil {
 		return nil
 	}

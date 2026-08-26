@@ -230,18 +230,7 @@ func (h *host) Preferences() agent.Preferences {
 }
 
 // ApplyPreferences changes the agent and answers with what it holds afterwards,
-// which is not necessarily what was asked for. Nothing is persisted: a change
-// lasts as long as the agent runs.
+// which is not necessarily what was asked for.
 func (h *host) ApplyPreferences(mutate func(*agent.Preferences)) agent.Preferences {
-	next := h.agent.Preferences()
-	mutate(&next)
-
-	h.agent.SetReaderMode(next.Mode)
-	h.agent.SetCardTypeFilter(next.CardTypes)
-	h.agent.SetPinnedDevice(next.DevicePath)
-	h.agent.SetDevicePort(next.Port)
-	h.agent.SetRequirePairedDevice(next.RequirePairedDevice)
-	h.agent.SetReaderFeedback(next.ReaderFeedback)
-
-	return h.agent.Preferences()
+	return h.agent.ApplyPreferences(mutate)
 }

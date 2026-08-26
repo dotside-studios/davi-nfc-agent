@@ -512,32 +512,13 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement. The device
 // endpoint's check reads it per connection, so this takes effect immediately.
 func (a *Agent) SetRequirePairedDevice(on bool) {
-	if a.RequirePairedDevice() == on {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.requirePairedDevice = on
-	a.settingsMu.Unlock()
-
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.RequirePairedDevice = on })
 }
 
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
-	if a.ReaderFeedback() == on {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.readerFeedback = on
-	a.settingsMu.Unlock()
-
-	if readers := a.supervisor.Load(); readers != nil {
-		readers.SetFeedback(on)
-	}
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.ReaderFeedback = on })
 }
 
 // TokenVerifier recognises the per-device credentials this agent issued at

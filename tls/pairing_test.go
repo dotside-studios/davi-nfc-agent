@@ -1,7 +1,9 @@
 package tls
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,7 @@ import (
 // stubIssuer stands in for the device registry.
 type stubIssuer struct {
 	calls int
+	pin   string
 	name  string
 	plat  string
 }
@@ -21,7 +24,12 @@ func (s *stubIssuer) Pair(name, platform string) (string, string, error) {
 	return "dev-1", "issued-token", nil
 }
 
-func (s *stubIssuer) PublicKeyPin() string { return "sha256/testpin" }
+func (s *stubIssuer) PublicKeyPin() string {
+	if s.pin != "" {
+		return ""
+	}
+	return "sha256/testpin"
+}
 
 func newPairingServer(t *testing.T) (*BootstrapServer, *stubIssuer) {
 	t.Helper()
@@ -32,11 +40,20 @@ func newPairingServer(t *testing.T) (*BootstrapServer, *stubIssuer) {
 	return s, issuer
 }
 
+// pairRequest builds a request over an encrypted connection, which is what
+// handlePair requires of anything but loopback. httptest.NewRequest reports a
+// non-loopback RemoteAddr and no TLS.
+func pairRequest(method, target string, body io.Reader) *http.Request {
+	r := httptest.NewRequest(method, target, body)
+	r.TLS = &tls.ConnectionState{}
+	return r
+}
+
 func TestPairIssuesCredential(t *testing.T) {
 	s, issuer := newPairingServer(t)
 
 	body := strings.NewReader(`{"deviceName":"Operator iPhone","platform":"ios"}`)
-	r := httptest.NewRequest(http.MethodPost, "/pair?pin="+s.PIN(), body)
+	r := pairRequest(http.MethodPost, "/pair?pin="+s.PIN(), body)
 	w := httptest.NewRecorder()
 
 	s.handlePair(w, r)
@@ -70,7 +87,7 @@ func TestPairIssuesCredential(t *testing.T) {
 func TestPairRequiresPIN(t *testing.T) {
 	s, issuer := newPairingServer(t)
 
-	r := httptest.NewRequest(http.MethodPost, "/pair?pin=000000", nil)
+	r := pairRequest(http.MethodPost, "/pair?pin=000000", nil)
 	w := httptest.NewRecorder()
 	s.handlePair(w, r)
 
@@ -85,7 +102,7 @@ func TestPairRequiresPIN(t *testing.T) {
 func TestPairRejectsGet(t *testing.T) {
 	s, issuer := newPairingServer(t)
 
-	r := httptest.NewRequest(http.MethodGet, "/pair?pin="+s.PIN(), nil)
+	r := pairRequest(http.MethodGet, "/pair?pin="+s.PIN(), nil)
 	w := httptest.NewRecorder()
 	s.handlePair(w, r)
 
@@ -102,7 +119,7 @@ func TestPairRejectsGet(t *testing.T) {
 func TestPairWithoutIssuer(t *testing.T) {
 	s := NewBootstrapServer(newFakeCAReader(t), 0)
 
-	r := httptest.NewRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
+	r := pairRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
 	w := httptest.NewRecorder()
 	s.handlePair(w, r)
 
@@ -115,7 +132,7 @@ func TestPairWithoutIssuer(t *testing.T) {
 func TestPairWithoutBody(t *testing.T) {
 	s, _ := newPairingServer(t)
 
-	r := httptest.NewRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
+	r := pairRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
 	w := httptest.NewRecorder()
 	s.handlePair(w, r)
 
@@ -129,12 +146,12 @@ func TestPairLocksAfterRepeatedWrongPIN(t *testing.T) {
 	s, issuer := newPairingServer(t)
 
 	for i := 0; i < bootstrapMaxFailures; i++ {
-		r := httptest.NewRequest(http.MethodPost, "/pair?pin=000000", nil)
+		r := pairRequest(http.MethodPost, "/pair?pin=000000", nil)
 		s.handlePair(httptest.NewRecorder(), r)
 	}
 
 	// Even the correct PIN is refused once locked.
-	r := httptest.NewRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
+	r := pairRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
 	w := httptest.NewRecorder()
 	s.handlePair(w, r)
 
@@ -154,7 +171,7 @@ func TestPairWorksWithoutCA(t *testing.T) {
 	issuer := &stubIssuer{}
 	s.SetPairingIssuer(issuer, 9470)
 
-	r := httptest.NewRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
+	r := pairRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
 	w := httptest.NewRecorder()
 	s.handlePair(w, r)
 

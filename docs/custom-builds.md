@@ -279,6 +279,16 @@ servers := &agent.ServerPlugin{
 }
 pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
 
+// Pairing issues a durable credential and the key pin a device recognises this
+// agent by, so it is served from the listener that already serves the
+// certificate that pin covers. Port 9472 stays cleartext: it hands out the
+// certificate authority to a device that does not trust that certificate yet.
+servers.Add(agent.Endpoint{
+	Name:    "pairing",
+	Pattern: "/pair",
+	Handler: pairing.Server.Server().PairHandler(),
+})
+
 rt.Agent.Plugins.Add(servers, pairing, trust)
 ```
 

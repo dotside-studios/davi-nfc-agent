@@ -85,9 +85,11 @@ built-in web console.
 
 The agent listens on two ports, both configurable:
 - **Agent server** (port 9470): NFC devices connect to `/ws?mode=device`, client
-  applications to `/ws`, and the Control Center is served from the same port
-- **Pairing server** (port 9472): serves the page a phone opens to pair, and
-  issues each device its own credential
+  applications to `/ws`, devices pair at `/pair`, and the Control Center is
+  served from the same port
+- **Bootstrap server** (port 9472): serves the page a phone opens to set itself
+  up, and hands out the local certificate authority. Cleartext, because it runs
+  before the device trusts the agent's certificate
 
 ### JavaScript / TypeScript
 

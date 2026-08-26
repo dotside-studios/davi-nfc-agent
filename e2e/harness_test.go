@@ -55,9 +55,12 @@ type harness struct {
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
 
-	// Origin is the agent's https base; Pair the pairing server's http base.
-	Origin string
-	Pair   string
+	// Origin is the agent's https base, and Pair the same: pairing is served
+	// from the agent's listener. Bootstrap is the cleartext CA-distribution
+	// listener.
+	Origin    string
+	Pair      string
+	Bootstrap string
 
 	scans chan nfc.NFCData
 }
@@ -122,13 +125,26 @@ func start(t *testing.T, opts options) *harness {
 		}),
 	}
 
+	// Pairing is served from the agent's listener, which already serves the
+	// certificate the key pin covers. The bootstrap listener is cleartext and
+	// hands out the CA, so no credential is issued over it. The endpoint is
+	// registered before the server plugin activates, which is when the routes
+	// are mounted.
+	var pairing *agent.PairingPlugin
+	if opts.Pairing {
+		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), rt.Certificates)
+		servers.Add(agent.Endpoint{
+			Name:    "pairing",
+			Pattern: "/pair",
+			Handler: pairing.Server.Server().PairHandler(),
+		})
+	}
+
 	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
-	var pairing *agent.PairingPlugin
-	if opts.Pairing {
-		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), rt.Certificates)
+	if pairing != nil {
 		if err := rt.Agent.Plugins.Add(pairing); err != nil {
 			t.Fatalf("Plugins.Add: %v", err)
 		}
@@ -145,7 +161,10 @@ func start(t *testing.T, opts options) *harness {
 		scans:    make(chan nfc.NFCData, 32),
 	}
 	if pairing != nil {
-		h.Pair = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(pairing.Port()))
+		// Pairing is on the agent's listener; Bootstrap is the cleartext
+		// listener that hands out the CA.
+		h.Pair = h.Origin
+		h.Bootstrap = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(pairing.Port()))
 	}
 
 	rt.Agent.Events().Tag.Connect(func(data nfc.NFCData) {
@@ -163,7 +182,7 @@ func start(t *testing.T, opts options) *harness {
 	if h.Pair != "" {
 		// The pairing server serves on a goroutine and does not bind before
 		// Start returns, so a request sent immediately can beat it there.
-		waitForListener(t, h.Pair[len("http://"):])
+		waitForListener(t, h.Bootstrap[len("http://"):])
 	}
 
 	return h

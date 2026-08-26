@@ -22,14 +22,28 @@ The device endpoint accepts connections from NFC devices that provide tag data.
 ### Pairing
 
 A device authenticates with its own credential, obtained once by presenting the
-PIN shown on the kiosk (tray, logs, and the pairing QR):
+PIN shown on the kiosk (tray, logs, and the pairing QR).
+
+The QR printed at startup carries where to pair, the agent's key pin and the
+PIN:
 
 ```
-POST http://[host]:9472/pair?pin=123456
+davi-pair://[host]:9470/?spki=sha256%2F47DE…&code=123456&name=Davi%20NFC%20Agent
+```
+
+Read it off the kiosk screen, pin the TLS connection to `spki`, then:
+
+```
+POST https://[host]:9470/pair?pin=123456
 Content-Type: application/json
 
 {"deviceName": "Operator iPhone", "platform": "ios"}
 ```
+
+Pairing is served from the agent's port, which serves the certificate `spki`
+covers. Over a cleartext connection it is refused with `426 Upgrade Required`
+from anything but loopback. Port 9472 is the cleartext bootstrap listener; it
+serves the setup page and the certificate authority, and does not pair.
 
 ```json
 {

@@ -88,6 +88,61 @@ func NewBootstrapServer(manager CertificateAuthority, port int) *BootstrapServer
 	}
 }
 
+// PairingURI is what a device scans to pair: the agent's TLS port, the key pin
+// that identifies it, and the code proving the holder can see the kiosk.
+//
+// It names the agent's port rather than this one. Pairing issues a durable
+// credential and the pin the device recognises the agent by afterwards, so it
+// runs on the listener already serving the certificate that pin covers. This
+// listener exists to hand out the CA to a device that does not trust that
+// certificate yet, which is why it is cleartext and why pairing is not on it.
+//
+// host names the address the device should use; empty takes the first non
+// loopback address of this machine.
+func (s *BootstrapServer) PairingURI(host string) (PairingURI, error) {
+	if host == "" {
+		hosts, err := GetAllHosts()
+		if err != nil {
+			return PairingURI{}, fmt.Errorf("resolve pairing host: %w", err)
+		}
+		// A device scanning this is on the network, so loopback is no use to
+		// it. Fall back to loopback only when there is nothing else.
+		for _, h := range hosts {
+			if ip := net.ParseIP(h); ip != nil && !ip.IsLoopback() {
+				host = h
+				break
+			}
+		}
+		if host == "" {
+			host = "localhost"
+		}
+	}
+
+	s.pairMu.RLock()
+	issuer, agentPort := s.pairIssuer, s.agentPort
+	s.pairMu.RUnlock()
+
+	if issuer == nil {
+		return PairingURI{}, fmt.Errorf("pairing is not enabled on this agent")
+	}
+	if agentPort == 0 {
+		return PairingURI{}, fmt.Errorf("pairing does not know the agent's port")
+	}
+
+	pin := issuer.PublicKeyPin()
+	if pin == "" {
+		return PairingURI{}, fmt.Errorf("the agent has no key pin: a device would have nothing to authenticate pairing by")
+	}
+
+	return PairingURI{
+		Host:    host,
+		Port:    agentPort,
+		SPKI:    pin,
+		Code:    s.PIN(),
+		AppName: s.AppName(),
+	}, nil
+}
+
 // SetAppName sets the name shown on the pairing pages and carried in the iOS
 // configuration profile. It defaults to this agent's own display name; a
 // program built on the agent sets its own so the page it serves does not
@@ -141,22 +196,16 @@ func generatePIN() string {
 
 // Start brings up the HTTP server and logs the pairing details.
 func (s *BootstrapServer) Start() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/install", s.handleInstall)
-	mux.HandleFunc("/install/ios", s.handleAppleProfile)
-	mux.HandleFunc("/install/android", s.handleAndroidCert)
-	mux.HandleFunc("/qr.png", s.handleQR)
-	mux.HandleFunc("/pair", s.handlePair)
-	mux.HandleFunc("/ca.pem", s.handleRawCA)
-	mux.HandleFunc("/ca.crt", s.handleRawCA)
-
 	s.httpServer = &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),
-		Handler:           mux,
+		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// Cleartext on purpose: this listener hands out the certificate authority
+	// to a device that has no reason to trust the agent's certificate yet.
+	// Nothing secret is served from it. Pairing is mounted on the agent's TLS
+	// listener instead; see PairHandler.
 	s.logger.Printf("Pairing server: http://localhost:%d", s.port)
 	s.logger.Printf("Pairing PIN: %s", s.PIN())
 
@@ -175,6 +224,8 @@ func (s *BootstrapServer) Start() error {
 		}
 	}
 
+	s.logPairingQR()
+
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.logger.Printf("Bootstrap server error: %v", err)
@@ -182,6 +233,41 @@ func (s *BootstrapServer) Start() error {
 	}()
 
 	return nil
+}
+
+// logPairingQR prints the pairing URI and a QR of it, for an operator to read
+// off the kiosk screen. This is the out-of-band channel the key pin travels on:
+// a QR fetched over the network carries no more authority than the connection
+// that served it.
+func (s *BootstrapServer) logPairingQR() {
+	uri, err := s.PairingURI("")
+	if err != nil {
+		s.logger.Printf("Pairing QR unavailable: %v", err)
+		return
+	}
+
+	art, err := uri.TerminalQR()
+	if err != nil {
+		s.logger.Printf("Pairing QR unavailable: %v", err)
+		return
+	}
+
+	s.logger.Printf("Pairing URI: %s", uri)
+	s.logger.Printf("Scan this from the device, off this screen:\n%s", art)
+}
+
+// routes is what this listener serves: the human-facing setup page and the
+// certificate authority behind it. Pairing is not among them; see PairHandler.
+func (s *BootstrapServer) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/install", s.handleInstall)
+	mux.HandleFunc("/install/ios", s.handleAppleProfile)
+	mux.HandleFunc("/install/android", s.handleAndroidCert)
+	mux.HandleFunc("/qr.png", s.handleQR)
+	mux.HandleFunc("/ca.pem", s.handleRawCA)
+	mux.HandleFunc("/ca.crt", s.handleRawCA)
+	return mux
 }
 
 // Stop shuts down the HTTP server.

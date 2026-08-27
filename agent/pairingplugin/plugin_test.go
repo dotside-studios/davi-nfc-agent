@@ -54,7 +54,9 @@ func TestPairingPluginRegistersItsServerAndItsEntries(t *testing.T) {
 }
 
 // Rotating relabels the entries that show the PIN, wherever the rotation came
-// from: the menu item, or the control center through the same method.
+// from. The console rotates on the gate's own server rather than through this
+// plugin, so the entries follow what the server reports, not the control that
+// asked for it.
 func TestRotatingThePINRelabelsTheEntries(t *testing.T) {
 	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
@@ -84,6 +86,39 @@ func TestRotatingThePINRelabelsTheEntries(t *testing.T) {
 	}
 	if got := fake.Find("Pairing", "Pair Phone: "+pairing.URL()); got == nil {
 		t.Errorf("the address entry still carries the PIN it replaced:\n%s", fake.Render())
+	}
+}
+
+// The console holds the gate rather than this plugin, so it rotates on the
+// server underneath. The entries have to relabel from that, or the tray keeps
+// offering a PIN no device will be admitted on.
+func TestAPINRotatedOnTheGateRelabelsTheEntries(t *testing.T) {
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("agent.Setup: %v", err)
+	}
+
+	gate := pairing.New(nil, pairing.Options{})
+	plugin := New(gate, 9502)
+	if err := rt.Agent.Plugins.Add(plugin); err != nil {
+		t.Fatalf("Plugins.Add: %v", err)
+	}
+
+	fake := traymenu.NewFake()
+	menu := traymenu.New(fake)
+	t.Cleanup(menu.Close)
+	if err := rt.Agent.Activate(menu); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	pin := fake.Find("Pairing", "Pairing PIN: "+plugin.PIN())
+	if pin == nil {
+		t.Fatalf("the PIN entry is missing:\n%s", fake.Render())
+	}
+
+	fresh := gate.PairingServer().RotatePIN()
+	if got := pin.Title(); got != "Pairing PIN: "+fresh {
+		t.Errorf("PIN entry reads %q, want the PIN rotated on the gate", got)
 	}
 }
 

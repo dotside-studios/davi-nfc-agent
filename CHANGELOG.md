@@ -165,6 +165,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `console.Config` takes the components rather than the plugins wrapping them:
+  `Pairing` is a `*pairing.Gate`, `Certificates` a `*tls.Manager`, and
+  `BootstrapPort` the port the old `Pairing` plugin reported. Both exist before
+  the console does, and `pairingplugin.New` only unpacks the gate, so the
+  console reached them through a wrapper for nothing. `Servers` stays the
+  plugin, which builds its listener when it activates
+- `pairing.Server.OnPINChange` reports a rotation, and the tray entries follow
+  it rather than the control that rotated the PIN
 - `nfc.TagHolder`'s four operations take a `context.Context` first argument:
   `WriteTag`, `LockTag`, `TransceiveTag` and `TagCapabilities`. `TagOn` and
   `DevicesHoldingTags` are unchanged, since both answer from memory. The same
@@ -527,6 +535,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A scan reaches the console's log. The line naming what was read went to
+  stdout through `fmt.Printf`, so it bypassed the agent's logger and the ring
+  behind it: the one line an operator watches for while tapping a card was the
+  one the Control Center never showed, and an agent started from a desktop
+  launcher had no stdout to read it on either. It is one line on the agent's
+  channel now, at info, carrying the UID, the card type and what the card says
+- A pairing or revocation made outside the console redraws an open page again.
+  The agent reported device changes until the registry moved to
+  `secure/pairing`, and nothing re-subscribed, so a phone completing pairing or
+  a device revoked from the tray left the console listing what it loaded. Its
+  own revoke still redrew, since every console action redraws
+- A PIN rotated from the tray reaches an open console page, which it never did
 - A client that disconnects mid-operation now cancels it. The websocket read
   loop served each request inline, so while a write was running nothing was
   reading the socket and the disconnect went unnoticed until the write had

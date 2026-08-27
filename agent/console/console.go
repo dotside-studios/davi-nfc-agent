@@ -9,11 +9,11 @@ import (
 	"runtime"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
-	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -27,12 +27,22 @@ type Config struct {
 	Logs *logbuf.Ring
 
 	// Servers is what the agent is served from, for the port and address the
-	// console hands out. Pairing is what issues pairing PINs, and Trust what
-	// installs the local authority and reports on it. The agent holds none of
-	// them, so whoever built them passes them here.
+	// console hands out. The plugin rather than the listener, because it builds
+	// one when it activates, which is after the console is assembled.
 	Servers *serverplugin.Plugin
-	Pairing *pairingplugin.Plugin
-	Trust   *trustplugin.Plugin
+
+	// Pairing issues the credentials and holds what has paired, for the PIN the
+	// console shows and the devices it revokes. Nil in a build that pairs none.
+	Pairing *pairing.Gate
+
+	// BootstrapPort is the cleartext listener a phone opens to set itself up,
+	// 0 for a build running none. The console hands out its address.
+	BootstrapPort int
+
+	// Certificates is the certificate the agent manages for itself, for the
+	// authority the console installs and the reissue it offers. Nil for a build
+	// serving one provisioned elsewhere, which has neither.
+	Certificates *tlspkg.Manager
 
 	// Quit ends the program the agent runs in, for the console's own quit
 	// control. Nil stops the agent and leaves the program running, which is
@@ -47,11 +57,12 @@ type Config struct {
 func New(cfg Config) *Server {
 	a := cfg.Agent
 	h := &host{
-		agent:   a,
-		servers: cfg.Servers,
-		pairing: cfg.Pairing,
-		trust:   cfg.Trust,
-		quit:    cfg.Quit,
+		agent:         a,
+		servers:       cfg.Servers,
+		pairing:       cfg.Pairing,
+		bootstrapPort: cfg.BootstrapPort,
+		certs:         cfg.Certificates,
+		quit:          cfg.Quit,
 	}
 	info := a.Info()
 	s := newServer(serverConfig{
@@ -74,6 +85,14 @@ func New(cfg Config) *Server {
 	if cfg.Servers != nil {
 		cfg.Servers.Events().Origins.Connect(func(serverplugin.OriginState) { s.NotifyChange() })
 		cfg.Servers.Events().Clients.Connect(func(int) { s.NotifyChange() })
+	}
+
+	// Pairing is the gate's, not the agent's, so it is followed separately too:
+	// a phone completing pairing, a device revoked from the tray, and a PIN
+	// rotated there all reach an open page.
+	if cfg.Pairing != nil {
+		cfg.Pairing.PairedDevices().OnChange(s.NotifyChange)
+		cfg.Pairing.PairingServer().OnPINChange(func(string) { s.NotifyChange() })
 	}
 
 	return s

@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
-	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 )
 
 // Stubs for -tags nowebui, which omits the control center: no /control routes,
@@ -23,12 +23,13 @@ type Server struct{}
 
 // Config is what a console would report on; this build has none.
 type Config struct {
-	Agent   *agent.Agent
-	Logs    *logbuf.Ring
-	Servers *serverplugin.Plugin
-	Pairing *pairingplugin.Plugin
-	Trust   *trustplugin.Plugin
-	Quit    func()
+	Agent         *agent.Agent
+	Logs          *logbuf.Ring
+	Servers       *serverplugin.Plugin
+	Pairing       *pairing.Gate
+	BootstrapPort int
+	Certificates  *tlspkg.Manager
+	Quit          func()
 }
 
 // New reports that there is no console in this build.

@@ -6,10 +6,10 @@ import (
 	"errors"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
-	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 )
@@ -19,8 +19,12 @@ import (
 type host struct {
 	agent   *agent.Agent
 	servers *serverplugin.Plugin
-	pairing *pairingplugin.Plugin
-	trust   *trustplugin.Plugin
+
+	// The components themselves rather than the plugins wrapping them: both
+	// exist before the console does, and the plugins only add tray entries.
+	pairing       *pairing.Gate
+	bootstrapPort int
+	certs         *tlspkg.Manager
 
 	// quit ends the program the agent runs in, supplied by whoever owns it.
 	quit func()
@@ -66,7 +70,7 @@ func (h *host) CurrentCard() (uid, cardType string, present bool) {
 // console reaches the listener only when one is next built, and until then the
 // console must not hand out a URL nothing is listening on.
 func (h *host) Port() int          { return h.servers.Port() }
-func (h *host) BootstrapPort() int { return h.pairing.Port() }
+func (h *host) BootstrapPort() int { return h.bootstrapPort }
 func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
 func (h *host) LocalIPs() []string { return netinfo.LocalIPs() }
@@ -98,49 +102,60 @@ func (h *host) PublicKeyPin() string { return h.agent.PublicKeyPin() }
 
 func (h *host) RotateAPISecret() (string, error) { return h.agent.RotateAPISecret() }
 
-func (h *host) PairingPIN() string { return h.pairing.PIN() }
+func (h *host) PairingPIN() string {
+	if h.pairing == nil {
+		return ""
+	}
+	return h.pairing.PairingServer().PIN()
+}
 
-// RotatePairingPIN goes through the plugin rather than the server, so the tray
-// entries showing the PIN follow a rotation done in the console.
+// RotatePairingPIN issues a fresh PIN. The server reports the rotation, so the
+// tray entries showing the PIN relabel without the console telling them.
 func (h *host) RotatePairingPIN() (string, error) {
 	if h.pairing == nil {
 		return "", errors.New("pairing server is disabled")
 	}
-	return h.pairing.RotatePIN(), nil
+	return h.pairing.PairingServer().RotatePIN(), nil
 }
 
-func (h *host) CAInstalled() bool { return h.trust.Installed() }
+func (h *host) CAInstalled() bool { return h.certs != nil && h.certs.CAInstalled() }
 
 func (h *host) CAFingerprint() (string, error) {
 	if !h.managesCertificates() {
 		return "", errors.New("no certificate authority")
 	}
-	return h.trust.Fingerprint()
+	return h.certs.GetCAFingerprint()
 }
 
-// InstallCA and RegenerateCertificate go through the trust plugin, so the tray
-// entry offering the same action follows an install done here.
 func (h *host) InstallCA() error {
 	if !h.managesCertificates() {
 		return errors.New("agent is not managing its own certificates")
 	}
-	return h.trust.Install()
+	return h.certs.InstallCA()
 }
 
 func (h *host) RegenerateCertificate() error {
 	if !h.managesCertificates() {
 		return errors.New("agent is not managing its own certificates")
 	}
-	return h.trust.Regenerate()
+	return h.certs.RegenerateCertificates()
 }
 
 // managesCertificates reports whether there is a certificate this agent can act
-// on. Without one the trust plugin does nothing, and saying so is better than
+// on. Without one there is nothing to install, and saying so is better than
 // reporting success for work that never happened.
-func (h *host) managesCertificates() bool { return h.trust.Manages() }
+func (h *host) managesCertificates() bool { return h.certs != nil }
+
+// devices is the credential store, nil in a build that pairs none.
+func (h *host) devices() pairing.Store {
+	if h.pairing == nil {
+		return nil
+	}
+	return h.pairing.PairedDevices()
+}
 
 func (h *host) PairedDevices() []PairedDevice {
-	if h.pairing.PairedDevices() == nil {
+	if h.devices() == nil {
 		return nil
 	}
 
@@ -151,7 +166,7 @@ func (h *host) PairedDevices() []PairedDevice {
 		online[id] = true
 	}
 
-	paired := h.pairing.PairedDevices().List()
+	paired := h.devices().List()
 	out := make([]PairedDevice, 0, len(paired))
 	for _, d := range paired {
 		out = append(out, PairedDevice{
@@ -167,17 +182,17 @@ func (h *host) PairedDevices() []PairedDevice {
 }
 
 func (h *host) RevokeDevice(id string) error {
-	if h.pairing.PairedDevices() == nil {
+	if h.devices() == nil {
 		return errors.New("no device registry")
 	}
-	return h.pairing.PairedDevices().Revoke(id)
+	return h.devices().Revoke(id)
 }
 
 func (h *host) RevokeAllDevices() error {
-	if h.pairing.PairedDevices() == nil {
+	if h.devices() == nil {
 		return errors.New("no device registry")
 	}
-	return h.pairing.PairedDevices().RevokeAll()
+	return h.devices().RevokeAll()
 }
 
 // The allowlist belongs to what serves the connections it admits, so these ask

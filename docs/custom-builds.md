@@ -145,12 +145,13 @@ func main() {
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
 	// so this program needs no build tag of its own.
 	c := console.New(console.Config{
-		Agent:   rt.Agent,
-		Logs:    rt.Logs,
-		Servers: servers,
-		Pairing: pairing,
-		Trust:   trust,
-		Quit:    app.Quit,
+		Agent:         rt.Agent,
+		Logs:          rt.Logs,
+		Servers:       servers,
+		Pairing:       paired,
+		BootstrapPort: opts.BootstrapPort,
+		Certificates:  certs.Manager,
+		Quit:          app.Quit,
 	})
 	servers.Add(c.Endpoints()...)
 
@@ -190,8 +191,12 @@ certificate provisioned elsewhere names the pair on `Options` and leaves
 
 `trustplugin.Plugin` wraps the same manager for the one job the others do not do:
 the tray entry that installs the local authority, hidden once there is nothing
-left to install. `console.Config.Trust` takes it so the same install can be
-started from a page. Leave `Manager` nil and the plugin is inert.
+left to install. Leave `Manager` nil and the plugin is inert.
+
+The console takes the manager and the gate themselves, not these two plugins:
+both exist before it does, and what it needs from them is the certificate and
+the credentials rather than the tray entries. It follows the server plugin
+instead, which builds its listener when it activates.
 
 Pairing is `pairing.Gate`: the credential store, the endpoint that issues into
 it, the check that admits on it, and the revocation that ends a session when one
@@ -433,12 +438,13 @@ agent's port and listed with the other addresses:
 
 ```go
 c := console.New(console.Config{
-	Agent:   rt.Agent,
-	Logs:    rt.Logs,
-	Servers: servers,
-	Pairing: pairing,
-	Trust:   trust,
-	Quit:    app.Quit,
+	Agent:         rt.Agent,
+	Logs:          rt.Logs,
+	Servers:       servers,
+	Pairing:       paired,
+	BootstrapPort: 9472,
+	Certificates:  certs.Manager,
+	Quit:          app.Quit,
 })
 servers.Add(c.Endpoints()...)
 ```

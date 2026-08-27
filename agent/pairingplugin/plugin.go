@@ -93,9 +93,7 @@ func (p *Plugin) RotatePIN() string {
 	if p == nil {
 		return ""
 	}
-	fresh := p.Server.RotatePIN()
-	p.refresh()
-	return fresh
+	return p.Server.RotatePIN()
 }
 
 // URL is the pairing page, carrying the PIN so a link clicked from a chat goes
@@ -152,8 +150,11 @@ func (p *Plugin) Activate(ctx agent.AgentContext) error {
 	}
 
 	// The address follows the machine's own, so it is redrawn whenever a
-	// listener binds again as well as when the agent starts and stops.
+	// listener binds again as well as when the agent starts and stops. The PIN
+	// follows the server rather than the entry that rotated it, so a rotation
+	// from the console relabels these too.
 	p.refresh()
+	p.Server.Server().OnPINChange(func(string) { p.refresh() })
 	ctx.Events.State.Connect(func(agent.State) { p.refresh() })
 	ctx.Events.Servers.Connect(func(int) { p.refresh() })
 	return nil

@@ -176,12 +176,13 @@ func main() {
 	// The control center, served from the same listener. Nil in a -tags nowebui
 	// build, where Endpoints is empty.
 	controlCenter := console.New(console.Config{
-		Agent:   rt.Agent,
-		Logs:    rt.Logs,
-		Servers: servers,
-		Pairing: pairing,
-		Trust:   trust,
-		Quit:    app.Quit,
+		Agent:         rt.Agent,
+		Logs:          rt.Logs,
+		Servers:       servers,
+		Pairing:       paired,
+		BootstrapPort: opts.BootstrapPort,
+		Certificates:  certs.Manager,
+		Quit:          app.Quit,
 	})
 	servers.Add(controlCenter.Endpoints()...)
 

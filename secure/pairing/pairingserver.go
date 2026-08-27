@@ -3,6 +3,7 @@ package pairing
 import (
 	"net/http"
 
+	"github.com/dotside-studios/davi-nfc-agent/event"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 )
 
@@ -46,6 +47,10 @@ type ServerOptions struct {
 type Server struct {
 	bootstrap *tlspkg.BootstrapServer
 	opts      ServerOptions
+
+	// rotated reports a fresh PIN, so everything displaying one follows a
+	// rotation made anywhere else. The tray and the console each show it.
+	rotated event.Signal[string]
 }
 
 // NewServer builds the pairing server. It binds nothing until Listen.
@@ -124,7 +129,22 @@ func (s *Server) RotatePIN() string {
 	if s == nil {
 		return ""
 	}
-	return s.bootstrap.RotatePIN()
+	fresh := s.bootstrap.RotatePIN()
+	s.rotated.Emit(fresh)
+	return fresh
+}
+
+// OnPINChange registers fn to run after each rotation, with the fresh PIN. The
+// connection it returns removes it.
+//
+// Whoever displays the PIN follows this rather than the control that rotated
+// it: a rotation from the tray reaches an open console page, and one from the
+// console relabels the tray.
+func (s *Server) OnPINChange(fn func(pin string)) *event.Connection {
+	if s == nil {
+		return nil
+	}
+	return s.rotated.Connect(fn)
 }
 
 // Bootstrap exposes the underlying server, for a caller that needs the pairing

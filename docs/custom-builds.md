@@ -31,6 +31,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -54,15 +55,45 @@ func main() {
 
 	// Hardware readers and phones behind one manager, which the agent opens
 	// its reader from.
-	manager := multimanager.NewMultiManager(
+	backends := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
-	rt, err := agent.Setup(opts, manager)
+	// The paired-device manager over them: the credential store, the pairing
+	// machinery, and the check that admits a device. It is what the agent
+	// holds, so this build cannot have the readers without the policy deciding
+	// who reaches them. Leave it out and every device is admitted.
+	//
+	// The pin and the port are functions because both are read when a device
+	// pairs: Setup settles them below, and both can change while the endpoint
+	// stays up.
+	var rt *agent.Runtime
+	paired, err := pairednfc.New(backends, pairednfc.Options{
+		ConfigDir:    agent.ResolveConfigDir(opts),
+		AppName:      opts.Info.OrDefault().DisplayName,
+		PublicKeyPin: func() string { return rt.Agent.PublicKeyPin() },
+		AgentPort:    func() int { return rt.Agent.DevicePort() },
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// The agent reports and revokes through the same store the manager admits
+	// on, rather than loading a second one.
+	opts.Devices = paired.PairedDevices()
+
+	rt, err = agent.Setup(opts, paired)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// What it admits on, now that the agent holds the preferences: the shared
+	// secret as a peer credential to a paired token, and the requirement that
+	// drops both it and the loopback bypass. Read per connection.
+	paired.UseSecret(rt.Agent.APISecret)
+	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.UseCertificateAuthority(rt.Certificates)
 
 	// The tray entry that installs the local authority, so browsers on this
 	// machine accept the agent.
@@ -77,31 +108,34 @@ func main() {
 		AllowedOrigins: rt.AllowedOrigins,
 	}
 
-	// The two halves of /ws, both declared here. The agent decides who is
-	// admitted and what is allowed; each protocol decides what its own side
-	// may say.
+	// The two halves of /ws, both declared here. The paired-device manager
+	// decides who is admitted and the agent what is allowed; each protocol
+	// decides what its own side may say.
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
-		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         servers.Authenticate(),
+		// The driver serves the protocol; Admit decides who gets that far, and
+		// names the device it admitted so the driver registers it under the
+		// identity it paired with. Mount the driver bare and every device is
+		// admitted under an identity of the driver's own minting.
+		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
-		}),
+		})),
 	}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
-	// address and PIN. The agent holds no pairing server, so it is built here
-	// and passed to the console. It hands the authority to a device that pairs.
-	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
+	// address and PIN. The machinery belongs to the paired-device manager; this
+	// plugin runs its listener and shows its PIN.
+	pairing := agent.NewPairingPlugin(paired.PairingServer(), opts.BootstrapPort)
 
 	app := tray.New(rt)
 
@@ -153,14 +187,22 @@ the tray entry that installs the local authority, hidden once there is nothing
 left to install. `console.Config.Trust` takes it so the same install can be
 started from a page. Leave `Manager` nil and the plugin is inert.
 
-Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
-menu entries that hand out its address and PIN.
-`agent.NewPairingPlugin(a, port, trust)` takes the device registry, the key pin
-and the name from the agent, so nothing already given to `Setup` is repeated.
-Omit the plugin and the build pairs no devices: the console is handed `nil` and
-reports pairing as disabled. For the listener without the menu entries, register
-the component directly with `agent.PairingFor(a, port, ca)` and `ctx.Use` or an
+Pairing is two things now. The machinery — the credential store, the PIN, and
+the endpoint that issues a credential — belongs to `pairednfc.Manager`, which
+builds a `pairing.Server` of its own from `Options.ConfigDir`. The plugin,
+`agent.PairingPlugin`, runs that server's cleartext listener and owns the menu
+entries that hand out its address and PIN:
+`agent.NewPairingPlugin(paired.PairingServer(), port)`. Omit the plugin and the
+build still pairs devices over `/pair`; it just binds no listener of its own and
+the console is handed `nil`. For the listener without the menu entries, register
+`agent.NewPairingServer(paired.PairingServer(), port)` with `ctx.Use` or an
 `agent.Endpoint`.
+
+Omit the **paired-device manager** and the build pairs nobody and admits
+everyone: hand `backends` to `Setup` and mount the device endpoint bare. That is
+what a build reached only over a trusted transport, and every test, wants — a
+bare `remotenfc` endpoint mints an identity for each connection, so devices
+still register, just under no credential.
 
 The NFC backend is `Setup`'s second argument, which is why every package beneath
 `cmd` builds without one. A manager reports what its devices scan through
@@ -267,7 +309,7 @@ none leaves an agent that drives the reader and serves nothing.
 | Plugin | Owns |
 |---|---|
 | `agent.ServerPlugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
-| `agent.PairingPlugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
+| `agent.PairingPlugin` | The pairing server's own cleartext listener, and the entries showing its address and PIN |
 | `agent.TrustPlugin` | The entry that installs the local certificate authority |
 
 ```go
@@ -277,7 +319,7 @@ servers := &agent.ServerPlugin{
 	Certificates:   rt.Certificates,
 	AllowedOrigins: rt.AllowedOrigins,
 }
-pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
+pairing := agent.NewPairingPlugin(paired.PairingServer(), 9472)
 
 // Pairing issues a durable credential and the key pin a device recognises this
 // agent by, so it is served from the listener that already serves the
@@ -286,7 +328,7 @@ pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
 servers.Add(agent.Endpoint{
 	Name:    "pairing",
 	Pattern: "/pair",
-	Handler: pairing.Server.Server().PairHandler(),
+	Handler: paired.PairHandler(),
 })
 
 rt.Agent.Plugins.Add(servers, pairing, trust)
@@ -333,13 +375,11 @@ same for anything taking a `server.OriginPolicy`. Both resolve per request, so
 they can be handed over before the plugin has a store and follow an origin
 allowed while the agent runs.
 
-The credential check for a device endpoint is the plugin's too.
-`servers.Authenticate()` is what a build passes as
-`remotenfc.ServerOptions.Authenticate`. It reads `RequirePairedDevice()`,
-`APISecret()` and `TokenVerifier()` off the agent per request, so rotating the
-secret or requiring pairing needs nothing rebuilt, and it can be handed over
-before the plugin activates. One taken from a plugin that never activates
-admits nobody.
+The credential check for a device endpoint is not the plugin's. It belongs to
+whatever owns the credentials, which is `pairednfc.Manager`: wrap the endpoint
+in `paired.Admit(...)` at the mount. It reads its policy per request, so
+rotating the secret or withdrawing the paired-device requirement needs nothing
+rebuilt.
 
 The clients connected right now are reported through the plugin:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
@@ -503,7 +543,7 @@ func main() {
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,

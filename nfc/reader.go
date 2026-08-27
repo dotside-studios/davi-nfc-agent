@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -718,14 +719,14 @@ type LockResult struct {
 }
 
 // WriteCardData attempts to write data to a detected NFC card using default options (overwrite mode).
-func (r *deviceReader) WriteCardData(text string) error {
+func (r *deviceReader) WriteCardData(ctx context.Context, text string) error {
 	msg := &NDEFMessageBuilder{
 		Records: []NDEFRecordBuilder{
 			&NDEFText{Content: text, Language: "en"},
 		},
 	}
 	ndefMsg := msg.MustBuild()
-	return r.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	return r.WriteMessageWithOptions(ctx, ndefMsg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -734,10 +735,10 @@ func (r *deviceReader) WriteCardData(text string) error {
 // EraseCard overwrites the presented tag with an empty NDEF message, making it
 // read as blank. This is reversible: the tag can be rewritten afterward. The
 // write is verified like any other write.
-func (r *deviceReader) EraseCard() (*WriteResult, error) {
+func (r *deviceReader) EraseCard(ctx context.Context) (*WriteResult, error) {
 	msg := NewNDEFMessage()
 	msg.AddRecord((&NDEFEmpty{}).ToRecord())
-	return r.WriteMessageWithResult(msg, WriteOptions{
+	return r.WriteMessageWithResult(ctx, msg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -1013,17 +1014,17 @@ func newWriteResult(card *Card, bytesWritten int, verified bool, attempts int, l
 // options for record manipulation. It performs a pre-flight capacity check,
 // retries on transient failures, and (unless disabled) verifies the write by
 // reading the data back. Use WriteMessageWithResult to obtain the WriteResult.
-func (r *deviceReader) WriteMessageWithOptions(msg *NDEFMessage, opts WriteOptions) error {
-	_, err := r.WriteMessageWithResult(msg, opts)
+func (r *deviceReader) WriteMessageWithOptions(ctx context.Context, msg *NDEFMessage, opts WriteOptions) error {
+	_, err := r.WriteMessageWithResult(ctx, msg, opts)
 	return err
 }
 
 // WriteMessageWithResult is like WriteMessageWithOptions but returns a
 // WriteResult describing the outcome (verification status, attempts, and bytes
 // written) so callers can surface real write confidence to the user.
-func (r *deviceReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
+func (r *deviceReader) WriteMessageWithResult(ctx context.Context, msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
 	var result *WriteResult
-	err := r.withTagOperation(func() error {
+	err := r.withTagOperation(ctx, func() error {
 		card, err := r.prepareCardForWrite(opts.ExpectUID)
 		if err != nil {
 			return err
@@ -1062,16 +1063,16 @@ func (r *deviceReader) WriteMessageWithResult(msg *NDEFMessage, opts WriteOption
 // It locks whatever tag is present. Prefer LockCardExpecting, which refuses
 // unless the tag present is the one you meant. For an operation that cannot
 // be undone, "whatever is on the reader now" is rarely what the caller means.
-func (r *deviceReader) LockCard() (*LockResult, error) {
-	return r.LockCardExpecting("")
+func (r *deviceReader) LockCard(ctx context.Context) (*LockResult, error) {
+	return r.LockCardExpecting(ctx, "")
 }
 
 // LockCardExpecting locks the presented tag only if it carries expectUID,
 // refusing with ErrTagUIDMismatch otherwise. An empty expectUID locks whatever
 // is present, as LockCard does.
-func (r *deviceReader) LockCardExpecting(expectUID string) (*LockResult, error) {
+func (r *deviceReader) LockCardExpecting(ctx context.Context, expectUID string) (*LockResult, error) {
 	var result *LockResult
-	err := r.withTagOperation(func() error {
+	err := r.withTagOperation(ctx, func() error {
 		card, err := r.prepareCardForWrite(expectUID)
 		if err != nil {
 			return err
@@ -1117,8 +1118,14 @@ func lockCard(card *Card) (*LockResult, error) {
 	return &LockResult{UID: card.UID, TagType: card.Type, Locked: true}, nil
 }
 
-// withTagOperation performs a protected tag operation with timeout.
-func (r *deviceReader) withTagOperation(operation func() error) error {
+// withTagOperation performs a protected tag operation, bounded by whichever
+// comes first: the caller's context or the reader's operationTimeout.
+//
+// The timeout is the reader's ceiling and the context can only tighten it. The
+// operation runs on its own goroutine because the PC/SC transmit under it
+// cannot be interrupted; abandoning it here ends the wait, not the transfer, so
+// the tag may still be written after this returns.
+func (r *deviceReader) withTagOperation(ctx context.Context, operation func() error) error {
 	r.operationMutex.Lock()
 	defer r.operationMutex.Unlock()
 
@@ -1130,9 +1137,9 @@ func (r *deviceReader) withTagOperation(operation func() error) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(r.operationTimeout):
-		// Attempt to signal the operation to stop if possible (e.g. context cancellation)
-		// For now, just return timeout. The operation might still be running.
+	case <-ctx.Done():
+		return fmt.Errorf("tag operation abandoned: %w", ctx.Err())
+	case <-r.clock.After(r.operationTimeout):
 		return fmt.Errorf("operation timed out after %v", r.operationTimeout)
 	}
 }
@@ -1170,17 +1177,17 @@ func (r *deviceReader) soleTag(expectUID string) (Tag, error) {
 // read-only state. It requires exactly one tag to be present, performs no
 // write, and works regardless of reader mode (including read-only). This lets
 // clients query what a tag supports before attempting a write or lock.
-func (r *deviceReader) GetCapabilities() (*TagCapabilities, error) {
-	return r.GetCapabilitiesExpecting("")
+func (r *deviceReader) GetCapabilities(ctx context.Context) (*TagCapabilities, error) {
+	return r.GetCapabilitiesExpecting(ctx, "")
 }
 
 // GetCapabilitiesExpecting reports the presented tag's capabilities only if it
 // carries expectUID, so a client is never told about a different tag than the
 // one it asked about, and then writes to it on that answer. An empty
 // expectUID reports whatever is present, as GetCapabilities does.
-func (r *deviceReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilities, error) {
+func (r *deviceReader) GetCapabilitiesExpecting(ctx context.Context, expectUID string) (*TagCapabilities, error) {
 	var caps TagCapabilities
-	err := r.withTagOperation(func() error {
+	err := r.withTagOperation(ctx, func() error {
 		tag, err := r.soleTag(expectUID)
 		if err != nil {
 			return err
@@ -1201,20 +1208,20 @@ func (r *deviceReader) GetCapabilitiesExpecting(expectUID string) (*TagCapabilit
 // is neither a read nor a write as far as this layer can tell, since the same
 // interface carries a SELECT and a write to a config page, so the policy call
 // belongs where the request enters, not here.
-func (r *deviceReader) Transceive(data []byte) ([]byte, error) {
-	return r.TransceiveExpecting(data, "")
+func (r *deviceReader) Transceive(ctx context.Context, data []byte) ([]byte, error) {
+	return r.TransceiveExpecting(ctx, data, "")
 }
 
 // TransceiveExpecting exchanges raw bytes only with the tag expectUID names,
 // refusing otherwise. A raw exchange can carry a write, so it is held to the
 // same guard as one. An empty expectUID exchanges with whatever is present.
-func (r *deviceReader) TransceiveExpecting(data []byte, expectUID string) ([]byte, error) {
+func (r *deviceReader) TransceiveExpecting(ctx context.Context, data []byte, expectUID string) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("no command bytes to send")
 	}
 
 	var response []byte
-	err := r.withTagOperation(func() error {
+	err := r.withTagOperation(ctx, func() error {
 		tag, err := r.soleTag(expectUID)
 		if err != nil {
 			return err

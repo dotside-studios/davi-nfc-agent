@@ -71,7 +71,7 @@ func (s *tagOps) Write(ctx context.Context, req server.WriteOp) (*nfc.WriteResul
 		return nil, protocol.WrapError(protocol.ErrCodeInvalidRequest, err, "invalid write request")
 	}
 
-	result, err := rt.holder.WriteTag(rt.device, rt.uid, msg, req.Request.Lock, req.IdempotencyKey)
+	result, err := rt.holder.WriteTag(ctx, rt.device, rt.uid, msg, req.Request.Lock, req.IdempotencyKey)
 	if err != nil {
 		return nil, sourceFailure(err, rt.device, "write", protocol.ErrCodeWriteFailed)
 	}
@@ -91,7 +91,7 @@ func (s *tagOps) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, 
 
 	// Named, so whatever holds it refuses if the tag present is not that one. A
 	// lock cannot be undone.
-	result, err := rt.holder.LockTag(rt.device, rt.uid, req.IdempotencyKey)
+	result, err := rt.holder.LockTag(ctx, rt.device, rt.uid, req.IdempotencyKey)
 	if err != nil {
 		return nil, sourceFailure(err, rt.device, "lock", protocol.ErrCodeLockFailed)
 	}
@@ -112,7 +112,7 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 		return nil, err
 	}
 
-	data, err := rt.holder.TransceiveTag(rt.device, rt.uid, req.Data, req.Raw)
+	data, err := rt.holder.TransceiveTag(ctx, rt.device, rt.uid, req.Data, req.Raw)
 	if err != nil {
 		return nil, sourceFailure(err, rt.device, "exchange", protocol.ErrCodeTransceiveFailed)
 	}
@@ -126,7 +126,7 @@ func (s *tagOps) Capabilities(ctx context.Context, req server.CapabilitiesOp) (*
 		return nil, err
 	}
 
-	caps, err := rt.holder.TagCapabilities(rt.device, rt.uid)
+	caps, err := rt.holder.TagCapabilities(ctx, rt.device, rt.uid)
 	if err != nil {
 		return nil, sourceFailure(err, rt.device, "capability report", protocol.ErrCodeCapabilitiesFailed)
 	}

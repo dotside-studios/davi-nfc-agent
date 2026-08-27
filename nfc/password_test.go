@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestSetCardPassword_GatedForSupportedTag(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.SetCardPassword([]byte{1, 2, 3, 4}, PasswordOptions{})
+	result, err := reader.SetCardPassword(context.Background(), []byte{1, 2, 3, 4}, PasswordOptions{})
 	if err == nil {
 		t.Fatal("expected SetCardPassword to be gated off")
 	}
@@ -57,7 +58,7 @@ func TestSetCardPassword_UnsupportedTagType(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	_, err := reader.SetCardPassword([]byte{1, 2, 3, 4}, PasswordOptions{})
+	_, err := reader.SetCardPassword(context.Background(), []byte{1, 2, 3, 4}, PasswordOptions{})
 	if err == nil {
 		t.Fatal("expected error for tag without password support")
 	}
@@ -77,7 +78,7 @@ func TestRemoveCardPassword_Gated(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	_, err := reader.RemoveCardPassword([]byte{1, 2, 3, 4})
+	_, err := reader.RemoveCardPassword(context.Background(), []byte{1, 2, 3, 4})
 	if err == nil {
 		t.Fatal("expected RemoveCardPassword to be gated off")
 	}

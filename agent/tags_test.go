@@ -39,7 +39,7 @@ func TestTheAgentAnswersForTagsOnlyWhileServing(t *testing.T) {
 	if got := a.DevicesHoldingTags(); len(got) != 1 || got[0] != "mock:usb:001" {
 		t.Errorf("DevicesHoldingTags = %v, want the reader holding the tag", got)
 	}
-	if _, err := a.TagCapabilities("mock:usb:001", "04A1B2C3"); err != nil {
+	if _, err := a.TagCapabilities(context.Background(), "mock:usb:001", "04A1B2C3"); err != nil {
 		t.Errorf("TagCapabilities while serving: %v", err)
 	}
 
@@ -59,16 +59,16 @@ func assertNotServing(t *testing.T, a *Agent) {
 		t.Errorf("DevicesHoldingTags = %v, want none while the agent is not serving", got)
 	}
 
-	if _, err := a.WriteTag("mock:usb:001", "04A1B2C3", nfc.NewNDEFMessage(), false, "key-1"); !errors.Is(err, errNotServing) {
+	if _, err := a.WriteTag(context.Background(), "mock:usb:001", "04A1B2C3", nfc.NewNDEFMessage(), false, "key-1"); !errors.Is(err, errNotServing) {
 		t.Errorf("WriteTag err = %v, want %v", err, errNotServing)
 	}
-	if _, err := a.LockTag("mock:usb:001", "04A1B2C3", "key-1"); !errors.Is(err, errNotServing) {
+	if _, err := a.LockTag(context.Background(), "mock:usb:001", "04A1B2C3", "key-1"); !errors.Is(err, errNotServing) {
 		t.Errorf("LockTag err = %v, want %v", err, errNotServing)
 	}
-	if _, err := a.TransceiveTag("mock:usb:001", "04A1B2C3", []byte{0x30, 0x00}, true); !errors.Is(err, errNotServing) {
+	if _, err := a.TransceiveTag(context.Background(), "mock:usb:001", "04A1B2C3", []byte{0x30, 0x00}, true); !errors.Is(err, errNotServing) {
 		t.Errorf("TransceiveTag err = %v, want %v", err, errNotServing)
 	}
-	if _, err := a.TagCapabilities("mock:usb:001", "04A1B2C3"); !errors.Is(err, errNotServing) {
+	if _, err := a.TagCapabilities(context.Background(), "mock:usb:001", "04A1B2C3"); !errors.Is(err, errNotServing) {
 		t.Errorf("TagCapabilities err = %v, want %v", err, errNotServing)
 	}
 }

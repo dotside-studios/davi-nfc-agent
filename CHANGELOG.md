@@ -160,6 +160,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `nfc.TagHolder`'s four operations take a `context.Context` first argument:
+  `WriteTag`, `LockTag`, `TransceiveTag` and `TagCapabilities`. `TagOn` and
+  `DevicesHoldingTags` are unchanged, since both answer from memory. The same
+  argument is added to the matching methods on `nfc.Supervisor`, `agent.Agent`,
+  `multimanager.MultiManager` and `remotenfc.Manager`, to
+  `Supervisor.WriteMessage`, `Lock`, `Transceive` and `Capabilities`, and to
+  `remotenfc.Manager.WriteToDevice` and `TransceiveWithDevice`. Breaking for an
+  embedder that implements `nfc.TagHolder` or calls these directly; add the
+  parameter and pass the caller's context, or `context.Background()`
+- `server.TagOps` implementations now pass the context they are given down to
+  the holder instead of discarding it. The context reaching a reader operation
+  bounds the wait alongside the reader's own operation timeout, whichever
+  expires first. Cancelling does not abort a PC/SC transfer already in progress,
+  so a tag may still be written after the caller has given up
+- `remotenfc.Manager.request` returns `ctx.Err()` when the context ends, instead
+  of waiting out the full device timeout. The pending entry is removed either way
 - The loopback bypass is off unless asked for. A connection from the agent's own
   host was admitted with no credential whenever an API secret was set, which
   admitted every other account on that host, every local proxy and every port

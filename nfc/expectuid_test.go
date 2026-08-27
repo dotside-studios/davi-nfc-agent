@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestLockCardExpectingRefusesAnotherTag(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.LockCardExpecting("04FFFFFF")
+	result, err := reader.LockCardExpecting(context.Background(), "04FFFFFF")
 	if err == nil {
 		t.Fatal("locked a tag the caller did not name")
 	}
@@ -35,7 +36,7 @@ func TestLockCardExpectingAcceptsTheNamedTag(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	if _, err := reader.LockCardExpecting("04A1B2C3"); err != nil {
+	if _, err := reader.LockCardExpecting(context.Background(), "04A1B2C3"); err != nil {
 		t.Fatalf("LockCardExpecting: %v", err)
 	}
 	if !mockTag.IsReadOnly {
@@ -51,7 +52,7 @@ func TestWriteExpectUIDRefusesAnotherTag(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	_, err := reader.WriteMessageWithResult(textMessage("payload for a different tag"),
+	_, err := reader.WriteMessageWithResult(context.Background(), textMessage("payload for a different tag"),
 		WriteOptions{Overwrite: true, Index: -1, ExpectUID: "04FFFFFF"})
 	if err == nil {
 		t.Fatal("wrote a payload to a tag the caller did not name")
@@ -67,7 +68,7 @@ func TestWriteExpectUIDAcceptsTheNamedTag(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	if _, err := reader.WriteMessageWithResult(textMessage("hello"),
+	if _, err := reader.WriteMessageWithResult(context.Background(), textMessage("hello"),
 		WriteOptions{Overwrite: true, Index: -1, ExpectUID: "04A1B2C3"}); err != nil {
 		t.Fatalf("WriteMessageWithResult: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestEmptyExpectUIDActsOnWhateverIsPresent(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	if _, err := reader.WriteMessageWithResult(textMessage("hi"),
+	if _, err := reader.WriteMessageWithResult(context.Background(), textMessage("hi"),
 		WriteOptions{Overwrite: true, Index: -1}); err != nil {
 		t.Fatalf("WriteMessageWithResult: %v", err)
 	}

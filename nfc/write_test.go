@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -44,7 +45,7 @@ func TestWriteMessageWithResult_VerifiesByDefault(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.WriteMessageWithResult(textMessage("Hello World"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("Hello World"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -76,7 +77,7 @@ func TestEraseCard(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.EraseCard()
+	result, err := reader.EraseCard(context.Background())
 	if err != nil {
 		t.Fatalf("EraseCard() failed: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestWriteMessageWithResult_RetriesThenSucceeds(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.WriteMessageWithResult(textMessage("retry me"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("retry me"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -140,7 +141,7 @@ func TestWriteMessageWithResult_VerificationMismatchFails(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.WriteMessageWithResult(textMessage("never verifies"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("never verifies"), WriteOptions{
 		Overwrite:        true,
 		Index:            -1,
 		MaxWriteAttempts: 2,
@@ -176,7 +177,7 @@ func TestWriteMessageWithResult_CapacityExceeded(t *testing.T) {
 	reader := newWriteTestReader(t, mockTag)
 
 	// ~100 characters easily exceeds 46 bytes once NDEF-encoded.
-	result, err := reader.WriteMessageWithResult(textMessage(strings.Repeat("A", 100)), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage(strings.Repeat("A", 100)), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -202,7 +203,7 @@ func TestWriteMessageWithResult_SkipVerify(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.WriteMessageWithResult(textMessage("unverified write"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("unverified write"), WriteOptions{
 		Overwrite:  true,
 		Index:      -1,
 		SkipVerify: true,

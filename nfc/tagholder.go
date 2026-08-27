@@ -1,5 +1,7 @@
 package nfc
 
+import "context"
+
 // TagHolder is what the tag router asks: which source is holding which tag, and
 // how to act on the tag one of them holds.
 //
@@ -22,6 +24,11 @@ type TagHolder interface {
 	// first.
 	DevicesHoldingTags() []string
 
+	// The operations below take a context. Cancelling it abandons the wait and
+	// returns ctx.Err(); it does not abort a transfer already on the wire, so
+	// an operation may still be applied after the caller has given up. TagOn
+	// and DevicesHoldingTags take none: both answer from memory.
+
 	// WriteTag encodes msg onto the tag the named device is holding, locking it
 	// afterwards when lock is set. idempotencyKey identifies the logical write,
 	// so a source that already applied it reports the previous outcome rather
@@ -30,17 +37,17 @@ type TagHolder interface {
 	// The result describes what was written and whether it could be confirmed,
 	// which differs by source: a reader reads the tag back, a phone answers
 	// from what it did.
-	WriteTag(deviceID, tagUID string, msg *NDEFMessage, lock bool, idempotencyKey string) (*WriteResult, error)
+	WriteTag(ctx context.Context, deviceID, tagUID string, msg *NDEFMessage, lock bool, idempotencyKey string) (*WriteResult, error)
 
 	// LockTag makes the tag the named device is holding permanently read-only.
-	LockTag(deviceID, tagUID, idempotencyKey string) (*LockResult, error)
+	LockTag(ctx context.Context, deviceID, tagUID, idempotencyKey string) (*LockResult, error)
 
 	// TransceiveTag exchanges raw bytes with the tag.
-	TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error)
+	TransceiveTag(ctx context.Context, deviceID, tagUID string, data []byte, raw bool) ([]byte, error)
 
 	// TagCapabilities reports what the tag the named device is holding
 	// supports.
-	TagCapabilities(deviceID, tagUID string) (*TagCapabilities, error)
+	TagCapabilities(ctx context.Context, deviceID, tagUID string) (*TagCapabilities, error)
 }
 
 // TagsHeldBy returns the manager's holder of tags, or nil for one whose devices

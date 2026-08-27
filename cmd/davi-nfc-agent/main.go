@@ -157,22 +157,23 @@ func main() {
 		})),
 	}
 
-	// The pairing server, on a listener of its own, with the menu entries that
-	// hand out its address and PIN.
-	//
-	// That listener is cleartext: it hands out the certificate authority to a
-	// device that does not trust the agent's certificate yet. Pairing issues a
-	// durable credential and the key pin a device recognises this agent by, so
-	// it mounts on the listener already serving the certificate that pin
-	// covers.
+	// Pairing issues a durable credential and the key pin a device recognises
+	// this agent by, so it is served from the listener already serving the
+	// certificate that pin covers. It belongs to the paired-device manager, so
+	// it is mounted whatever the build does about the listener below.
+	servers.Add(serverplugin.Endpoint{
+		Name:    "pairing",
+		Pattern: "/pair",
+		Handler: paired.PairHandler(),
+	})
+
+	// The cleartext listener that hands the certificate authority to a device
+	// that does not trust the agent's certificate yet, and the menu entries
+	// giving out its address and PIN. A zero bootstrap port leaves both out;
+	// devices still pair over /pair above.
 	var pairing *pairingplugin.Plugin
 	if opts.BootstrapPort > 0 {
 		pairing = pairingplugin.New(paired.PairingServer(), opts.BootstrapPort)
-		servers.Add(serverplugin.Endpoint{
-			Name:    "pairing",
-			Pattern: "/pair",
-			Handler: paired.PairHandler(),
-		})
 	}
 
 	app := tray.New(rt)

@@ -206,9 +206,11 @@ endpoint that issues a credential) belongs to `pairednfc.Manager`, which builds
 a `pairing.Server` of its own from `Options.ConfigDir`. The plugin,
 `pairingplugin.Plugin`, runs that server's cleartext listener and owns the menu
 entries that hand out its address and PIN:
-`pairingplugin.New(paired.PairingServer(), port)`. Omit the plugin and the build
-still pairs devices over `/pair`; it just binds no listener of its own and the
-console is handed `nil`. For the listener without the menu entries, register
+`pairingplugin.New(paired.PairingServer(), port)`. Mount `/pair` from the
+manager, not the plugin: `paired.PairHandler()` exists whatever the build does
+about the cleartext listener, so omitting the plugin leaves devices pairing over
+`/pair` with no CA download and no menu entries, and the console handed `nil`.
+For the listener without the menu entries, register
 `pairingplugin.NewServer(paired.PairingServer(), port)` with `ctx.Use` or a
 `serverplugin.Endpoint`.
 

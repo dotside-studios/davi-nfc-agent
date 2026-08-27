@@ -22,6 +22,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -53,10 +54,12 @@ type harness struct {
 
 	// Devices is the phone driver the test built and handed over, Servers what
 	// the agent is served from, and Pairing the pairing plugin, when the test
-	// asked for one.
-	Devices *remotenfc.Manager
-	Servers *serverplugin.Plugin
-	Pairing *pairingplugin.Plugin
+	// asked for one. Credentials is the pairing server behind /pair, which the
+	// paired-device manager holds whether or not the plugin was built.
+	Devices     *remotenfc.Manager
+	Servers     *serverplugin.Plugin
+	Pairing     *pairingplugin.Plugin
+	Credentials *pairing.Server
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
@@ -158,18 +161,21 @@ func start(t *testing.T, opts options) *harness {
 	}
 
 	// Pairing is served from the agent's listener, which already serves the
-	// certificate the key pin covers. The bootstrap listener is cleartext and
-	// hands out the CA, so no credential is issued over it. The endpoint is
-	// registered before the server plugin activates, which is when the routes
-	// are mounted.
+	// certificate the key pin covers, and belongs to the paired-device manager,
+	// so it is mounted whether or not the plugin below is built. The endpoint
+	// is registered before the server plugin activates, which is when the
+	// routes are mounted.
+	servers.Add(serverplugin.Endpoint{
+		Name:    "pairing",
+		Pattern: "/pair",
+		Handler: paired.PairHandler(),
+	})
+
+	// The bootstrap listener is cleartext and hands out the CA, so no credential
+	// is issued over it. Only a test wanting that listener asks for the plugin.
 	var pairing *pairingplugin.Plugin
 	if opts.Pairing {
 		pairing = pairingplugin.New(paired.PairingServer(), freePort(t))
-		servers.Add(serverplugin.Endpoint{
-			Name:    "pairing",
-			Pattern: "/pair",
-			Handler: paired.PairHandler(),
-		})
 	}
 
 	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
@@ -183,19 +189,21 @@ func start(t *testing.T, opts options) *harness {
 	}
 
 	h := &harness{
-		Agent:    rt.Agent,
-		Runtime:  rt,
-		Devices:  devices,
-		Servers:  servers,
-		Hardware: hardware.MockDevice,
-		Pairing:  pairing,
-		Origin:   "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
-		scans:    make(chan nfc.NFCData, 32),
+		Agent:       rt.Agent,
+		Runtime:     rt,
+		Devices:     devices,
+		Servers:     servers,
+		Hardware:    hardware.MockDevice,
+		Pairing:     pairing,
+		Credentials: paired.PairingServer(),
+		Origin:      "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
+		scans:       make(chan nfc.NFCData, 32),
 	}
+	// Pairing is on the agent's listener, so it is reachable whatever the build
+	// did about the cleartext one. Bootstrap is that cleartext listener, and
+	// exists only where a test asked for it.
+	h.Pair = h.Origin
 	if pairing != nil {
-		// Pairing is on the agent's listener; Bootstrap is the cleartext
-		// listener that hands out the CA.
-		h.Pair = h.Origin
 		h.Bootstrap = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(pairing.Port()))
 	}
 
@@ -211,8 +219,8 @@ func start(t *testing.T, opts options) *harness {
 	}
 	t.Cleanup(rt.Agent.Shutdown)
 
-	if h.Pair != "" {
-		// The pairing server serves on a goroutine and does not bind before
+	if h.Bootstrap != "" {
+		// The bootstrap listener serves on a goroutine and does not bind before
 		// Start returns, so a request sent immediately can beat it there.
 		waitForListener(t, h.Bootstrap[len("http://"):])
 	}

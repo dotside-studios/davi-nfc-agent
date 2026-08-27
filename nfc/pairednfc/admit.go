@@ -45,11 +45,15 @@ func (m *Manager) authenticate(w http.ResponseWriter, r *http.Request) (string, 
 		return id, true
 	}
 
-	// A paired credential, the shared secret, or the loopback bypass. The
-	// secret is a peer of a paired token rather than a replacement: a paired
-	// device is admitted on its own credential whatever the secret is set to,
-	// which is what makes revoking one device meaningful.
-	id, ok := server.CheckAuth(w, r, m.policy.secret(), m.registry)
+	// A paired credential, the shared secret, or the loopback bypass where the
+	// build asked for it. The secret is a peer of a paired token rather than a
+	// replacement: a paired device is admitted on its own credential whatever
+	// the secret is set to, which is what makes revoking one device meaningful.
+	id, ok := server.CheckAuth(w, r, server.AuthOptions{
+		Secret:        m.policy.secret(),
+		Verifier:      m.registry,
+		AllowLoopback: m.policy.allowLoopback(),
+	})
 	if !ok {
 		pairedWarn.Printf("Connection refused from %s: bad or missing credential", r.RemoteAddr)
 		return "", false

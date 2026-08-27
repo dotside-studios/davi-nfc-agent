@@ -180,8 +180,10 @@ func TestPairingRefusesCleartextFromOffThisMachine(t *testing.T) {
 	}
 }
 
-// From this machine there is no path to observe or substitute on, so cleartext
-// is allowed, as with the loopback bypass on the device endpoint.
+// From this machine there is no network to observe or substitute on, so
+// cleartext is allowed here. A separate question from the device endpoint's
+// loopback bypass, which is about who is admitted rather than what can read
+// the wire, and is off unless a build asks for it.
 func TestPairingAllowsCleartextFromThisMachine(t *testing.T) {
 	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {

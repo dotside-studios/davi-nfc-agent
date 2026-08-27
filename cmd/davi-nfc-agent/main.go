@@ -120,6 +120,7 @@ func main() {
 	// withdrawing the requirement or changing the port needs nothing rebuilt.
 	paired.UseSecret(rt.Agent.APISecret)
 	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.AllowLoopback(rt.Agent.AllowLoopbackBypass)
 	paired.UsePort(rt.Agent.DevicePort)
 
 	// The entry that makes browsers accept the certificate above.
@@ -138,6 +139,7 @@ func main() {
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
+			AllowLoopbackBypass:  rt.Agent.AllowLoopbackBypass,
 			OriginPolicy:         servers.OriginPolicy(),
 			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,

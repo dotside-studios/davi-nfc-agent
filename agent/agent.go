@@ -87,8 +87,15 @@ type Config struct {
 
 	Logs *logbuf.Ring
 
+	// AllowLoopbackBypass admits a connection from this host with no
+	// credential. Off by default: loopback identifies the host, so it also
+	// admits other accounts on it, local proxies, and port forwards into it.
+	// Settled at construction, unlike the requirement below: it widens what is
+	// admitted rather than narrowing it.
+	AllowLoopbackBypass bool
+
 	// RequirePairedDevice admits only devices holding a paired credential,
-	// withdrawing the shared secret and loopback bypass for device
+	// withdrawing the shared secret, and any loopback bypass, for device
 	// connections. Browser clients are unaffected. Changeable at runtime
 	// through SetRequirePairedDevice.
 	RequirePairedDevice bool
@@ -142,6 +149,7 @@ type Agent struct {
 	devicePort          int
 	publicKeyPin        string
 	requirePairedDevice bool
+	allowLoopbackBypass bool
 	readerFeedback      bool
 	logs                *logbuf.Ring
 	suppliedLogger      bool
@@ -222,6 +230,7 @@ func New(cfg Config) *Agent {
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
 		requirePairedDevice: cfg.RequirePairedDevice,
+		allowLoopbackBypass: cfg.AllowLoopbackBypass,
 		readerMode:          cfg.Mode,
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
@@ -320,6 +329,11 @@ func (a *Agent) DevicePort() int {
 	return a.devicePort
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
+
+// AllowLoopbackBypass reports whether a connection from this host is admitted
+// without a credential, read on every upgrade by whatever checks it.
+// [Agent.RequirePairedDevice] withdraws it for device connections regardless.
+func (a *Agent) AllowLoopbackBypass() bool { return a.allowLoopbackBypass }
 
 func (a *Agent) RequirePairedDevice() bool {
 	a.settingsMu.RLock()

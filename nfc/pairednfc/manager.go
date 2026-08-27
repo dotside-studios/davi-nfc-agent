@@ -81,6 +81,12 @@ type Policy struct {
 	// RequirePaired drops the shared secret and the loopback bypass, admitting
 	// only a device holding a credential issued at pairing. Nil is false.
 	RequirePaired func() bool
+
+	// AllowLoopback admits a request from this host with no credential at all.
+	// Nil is false: loopback names the host, so it also admits other accounts
+	// on it, local proxies, and port forwards into it. See
+	// [server.AuthOptions.AllowLoopback].
+	AllowLoopback func() bool
 }
 
 func (p Policy) secret() string {
@@ -92,6 +98,10 @@ func (p Policy) secret() string {
 
 func (p Policy) requirePaired() bool {
 	return p.RequirePaired != nil && p.RequirePaired()
+}
+
+func (p Policy) allowLoopback() bool {
+	return p.AllowLoopback != nil && p.AllowLoopback()
 }
 
 // New builds the manager over child, which is one backend or an aggregate.
@@ -155,6 +165,12 @@ func (m *Manager) Require(requirePaired func() bool) {
 // UseSecret sets the shared API secret, the peer credential to a paired token.
 func (m *Manager) UseSecret(secret func() string) {
 	m.policy.Secret = secret
+}
+
+// AllowLoopback sets whether a request from this host is admitted with no
+// credential. See [Policy.AllowLoopback].
+func (m *Manager) AllowLoopback(allow func() bool) {
+	m.policy.AllowLoopback = allow
 }
 
 // UsePort sets the port a paired device is told to connect to afterwards, for a

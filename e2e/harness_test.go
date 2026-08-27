@@ -29,8 +29,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// apiSecret is the shared secret every agent here runs with. Loopback bypasses
-// it, so it proves nothing on its own; it is set because a deployment has one.
+// apiSecret is the shared secret every agent here runs with, and every
+// connection below presents: the loopback bypass is off unless an agent is
+// built with it.
 const apiSecret = "e2e-shared-secret"
 
 // timeout bounds every wait. Generous on purpose: these tests bind real
@@ -124,6 +125,7 @@ func start(t *testing.T, opts options) *harness {
 
 	paired.UseSecret(rt.Agent.APISecret)
 	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.AllowLoopback(rt.Agent.AllowLoopbackBypass)
 	paired.UsePort(rt.Agent.DevicePort)
 
 	// The listener is a plugin, as it is in docs/custom-builds.md. With none

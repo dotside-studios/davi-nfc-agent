@@ -391,9 +391,11 @@ allowed while the agent runs.
 
 The credential check for a device endpoint is not the plugin's. It belongs to
 whatever owns the credentials, which is `pairednfc.Manager`: wrap the endpoint
-in `paired.Admit(...)` at the mount. It reads its policy per request, so
-rotating the secret or withdrawing the paired-device requirement needs nothing
-rebuilt.
+in `paired.Admit(...)` at the mount. Its policy comes from `UseSecret`,
+`Require` and `AllowLoopback`, each read per request, so rotating the secret,
+withdrawing the paired-device requirement or changing the bypass needs nothing
+rebuilt. See [The loopback bypass](api.md#the-loopback-bypass) for what
+`AllowLoopback` admits.
 
 The clients connected right now are reported through the plugin:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`

@@ -183,23 +183,56 @@ func TestRequirePairedWithNoPairedDevicesAdmitsNobody(t *testing.T) {
 	}
 }
 
-// The kiosk front end runs on this machine and has never had to know the
-// secret. The bypass survives, and names nobody.
-func TestALoopbackRequestBypassesTheSharedSecret(t *testing.T) {
+// Loopback names the host, not a client on it, so it presents the secret like
+// any other address unless the build asked otherwise.
+func TestALoopbackRequestIsNotAdmittedByDefault(t *testing.T) {
 	_, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
 
+	if status := reachFromLoopback(t, endpoint, ""); status != http.StatusUnauthorized {
+		t.Errorf("a request from this machine was admitted with no credential (status %d)", status)
+	}
+	if seen.reached {
+		t.Error("a refused connection reached the endpoint behind the check")
+	}
+
+	if status := reachFromLoopback(t, endpoint, "shared"); status != http.StatusOK {
+		t.Errorf("a request from this machine presenting the secret was refused (status %d)", status)
+	}
+}
+
+// A build whose local client cannot be given the secret asks for the bypass. It
+// admits, and names nobody.
+func TestTheLoopbackBypassAdmitsWhenAskedFor(t *testing.T) {
+	_, seen, endpoint := gate(t, pairednfc.Policy{
+		Secret:        func() string { return "shared" },
+		AllowLoopback: func() bool { return true },
+	})
+
 	if status := reachFromLoopback(t, endpoint, ""); status != http.StatusOK {
-		t.Fatalf("a request from this machine was refused (status %d)", status)
+		t.Fatalf("the bypass did not admit a request from this machine (status %d)", status)
 	}
 	if seen.identity != "" {
 		t.Errorf("the bypass named device %q; it identifies nobody", seen.identity)
 	}
 }
 
-// RequirePaired drops the bypass too.
+// The bypass reaches no further than this host, however it is set.
+func TestTheLoopbackBypassAdmitsNothingOffThisHost(t *testing.T) {
+	_, _, endpoint := gate(t, pairednfc.Policy{
+		Secret:        func() string { return "shared" },
+		AllowLoopback: func() bool { return true },
+	})
+
+	if status := reach(t, endpoint, ""); status != http.StatusUnauthorized {
+		t.Errorf("the bypass admitted a request from off this host (status %d)", status)
+	}
+}
+
+// RequirePaired drops the bypass even where the build asked for it.
 func TestRequirePairedDropsTheLoopbackBypass(t *testing.T) {
 	_, _, endpoint := gate(t, pairednfc.Policy{
 		Secret:        func() string { return "shared" },
+		AllowLoopback: func() bool { return true },
 		RequirePaired: func() bool { return true },
 	})
 

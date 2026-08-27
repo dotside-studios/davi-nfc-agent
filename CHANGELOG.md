@@ -174,9 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Agent.ServerRebound` raises `Events().Servers`, which is how a plugin
   reports that its listener bound again. The server plugin called an
   unexported method for this
-- `agent.ServiceHost` and `agent.ServiceAddress` report the address the agent
-  hands out, and `clipboard.CopyValue` copies a value and logs what happened.
-  Both were unexported helpers the plugins shared
+- `clipboard.CopyValue` copies a value and logs the result, which was an
+  unexported helper in `agent/menu.go` that only the plugins used
 - `serverplugin.Plugin.OnOriginsChange` returns an `*event.Connection`, so a subscriber
   can stop following. Both it and `OnClientsChange` are deprecated in favour of
   `serverplugin.Plugin.Events`; neither replays on connect, as before

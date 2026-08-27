@@ -3,7 +3,9 @@ package pairingplugin
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/url"
+	"strconv"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
@@ -94,7 +96,7 @@ func (p *Plugin) URL() string {
 		return ""
 	}
 
-	return "http://" + agent.ServiceAddress(agent.ServiceHost(), port) + "/?pin=" + url.QueryEscape(p.PIN())
+	return "http://" + net.JoinHostPort(serviceHost(), strconv.Itoa(port)) + "/?pin=" + url.QueryEscape(p.PIN())
 }
 
 // Activate registers the pairing server and adds the plugin's menu entries.
@@ -159,4 +161,14 @@ func (p *Plugin) menuTitle() string {
 		return p.MenuTitle
 	}
 	return "Pairing"
+}
+
+// serviceHost is the address this plugin's menu entries hand out: the machine's
+// first address, or localhost when it reports none. Copied into a phone or a
+// browser, so the most broadly reachable one wins; see [agent.LocalIPs].
+func serviceHost() string {
+	if ips := agent.LocalIPs(); len(ips) > 0 {
+		return ips[0]
+	}
+	return "localhost"
 }

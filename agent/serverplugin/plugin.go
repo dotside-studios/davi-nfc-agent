@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -427,7 +429,7 @@ func (p *Plugin) clientURL() string {
 	if p.Config.TLSEnabled() {
 		scheme = "wss"
 	}
-	return scheme + "://" + agent.ServiceAddress(agent.ServiceHost(), p.Port()) + "/ws"
+	return scheme + "://" + net.JoinHostPort(serviceHost(), strconv.Itoa(p.Port())) + "/ws"
 }
 
 func (p *Plugin) deviceURL() string { return p.clientURL() + "?mode=device" }
@@ -442,7 +444,7 @@ func (p *Plugin) endpointURL(endpoint Endpoint) string {
 	if p.Config.TLSEnabled() {
 		scheme = "https"
 	}
-	return scheme + "://" + agent.ServiceAddress(agent.ServiceHost(), p.Port()) + endpoint.Pattern
+	return scheme + "://" + net.JoinHostPort(serviceHost(), strconv.Itoa(p.Port())) + endpoint.Pattern
 }
 
 // redact shows enough of a secret to tell it apart from the one it replaced,
@@ -686,4 +688,14 @@ func (p *Plugin) healthHandler() http.Handler {
 			"clients":   p.ClientCount(),
 		})
 	})
+}
+
+// serviceHost is the address this plugin's menu entries hand out: the machine's
+// first address, or localhost when it reports none. Copied into a phone or a
+// browser, so the most broadly reachable one wins; see [agent.LocalIPs].
+func serviceHost() string {
+	if ips := agent.LocalIPs(); len(ips) > 0 {
+		return ips[0]
+	}
+	return "localhost"
 }

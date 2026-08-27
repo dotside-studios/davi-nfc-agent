@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 )
 
 // ServerConfig is what the pairing server needs, and nothing the rest of the

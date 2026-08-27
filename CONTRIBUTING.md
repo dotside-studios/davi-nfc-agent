@@ -140,7 +140,7 @@ davi-nfc-agent/
 │   └── fynetray/        # The real tray, on fyne.io/systray
 ├── clipboard/           # Copying text to the system clipboard
 ├── secure/              # Restricting a file or directory to the current user
-├── tls/                 # Auto-TLS certificate management
+│   └── tls/             # Auto-TLS certificates, the local CA, and pairing
 ├── protocol/            # Protocol definitions
 ├── client/              # TypeScript client library (src/), plus its built dist/
 ├── scripts/             # Build scripts
@@ -175,10 +175,11 @@ davi-nfc-agent/
 - Depends on nothing else in this repository
 - See [traymenu/README.md](traymenu/README.md) for the pattern
 
-**TLS Layer** (`tls/`)
-- Automatic certificate generation
-- Network change detection
-- CA bootstrap server for device setup
+**Security** (`secure/`)
+- `secure` restricts a file or directory to the current user, which is what
+  guards the certificate, the API secret and the device credentials on disk
+- `secure/tls` manages the certificate: generation, the local authority,
+  network change detection, and the CA bootstrap server a device pairs through
 
 ## Code Style
 

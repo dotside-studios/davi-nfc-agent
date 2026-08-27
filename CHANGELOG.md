@@ -177,6 +177,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `secure.Dir` and `secure.File` are `tls.SecureDir` and `tls.SecureFile`
   moved. They restrict a path to the current user and have nothing to do with
   TLS, and `agent`, `server` and `tls` all called them
+- `tls` is `secure/tls`. The package and its contents are unchanged; what a
+  build imports is `.../secure/tls`. Certificates, the local authority and the
+  credentials a device pairs with belong under the same tree as the file
+  permissions guarding them on disk
 - The shipped plugins are packages of their own: `agent/serverplugin`,
   `agent/pairingplugin` and `agent/trustplugin`, with `ServerPlugin`,
   `PairingPlugin` and `TrustPlugin` renamed to `Plugin` in each.

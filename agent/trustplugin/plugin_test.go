@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 

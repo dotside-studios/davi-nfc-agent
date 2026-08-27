@@ -39,7 +39,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 )
 
 func main() {

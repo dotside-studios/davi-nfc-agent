@@ -201,3 +201,47 @@ type writerFunc func(p []byte) (int, error)
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 var _ io.Writer = writerFunc(nil)
+
+// A scan reaches the console's log. The line naming what was scanned went to
+// stdout through fmt.Printf, so it bypassed the agent's logger and the ring
+// behind it: the one line an operator most wants while tapping a card was the
+// one the Control Center never showed, and a build started from a desktop
+// launcher had no stdout to read it on either.
+func TestAScanReachesTheConsoleLog(t *testing.T) {
+	a, ring := ringAgent(t)
+
+	card := nfc.NewCard(nfc.NewMockTag("04A1B2C3"))
+	card.MessageData = nfc.NewNDEFMessage().AddText("staff badge", "en")
+
+	a.forwardScan(nfc.NFCData{Device: "mock:usb:001", Card: card})
+
+	entry := find(t, ring, "04A1B2C3")
+	if !strings.Contains(entry.Message, "staff badge") {
+		t.Errorf("the scan line does not say what the card carries: %q", entry.Message)
+	}
+	if entry.Source != "[agent]" {
+		t.Errorf("the scan was logged under %q, want the agent's own channel", entry.Source)
+	}
+	if entry.Level != logbuf.LevelInfo {
+		t.Errorf("the scan was logged at %v, want info: a card being read is not a failure", entry.Level)
+	}
+	if strings.Contains(entry.Message, "\n") {
+		t.Errorf("the scan line carries a newline (%q), which the console renders as one entry", entry.Message)
+	}
+}
+
+// A card carrying nothing readable still scans, and the line says so without
+// trailing an empty field.
+func TestABlankCardIsLoggedWithoutAnEmptyField(t *testing.T) {
+	a, ring := ringAgent(t)
+
+	a.forwardScan(nfc.NFCData{
+		Device: "mock:usb:001",
+		Card:   nfc.NewCard(nfc.NewMockTag("04FFFFFF")),
+	})
+
+	entry := find(t, ring, "04FFFFFF")
+	if strings.HasSuffix(entry.Message, ": ") {
+		t.Errorf("the scan line ends on an empty field: %q", entry.Message)
+	}
+}

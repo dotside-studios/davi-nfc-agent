@@ -514,6 +514,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A scan reaches the console's log. The line naming what was read went to
+  stdout through `fmt.Printf`, so it bypassed the agent's logger and the ring
+  behind it: the one line an operator watches for while tapping a card was the
+  one the Control Center never showed, and an agent started from a desktop
+  launcher had no stdout to read it on either. It is one line on the agent's
+  channel now, at info, carrying the UID, the card type and what the card says
 - A pairing or revocation made outside the console redraws an open page again.
   The agent reported device changes until the registry moved to
   `secure/pairing`, and nothing re-subscribed, so a phone completing pairing or

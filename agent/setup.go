@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"os"
 	"path/filepath"
 
@@ -47,6 +48,12 @@ type Options struct {
 	// does, as [listener.Config] on a [ServerPlugin].
 	CertFile string
 	KeyFile  string
+
+	// Devices is the credential store the agent reports and revokes through.
+	// Nil has Setup load one from ConfigDir, which is what a build with no
+	// paired-device manager wants; a build with one passes that manager's, so
+	// the agent and the thing admitting devices read the same store.
+	Devices pairing.Store
 
 	AutoTLS             bool
 	ConfigDir           string
@@ -129,10 +136,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	// Resolve the config directory once, for both the TLS manager and the
 	// persistent API secret.
-	configDir := opts.ConfigDir
-	if configDir == "" {
-		configDir = DefaultConfigDir(info.DirName)
-	}
+	configDir := ResolveConfigDir(opts)
 
 	// The certificate this agent manages for itself, unless one was
 	// provisioned outside it. Setup builds it because it is config-directory
@@ -171,12 +175,17 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	// Load the paired-device registry. Each device gets its own credential, so
-	// one can be revoked without logging out the rest.
-	devices, err := NewDeviceRegistry(configDir)
-	if err != nil {
-		agentWarn.Printf("failed to load paired devices: %v", err)
-		devices, _ = NewDeviceRegistry("")
+	// The credential store: the one the caller's paired-device manager owns, or
+	// one loaded here for a build that has no such manager. Each device gets its
+	// own credential, so one can be revoked without logging out the rest.
+	devices := opts.Devices
+	if devices == nil {
+		loaded, err := pairing.NewRegistry(configDir)
+		if err != nil {
+			agentWarn.Printf("failed to load paired devices: %v", err)
+			loaded, _ = pairing.NewRegistry("")
+		}
+		devices = loaded
 	}
 
 	// Asked for on the command line or in the environment, as opposed to
@@ -237,6 +246,24 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}, nil
+}
+
+// ResolveConfigDir reports where opts says the agent's state lives: what it
+// names, or the platform default for this build.
+//
+// Exported because a program assembling components that hold config-directory
+// state builds them before Setup, and both must land on the same directory.
+func ResolveConfigDir(opts *Options) string {
+	if opts != nil && opts.ConfigDir != "" {
+		return opts.ConfigDir
+	}
+	info := buildinfo.Info{}
+	if opts != nil {
+		info = opts.Info.OrDefault()
+	} else {
+		info = info.OrDefault()
+	}
+	return DefaultConfigDir(info.DirName)
 }
 
 // DefaultConfigDir returns the platform-specific config directory for an

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"strconv"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
@@ -71,7 +72,7 @@ type Events struct {
 
 	// Devices carries the paired devices after each pairing and revocation.
 	// Empty on an agent built without a registry.
-	Devices event.Property[[]PairedDevice]
+	Devices event.Property[[]pairing.Device]
 
 	// Tag carries every scan the agent broadcasts, so a program embedding the
 	// agent acts on cards without connecting to its own WebSocket endpoint.
@@ -98,7 +99,7 @@ func (a *Agent) publishEvents() {
 	a.events.Preferences.Current = a.Preferences
 	a.events.Servers.Current = a.DevicePort
 	a.events.Readers.Current = a.Readers
-	a.events.Devices.Current = func() []PairedDevice {
+	a.events.Devices.Current = func() []pairing.Device {
 		if a.devices == nil {
 			return nil
 		}
@@ -111,7 +112,7 @@ func (a *Agent) publishEvents() {
 // agent is handed out.
 func (a *Agent) watchStores() {
 	if a.devices != nil {
-		a.devices.changed.Connect(a.fireDevicesChanged)
+		a.devices.OnChange(func() { a.fireDevicesChanged(a.devices.List()) })
 	}
 }
 
@@ -155,7 +156,7 @@ func (a *Agent) fireServerRestart() {
 	a.events.Any.Emit(ChangeServers)
 }
 
-func (a *Agent) fireDevicesChanged(devices []PairedDevice) {
+func (a *Agent) fireDevicesChanged(devices []pairing.Device) {
 	a.events.Devices.Emit(devices)
 	a.events.Any.Emit(ChangeDevices)
 }

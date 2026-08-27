@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
@@ -23,9 +24,9 @@ func TestAPreferenceChangedElsewhereRedrawsTheMenu(t *testing.T) {
 // A device paired from the console or over the pairing server shows up without
 // the operator reopening the menu.
 func TestADevicePairedElsewhereRedrawsTheMenu(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
+	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
 	app, _ := newTestTray(t, agent)

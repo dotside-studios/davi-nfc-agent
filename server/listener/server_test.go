@@ -25,9 +25,9 @@ func newTestServer(t *testing.T) (string, *clientserver.Server) {
 
 	deviceMgr := remotenfc.NewManager(30 * time.Second)
 
-	// These tests are about routing. The agent's check admitted everything
-	// with no secret and no verifier configured, so say so directly.
-	device := deviceMgr.Handler(remotenfc.ServerOptions{AllowUnauthenticated: true})
+	// These tests are about routing. A bare device endpoint admits everything,
+	// which is what this needs and what the driver does on its own.
+	device := deviceMgr.Handler(remotenfc.ServerOptions{})
 	client := clientserver.New(clientserver.Config{})
 
 	u := listener.New(listener.Config{})

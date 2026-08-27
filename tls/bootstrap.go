@@ -67,7 +67,20 @@ type BootstrapServer struct {
 	// agent has no device registry.
 	pairMu     sync.RWMutex
 	pairIssuer PairingIssuer
-	agentPort  int
+
+	// agentPort is read per request rather than stored, because the port the
+	// agent serves on can be changed while this listener stays up. A device
+	// handed the old one has no way back.
+	agentPort func() int
+}
+
+// port reports the agent's port for a device that is pairing now, 0 when
+// nothing supplied one.
+func (s *BootstrapServer) agentPortNow(fn func() int) int {
+	if fn == nil {
+		return 0
+	}
+	return fn()
 }
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
@@ -117,12 +130,13 @@ func (s *BootstrapServer) PairingURI(host string) (PairingURI, error) {
 	}
 
 	s.pairMu.RLock()
-	issuer, agentPort := s.pairIssuer, s.agentPort
+	issuer, port := s.pairIssuer, s.agentPort
 	s.pairMu.RUnlock()
 
 	if issuer == nil {
 		return PairingURI{}, fmt.Errorf("pairing is not enabled on this agent")
 	}
+	agentPort := s.agentPortNow(port)
 	if agentPort == 0 {
 		return PairingURI{}, fmt.Errorf("pairing does not know the agent's port")
 	}
@@ -191,6 +205,30 @@ func generatePIN() string {
 	}
 	return fmt.Sprintf("%06d", binary.BigEndian.Uint32(b[:])%1_000_000)
 }
+
+// UseCertificateAuthority names the authority handed out to a device that is
+// pairing, for a caller that builds this server before the authority exists —
+// which is the normal order, since the certificate is settled while the agent
+// is being assembled.
+//
+// Call it before Start. A nil *Manager boxed into the interface is unboxed
+// here, as in the constructor.
+func (s *BootstrapServer) UseCertificateAuthority(ca CertificateAuthority) {
+	if m, ok := ca.(*Manager); ok && m == nil {
+		ca = nil
+	}
+	s.manager = ca
+}
+
+// SetPort names the port Start will bind. It exists so a server can be built
+// before the port is settled, which is the normal case: the component holding
+// it is assembled before the agent has resolved its listeners.
+//
+// Changing it after Start has no effect on the listener already bound.
+func (s *BootstrapServer) SetPort(port int) { s.port = port }
+
+// Port reports the port Start will bind, or has bound.
+func (s *BootstrapServer) Port() int { return s.port }
 
 // Start brings up the HTTP server and logs the pairing details.
 func (s *BootstrapServer) Start() error {

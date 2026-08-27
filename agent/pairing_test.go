@@ -6,7 +6,15 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 )
+
+// testPairingServer is the component under test: the pairing machinery, which
+// belongs to whatever owns the credentials, wrapped in the lifetime that binds
+// and closes its listener.
+func testPairingServer(port int) *PairingServer {
+	return NewPairingServer(pairing.NewServer(pairing.ServerOptions{}), port)
+}
 
 func reachable(url string) bool {
 	c := &http.Client{Timeout: 2 * time.Second}
@@ -29,7 +37,7 @@ func TestPairingFollowsTheAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Use(PairingFor(rt.Agent, 9489, nil)); err != nil {
+	if err := rt.Agent.Use(testPairingServer(9489)); err != nil {
 		t.Fatalf("Use: %v", err)
 	}
 
@@ -76,35 +84,31 @@ func TestSetupBuildsNoPairingServer(t *testing.T) {
 // A build without pairing holds a nil *PairingServer, and every caller asking
 // it for the PIN would otherwise have to check first.
 func TestANilPairingServerReportsItsAbsence(t *testing.T) {
-	var pairing *PairingServer
+	var absent *PairingServer
 
-	if got := pairing.Port(); got != 0 {
+	if got := absent.Port(); got != 0 {
 		t.Errorf("Port() = %d, want 0", got)
 	}
-	if got := pairing.PIN(); got != "" {
+	if got := absent.PIN(); got != "" {
 		t.Errorf("PIN() = %q, want empty", got)
 	}
-	if got := pairing.RotatePIN(); got != "" {
+	if got := absent.RotatePIN(); got != "" {
 		t.Errorf("RotatePIN() = %q, want empty", got)
 	}
-	if pairing.Server() != nil {
+	if absent.Server() != nil {
 		t.Error("Server() should be nil")
 	}
 }
 
-// PairingFor takes what the pairing server needs from the agent, so a program
-// repeats none of what it already told Setup.
-func TestPairingForTakesTheAgentsConfiguration(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
+// The component reports what it runs, so a tray or a console can label its
+// entries before the listener is up.
+func TestAPairingServerReportsItsPortAndPIN(t *testing.T) {
+	server := testPairingServer(9495)
 
-	pairing := PairingFor(rt.Agent, 9495, nil)
-	if got := pairing.Port(); got != 9495 {
+	if got := server.Port(); got != 9495 {
 		t.Errorf("Port() = %d, want 9495", got)
 	}
-	if got := pairing.PIN(); got == "" {
+	if got := server.PIN(); got == "" {
 		t.Error("PIN() is empty; a phone would have nothing to present")
 	}
 }
@@ -120,8 +124,7 @@ func TestPairingRegistersAsAnEndpointComponent(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := PairingFor(rt.Agent, 9497, nil)
-	servers := &ServerPlugin{Endpoints: []Endpoint{{Name: "pairing", Component: pairing}}}
+	servers := &ServerPlugin{Endpoints: []Endpoint{{Name: "pairing", Component: testPairingServer(9497)}}}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}

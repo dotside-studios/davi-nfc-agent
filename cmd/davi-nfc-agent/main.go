@@ -20,6 +20,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -47,21 +48,52 @@ func main() {
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
 	logbuf.Install(opts.Logs)
 
-	// The driver serving phones. What it scans and what it holds reach the
-	// agent through the manager below; its endpoint is served alongside the
-	// clients, below.
+	// The driver serving phones. It decides nothing about who may connect: its
+	// endpoint is mounted behind the paired-device manager below, and what that
+	// admits is what registers.
 	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
 
 	// Hardware readers and phones behind one manager.
-	manager := multimanager.NewMultiManager(
+	backends := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
-	rt, err := agent.Setup(opts, manager)
+	// The paired-device manager: the credential store, the pairing machinery,
+	// and the check that admits a device, over the backends above. It is what
+	// the agent holds, so this build cannot have the readers without the policy
+	// that decides who reaches them.
+	//
+	// Leave it out — hand `backends` to Setup and mount the device endpoint bare
+	// — and this build pairs nobody and admits everyone.
+	//
+	// The pin and the port are read per pairing rather than captured: both are
+	// settled by Setup below, and both can change while the endpoint stays up.
+	var rt *agent.Runtime
+	paired, err := pairednfc.New(backends, pairednfc.Options{
+		ConfigDir:    agent.ResolveConfigDir(opts),
+		AppName:      opts.Info.OrDefault().DisplayName,
+		PublicKeyPin: func() string { return rt.Agent.PublicKeyPin() },
+		AgentPort:    func() int { return rt.Agent.DevicePort() },
+	})
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
+
+	opts.Devices = paired.PairedDevices()
+
+	rt, err = agent.Setup(opts, paired)
+	if err != nil {
+		log.Fatalf("Failed to start: %v", err)
+	}
+
+	// What the manager admits on, now that the agent holds it: the shared
+	// secret as a peer credential to a paired token, and the preference that
+	// drops both it and the loopback bypass. Read per connection, so changing
+	// either from the control center takes effect on the next one.
+	paired.UseSecret(rt.Agent.APISecret)
+	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.UseCertificateAuthority(rt.Certificates)
 
 	// The certificate this agent serves, and the entry that makes browsers
 	// accept it.
@@ -81,19 +113,20 @@ func main() {
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
-		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         servers.Authenticate(),
+		// The driver serves the protocol; the paired-device manager in front of
+		// it decides who gets that far, and names the device it admitted so the
+		// driver registers it under the identity it paired with.
+		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
-			Revocations:          rt.Agent.Devices(),
-		}),
+		})),
 	}
 
 	// The pairing server, on a listener of its own, with the menu entries that
@@ -104,13 +137,13 @@ func main() {
 	// durable credential and the key pin a device recognises this agent by, so
 	// it mounts on the listener already serving the certificate that pin
 	// covers.
-	var pairing *agent.PairingPlugin
+	var pairingPlugin *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {
-		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
+		pairingPlugin = agent.NewPairingPlugin(paired.PairingServer(), opts.BootstrapPort)
 		servers.Add(agent.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",
-			Handler: pairing.Server.Server().PairHandler(),
+			Handler: paired.PairHandler(),
 		})
 	}
 
@@ -122,7 +155,7 @@ func main() {
 		Agent:   rt.Agent,
 		Logs:    rt.Logs,
 		Servers: servers,
-		Pairing: pairing,
+		Pairing: pairingPlugin,
 		Trust:   trust,
 		Quit:    app.Quit,
 	})
@@ -131,8 +164,8 @@ func main() {
 	// The server goes on first: it publishes the listener the rest mount on,
 	// and activation order is the order their entries appear in the tray.
 	plugins := []agent.Plugin{servers}
-	if pairing != nil {
-		plugins = append(plugins, pairing)
+	if pairingPlugin != nil {
+		plugins = append(plugins, pairingPlugin)
 	}
 	plugins = append(plugins, trust)
 

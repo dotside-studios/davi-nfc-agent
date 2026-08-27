@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/url"
 
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -16,7 +16,7 @@ import (
 // It is a wrapper around [PairingServer], which is the component that binds the
 // listener. Registering the plugin is what a build does to pair devices:
 //
-//	pairing := agent.NewPairingPlugin(rt.Agent, 9472)
+//	pairing := agent.NewPairingPlugin(paired.PairingServer(), 9472)
 //	rt.Agent.Plugins.Add(pairing)
 //
 // A build wanting the listener without the menu registers the component on its
@@ -37,18 +37,18 @@ type PairingPlugin struct {
 
 var _ Plugin = (*PairingPlugin)(nil)
 
-// NewPairingPlugin builds the pairing server for a, listening on port and
-// handing out ca to a device that pairs, and the plugin that runs it. Pass
-// Runtime.Certificates, or nil for a build with no authority to give. See
-// [PairingFor].
+// NewPairingPlugin runs server's listener on port and puts its entries on the
+// tray. server is the pairing machinery, which belongs to whatever owns the
+// credentials — see [pairing.Server] and the paired-device manager that builds
+// one.
 //
-// A zero port is a build that pairs no devices: it returns nil, and every
-// method tolerates one.
-func NewPairingPlugin(a *Agent, port int, ca tlspkg.CertificateAuthority) *PairingPlugin {
-	if port <= 0 {
+// A zero port, or no server, is a build that pairs no devices: it returns nil,
+// and every method tolerates one.
+func NewPairingPlugin(server *pairing.Server, port int) *PairingPlugin {
+	if port <= 0 || server == nil {
 		return nil
 	}
-	return &PairingPlugin{Server: PairingFor(a, port, ca)}
+	return &PairingPlugin{Server: NewPairingServer(server, port)}
 }
 
 // Name identifies the plugin.

@@ -57,12 +57,23 @@ func serveClients(p *ServerPlugin, a *Agent) {
 	p.ServeMode[server.ModeClient] = clientserver.New(clientserver.Config{
 		APISecret:            a.APISecret,
 		OriginPolicy:         p.OriginPolicy(),
-		TokenVerifier:        a.TokenVerifier(),
+		TokenVerifier:        tokenVerifier(a),
 		Tags:                 a,
 		AllowTagModification: a.TagModificationAllowed,
 		Scans:                &a.events.Tag,
 		ReaderStatus:         &a.events.Reader,
 	})
+}
+
+// tokenVerifier is the credential check for a client endpoint. The agent holds
+// a view of the store rather than the store itself, so a build takes this from
+// whatever owns the credentials; here the test reaches through the view.
+func tokenVerifier(a *Agent) server.TokenVerifier {
+	verifier, ok := a.Devices().(server.TokenVerifier)
+	if !ok {
+		return nil
+	}
+	return verifier
 }
 
 // get asks the listener's mux for a path, without binding anything.

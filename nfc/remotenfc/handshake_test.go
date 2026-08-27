@@ -25,8 +25,7 @@ func servePinnedManager(t *testing.T, pin string) string {
 
 	m := NewManager(DeviceTimeout)
 	ts := httptest.NewServer(m.Handler(ServerOptions{
-		AllowUnauthenticated: true,
-		PublicKeyPin:         func() string { return pin },
+		PublicKeyPin: func() string { return pin },
 	}))
 
 	t.Cleanup(func() {

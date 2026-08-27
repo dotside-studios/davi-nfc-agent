@@ -16,6 +16,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -86,13 +87,33 @@ func start(t *testing.T, opts options) *harness {
 	hardware := nfc.NewMockManager()
 	hardware.MockDevice.SetTags(opts.Tags)
 
-	rt, err := agent.Setup(o, multimanager.NewMultiManager(
+	backends := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: hardware},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
-	))
+	)
+
+	// The paired-device manager over them: the credential store, the pairing
+	// machinery and the check that admits a device. It is what the agent holds,
+	// so this build cannot have the readers without the policy guarding them.
+	var rt *agent.Runtime
+	paired, err := pairednfc.New(backends, pairednfc.Options{
+		ConfigDir:    agent.ResolveConfigDir(o),
+		PublicKeyPin: func() string { return rt.Agent.PublicKeyPin() },
+		AgentPort:    func() int { return rt.Agent.DevicePort() },
+	})
+	if err != nil {
+		t.Fatalf("pairednfc.New: %v", err)
+	}
+	o.Devices = paired.PairedDevices()
+
+	rt, err = agent.Setup(o, paired)
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
+
+	paired.UseSecret(rt.Agent.APISecret)
+	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.UseCertificateAuthority(rt.Certificates)
 
 	// The listener is a plugin, as it is in docs/custom-builds.md. With none
 	// registered the agent drives the reader and serves nothing. Pairing is a
@@ -110,19 +131,17 @@ func start(t *testing.T, opts options) *harness {
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
-		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         servers.Authenticate(),
+		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
-			Revocations:          rt.Agent.Devices(),
-		}),
+		})),
 	}
 
 	// Pairing is served from the agent's listener, which already serves the
@@ -132,11 +151,11 @@ func start(t *testing.T, opts options) *harness {
 	// are mounted.
 	var pairing *agent.PairingPlugin
 	if opts.Pairing {
-		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), rt.Certificates)
+		pairing = agent.NewPairingPlugin(paired.PairingServer(), freePort(t))
 		servers.Add(agent.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",
-			Handler: pairing.Server.Server().PairHandler(),
+			Handler: paired.PairHandler(),
 		})
 	}
 

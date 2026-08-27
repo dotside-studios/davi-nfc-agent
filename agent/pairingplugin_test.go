@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestPairingPluginRegistersItsServerAndItsEntries(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := NewPairingPlugin(rt.Agent, 9499, nil)
+	pairing := NewPairingPlugin(pairing.NewServer(pairing.ServerOptions{}), 9499)
 	if err := rt.Agent.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestRotatingThePINRelabelsTheEntries(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 
-	pairing := NewPairingPlugin(rt.Agent, 9501, nil)
+	pairing := NewPairingPlugin(pairing.NewServer(pairing.ServerOptions{}), 9501)
 	if err := rt.Agent.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestPairingPluginActivatesWithNoTray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(NewPairingPlugin(rt.Agent, 9503, nil)); err != nil {
+	if err := rt.Agent.Plugins.Add(NewPairingPlugin(pairing.NewServer(pairing.ServerOptions{}), 9503)); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 

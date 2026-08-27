@@ -35,7 +35,6 @@ type Manager struct {
 	// Policy supplied by the agent through Handler.
 	publicKeyPin         func() string
 	allowTagModification func() bool
-	revocations          *event.Connection // Ends the session of a revoked device
 
 	sessions    map[string]*wsconn.SafeConn // deviceID -> connection
 	sessionConn map[*wsconn.SafeConn]string // reverse lookup
@@ -358,12 +357,7 @@ func (m *Manager) Close() {
 		return
 	}
 	m.closed = true
-	// Nothing left to revoke a session from.
-	revocations := m.revocations
-	m.revocations = nil
 	m.mu.Unlock()
-
-	revocations.Disconnect()
 
 	// Stop cleanup routine
 	if m.cleanupTicker != nil {

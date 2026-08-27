@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"io"
 	"log"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -73,7 +73,7 @@ type Config struct {
 	ConfigDir string
 
 	// Devices holds the paired devices and their per-device credentials.
-	Devices *DeviceRegistry
+	Devices pairing.Store
 
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
@@ -138,7 +138,7 @@ type Agent struct {
 	logger              *log.Logger
 	manager             nfc.Manager
 	configDir           string
-	devices             *DeviceRegistry
+	devices             pairing.Store
 	devicePort          int
 	publicKeyPin        string
 	requirePairedDevice bool
@@ -295,9 +295,9 @@ func (a *Agent) Readers() []string {
 	}
 	return readers
 }
-func (a *Agent) Logger() *log.Logger      { return a.logger }
-func (a *Agent) ConfigDir() string        { return a.configDir }
-func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+func (a *Agent) Logger() *log.Logger    { return a.logger }
+func (a *Agent) ConfigDir() string      { return a.configDir }
+func (a *Agent) Devices() pairing.Store { return a.devices }
 
 // APISecret is the secret non-loopback connections must present. Read on every
 // upgrade by whatever checks it, so it follows a rotation.
@@ -520,17 +520,4 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
 	a.ApplyPreferences(func(p *Preferences) { p.ReaderFeedback = on })
-}
-
-// TokenVerifier recognises the per-device credentials this agent issued at
-// pairing, for whatever admits a connection presenting one. Nil on an agent
-// built without a registry, which admits nobody on a credential.
-//
-// Take it from here rather than from Devices: a nil registry assigned to the
-// interface is not a nil interface, and the caller's nil check would miss it.
-func (a *Agent) TokenVerifier() server.TokenVerifier {
-	if a.devices == nil {
-		return nil
-	}
-	return a.devices
 }

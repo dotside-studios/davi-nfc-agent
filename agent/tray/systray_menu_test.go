@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/pairing"
 	"io"
 	"log"
 	"strings"
@@ -257,9 +258,9 @@ func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 }
 
 func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
+	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
 
@@ -296,9 +297,9 @@ func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {
 }
 
 func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
+	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
 

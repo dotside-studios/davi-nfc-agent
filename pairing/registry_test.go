@@ -1,4 +1,4 @@
-package agent
+package pairing
 
 import (
 	"encoding/json"
@@ -10,9 +10,9 @@ import (
 )
 
 func TestPairIssuesUsableToken(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	device, token, err := registry.Pair("Operator iPhone", "ios")
@@ -39,9 +39,9 @@ func TestPairIssuesUsableToken(t *testing.T) {
 // The registry must not be a file full of usable credentials.
 func TestTokenIsNotStoredInTheClear(t *testing.T) {
 	dir := t.TempDir()
-	registry, err := NewDeviceRegistry(dir)
+	registry, err := NewRegistry(dir)
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	_, token, err := registry.Pair("Operator iPhone", "ios")
@@ -57,7 +57,7 @@ func TestTokenIsNotStoredInTheClear(t *testing.T) {
 		t.Fatal("the token was written to disk in the clear")
 	}
 
-	var stored []PairedDevice
+	var stored []Device
 	if err := json.Unmarshal(data, &stored); err != nil {
 		t.Fatalf("parse devices file: %v", err)
 	}
@@ -69,9 +69,9 @@ func TestTokenIsNotStoredInTheClear(t *testing.T) {
 // Revoking one device must not disturb any other, which is the whole reason the
 // registry exists, since rotating the shared secret logs out everything.
 func TestRevokeIsPerDevice(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	first, firstToken, err := registry.Pair("First", "android")
@@ -101,16 +101,16 @@ func TestRevokeIsPerDevice(t *testing.T) {
 func TestPairingSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 
-	registry, err := NewDeviceRegistry(dir)
+	registry, err := NewRegistry(dir)
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 	device, token, err := registry.Pair("Operator iPhone", "ios")
 	if err != nil {
 		t.Fatalf("Pair: %v", err)
 	}
 
-	reopened, err := NewDeviceRegistry(dir)
+	reopened, err := NewRegistry(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -125,9 +125,9 @@ func TestPairingSurvivesRestart(t *testing.T) {
 }
 
 func TestVerifyRejectsUnknownTokens(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 	if _, _, err := registry.Pair("Operator iPhone", "ios"); err != nil {
 		t.Fatalf("Pair: %v", err)
@@ -141,9 +141,9 @@ func TestVerifyRejectsUnknownTokens(t *testing.T) {
 }
 
 func TestRevokeAll(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	_, firstToken, _ := registry.Pair("First", "android")
@@ -165,9 +165,9 @@ func TestRevokeAll(t *testing.T) {
 }
 
 func TestPairNotifiesOnChange(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	var changes int
@@ -182,9 +182,9 @@ func TestPairNotifiesOnChange(t *testing.T) {
 }
 
 func TestEveryDeviceSubscriberIsNotified(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	var first, second int
@@ -212,9 +212,9 @@ func TestEveryDeviceSubscriberIsNotified(t *testing.T) {
 // A token is only checked when a device connects, so a subscriber needs to know
 // which device was revoked in order to end the session it already holds.
 func TestRevokeNamesTheDevice(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	var revoked [][]string
@@ -248,9 +248,9 @@ func TestRevokeNamesTheDevice(t *testing.T) {
 
 // RevokeAll names every device it revoked, so every live session goes with it.
 func TestRevokeAllNamesEveryDevice(t *testing.T) {
-	registry, err := NewDeviceRegistry(t.TempDir())
+	registry, err := NewRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	var revoked []string

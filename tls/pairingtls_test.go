@@ -72,7 +72,7 @@ func TestPairingURICarriesTheKeyPin(t *testing.T) {
 // so the URI is refused rather than handed out authenticating nothing.
 func TestPairingURIWithoutAKeyPin(t *testing.T) {
 	s := NewBootstrapServer(newFakeCAReader(t), 9472)
-	s.SetPairingIssuer(&stubIssuer{pin: "none"}, 9470)
+	s.SetPairingIssuer(&stubIssuer{pin: "none"}, func() int { return 9470 })
 
 	if _, err := s.PairingURI("192.0.2.7"); err == nil {
 		t.Fatal("PairingURI succeeded with no key pin")

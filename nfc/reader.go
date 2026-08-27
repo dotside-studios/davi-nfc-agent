@@ -3,6 +3,7 @@ package nfc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -48,17 +49,29 @@ const (
 
 // deviceReader manages NFC device interactions and broadcasts tag data.
 type deviceReader struct {
-	deviceManager    *DeviceManager
-	dataChan         chan NFCData      // Broadcasts successfully read NFC data
-	statusChan       chan DeviceStatus // Broadcasts device status updates
-	stopChan         chan struct{}     // Signals the worker to stop
-	cache            *TagCache         // Caches tag data
-	mode             ReaderMode        // Access mode for the reader
-	clock            Clock             // Clock abstraction for time operations
-	statusMux        sync.RWMutex
-	cardPresent      bool           // Internal tracking of card presence
-	isWriting        bool           // Tracks if a write operation is in progress
-	operationMutex   sync.Mutex     // Protects tag operations (read/write)
+	deviceManager *DeviceManager
+	dataChan      chan NFCData      // Broadcasts successfully read NFC data
+	statusChan    chan DeviceStatus // Broadcasts device status updates
+	stopChan      chan struct{}     // Signals the worker to stop
+	cache         *TagCache         // Caches tag data
+	mode          ReaderMode        // Access mode for the reader
+	clock         Clock             // Clock abstraction for time operations
+	statusMux     sync.RWMutex
+	cardPresent   bool // Internal tracking of card presence
+	isWriting     bool // Tracks if a write operation is in progress
+
+	// opSlot admits one tag operation at a time. It is a channel rather than a
+	// mutex because the goroutine running an operation holds it until the
+	// operation actually returns, which outlasts an abandoned wait: a mutex
+	// released on the abandoning side would let the next operation run
+	// concurrently with one still driving the reader.
+	opSlot chan struct{}
+
+	// opsWg tracks operation goroutines, including abandoned ones, so Stop can
+	// wait for them. abandoned counts the waits given up on.
+	opsWg     sync.WaitGroup
+	abandoned atomic.Int64
+
 	operationTimeout time.Duration  // Timeout for tag operations
 	cardCheckTicker  Ticker         // Ticker for periodic card presence checks (based on cache)
 	workerWg         sync.WaitGroup // Tracks worker goroutine completion
@@ -131,6 +144,7 @@ func newDeviceReaderWithClock(deviceStr string, manager Manager, opTimeout time.
 		mode:             ModeReadWrite, // Default to read/write mode
 		clock:            clock,
 		cardPresent:      false,
+		opSlot:           make(chan struct{}, 1),
 		operationTimeout: opTimeout,
 	}
 
@@ -241,7 +255,26 @@ func (r *deviceReader) Stop() {
 	// Wait for the worker to finish
 	r.workerWg.Wait()
 	readerLog.Println("deviceReader worker stopped successfully.")
+	r.drainOperations()
 	// Worker's defer will handle device closing and final status.
+}
+
+// drainOperations waits for in-flight tag operations, bounded: an abandoned one
+// is blocked in a PC/SC transfer that cannot be interrupted, so waiting without
+// a limit would hang shutdown behind the reader.
+func (r *deviceReader) drainOperations() {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.opsWg.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * r.operationTimeout):
+		readerWarn.Printf("Stopping with tag operations still running (%d abandoned); not waiting further",
+			r.abandoned.Load())
+	}
 }
 
 // Start begins the NFC reading process in a separate goroutine.
@@ -1118,19 +1151,32 @@ func lockCard(card *Card) (*LockResult, error) {
 	return &LockResult{UID: card.UID, TagType: card.Type, Locked: true}, nil
 }
 
-// withTagOperation performs a protected tag operation, bounded by whichever
-// comes first: the caller's context or the reader's operationTimeout.
+// ErrReaderBusy reports that the reader is still finishing an operation whose
+// caller has already given up. A PC/SC transfer cannot be interrupted, so an
+// abandoned operation runs to completion; starting another one meanwhile would
+// drive the same tag from two goroutines.
+var ErrReaderBusy = errors.New("reader is busy finishing an abandoned operation")
+
+// withTagOperation runs one tag operation at a time, bounded by whichever comes
+// first: the caller's context or the reader's operationTimeout. The timeout is
+// the reader's ceiling and the context can only tighten it.
 //
-// The timeout is the reader's ceiling and the context can only tighten it. The
-// operation runs on its own goroutine because the PC/SC transmit under it
-// cannot be interrupted; abandoning it here ends the wait, not the transfer, so
-// the tag may still be written after this returns.
+// Abandoning the wait does not abort the transfer, so the tag may still be
+// written after this returns. The operation keeps the reader's slot until it
+// genuinely finishes; a caller arriving meanwhile waits for it and is refused
+// with ErrReaderBusy if it does not finish in time.
 func (r *deviceReader) withTagOperation(ctx context.Context, operation func() error) error {
-	r.operationMutex.Lock()
-	defer r.operationMutex.Unlock()
+	if err := r.acquireSlot(ctx); err != nil {
+		return err
+	}
 
 	done := make(chan error, 1)
+	r.opsWg.Add(1)
 	go func() {
+		defer r.opsWg.Done()
+		// Released here rather than by the waiter, so an abandoned operation
+		// keeps the reader to itself until it is really done.
+		defer func() { <-r.opSlot }()
 		done <- operation()
 	}()
 
@@ -1138,11 +1184,46 @@ func (r *deviceReader) withTagOperation(ctx context.Context, operation func() er
 	case err := <-done:
 		return err
 	case <-ctx.Done():
+		r.reportAbandoned(ctx.Err())
 		return fmt.Errorf("tag operation abandoned: %w", ctx.Err())
 	case <-r.clock.After(r.operationTimeout):
+		r.reportAbandoned(nil)
 		return fmt.Errorf("operation timed out after %v", r.operationTimeout)
 	}
 }
+
+// acquireSlot takes the reader's operation slot, waiting for an abandoned
+// operation to finish rather than running beside it.
+func (r *deviceReader) acquireSlot(ctx context.Context) error {
+	select {
+	case r.opSlot <- struct{}{}:
+		return nil
+	default:
+	}
+
+	select {
+	case r.opSlot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for the reader: %w", ctx.Err())
+	case <-r.clock.After(r.operationTimeout):
+		return NewBusyError("acquire", ErrReaderBusy)
+	}
+}
+
+// reportAbandoned counts a wait given up on and says so once per occurrence.
+func (r *deviceReader) reportAbandoned(cause error) {
+	n := r.abandoned.Add(1)
+	if cause != nil {
+		readerWarn.Printf("Tag operation abandoned (%v); it still holds the reader. %d abandoned so far", cause, n)
+		return
+	}
+	readerWarn.Printf("Tag operation timed out after %v; it still holds the reader. %d abandoned so far", r.operationTimeout, n)
+}
+
+// abandonedOperations reports how many waits have been given up on while the
+// operation kept running.
+func (r *deviceReader) abandonedOperations() int64 { return r.abandoned.Load() }
 
 // soleTag returns the one tag on the reader, refusing when none or several are
 // present, or when the tag is not the one expectUID names. Callers run it

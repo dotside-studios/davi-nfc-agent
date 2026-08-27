@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `remotenfc.Manager.Dropped` counts the scans and removals that could not be
   published within `ScanPublishTimeout`, so overflow is a number rather than a
   log line
+- `BUSY` error code for a request the agent could not start because earlier work
+  is still draining: a reader still finishing an operation whose caller gave up.
+  Retryable. `nfc.ErrCodeBusy`, `nfc.NewBusyError` and `nfc.ErrReaderBusy` are
+  its internal counterparts
 - `MULTIPLE_TAGS` error code for more than one tag in the field where the
   operation needs exactly one. Not retryable: the user has to separate them
   first. Both guards raised an untyped `fmt.Errorf`, so a real and
@@ -522,6 +526,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A tag operation whose caller gave up no longer runs beside the next one. On a
+  timeout the reader released `operationMutex` while the abandoned goroutine was
+  still driving the tag, so the following request acquired the mutex and the two
+  interleaved: a write's verification read could land between another write's
+  attempts. The operation now holds the reader until it actually returns. A
+  request arriving meanwhile waits one operation timeout for it and is then
+  refused with `BUSY`, which is retryable
+- Abandoned tag operations are counted and logged instead of disappearing, and
+  the reader waits for them when it stops, bounded at twice the operation
+  timeout so a stuck PC/SC transfer cannot hang shutdown
 - `pcsc.Manager.DeviceChanges` no longer leaks its polling goroutine. The
   goroutine ran `for range ticker.C` with no stop path, so it outlived the
   manager and the process kept polling PC/SC after shutdown. It now selects on a

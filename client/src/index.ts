@@ -4,6 +4,7 @@ export {
   encodeBase64,
   parseTagData,
 } from "./session/protocol";
+export type { RawTagPayload, WireMessage } from "./session/protocol";
 export { diagnoseAgent } from "./session/diagnose";
 export type { AgentDiagnosis, AgentDiagnosisKind } from "./session/diagnose";
 export type {
@@ -13,6 +14,8 @@ export type {
   NDEFRecord,
   NDEFRecordWrite,
   NFCClientOptions,
+  NFCErrorCode,
+  NFCErrorCodeValue,
   NFCErrorEvent,
   NFCEventHandler,
   NFCEventName,

@@ -1,4 +1,11 @@
 export interface NFCClientOptions {
+  /**
+   * The agent's shared API secret, sent as `?secret=` on the upgrade. Required
+   * from the agent's own host too: the loopback bypass is off unless the agent
+   * was started with `-allow-loopback-bypass`. Without it the upgrade is
+   * refused with a plain 401, which surfaces as a failed connection rather
+   * than a close code.
+   */
   apiSecret?: string;
   autoReconnect?: boolean;
   /** First retry delay. Later attempts double it, up to `maxReconnectDelay`. */
@@ -70,6 +77,11 @@ export interface TagMessage {
 export interface TagCapabilities {
   canRead?: boolean;
   canWrite?: boolean;
+  /**
+   * True for a tag a paired device is holding too, when that device declared
+   * it. How a device reports a scan says nothing about whether it can exchange
+   * bytes with the tag.
+   */
   canTransceive?: boolean;
   canLock?: boolean;
   isReadOnly?: boolean;
@@ -113,7 +125,8 @@ export interface TagData {
 
 export interface DeviceStatus {
   connected: boolean;
-  deviceName?: string;
+  /** The reader this describes. Absent from agents before 1.2. */
+  device?: string;
   message?: string;
   /**
    * Whether the agent's own reader holds a card. It says nothing about a tag a
@@ -122,9 +135,56 @@ export interface DeviceStatus {
   cardPresent?: boolean;
 }
 
+/**
+ * The error codes the agent speaks, as of this release. Not retryable unless
+ * listed here as one: `TAG_SEND_FAILED`, `READ_ERROR`, `SESSION_LOCKED`,
+ * `NO_CARD`, `TIMEOUT`, `DEVICE_GONE`, `READ_FAILED`, `WRITE_FAILED`,
+ * `TRANSCEIVE_FAILED` and `TAG_NOT_CONNECTED` are. Read `retryable` off the
+ * error rather than this list: the agent decides per error.
+ */
+export type NFCErrorCode =
+  | "PARSE_ERROR"
+  | "INVALID_PAYLOAD"
+  | "INVALID_REQUEST"
+  | "INVALID_MESSAGE_TYPE"
+  | "UNKNOWN_TYPE"
+  | "INVALID_DEVICE"
+  | "REGISTRATION_FAILED"
+  | "TAG_SEND_FAILED"
+  | "READ_ERROR"
+  | "LOCK_FAILED"
+  | "CAPABILITIES_FAILED"
+  | "SESSION_LOCKED"
+  | "NO_CARD"
+  | "TAG_MISMATCH"
+  | "TAG_NOT_NAMED"
+  | "TIMEOUT"
+  | "DEVICE_GONE"
+  | "INTERNAL_ERROR"
+  | "UNKNOWN_ERROR"
+  | "NOT_SUPPORTED"
+  | "TAG_REMOVED"
+  | "AUTH_FAILED"
+  | "READ_FAILED"
+  | "WRITE_FAILED"
+  | "TRANSCEIVE_FAILED"
+  | "TAG_NOT_CONNECTED"
+  | "READ_ONLY"
+  | "CAPACITY_EXCEEDED"
+  | "INVALID_DATA"
+  /** More than one tag in the field. Separate them and try again. */
+  | "MULTIPLE_TAGS";
+
+/**
+ * A code off the wire: one this release knows, or one a newer agent added.
+ * Switch on `NFCErrorCode` where you want the compiler to check the arms, but
+ * never refuse a code because this library predates it.
+ */
+export type NFCErrorCodeValue = NFCErrorCode | (string & {});
+
 export interface NFCErrorEvent {
   error: Error;
-  code?: string;
+  code?: NFCErrorCodeValue;
   /** Whether repeating the identical request could plausibly succeed. */
   retryable?: boolean;
   op?: string;
@@ -156,7 +216,8 @@ export interface WriteResponse {
 }
 
 export interface LockResponse {
-  message: string;
+  /** Absent: the agent answers a lock with the result alone. */
+  message?: string;
   uid?: string;
   tagType?: string;
   locked?: boolean;
@@ -164,6 +225,8 @@ export interface LockResponse {
 
 export interface TransceiveRequest extends TagTarget {
   data: Uint8Array;
+  // No idempotencyKey: the agent does not read one on a raw exchange, so a
+  // retry is a second exchange. Only writes and locks are idempotent.
   /**
    * Exchange at the framing level rather than wrapping the bytes as an APDU. A
    * framing-level response carries no ISO 7816 status word.

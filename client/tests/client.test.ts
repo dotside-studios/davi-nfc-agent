@@ -453,6 +453,47 @@ describe("tag operations", () => {
     });
   });
 
+  it("reports more than one tag in the field as MULTIPLE_TAGS", async () => {
+    const { client, ws } = await connected();
+    const writing = client.write({ records: [] });
+    const sent = JSON.parse(ws.send.mock.calls[0][0]);
+
+    ws.emit({
+      id: sent.id,
+      type: "error",
+      success: false,
+      error: "multiple cards detected (2 tags), please present only one card",
+      payload: { code: "MULTIPLE_TAGS", retryable: false, op: "WriteData" },
+    });
+
+    // Not retryable: the operator has to separate the cards first, so a client
+    // that retries on `retryable` must not retry this one.
+    await expect(writing).rejects.toMatchObject({
+      name: "NFCRequestError",
+      code: "MULTIPLE_TAGS",
+      retryable: false,
+    });
+  });
+
+  it("carries an error code this release does not know", async () => {
+    const { client, ws } = await connected();
+    const writing = client.write({ records: [] });
+    const sent = JSON.parse(ws.send.mock.calls[0][0]);
+
+    ws.emit({
+      id: sent.id,
+      type: "error",
+      success: false,
+      error: "something newer",
+      payload: { code: "CODE_FROM_A_NEWER_AGENT", retryable: true },
+    });
+
+    await expect(writing).rejects.toMatchObject({
+      code: "CODE_FROM_A_NEWER_AGENT",
+      retryable: true,
+    });
+  });
+
   it("fails a request in flight when the socket closes", async () => {
     const { client, ws } = await connected();
     const writing = client.write({ records: [] });

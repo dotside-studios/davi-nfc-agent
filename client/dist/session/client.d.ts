@@ -1,12 +1,12 @@
-import type { HealthCheckResponse, LockResponse, NFCClientOptions, NFCEventHandler, NFCEventName, TagCapabilities, TagData, TagTarget, TransceiveRequest, WriteRequest, WriteResponse } from "./types";
+import type { HealthCheckResponse, LockResponse, NFCClientOptions, NFCErrorCodeValue, NFCEventHandler, NFCEventName, TagCapabilities, TagData, TagTarget, TransceiveRequest, WriteRequest, WriteResponse } from "./types";
 /** A refused request, with the agent's code and whether a retry could work. */
 export declare class NFCRequestError extends Error {
-    readonly code?: string;
+    readonly code?: NFCErrorCodeValue;
     readonly retryable?: boolean;
     readonly op?: string;
     readonly tagUID?: string;
     constructor(message: string, detail?: {
-        code?: string;
+        code?: NFCErrorCodeValue;
         retryable?: boolean;
         op?: string;
         tagUID?: string;

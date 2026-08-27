@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
@@ -75,7 +76,7 @@ func TestRoutesAnswerBeforeTheAgentHasStarted(t *testing.T) {
 
 	// The listener and its routes are what the server plugin brings, so they
 	// exist from activation rather than from Start.
-	servers := &agent.ServerPlugin{}
+	servers := &serverplugin.Plugin{}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestAPortAlreadyInUseFailsTheStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(&agent.ServerPlugin{}); err != nil {
+	if err := rt.Agent.Plugins.Add(&serverplugin.Plugin{}); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 

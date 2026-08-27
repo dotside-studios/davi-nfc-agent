@@ -14,11 +14,15 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
@@ -50,8 +54,8 @@ type harness struct {
 	// the agent is served from, and Pairing the pairing plugin, when the test
 	// asked for one.
 	Devices *remotenfc.Manager
-	Servers *agent.ServerPlugin
-	Pairing *agent.PairingPlugin
+	Servers *serverplugin.Plugin
+	Pairing *pairingplugin.Plugin
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
@@ -87,6 +91,14 @@ func start(t *testing.T, opts options) *harness {
 	hardware := nfc.NewMockManager()
 	hardware.MockDevice.SetTags(opts.Tags)
 
+	// The certificate the listener serves, provisioned before Setup as a
+	// program does: the agent neither serves it nor hands out its authority.
+	certs, err := tlspkg.Provision(o.ConfigDir, false)
+	if err != nil {
+		t.Fatalf("tls.Provision: %v", err)
+	}
+	o.CertFile, o.KeyFile, o.PublicKeyPin = certs.CertFile, certs.KeyFile, certs.PublicKeyPin
+
 	backends := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: hardware},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
@@ -95,25 +107,24 @@ func start(t *testing.T, opts options) *harness {
 	// The paired-device manager over them: the credential store, the pairing
 	// machinery and the check that admits a device. It is what the agent holds,
 	// so this build cannot have the readers without the policy guarding them.
-	var rt *agent.Runtime
 	paired, err := pairednfc.New(backends, pairednfc.Options{
-		ConfigDir:    agent.ResolveConfigDir(o),
-		PublicKeyPin: func() string { return rt.Agent.PublicKeyPin() },
-		AgentPort:    func() int { return rt.Agent.DevicePort() },
+		ConfigDir:    o.ConfigDir,
+		CA:           certs.Manager,
+		PublicKeyPin: func() string { return certs.PublicKeyPin },
 	})
 	if err != nil {
 		t.Fatalf("pairednfc.New: %v", err)
 	}
 	o.Devices = paired.PairedDevices()
 
-	rt, err = agent.Setup(o, paired)
+	rt, err := agent.Setup(o, paired)
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 
 	paired.UseSecret(rt.Agent.APISecret)
 	paired.Require(rt.Agent.RequirePairedDevice)
-	paired.UseCertificateAuthority(rt.Certificates)
+	paired.UsePort(rt.Agent.DevicePort)
 
 	// The listener is a plugin, as it is in docs/custom-builds.md. With none
 	// registered the agent drives the reader and serves nothing. Pairing is a
@@ -121,11 +132,11 @@ func start(t *testing.T, opts options) *harness {
 	// entries go to a menu that draws nothing. The certificate the listener
 	// serves and the authority pairing hands out are the trust plugin's, not
 	// the agent's.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-	servers := &agent.ServerPlugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
+	servers := &serverplugin.Plugin{
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(o.AllowedOrigins),
 	}
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
@@ -149,10 +160,10 @@ func start(t *testing.T, opts options) *harness {
 	// hands out the CA, so no credential is issued over it. The endpoint is
 	// registered before the server plugin activates, which is when the routes
 	// are mounted.
-	var pairing *agent.PairingPlugin
+	var pairing *pairingplugin.Plugin
 	if opts.Pairing {
-		pairing = agent.NewPairingPlugin(paired.PairingServer(), freePort(t))
-		servers.Add(agent.Endpoint{
+		pairing = pairingplugin.New(paired.PairingServer(), freePort(t))
+		servers.Add(serverplugin.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",
 			Handler: paired.PairHandler(),

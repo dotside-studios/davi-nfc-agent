@@ -9,6 +9,9 @@ import (
 	"runtime"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -27,9 +30,9 @@ type Config struct {
 	// console hands out. Pairing is what issues pairing PINs, and Trust what
 	// installs the local authority and reports on it. The agent holds none of
 	// them, so whoever built them passes them here.
-	Servers *agent.ServerPlugin
-	Pairing *agent.PairingPlugin
-	Trust   *agent.TrustPlugin
+	Servers *serverplugin.Plugin
+	Pairing *pairingplugin.Plugin
+	Trust   *trustplugin.Plugin
 
 	// Quit ends the program the agent runs in, for the console's own quit
 	// control. Nil stops the agent and leaves the program running, which is
@@ -69,7 +72,7 @@ func New(cfg Config) *Server {
 	// tray, a page refused, or a client connecting reaches an open page the
 	// same way.
 	if cfg.Servers != nil {
-		cfg.Servers.Events().Origins.Connect(func(agent.OriginState) { s.NotifyChange() })
+		cfg.Servers.Events().Origins.Connect(func(serverplugin.OriginState) { s.NotifyChange() })
 		cfg.Servers.Events().Clients.Connect(func(int) { s.NotifyChange() })
 	}
 
@@ -85,12 +88,12 @@ func New(cfg Config) *Server {
 // page, so no other origin has business calling them. The page carries the tray
 // entries that show its address and open it; the API carries none, being a
 // route nobody opens by hand.
-func (s *Server) Endpoints() []agent.Endpoint {
+func (s *Server) Endpoints() []serverplugin.Endpoint {
 	if s == nil {
 		return nil
 	}
 
-	return []agent.Endpoint{
+	return []serverplugin.Endpoint{
 		{Name: "control API", Pattern: "/control/", Handler: s.Routes()},
 		{
 			Name:    "control center",

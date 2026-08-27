@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotside-studios/davi-nfc-agent/deviceid"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 )
 
 // admitAs mounts the endpoint behind something that names every connection id,

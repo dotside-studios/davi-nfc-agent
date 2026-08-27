@@ -1,7 +1,7 @@
 package tray
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"

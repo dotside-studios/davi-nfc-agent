@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	"github.com/dotside-studios/davi-nfc-agent/secure"
 )
 
 // secretFileName is where the auto-generated API secret lives under
@@ -29,7 +29,7 @@ func loadOrCreateAPISecret(configDir string) (string, bool, error) {
 		return "", false, fmt.Errorf("create config dir: %w", err)
 	}
 	// Apply Windows DACL / Unix chmod via the same helper used for TLS.
-	_ = tlspkg.SecureDir(configDir)
+	_ = secure.Dir(configDir)
 
 	path := filepath.Join(configDir, secretFileName)
 	if data, err := os.ReadFile(path); err == nil {
@@ -48,7 +48,7 @@ func loadOrCreateAPISecret(configDir string) (string, bool, error) {
 	if err := os.WriteFile(path, []byte(secret+"\n"), 0600); err != nil {
 		return "", false, fmt.Errorf("write secret file: %w", err)
 	}
-	_ = tlspkg.SecureFile(path)
+	_ = secure.File(path)
 	return secret, true, nil
 }
 
@@ -61,7 +61,7 @@ func rotateAPISecret(configDir string) (string, error) {
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return "", fmt.Errorf("create config dir: %w", err)
 	}
-	_ = tlspkg.SecureDir(configDir)
+	_ = secure.Dir(configDir)
 
 	secret, err := generateAPISecret()
 	if err != nil {
@@ -71,7 +71,7 @@ func rotateAPISecret(configDir string) (string, error) {
 	if err := os.WriteFile(path, []byte(secret+"\n"), 0600); err != nil {
 		return "", fmt.Errorf("write secret file: %w", err)
 	}
-	_ = tlspkg.SecureFile(path)
+	_ = secure.File(path)
 	return secret, nil
 }
 

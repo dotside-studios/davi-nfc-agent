@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"strconv"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
@@ -150,6 +150,11 @@ func (a *Agent) firePreferencesChanged() {
 	a.events.Preferences.Emit(a.Preferences())
 	a.events.Any.Emit(ChangePreferences)
 }
+
+// ServerRebound reports that a listener bound again, raising Events().Servers
+// with the agent's configured port. Called by whatever serves the agent, which
+// is a plugin rather than the agent itself, so the agent cannot raise it.
+func (a *Agent) ServerRebound() { a.fireServerRestart() }
 
 func (a *Agent) fireServerRestart() {
 	a.events.Servers.Emit(a.DevicePort())

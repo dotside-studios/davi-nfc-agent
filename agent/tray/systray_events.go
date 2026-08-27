@@ -3,7 +3,7 @@ package tray
 import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 )
 
 // subscribe follows the agent, which is what keeps the menu in step with a

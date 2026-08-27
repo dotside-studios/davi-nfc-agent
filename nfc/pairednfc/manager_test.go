@@ -7,7 +7,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 

@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/deviceid"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 )
 
 // admitted records what reached the wrapped endpoint, which is what a backend

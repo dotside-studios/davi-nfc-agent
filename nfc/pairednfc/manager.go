@@ -17,9 +17,9 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
 // Manager admits devices for the backends beneath it, and is the manager the
@@ -53,8 +53,7 @@ type Options struct {
 
 	// CA hands out the local certificate authority to a device that is pairing.
 	// Nil for an agent serving an externally provisioned certificate, which has
-	// no authority of its own to give. Also settable with
-	// [Manager.UseCertificateAuthority].
+	// no authority of its own to give.
 	CA tlspkg.CertificateAuthority
 
 	// AppName is the name the pairing pages present.
@@ -158,11 +157,13 @@ func (m *Manager) UseSecret(secret func() string) {
 	m.policy.Secret = secret
 }
 
-// UseCertificateAuthority names the authority a pairing device is handed, for a
-// build that settles its certificate after assembling this manager. Call it
-// before the pairing listener starts.
-func (m *Manager) UseCertificateAuthority(ca tlspkg.CertificateAuthority) {
-	m.pairing.UseCertificateAuthority(ca)
+// UsePort sets the port a paired device is told to connect to afterwards.
+//
+// A setter because the port is a saved preference the operator can change,
+// which the agent holds; this manager is assembled before it. Passing the
+// agent's accessor keeps the value read per pairing rather than captured.
+func (m *Manager) UsePort(agentPort func() int) {
+	m.pairing.UsePort(agentPort)
 }
 
 // PairedDevices is the credential store, to list and revoke. Narrower than the

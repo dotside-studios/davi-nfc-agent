@@ -1,7 +1,7 @@
 package clientserver
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/deviceid"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 	"net/http"
 	"net/http/httptest"
 	"strings"

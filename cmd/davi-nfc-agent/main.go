@@ -15,7 +15,10 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -23,9 +26,18 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
+)
+
+// What this program reports while it assembles the agent. On the agent's
+// channel because that is where an operator looked for these lines before
+// provisioning moved out of Setup, and the console filters the log by source.
+var (
+	startupLog  = logbuf.Channel("agent", logbuf.LevelInfo)
+	startupWarn = logbuf.Channel("agent", logbuf.LevelWarn)
 )
 
 func main() {
@@ -59,49 +71,68 @@ func main() {
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
+	// The certificate this agent manages for itself, under the same config
+	// directory the agent resolves. Provisioning it is the program's: the
+	// agent neither serves it nor hands out its authority.
+	if opts.ConfigDir == "" {
+		opts.ConfigDir = agent.DefaultConfigDir(opts.Info.OrDefault().DirName)
+	}
+	var certs tlspkg.Provisioned
+	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
+		provisioned, err := tlspkg.Provision(opts.ConfigDir, opts.InstallCA)
+		if err != nil {
+			startupWarn.Printf("Auto-TLS failed: %v (running without TLS)", err)
+		} else {
+			certs = provisioned
+			opts.CertFile, opts.KeyFile = certs.CertFile, certs.KeyFile
+			opts.PublicKeyPin = certs.PublicKeyPin
+			// Native devices authenticate the agent by this value rather than
+			// by a trust store, so log it where a first run will show it.
+			startupLog.Printf("Agent public key pin: %s", certs.PublicKeyPin)
+		}
+	}
+
 	// The paired-device manager over the backends above: the credential store,
 	// the pairing machinery, and the check that admits a device. It is what the
 	// agent holds, so this build cannot have the readers without the policy
 	// deciding who reaches them. Hand backends to Setup instead, and mount the
 	// device endpoint bare, and the build pairs nobody and admits everyone.
-	//
-	// The pin and the port are read per pairing rather than captured: Setup
-	// settles both below, and both can change while the endpoint stays up.
-	var rt *agent.Runtime
 	paired, err := pairednfc.New(backends, pairednfc.Options{
-		ConfigDir:    agent.ResolveConfigDir(opts),
+		ConfigDir:    opts.ConfigDir,
+		CA:           certs.Manager,
 		AppName:      opts.Info.OrDefault().DisplayName,
-		PublicKeyPin: func() string { return rt.Agent.PublicKeyPin() },
-		AgentPort:    func() int { return rt.Agent.DevicePort() },
+		PublicKeyPin: func() string { return certs.PublicKeyPin },
 	})
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
+	// The agent reports and revokes through the same store the manager admits
+	// on, rather than loading a second one.
 	opts.Devices = paired.PairedDevices()
 
-	rt, err = agent.Setup(opts, paired)
+	rt, err := agent.Setup(opts, paired)
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
-	// What it admits on, now that the agent holds the preferences: the shared
-	// secret as a peer credential to a paired token, and the requirement that
-	// drops both it and the loopback bypass. Read per connection.
+	// What it admits on, and what a pairing device is told to connect to, now
+	// that the agent holds them. All read per use: the secret can be rotated,
+	// the requirement withdrawn and the port changed while the endpoints stay
+	// up.
 	paired.UseSecret(rt.Agent.APISecret)
 	paired.Require(rt.Agent.RequirePairedDevice)
-	paired.UseCertificateAuthority(rt.Certificates)
+	paired.UsePort(rt.Agent.DevicePort)
 
-	// The certificate this agent serves, and the entry that makes browsers
-	// accept it.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	// The entry that makes browsers accept the certificate above.
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
 
-	// The listener and everything on it. Setup resolved which certificate to
-	// serve; registering no server plugin leaves an agent that serves nothing.
-	servers := &agent.ServerPlugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+	// The listener and everything on it. Registering no server plugin leaves
+	// an agent that serves nothing.
+	servers := &serverplugin.Plugin{
+		Config:         listener.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}
 
 	// The two halves of /ws, both built here. The agent decides who is admitted
@@ -130,13 +161,14 @@ func main() {
 	// hand out its address and PIN.
 	//
 	// That listener is cleartext: it hands out the certificate authority to a
-	// device that does not trust the agent's certificate yet. Pairing itself
-	// mounts on the listener already serving the certificate its key pin
+	// device that does not trust the agent's certificate yet. Pairing issues a
+	// durable credential and the key pin a device recognises this agent by, so
+	// it mounts on the listener already serving the certificate that pin
 	// covers.
-	var pairingPlugin *agent.PairingPlugin
+	var pairing *pairingplugin.Plugin
 	if opts.BootstrapPort > 0 {
-		pairingPlugin = agent.NewPairingPlugin(paired.PairingServer(), opts.BootstrapPort)
-		servers.Add(agent.Endpoint{
+		pairing = pairingplugin.New(paired.PairingServer(), opts.BootstrapPort)
+		servers.Add(serverplugin.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",
 			Handler: paired.PairHandler(),
@@ -151,7 +183,7 @@ func main() {
 		Agent:   rt.Agent,
 		Logs:    rt.Logs,
 		Servers: servers,
-		Pairing: pairingPlugin,
+		Pairing: pairing,
 		Trust:   trust,
 		Quit:    app.Quit,
 	})
@@ -160,8 +192,8 @@ func main() {
 	// The server goes on first: it publishes the listener the rest mount on,
 	// and activation order is the order their entries appear in the tray.
 	plugins := []agent.Plugin{servers}
-	if pairingPlugin != nil {
-		plugins = append(plugins, pairingPlugin)
+	if pairing != nil {
+		plugins = append(plugins, pairing)
 	}
 	plugins = append(plugins, trust)
 

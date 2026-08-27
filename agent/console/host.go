@@ -6,17 +6,21 @@ import (
 	"errors"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 )
 
 // host adapts the agent to Host. Every reach the console makes into the agent
 // is a method here.
 type host struct {
 	agent   *agent.Agent
-	servers *agent.ServerPlugin
-	pairing *agent.PairingPlugin
-	trust   *agent.TrustPlugin
+	servers *serverplugin.Plugin
+	pairing *pairingplugin.Plugin
+	trust   *trustplugin.Plugin
 
 	// quit ends the program the agent runs in, supplied by whoever owns it.
 	quit func()
@@ -65,7 +69,7 @@ func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
-func (h *host) LocalIPs() []string { return agent.LocalIPs() }
+func (h *host) LocalIPs() []string { return netinfo.LocalIPs() }
 
 func (h *host) ClientCount() int { return h.servers.ClientCount() }
 

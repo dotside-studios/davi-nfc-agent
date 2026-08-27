@@ -2,7 +2,7 @@ package agent
 
 import (
 	"errors"
-	"github.com/dotside-studios/davi-nfc-agent/pairing"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"slices"
 	"testing"
 	"time"

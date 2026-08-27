@@ -9,8 +9,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/dotside-studios/davi-nfc-agent/deviceid"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 )
 
 func dialDevice(t *testing.T, url string) (*websocket.Conn, int) {

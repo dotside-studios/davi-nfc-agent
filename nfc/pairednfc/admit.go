@@ -3,8 +3,8 @@ package pairednfc
 import (
 	"net/http"
 
-	"github.com/dotside-studios/davi-nfc-agent/deviceid"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 )
 
 // Admit wraps a backend's device endpoint with this manager's credential check.

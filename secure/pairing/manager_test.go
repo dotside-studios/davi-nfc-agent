@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
 // The machinery is the component: bolting this on gets a credential store,
@@ -86,24 +84,21 @@ func TestASuppliedRegistryIsUsed(t *testing.T) {
 	}
 }
 
-// The manager hands out two narrow capabilities rather than the registry: a
-// store to read and revoke, and a verifier to check. Minting stays inside with
-// the pairing server.
+// The gate hands out two narrow capabilities rather than the registry: a store
+// to read and revoke, and a verifier to check. Minting stays inside with the
+// pairing server, and the return types are what keeps it there.
 //
-// The narrowing is the compiler's, since a caller holding a pairing.Store
-// cannot reach Pair without asserting its way back to the registry, so this
-// pins the types rather than probing the value.
-func TestTheManagerHandsOutNarrowCapabilities(t *testing.T) {
-	m := pairing.New(nil, pairing.Options{ConfigDir: t.TempDir()})
+// What this covers is that the two answer for the same credentials, so a
+// console listing devices and an endpoint admitting one cannot drift apart.
+func TestTheGateHandsOutNarrowCapabilities(t *testing.T) {
+	g := pairing.New(nil, pairing.Options{ConfigDir: t.TempDir()})
 
-	var store pairing.Store = m.PairedDevices()
-	var verifier server.TokenVerifier = m.TokenVerifier()
-
+	store := g.PairedDevices()
+	verifier := g.TokenVerifier()
 	if store == nil || verifier == nil {
-		t.Fatal("the manager hands out no store or no verifier")
+		t.Fatal("the gate hands out no store or no verifier")
 	}
 
-	// Both views answer for the same credentials.
 	registry, ok := store.(*pairing.Registry)
 	if !ok {
 		t.Fatalf("the store is %T, not a registry", store)

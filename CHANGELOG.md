@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-08-27
 
 ### Added
 
@@ -727,8 +727,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A device is no longer refused for what it calls itself. Registration required
   `platform` to be `ios`, `android` or `web`, which the bundled client's own
   default of `unknown` and its Node example both failed
-- A phone is no longer offered as the agent's own reader
-- A reader that will not open is reported once, not on every poll
 - The tray's dynamic menus receive their clicks. The tray library drops a click
   when nobody is receiving, and the card filters, readers, origins and paired
   devices were polled between other events, so those clicks were lost
@@ -740,11 +738,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filter with the eight types this agent enumerates instead of emptying it
 - The control center's capability panel was blank on every tag: it read five
   fields the agent does not send
-- The console shows what an NDEF record says. The record tables read `r.text` and
-  `r.uri`; the agent sends one `content` field
 - A deliberately disconnected client auto-reconnects again: `connect()` did not
   clear the flag `disconnect()` sets
-- The protocol reference described NDEF records the agent never sent
+
+## [1.1.3] - 2026-08-15
+
+### Fixed
+
+- **A phone is no longer offered as the agent's own reader.** Every device the
+  managers knew was listed as a reader to pick, phones included, so the reader
+  menu offered `smartphone:85bacf02-…` beside an ACR122 and picking one pinned
+  it in settings; auto-selection could reach the same result on its own, taking
+  whatever `ListDevices` returned first. But a phone is never opened and polled
+  here — it reports what it scans over the device bridge, which is why its tags
+  arrive whether or not the reader has it selected. So the pin named a device
+  that could not be connected and would not become connectable, and the agent
+  spent every poll trying, forever, with a line each time, while the console
+  said "No readers detected" beside the reader it claimed was pinned — both
+  true and neither explaining the other. A manager now reports whether its
+  devices are remote and `MultiManager` can list readers alone; the reader menu
+  and both auto-selections ask for readers, while the device list keeps
+  everything, since that is what the pairing views are built from. A phone
+  already pinned is ignored at startup with a line saying why, and selecting one
+  is refused rather than accepted and quietly dropped
+- **A reader that will not open is reported once, not every poll.** `doPoll`
+  runs continuously and logged each failed connection attempt, so an unplugged
+  reader — or a device path naming one that will never appear — filled the log
+  at the polling rate with one repeated line. It is now reported once for as
+  long as the reason holds, and again once the reader has worked in between,
+  which is the rule `HandleError` was given in 1.1.2. The same counter serves
+  both, so a fault reported by one is not repeated by the other
+- **The console shows what an NDEF record says.** The record tables read
+  `r.text` and `r.uri`. The agent sends neither: it decodes text and URI records
+  alike into one `content` field, named that because a record carries one value
+  and the type beside it already says which kind. So the value column was empty
+  for every record of every type, and a tag holding a URL showed the type `uri`,
+  a dash, and the base64 of the bytes — everything except the URL
+- **The protocol reference described NDEF records that the agent never sent.**
+  The read direction in [api.md](docs/api.md) documented each record as carrying
+  `type: "T"`, a `text` field and a `uri` field, with `payload` as an array of
+  numbers. The agent sends a human-readable `type`, one `content` field, and a
+  base64 `payload` — so a client written against that page saw an empty value
+  for every record, which is the bug the console had just been fixed for. The
+  section now describes what is actually on the wire, and says that the read and
+  write directions share these names
 
 ## [1.1.2] - 2026-08-15
 

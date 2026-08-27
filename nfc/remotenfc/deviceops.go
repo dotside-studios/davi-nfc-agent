@@ -1,6 +1,7 @@
 package remotenfc
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -32,13 +33,13 @@ func (m *Manager) DevicesHoldingTags() []string { return m.ActiveTagDevices() }
 // Whether the write could be confirmed is the tag's answer, not this driver's:
 // a tag whose reads are a snapshot cannot confirm one, which is the same fact
 // a reader's pipeline consults.
-func (m *Manager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
+func (m *Manager) WriteTag(ctx context.Context, deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
 	ndef, err := msg.Encode()
 	if err != nil {
 		return nil, protocol.WrapError(protocol.ErrCodeInvalidRequest, err, "could not encode the message")
 	}
 
-	if err := m.writeToTag(deviceID, tagUID, ndef, lock, idempotencyKey); err != nil {
+	if err := m.writeToTag(ctx, deviceID, tagUID, ndef, lock, idempotencyKey); err != nil {
 		return nil, err
 	}
 
@@ -56,8 +57,8 @@ func (m *Manager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock b
 // LockTag makes the tag the device is holding permanently read-only. It travels
 // as a write with no message: the device protocol has one tag-modifying frame,
 // not two.
-func (m *Manager) LockTag(deviceID, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
-	if err := m.writeToTag(deviceID, tagUID, nil, true, idempotencyKey); err != nil {
+func (m *Manager) LockTag(ctx context.Context, deviceID, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
+	if err := m.writeToTag(ctx, deviceID, tagUID, nil, true, idempotencyKey); err != nil {
 		return nil, err
 	}
 
@@ -67,7 +68,7 @@ func (m *Manager) LockTag(deviceID, tagUID, idempotencyKey string) (*nfc.LockRes
 
 // TagCapabilities answers from what the device declared at the scan, with no
 // round trip, so it costs nothing to ask.
-func (m *Manager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapabilities, error) {
+func (m *Manager) TagCapabilities(_ context.Context, deviceID, tagUID string) (*nfc.TagCapabilities, error) {
 	tag := m.tagOn(deviceID)
 	if tag == nil {
 		return nil, protocol.Errorf(protocol.ErrCodeNoCard, "device %s is not holding a tag", deviceID)
@@ -88,8 +89,8 @@ func (m *Manager) tagOn(deviceID string) nfc.Tag {
 }
 
 // writeToTag is the one tag-modifying frame the device protocol has.
-func (m *Manager) writeToTag(deviceID, tagUID string, ndef []byte, lock bool, idempotencyKey string) error {
-	resp, err := m.WriteToDevice(deviceID, DeviceWriteRequest{
+func (m *Manager) writeToTag(ctx context.Context, deviceID, tagUID string, ndef []byte, lock bool, idempotencyKey string) error {
+	resp, err := m.WriteToDevice(ctx, deviceID, DeviceWriteRequest{
 		RequestID:      m.nextRequestID("write"),
 		TagUID:         tagUID,
 		NDEFBytes:      ndef,
@@ -124,8 +125,8 @@ func confirmable(tag nfc.Tag) bool {
 }
 
 // TransceiveTag asks the device to exchange raw bytes with the tag.
-func (m *Manager) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
-	resp, err := m.TransceiveWithDevice(deviceID, DeviceTransceiveRequest{
+func (m *Manager) TransceiveTag(ctx context.Context, deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+	resp, err := m.TransceiveWithDevice(ctx, deviceID, DeviceTransceiveRequest{
 		RequestID: m.nextRequestID("transceive"),
 		DeviceID:  deviceID,
 		TagUID:    tagUID,

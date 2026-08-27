@@ -21,6 +21,7 @@
 package nfctest
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -823,7 +824,7 @@ func NewEmulatedReader(tb TB, cards ...*EmulatedCard) *EmulatedReader {
 // WriteMessage encodes a message onto the card on the reader. The emulator has
 // one, so nothing has to name it.
 func (r *EmulatedReader) WriteMessage(msg *nfc.NDEFMessage, opts nfc.WriteOptions) (*nfc.WriteResult, error) {
-	return r.Supervisor.WriteMessage("", msg, opts)
+	return r.Supervisor.WriteMessage(context.Background(), "", msg, opts)
 }
 
 // Erase writes an empty message over whatever the card holds.
@@ -835,7 +836,7 @@ func (r *EmulatedReader) Erase() (*nfc.WriteResult, error) {
 
 // Capabilities reports what the card on the reader supports.
 func (r *EmulatedReader) Capabilities() (*nfc.TagCapabilities, error) {
-	return r.Supervisor.Capabilities("", "")
+	return r.Supervisor.Capabilities(context.Background(), "", "")
 }
 
 // Present taps additional cards onto the reader.

@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func TestFeedbackOffByDefault(t *testing.T) {
 		t.Error("FeedbackEnabled() = true, want false before it is turned on")
 	}
 
-	if _, err := reader.WriteMessageWithResult(textMessage("quiet"), WriteOptions{
+	if _, err := reader.WriteMessageWithResult(context.Background(), textMessage("quiet"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	}); err != nil {
@@ -93,7 +94,7 @@ func TestFeedbackOnWrite(t *testing.T) {
 		t.Error("FeedbackEnabled() = false after SetFeedback(true)")
 	}
 
-	if _, err := reader.WriteMessageWithResult(textMessage("hello"), WriteOptions{
+	if _, err := reader.WriteMessageWithResult(context.Background(), textMessage("hello"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	}); err != nil {
@@ -137,7 +138,7 @@ func TestFeedbackOnFailedWrite(t *testing.T) {
 	reader, device := newFeedbackTestReader(t, tag)
 	reader.SetFeedback(true)
 
-	if _, err := reader.WriteMessageWithResult(textMessage("hello"), WriteOptions{
+	if _, err := reader.WriteMessageWithResult(context.Background(), textMessage("hello"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	}); err == nil {
@@ -158,7 +159,7 @@ func TestFeedbackSurvivesAnUnsupportedReader(t *testing.T) {
 	device.SignalError = NewNotSupportedError("Signal")
 	reader.SetFeedback(true)
 
-	result, err := reader.WriteMessageWithResult(textMessage("hello"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("hello"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})

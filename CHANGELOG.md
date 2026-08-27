@@ -467,6 +467,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `server.HandlerRegistry` and everything on it (`HandlerFunc`,
+  `WebSocketHandlerFunc`, `HandlerServer`, `Handle`, `RegisterLifecycle`,
+  `HandleWebSocket`, `TryCustomWebSocketHandler`, `StartLifecycleHandlers`).
+  Nothing in the agent constructed one, nothing implemented `HandlerServer`,
+  and its `HandlerFunc` took a raw `*websocket.Conn`, which does not fit
+  `clientserver`'s `*wsconn.SafeConn` — it could not have been wired in as it
+  stood. Its `ctx context.Context` parameters looked like a second, unused
+  answer to where a client's context comes from, next to the one
+  `clientserver.Server` actually uses
 - `Agent.RestartServers` and the console's `agent.restartServers` action, with
   the **restart listeners** control that called it. Both endpoints read the API
   secret per connection now, so nothing needs rebuilding, and what the action

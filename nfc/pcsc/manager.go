@@ -24,6 +24,11 @@ import (
 type Manager struct {
 	ctx   scardContext
 	ctxMu sync.Mutex
+
+	// stopped ends the polling goroutines DeviceChanges starts. Closed by Close.
+	stopMu    sync.Mutex
+	stopped   chan struct{}
+	closeOnce sync.Once
 }
 
 // NewManager creates a manager for the PC/SC readers attached to this machine.
@@ -32,7 +37,30 @@ type Manager struct {
 //
 //	manager := NewManager()
 func NewManager() *Manager {
-	return &Manager{}
+	return &Manager{stopped: make(chan struct{})}
+}
+
+// stopChan returns the stop channel, creating it on first use so a zero-value
+// Manager behaves like one from NewManager.
+func (m *Manager) stopChan() chan struct{} {
+	m.stopMu.Lock()
+	defer m.stopMu.Unlock()
+
+	if m.stopped == nil {
+		m.stopped = make(chan struct{})
+	}
+	return m.stopped
+}
+
+// Close stops the DeviceChanges watches and releases the PC/SC context.
+// Safe to call more than once, and from any goroutine.
+func (m *Manager) Close() {
+	stopped := m.stopChan()
+	m.closeOnce.Do(func() { close(stopped) })
+
+	if err := m.Release(); err != nil {
+		pcscWarn.Printf("Releasing the PC/SC context: %v", err)
+	}
 }
 
 // ensureContext ensures we have a valid PC/SC context
@@ -222,17 +250,28 @@ func (m *Manager) listReaders() ([]string, error) {
 	return nil, fmt.Errorf("failed to list PC/SC readers after %d retries: %w", nfc.DeviceEnumRetries, lastErr)
 }
 
-// DeviceChanges returns a channel that signals when devices change
-// PC/SC doesn't have a native notification mechanism, so we poll
+// DeviceChanges returns a channel that signals when devices change.
+// PC/SC doesn't have a native notification mechanism, so we poll.
+//
+// Close ends the watch and closes the channel. Consumers must treat a closed
+// channel as the end of the watch, not as a change.
 func (m *Manager) DeviceChanges() <-chan struct{} {
 	ch := make(chan struct{}, 1)
+	stopped := m.stopChan()
 
 	go func() {
 		var lastReaders []string
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
+		defer close(ch)
 
-		for range ticker.C {
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-ticker.C:
+			}
+
 			readers, err := m.listReaders()
 			if err != nil {
 				continue

@@ -506,6 +506,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `pcsc.Manager.DeviceChanges` no longer leaks its polling goroutine. The
+  goroutine ran `for range ticker.C` with no stop path, so it outlived the
+  manager and the process kept polling PC/SC after shutdown. It now selects on a
+  stop channel and closes the channel it returned. `pcsc.Manager.Close` stops
+  the watches and releases the PC/SC context; `multimanager.MultiManager.Close`
+  already fans out to children implementing `Close()`, so agent shutdown reaches
+  it. Consumers must treat a closed channel as the end of the watch, which
+  `nfc.Supervisor` and `agent.Agent` already did
 - A preference change announces once, with every field in place.
   `console.host.ApplyPreferences` called six setters in turn and each raised
   `Events().Preferences` and `Events().Any`, so one `settings.save` emitted up

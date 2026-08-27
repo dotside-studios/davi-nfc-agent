@@ -1,8 +1,9 @@
-package agent
+package serverplugin
 
 import (
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -10,11 +11,11 @@ import (
 // mounts it: the credentials that admit a device, what the mode allows, and
 // the pin a device recognises this agent by later.
 //
-// The check built from them is [ServerPlugin.Authenticate].
+// The check built from them is [Plugin.Authenticate].
 func TestTheAgentAnswersWhatADeviceEndpointNeeds(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 	a := rt.Agent
 
@@ -39,9 +40,9 @@ func TestTheAgentAnswersWhatADeviceEndpointNeeds(t *testing.T) {
 // The mode gate is read per operation, so a mode change while running takes
 // effect rather than being fixed when the endpoint was built.
 func TestTagModificationFollowsTheReaderMode(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 	a := rt.Agent
 

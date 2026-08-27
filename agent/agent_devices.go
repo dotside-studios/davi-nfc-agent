@@ -264,27 +264,3 @@ func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
-
-// pairingIssuer adapts the registry to the bootstrap server's issuer
-// interface, which is deliberately narrow: the bootstrap server owns the PIN
-// and the proof-of-presence, and knows nothing about how devices are stored.
-type pairingIssuer struct {
-	registry *DeviceRegistry
-	pin      string
-}
-
-func (p pairingIssuer) Pair(name, platform string) (string, string, error) {
-	device, token, err := p.registry.Pair(name, platform)
-	if err != nil {
-		return "", "", err
-	}
-	return device.ID, token, nil
-}
-
-func (p pairingIssuer) PublicKeyPin() string { return p.pin }
-
-// NewPairingIssuer returns an issuer backed by this registry, reporting pin as
-// the agent's identity to newly paired devices.
-func NewPairingIssuer(registry *DeviceRegistry, pin string) tlspkg.PairingIssuer {
-	return pairingIssuer{registry: registry, pin: pin}
-}

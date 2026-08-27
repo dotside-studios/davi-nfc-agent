@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -31,7 +32,7 @@ func quietAgent(t *testing.T) *agent.Agent {
 func TestTheEndpointsServeTheConsoleAndListIt(t *testing.T) {
 	a := quietAgent(t)
 
-	servers := &agent.ServerPlugin{}
+	servers := &serverplugin.Plugin{}
 	c := New(Config{Agent: a, Servers: servers})
 	servers.Add(c.Endpoints()...)
 	if err := a.Plugins.Add(servers); err != nil {

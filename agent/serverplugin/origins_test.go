@@ -1,4 +1,4 @@
-package agent
+package serverplugin
 
 import (
 	"io"
@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -15,10 +16,10 @@ import (
 
 // originsTray activates an agent serving behind store, with a tray to draw the
 // allowlist into.
-func originsTray(t *testing.T, p *ServerPlugin) (*Agent, *traymenu.Fake) {
+func originsTray(t *testing.T, p *Plugin) (*agent.Agent, *traymenu.Fake) {
 	t.Helper()
 
-	a := New(Config{
+	a := agent.New(agent.Config{
 		Manager:    nfc.NewMockManager(),
 		Logger:     log.New(io.Discard, "", 0),
 		DevicePort: freePort(t),
@@ -53,7 +54,7 @@ func originStore(t *testing.T) *server.OriginStore {
 // as a tick that revokes.
 func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
 	store := originStore(t)
-	p := &ServerPlugin{Origins: store}
+	p := &Plugin{Origins: store}
 	originsTray(t, p)
 
 	store.RecordBlocked("https://console.example")
@@ -78,7 +79,7 @@ func TestOriginsMenuOffersBlockedOriginsAndAllowsThem(t *testing.T) {
 
 func TestOriginsAllowAnyToggle(t *testing.T) {
 	store := originStore(t)
-	p := &ServerPlugin{Origins: store}
+	p := &Plugin{Origins: store}
 	originsTray(t, p)
 
 	p.originAllowAny.Click()
@@ -96,7 +97,7 @@ func TestOriginsAllowAnyToggle(t *testing.T) {
 // operator reopening the menu.
 func TestAnOriginAllowedElsewhereRedrawsTheMenu(t *testing.T) {
 	store := originStore(t)
-	p := &ServerPlugin{Origins: store}
+	p := &Plugin{Origins: store}
 	originsTray(t, p)
 
 	if err := store.Allow("console.example"); err != nil {
@@ -111,7 +112,7 @@ func TestAnOriginAllowedElsewhereRedrawsTheMenu(t *testing.T) {
 // The allowlist is the server's, so a build passing one through on the command
 // line hands it here and the plugin builds the store behind it.
 func TestTheAllowlistIsSeededFromWhatTheBuildWasTold(t *testing.T) {
-	p := &ServerPlugin{AllowedOrigins: []string{"console.example"}}
+	p := &Plugin{AllowedOrigins: []string{"console.example"}}
 	originsTray(t, p)
 
 	if p.Origins == nil {
@@ -128,7 +129,7 @@ func TestTheAllowlistIsSeededFromWhatTheBuildWasTold(t *testing.T) {
 // "*" is the escape hatch, and it turns the check off for the run rather than
 // being stored as an origin.
 func TestAnAllowlistOfAnyTurnsTheCheckOff(t *testing.T) {
-	p := &ServerPlugin{AllowedOrigins: []string{"*"}}
+	p := &Plugin{AllowedOrigins: []string{"*"}}
 	originsTray(t, p)
 
 	if !p.Origins.IsSessionAllowAny() {
@@ -146,7 +147,7 @@ func TestAnAllowlistOfAnyTurnsTheCheckOff(t *testing.T) {
 // without the handler being rebuilt.
 func TestTheServerAnswersWhichOriginsMayConnect(t *testing.T) {
 	store := originStore(t)
-	p := &ServerPlugin{Origins: store}
+	p := &Plugin{Origins: store}
 	originsTray(t, p)
 
 	check := p.CheckOrigin()
@@ -168,7 +169,7 @@ func TestTheServerAnswersWhichOriginsMayConnect(t *testing.T) {
 // A console is built beside the plugin rather than after it, so it subscribes
 // before there is a store to subscribe to.
 func TestAWatcherRegisteredBeforeActivationFollowsTheAllowlist(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 
 	var changes int
 	p.OnOriginsChange(func() { changes++ })
@@ -193,7 +194,7 @@ func TestAWatcherRegisteredBeforeActivationFollowsTheAllowlist(t *testing.T) {
 // tray can offer it.
 func TestAClientFromAnUnlistedOriginIsRefused(t *testing.T) {
 	store := originStore(t)
-	p := &ServerPlugin{Origins: store}
+	p := &Plugin{Origins: store}
 	a, _ := originsTray(t, p)
 
 	if err := a.Start(""); err != nil {
@@ -224,7 +225,7 @@ func TestAClientFromAnUnlistedOriginIsRefused(t *testing.T) {
 // connection is built beside this plugin rather than after it. It answers from
 // whatever store the plugin ends up with.
 func TestTheOriginPolicyCanBeHandedOverBeforeThereIsAStore(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 
 	policy := p.OriginPolicy()
 	if policy.Allowed("console.example") {
@@ -248,7 +249,7 @@ func TestTheOriginPolicyCanBeHandedOverBeforeThereIsAStore(t *testing.T) {
 }
 
 // findOriginRow returns the visible origin row with the given label.
-func findOriginRow(t *testing.T, p *ServerPlugin, title string) *traymenu.Item {
+func findOriginRow(t *testing.T, p *Plugin, title string) *traymenu.Item {
 	t.Helper()
 
 	for _, item := range p.origins.Items() {
@@ -270,7 +271,7 @@ func findOriginRow(t *testing.T, p *ServerPlugin, title string) *traymenu.Item {
 // The allowlist reaches a subscriber as a value, so a console renders it
 // without three separate reads back into the plugin.
 func TestOriginsEventCarriesTheAllowlist(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 
 	var seen []OriginState
@@ -307,7 +308,7 @@ func TestOriginsEventCarriesTheAllowlist(t *testing.T) {
 // A subscriber can stop following. OnOriginsChange returned nothing, so a
 // console rebuilt against a long-lived plugin kept notifying a dead server.
 func TestOriginsSubscriberCanDisconnect(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 	if err := a.Activate(nil); err != nil {
 		t.Fatalf("Activate: %v", err)

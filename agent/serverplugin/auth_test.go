@@ -1,4 +1,4 @@
-package agent
+package serverplugin
 
 import (
 	"io"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/gorilla/websocket"
@@ -16,18 +17,18 @@ import (
 // guardedEndpoint serves the real device driver behind the plugin's check, the
 // way a build mounts it. It returns the device URL, the agent whose policy the
 // check reads, and the credential of a device paired with it.
-func guardedEndpoint(t *testing.T, strict bool) (url string, a *Agent, pairedToken string) {
+func guardedEndpoint(t *testing.T, strict bool) (url string, a *agent.Agent, pairedToken string) {
 	t.Helper()
 
-	devices, err := NewDeviceRegistry(t.TempDir())
+	devices, err := agent.NewDeviceRegistry(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
+		t.Fatalf("agent.NewDeviceRegistry: %v", err)
 	}
 	if _, pairedToken, err = devices.Pair("test phone", "ios"); err != nil {
 		t.Fatalf("Pair: %v", err)
 	}
 
-	a = New(Config{
+	a = agent.New(agent.Config{
 		Manager:             nfc.NewMockManager(),
 		Logger:              log.New(io.Discard, "", 0),
 		APISecret:           "shared-secret",
@@ -37,7 +38,7 @@ func guardedEndpoint(t *testing.T, strict bool) (url string, a *Agent, pairedTok
 		DevicePort:          freePort(t),
 	})
 
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	if err := a.Plugins.Add(p); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestStrictModeTogglesAtRuntime(t *testing.T) {
 // A check taken from a plugin that never activated has no policy to read, so
 // it admits nobody rather than leaving the endpoint open.
 func TestGateWithoutAnActivatedPluginAdmitsNobody(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/ws?mode=device", nil)

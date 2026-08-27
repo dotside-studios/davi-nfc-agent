@@ -1,6 +1,9 @@
 package agent
 
-import "net"
+import (
+	"net"
+	"strconv"
+)
 
 // LocalIPs returns local non-loopback IP addresses (both IPv4 and IPv6 globals).
 // IPv4 addresses come first so callers that pick ips[0] get the most broadly
@@ -31,4 +34,19 @@ func LocalIPs() []string {
 		}
 	}
 	return append(v4, v6...)
+}
+
+// ServiceHost is the address the agent hands out: the machine's first address,
+// or localhost when it reports none. Copied into a phone or a browser, so the
+// most broadly reachable one wins; see [LocalIPs].
+func ServiceHost() string {
+	if ips := LocalIPs(); len(ips) > 0 {
+		return ips[0]
+	}
+	return "localhost"
+}
+
+// ServiceAddress joins a host and port, bracketing an IPv6 literal.
+func ServiceAddress(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }

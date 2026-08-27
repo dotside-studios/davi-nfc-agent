@@ -1,4 +1,4 @@
-package agent
+package serverplugin
 
 import (
 	"encoding/json"
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -27,17 +28,17 @@ import (
 // Most tests here reach the routes through the mux and bind nothing, but a
 // started agent binds for real, so the port is one nothing else holds: package
 // test binaries run beside each other and the default port is one address.
-func serverAgent(t *testing.T, p *ServerPlugin, extra ...Plugin) *Agent {
+func serverAgent(t *testing.T, p *Plugin, extra ...agent.Plugin) *agent.Agent {
 	t.Helper()
 
-	a := New(Config{
+	a := agent.New(agent.Config{
 		Manager:    nfc.NewMockManager(),
 		Logger:     log.New(io.Discard, "", 0),
 		DevicePort: freePort(t),
 	})
 	serveClients(p, a)
 
-	if err := a.Plugins.Add(append([]Plugin{p}, extra...)...); err != nil {
+	if err := a.Plugins.Add(append([]agent.Plugin{p}, extra...)...); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 	return a
@@ -46,7 +47,7 @@ func serverAgent(t *testing.T, p *ServerPlugin, extra ...Plugin) *Agent {
 // serveClients declares the client server on the plugin, as cmd does. Nothing
 // mounts one for a build that does not ask for it, so a test that wants clients
 // served says so.
-func serveClients(p *ServerPlugin, a *Agent) {
+func serveClients(p *Plugin, a *agent.Agent) {
 	if p.ServeMode == nil {
 		p.ServeMode = map[string]http.Handler{}
 	}
@@ -60,8 +61,8 @@ func serveClients(p *ServerPlugin, a *Agent) {
 		TokenVerifier:        a.TokenVerifier(),
 		Tags:                 a,
 		AllowTagModification: a.TagModificationAllowed,
-		Scans:                &a.events.Tag,
-		ReaderStatus:         &a.events.Reader,
+		Scans:                &a.Events().Tag,
+		ReaderStatus:         &a.Events().Reader,
 	})
 }
 
@@ -78,7 +79,7 @@ func get(t *testing.T, srv *listener.Server, path string) int {
 // routes on it. Those are the agent's contract with every client library, so
 // they must not depend on the plugin having listed them.
 func TestServerPluginPublishesTheListenerWithTheAgentsRoutes(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 
 	if p.Listener() != nil {
@@ -106,7 +107,7 @@ func TestServerPluginPublishesTheListenerWithTheAgentsRoutes(t *testing.T) {
 // An endpoint is a route, a lifetime and a menu entry, in any combination.
 func TestServerPluginRegistersItsEndpoints(t *testing.T) {
 	component := &counter{name: "pairing"}
-	p := &ServerPlugin{Endpoints: []Endpoint{
+	p := &Plugin{Endpoints: []Endpoint{
 		{Name: "pairing", Component: component},
 		{Name: "control API", Pattern: "/control/", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusTeapot)
@@ -135,7 +136,7 @@ func TestServerPluginRegistersItsEndpoints(t *testing.T) {
 	if !runs(a, "listener") {
 		t.Errorf("Components() = %v, want the listener among them", names(a))
 	}
-	if item := fake.Find("Server URLs", "Extras: http://"+serviceAddress(serviceHost(), p.Listener().Port())+"/extras/"); item == nil {
+	if item := fake.Find("Server URLs", "Extras: http://"+agent.ServiceAddress(agent.ServiceHost(), p.Listener().Port())+"/extras/"); item == nil {
 		t.Errorf("the endpoint's menu entry is missing, or does not carry its address:\n%s", fake.Render())
 	}
 }
@@ -147,7 +148,7 @@ func TestAnEndpointIsListedOnlyIfItAsks(t *testing.T) {
 	menu := traymenu.New(fake)
 	t.Cleanup(menu.Close)
 
-	a := serverAgent(t, &ServerPlugin{Endpoints: []Endpoint{{Name: "quiet", Pattern: "/quiet", Handler: http.NotFoundHandler()}}})
+	a := serverAgent(t, &Plugin{Endpoints: []Endpoint{{Name: "quiet", Pattern: "/quiet", Handler: http.NotFoundHandler()}}})
 	if err := a.Activate(menu); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestAnEndpointIsListedOnlyIfItAsks(t *testing.T) {
 // A route declared with nothing behind it is a mistake worth reporting: the
 // alternative is a path that answers 404 for reasons nobody can find.
 func TestServerPluginRefusesAnEndpointWithNoHandler(t *testing.T) {
-	a := serverAgent(t, &ServerPlugin{Endpoints: []Endpoint{{Name: "control API", Pattern: "/control/"}}})
+	a := serverAgent(t, &Plugin{Endpoints: []Endpoint{{Name: "control API", Pattern: "/control/"}}})
 
 	err := a.Activate(nil)
 	if err == nil {
@@ -179,7 +180,7 @@ func TestServerPluginRefusesAnEndpointWithNoHandler(t *testing.T) {
 // fails where it happens, naming the second, rather than at whichever one the
 // mux happens to reach.
 func TestServerPluginRefusesTwoEndpointsOnOnePath(t *testing.T) {
-	a := serverAgent(t, &ServerPlugin{Endpoints: []Endpoint{
+	a := serverAgent(t, &Plugin{Endpoints: []Endpoint{
 		{Name: "first", Pattern: "/control/", Handler: http.NotFoundHandler()},
 		{Name: "second", Pattern: "/control/", Handler: http.NotFoundHandler()},
 	}})
@@ -196,7 +197,7 @@ func TestServerPluginRefusesTwoEndpointsOnOnePath(t *testing.T) {
 // The listener a route was mounted on is not something to swap underneath it,
 // so the second plugin to claim one says so.
 func TestOnlyOnePluginServesTheListener(t *testing.T) {
-	a := serverAgent(t, &ServerPlugin{}, &ServerPlugin{})
+	a := serverAgent(t, &Plugin{}, &Plugin{})
 
 	err := a.Activate(nil)
 	if err == nil {
@@ -211,7 +212,7 @@ func TestOnlyOnePluginServesTheListener(t *testing.T) {
 // there. Nothing to mount on is a wiring mistake, not a route that quietly
 // never answers.
 func TestMountSaysSoWhenNoListenerHasBeenPublished(t *testing.T) {
-	a := quietAgent(t, pluginFunc(func(ctx AgentContext) error {
+	a := quietAgent(t, pluginFunc(func(ctx agent.AgentContext) error {
 		return ctx.Mount("/late", http.NotFoundHandler())
 	}))
 
@@ -227,8 +228,8 @@ func TestMountSaysSoWhenNoListenerHasBeenPublished(t *testing.T) {
 // A plugin registered after the one that serves the listener can mount on it,
 // which is the ordering the plugin list promises.
 func TestAPluginMountsOnTheListenerPublishedBeforeIt(t *testing.T) {
-	p := &ServerPlugin{}
-	a := serverAgent(t, p, pluginFunc(func(ctx AgentContext) error {
+	p := &Plugin{}
+	a := serverAgent(t, p, pluginFunc(func(ctx agent.AgentContext) error {
 		return ctx.Mount("/late", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusTeapot)
 		}))
@@ -243,17 +244,17 @@ func TestAPluginMountsOnTheListenerPublishedBeforeIt(t *testing.T) {
 }
 
 // A plugin registered with no configuration serves what the agent was set up
-// with, so a program need not repeat what it already told Setup.
+// with, so a program need not repeat what it already told agent.Setup.
 func TestServerPluginFallsBackToTheAgentsConfiguration(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9496
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	servers := &ServerPlugin{}
+	servers := &Plugin{}
 	servers.Add(Endpoint{Name: "control center", Pattern: "/control/", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	})})
@@ -278,16 +279,16 @@ func TestServerPluginFallsBackToTheAgentsConfiguration(t *testing.T) {
 // An agent with no server plugin registered serves no HTTP, which is what a
 // program driving the reader directly wants.
 func TestAnAgentWithNoServerPluginServesNothing(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 	if err := rt.Agent.Activate(nil); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
 	// Nothing was published to serve them, so a plugin adding a route says so.
-	if err := (AgentContext{Agent: rt.Agent}).Mount("/late", http.NotFoundHandler()); err == nil {
+	if err := (agent.AgentContext{Agent: rt.Agent}).Mount("/late", http.NotFoundHandler()); err == nil {
 		t.Error("a route was mounted with nothing published to serve it")
 	}
 }
@@ -320,11 +321,11 @@ func TestTheListenerRebindsWhenItsCertificateIsReissued(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(&ServerPlugin{Certificates: certificates}); err != nil {
+	if err := rt.Agent.Plugins.Add(&Plugin{Certificates: certificates}); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
@@ -362,11 +363,11 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
-	servers := &ServerPlugin{}
+	servers := &Plugin{}
 	serveClients(servers, rt.Agent)
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
@@ -392,7 +393,7 @@ func TestRebindingLeavesTheServingStateAlone(t *testing.T) {
 // A plugin with no listener says so rather than reporting a rebind that did not
 // happen.
 func TestRebindingWithNoListener(t *testing.T) {
-	if err := (&ServerPlugin{}).Rebind(); err == nil {
+	if err := (&Plugin{}).Rebind(); err == nil {
 		t.Error("rebinding succeeded with no listener to rebind")
 	}
 }
@@ -426,11 +427,11 @@ func TestRestartingTheServersLeavesTheReaderAlone(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
-	servers := &ServerPlugin{}
+	servers := &Plugin{}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -459,11 +460,11 @@ func TestTheAddressesFollowTheAgent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = freePort(t)
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
-	servers := &ServerPlugin{}
+	servers := &Plugin{}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -499,11 +500,11 @@ func TestTheAddressesFollowTheAgent(t *testing.T) {
 // The secret is shown redacted, so an operator can tell it changed without it
 // being readable over their shoulder. No secret, no entries.
 func TestTheAPISecretIsListedRedacted(t *testing.T) {
-	withSecret := New(Config{
+	withSecret := agent.New(agent.Config{
 		Manager:   nfc.NewMockManager(),
 		Logger:    log.New(io.Discard, "", 0),
 		APISecret: "abcdefgh-ijklmnop",
-		Plugins:   []Plugin{&ServerPlugin{}},
+		Plugins:   []agent.Plugin{&Plugin{}},
 	})
 
 	fake := traymenu.NewFake()
@@ -521,7 +522,7 @@ func TestTheAPISecretIsListedRedacted(t *testing.T) {
 		t.Errorf("redact() = %q, want the middle hidden", got)
 	}
 
-	without := serverAgent(t, &ServerPlugin{})
+	without := serverAgent(t, &Plugin{})
 	plainFake := traymenu.NewFake()
 	plainMenu := traymenu.New(plainFake)
 	t.Cleanup(plainMenu.Close)
@@ -536,7 +537,7 @@ func TestTheAPISecretIsListedRedacted(t *testing.T) {
 // runs reports whether a component of that name is registered, and names lists
 // them for a failure message. The plugin registers a listener of its own, so a
 // count is no longer the thing to assert.
-func runs(a *Agent, name string) bool {
+func runs(a *agent.Agent, name string) bool {
 	for _, c := range a.Components() {
 		if c.Name() == name {
 			return true
@@ -545,7 +546,7 @@ func runs(a *Agent, name string) bool {
 	return false
 }
 
-func names(a *Agent) []string {
+func names(a *agent.Agent) []string {
 	var out []string
 	for _, c := range a.Components() {
 		out = append(out, c.Name())
@@ -556,7 +557,7 @@ func names(a *Agent) []string {
 // What the agent is reached on is mounted before the endpoints, so nothing can
 // displace it.
 func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	if err := serverAgent(t, p).Activate(nil); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -567,7 +568,7 @@ func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
 	}
 
 	// An endpoint on one of them fails the start rather than taking it over.
-	a := serverAgent(t, &ServerPlugin{Endpoints: []Endpoint{
+	a := serverAgent(t, &Plugin{Endpoints: []Endpoint{
 		{Name: "impostor", Pattern: "/health", Handler: http.NotFoundHandler()},
 	}})
 
@@ -581,18 +582,18 @@ func TestTheAgentsRoutesGoOnAheadOfTheEndpoints(t *testing.T) {
 }
 
 // The listener serves the certificate Config names, and plain HTTP when it
-// names none. Which certificate that should be is Setup's decision; see
+// names none. Which certificate that should be is agent.Setup's decision; see
 // TestSetupResolvesTheCertificateToServe.
 func TestTheListenerServesTheCertificateItWasGiven(t *testing.T) {
 	opts := testOptions(t)
 	opts.AutoTLS = true
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	named := &ServerPlugin{
+	named := &Plugin{
 		Config: listener.Config{CertFile: "/tmp/named.pem", KeyFile: "/tmp/named.key"},
 	}
 	if got := named.config(rt.Agent).CertFile; got != "/tmp/named.pem" {
@@ -601,7 +602,7 @@ func TestTheListenerServesTheCertificateItWasGiven(t *testing.T) {
 
 	// A build given no certificate serves plain HTTP rather than half a
 	// configuration.
-	none := &ServerPlugin{}
+	none := &Plugin{}
 	if cfg := none.config(rt.Agent); cfg.CertFile != "" || cfg.KeyFile != "" {
 		t.Errorf("CertFile/KeyFile = %q/%q, want empty", cfg.CertFile, cfg.KeyFile)
 	}
@@ -616,15 +617,15 @@ func TestAnUnmanagedCertificateDoesNotStartAWatch(t *testing.T) {
 	opts.AutoTLS = false
 	opts.DevicePort = freePort(t)
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 	if rt.Certificates != nil {
 		t.Fatal("this build managed a certificate, so there is no typed nil to normalise")
 	}
 
-	if err := rt.Agent.Plugins.Add(&ServerPlugin{Certificates: rt.Certificates}); err != nil {
+	if err := rt.Agent.Plugins.Add(&Plugin{Certificates: rt.Certificates}); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 	if err := rt.Agent.Start(rt.DevicePath); err != nil {
@@ -639,7 +640,7 @@ func TestAnUnmanagedCertificateDoesNotStartAWatch(t *testing.T) {
 // waited for a reply that could never come. It reaches the client server now,
 // which answers it.
 func TestADeviceConnectingWithoutADriverIsAnswered(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 
 	if err := a.Start(""); err != nil {
@@ -680,7 +681,7 @@ func mark(code int) http.Handler {
 // on. A build with none registered serves no HTTP at all, which is what a
 // program driving the readers directly wants.
 func TestTheClientServerBelongsToThePlugin(t *testing.T) {
-	var none *ServerPlugin
+	var none *Plugin
 	if got := none.ClientCount(); got != 0 {
 		t.Errorf("ClientCount() = %d with no plugin registered, want 0", got)
 	}
@@ -691,7 +692,7 @@ func TestTheClientServerBelongsToThePlugin(t *testing.T) {
 		t.Error("DisconnectClient succeeded with nothing serving clients")
 	}
 
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -717,7 +718,7 @@ func TestTheClientServerBelongsToThePlugin(t *testing.T) {
 // The health check answers what the listener is serving, including how many
 // clients it holds: a probe reads it to tell a live agent from a bound port.
 func TestTheHealthCheckCountsTheClients(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 	if err := a.Start(""); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -740,7 +741,7 @@ func TestTheHealthCheckCountsTheClients(t *testing.T) {
 }
 
 // health reads the health check through the listener's mux.
-func health(t *testing.T, p *ServerPlugin) struct {
+func health(t *testing.T, p *Plugin) struct {
 	Status  string `json:"status"`
 	Type    string `json:"type"`
 	Clients int    `json:"clients"`
@@ -767,7 +768,7 @@ func health(t *testing.T, p *ServerPlugin) struct {
 // ServeMode is what a build names its own handlers with. What it names replaces
 // what the plugin would have mounted, clients included.
 func TestServeModeReplacesWhatThePluginWouldMount(t *testing.T) {
-	p := &ServerPlugin{ServeMode: map[string]http.Handler{
+	p := &Plugin{ServeMode: map[string]http.Handler{
 		server.ModeClient: mark(http.StatusTeapot),
 		server.ModeDevice: mark(299),
 	}}

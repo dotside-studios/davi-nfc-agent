@@ -1,9 +1,10 @@
-package agent
+package pairingplugin
 
 import (
 	"strings"
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -11,12 +12,12 @@ import (
 // The plugin brings both halves: the listener as a component, and the entries
 // that hand out its address and PIN.
 func TestPairingPluginRegistersItsServerAndItsEntries(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	pairing := NewPairingPlugin(rt.Agent, 9499, nil)
+	pairing := New(rt.Agent, 9499, nil)
 	if err := rt.Agent.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -54,12 +55,12 @@ func TestPairingPluginRegistersItsServerAndItsEntries(t *testing.T) {
 // Rotating relabels the entries that show the PIN, wherever the rotation came
 // from: the menu item, or the control center through the same method.
 func TestRotatingThePINRelabelsTheEntries(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	pairing := NewPairingPlugin(rt.Agent, 9501, nil)
+	pairing := New(rt.Agent, 9501, nil)
 	if err := rt.Agent.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
@@ -88,11 +89,11 @@ func TestRotatingThePINRelabelsTheEntries(t *testing.T) {
 // The plugin adds its entries without asking whether anyone is looking, so a
 // headless agent activates it like any other.
 func TestPairingPluginActivatesWithNoTray(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
-	if err := rt.Agent.Plugins.Add(NewPairingPlugin(rt.Agent, 9503, nil)); err != nil {
+	if err := rt.Agent.Plugins.Add(New(rt.Agent, 9503, nil)); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 
@@ -104,7 +105,7 @@ func TestPairingPluginActivatesWithNoTray(t *testing.T) {
 
 // A plugin with no server to run says so rather than activating into nothing.
 func TestPairingPluginWithNoServer(t *testing.T) {
-	a := quietAgent(t, &PairingPlugin{})
+	a := quietAgent(t, &Plugin{})
 
 	err := a.Activate(nil)
 	if err == nil {
@@ -118,7 +119,7 @@ func TestPairingPluginWithNoServer(t *testing.T) {
 // A nil plugin answers for a build with no pairing, which is what the console
 // holds when none was registered.
 func TestANilPairingPluginReportsItsAbsence(t *testing.T) {
-	var pairing *PairingPlugin
+	var pairing *Plugin
 
 	if got := pairing.Port(); got != 0 {
 		t.Errorf("Port() = %d, want 0", got)

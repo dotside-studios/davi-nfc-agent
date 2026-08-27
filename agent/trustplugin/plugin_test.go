@@ -1,4 +1,4 @@
-package agent
+package trustplugin
 
 import (
 	"os"
@@ -15,7 +15,7 @@ import (
 // needs the offer back without an agent restart to notice.
 func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	dir := t.TempDir()
-	trust := &TrustPlugin{Manager: tlspkg.NewManager(dir)}
+	trust := &Plugin{Manager: tlspkg.NewManager(dir)}
 
 	a := quietAgent(t, trust)
 	fake := traymenu.NewFake()
@@ -41,7 +41,7 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	if err := os.WriteFile(caFile, []byte("ca"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a.fireServerRestart()
+	a.ServerRebound()
 	if entry.Visible() {
 		t.Fatal("the trust entry is still offered with a certificate authority installed")
 	}
@@ -49,7 +49,7 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 	if err := os.Remove(caFile); err != nil {
 		t.Fatal(err)
 	}
-	a.fireServerRestart()
+	a.ServerRebound()
 	if !entry.Visible() {
 		t.Fatal("the trust entry stayed hidden after the certificate authority went missing")
 	}
@@ -59,7 +59,7 @@ func TestTrustEntryFollowsTheCertificateAuthority(t *testing.T) {
 // it is asked reaches for one, and the entry it would have added is not there
 // to be clicked.
 func TestTrustPluginWithoutAManagerIsInert(t *testing.T) {
-	trust := &TrustPlugin{}
+	trust := &Plugin{}
 
 	a := quietAgent(t, trust)
 	fake := traymenu.NewFake()

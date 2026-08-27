@@ -1,8 +1,9 @@
-package agent
+package serverplugin
 
 import (
 	"net/http"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
@@ -22,7 +23,7 @@ type originRow struct {
 
 // loadOrigins settles the allowlist this plugin serves behind, building one
 // from the agent's config directory when it was given none.
-func (p *ServerPlugin) loadOrigins(ctx AgentContext) {
+func (p *Plugin) loadOrigins(ctx agent.AgentContext) {
 	if p.Origins != nil {
 		return
 	}
@@ -51,7 +52,7 @@ func (p *ServerPlugin) loadOrigins(ctx AgentContext) {
 // republishOrigins carries what the store reports onto the plugin's own signal,
 // so a subscriber follows the plugin rather than the store it happens to hold.
 // Called once, when the store settles.
-func (p *ServerPlugin) republishOrigins() {
+func (p *Plugin) republishOrigins() {
 	emit := func() { p.Events().Origins.Emit(p.OriginState()) }
 	p.Origins.OnChange(emit)
 	p.Origins.OnBlocked(func(string) { emit() })
@@ -59,7 +60,7 @@ func (p *ServerPlugin) republishOrigins() {
 
 // OriginState is the allowlist as something displaying it reads it. Empty
 // before the plugin activates, when there is no store yet.
-func (p *ServerPlugin) OriginState() OriginState {
+func (p *Plugin) OriginState() OriginState {
 	if p == nil || p.Origins == nil {
 		return OriginState{}
 	}
@@ -74,7 +75,7 @@ func (p *ServerPlugin) OriginState() OriginState {
 // connection. The connection it returns removes it.
 //
 // Deprecated: use Events().Origins, which also reports the current allowlist.
-func (p *ServerPlugin) OnOriginsChange(fn func()) *event.Connection {
+func (p *Plugin) OnOriginsChange(fn func()) *event.Connection {
 	if p == nil {
 		return nil
 	}
@@ -89,18 +90,18 @@ func (p *ServerPlugin) OnOriginsChange(fn func()) *event.Connection {
 //
 // Give it to whatever else on this build admits a browser connection, so one
 // allowlist answers for all of them.
-func (p *ServerPlugin) OriginPolicy() server.OriginPolicy { return pluginOrigins{plugin: p} }
+func (p *Plugin) OriginPolicy() server.OriginPolicy { return pluginOrigins{plugin: p} }
 
 // CheckOrigin admits or rejects an upgrade by Origin, for whatever serves a
 // WebSocket endpoint beside this plugin, such as a device driver's.
-func (p *ServerPlugin) CheckOrigin() func(r *http.Request) bool {
+func (p *Plugin) CheckOrigin() func(r *http.Request) bool {
 	return server.CheckOriginPolicy(p.OriginPolicy())
 }
 
 // pluginOrigins reads the plugin's store when it is asked rather than when it
 // is handed over. Before there is one nothing is on the list, which is what an
 // agent that has not activated should answer.
-type pluginOrigins struct{ plugin *ServerPlugin }
+type pluginOrigins struct{ plugin *Plugin }
 
 func (o pluginOrigins) Allowed(origin string) bool {
 	store := o.plugin.Origins
@@ -115,7 +116,7 @@ func (o pluginOrigins) RecordBlocked(origin string) {
 
 // originsMenu builds the Allowed Origins section: what is permitted now, and
 // what has been refused since the agent started, offered for one click.
-func (p *ServerPlugin) originsMenu(ctx AgentContext) {
+func (p *Plugin) originsMenu(ctx agent.AgentContext) {
 	section := ctx.Systray.Section("Allowed Origins",
 		traymenu.Tooltip("Web pages permitted to use this reader"))
 
@@ -139,7 +140,7 @@ func (p *ServerPlugin) originsMenu(ctx AgentContext) {
 
 // refreshOrigins redraws the section from the store: allowed origins first,
 // then anything refused since start, offered for one-click approval.
-func (p *ServerPlugin) refreshOrigins() {
+func (p *Plugin) refreshOrigins() {
 	allowed := p.Origins.List()
 	blocked := p.Origins.Blocked()
 
@@ -169,7 +170,7 @@ func (p *ServerPlugin) refreshOrigins() {
 
 // toggleOrigin allows an origin that was refused, or revokes one that was
 // allowed, depending on what the row was offering.
-func (p *ServerPlugin) toggleOrigin(row originRow) {
+func (p *Plugin) toggleOrigin(row originRow) {
 	if row.blocked {
 		if err := p.Origins.Allow(row.origin); err != nil {
 			p.failf("Failed to allow origin %q: %v", row.origin, err)
@@ -187,7 +188,7 @@ func (p *ServerPlugin) toggleOrigin(row originRow) {
 }
 
 // toggleAllowAny turns the origin check off for this run, or back on.
-func (p *ServerPlugin) toggleAllowAny() {
+func (p *Plugin) toggleAllowAny() {
 	on := !p.Origins.IsSessionAllowAny()
 	p.Origins.SessionAllowAny(on)
 

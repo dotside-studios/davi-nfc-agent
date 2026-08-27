@@ -150,6 +150,11 @@ func (a *Agent) firePreferencesChanged() {
 	a.events.Any.Emit(ChangePreferences)
 }
 
+// ServerRebound reports that a listener bound again, raising Events().Servers
+// with the agent's configured port. Called by whatever serves the agent, which
+// is a plugin rather than the agent itself, so the agent cannot raise it.
+func (a *Agent) ServerRebound() { a.fireServerRestart() }
+
 func (a *Agent) fireServerRestart() {
 	a.events.Servers.Emit(a.DevicePort())
 	a.events.Any.Emit(ChangeServers)

@@ -6,6 +6,9 @@ import (
 	"errors"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
@@ -14,9 +17,9 @@ import (
 // is a method here.
 type host struct {
 	agent   *agent.Agent
-	servers *agent.ServerPlugin
-	pairing *agent.PairingPlugin
-	trust   *agent.TrustPlugin
+	servers *serverplugin.Plugin
+	pairing *pairingplugin.Plugin
+	trust   *trustplugin.Plugin
 
 	// quit ends the program the agent runs in, supplied by whoever owns it.
 	quit func()

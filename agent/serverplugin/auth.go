@@ -1,4 +1,4 @@
-package agent
+package serverplugin
 
 import (
 	"net/http"
@@ -14,11 +14,11 @@ import (
 // paired-device requirement takes effect without rebuilding the endpoint, and
 // the check can be taken before the plugin activates. One taken from a plugin
 // that never activates admits nobody.
-func (p *ServerPlugin) Authenticate() func(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool) {
+func (p *Plugin) Authenticate() func(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool) {
 	return func(w http.ResponseWriter, r *http.Request) (string, bool) {
 		a := p.agent
 		if a == nil {
-			deviceWarn.Printf("Connection rejected from %s: the server plugin has not activated", r.RemoteAddr)
+			authWarn.Printf("Connection rejected from %s: the server plugin has not activated", r.RemoteAddr)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return "", false
 		}
@@ -26,7 +26,7 @@ func (p *ServerPlugin) Authenticate() func(w http.ResponseWriter, r *http.Reques
 		if a.RequirePairedDevice() {
 			id, ok := server.CheckPairedDevice(w, r, a.TokenVerifier())
 			if !ok {
-				deviceWarn.Printf("Connection rejected from %s: no paired-device credential", r.RemoteAddr)
+				authWarn.Printf("Connection rejected from %s: no paired-device credential", r.RemoteAddr)
 				return "", false
 			}
 			return id, true
@@ -34,7 +34,7 @@ func (p *ServerPlugin) Authenticate() func(w http.ResponseWriter, r *http.Reques
 
 		id, ok := server.CheckAuth(w, r, a.APISecret(), a.TokenVerifier())
 		if !ok {
-			deviceWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
+			authWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 			return "", false
 		}
 		return id, true

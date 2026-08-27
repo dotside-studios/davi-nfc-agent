@@ -114,7 +114,9 @@ davi-nfc-agent/
 │   ├── agent.go         # Core agent logic
 │   ├── setup.go         # Options and Setup, what the flags resolve to
 │   ├── plugin.go        # Plugin, AgentContext, activation
-│   ├── serverplugin.go  # The listener and everything served from it
+│   ├── serverplugin/    # The listener and everything served from it
+│   ├── pairingplugin/   # The pairing listener and its tray entries
+│   ├── trustplugin/     # Installing the local certificate authority
 │   ├── console/         # Control center: API, frontend, agent adapter
 │   │                    #   (-tags nowebui drops it)
 │   └── tray/            # System tray UI (the only fyne.io/systray dependency)
@@ -157,7 +159,7 @@ davi-nfc-agent/
   - **listener**: the listener itself, and the mux of what was mounted on it.
     It knows nothing about NFC
   - **clientserver**: fans a scan out to every connected client, serves their
-    requests, and resolves the tag each one names. `agent.ServerPlugin` runs
+    requests, and resolves the tag each one names. `serverplugin.Plugin` runs
     one and mounts the routes it is reached on
 - A client request is a call rather than a message on a channel: there is no
   bridge between the two halves

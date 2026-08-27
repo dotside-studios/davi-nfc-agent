@@ -1,4 +1,4 @@
-package agent
+package serverplugin
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -15,12 +16,12 @@ import (
 func served(t *testing.T) http.Handler {
 	t.Helper()
 
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	servers := &ServerPlugin{}
+	servers := &Plugin{}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Add: %v", err)
 	}

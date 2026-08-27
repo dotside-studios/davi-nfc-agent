@@ -483,6 +483,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `server.HandlerRegistry` and everything on it (`HandlerFunc`,
+  `WebSocketHandlerFunc`, `HandlerServer`, `Handle`, `RegisterLifecycle`,
+  `HandleWebSocket`, `TryCustomWebSocketHandler`, `StartLifecycleHandlers`).
+  Nothing in the agent constructed one, nothing implemented `HandlerServer`,
+  and its `HandlerFunc` took a raw `*websocket.Conn`, which does not fit
+  `clientserver`'s `*wsconn.SafeConn` — it could not have been wired in as it
+  stood. Its `ctx context.Context` parameters looked like a second, unused
+  answer to where a client's context comes from, next to the one
+  `clientserver.Server` actually uses
 - `Agent.RestartServers` and the console's `agent.restartServers` action, with
   the **restart listeners** control that called it. Both endpoints read the API
   secret per connection now, so nothing needs rebuilding, and what the action
@@ -594,6 +603,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already fans out to children implementing `Close()`, so agent shutdown reaches
   it. Consumers must treat a closed channel as the end of the watch, which
   `nfc.Supervisor` and `agent.Agent` already did
+- `multimanager.MultiManager.DeviceChanges` no longer races two callers against
+  a single channel. `agent.Agent.watchManager` and `nfc.Supervisor.watchDevices`
+  both call it on the same `MultiManager`, and every call returned the same
+  channel: a device change woke whichever of the two happened to receive it
+  first, and the other never saw it, so a reader plugged in while the agent
+  polled could go unnoticed by the tray, the console, or reconciliation,
+  depending on which one lost the race that day. Each call now gets its own
+  channel, fed from an internal fan-out signal, so a change reaches every
+  watcher rather than one of them. `Close` ends every channel it has handed
+  out, including one asked for afterward
 - A preference change announces once, with every field in place.
   `console.host.ApplyPreferences` called six setters in turn and each raised
   `Events().Preferences` and `Events().Any`, so one `settings.save` emitted up

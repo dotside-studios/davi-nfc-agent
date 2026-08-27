@@ -70,8 +70,8 @@ func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 		t.Errorf("pairing pointed the device at port %d, want %d", paired.AgentPort, h.Agent.DevicePort())
 	}
 
-	// Withdraw the shared secret and the loopback bypass, which is what the
-	// tray toggle and -require-paired-devices do.
+	// Withdraw the shared secret, which is what the tray toggle and
+	// -require-paired-devices do.
 	h.Agent.SetRequirePairedDevice(true)
 
 	if _, _, err := h.dial(t, "/ws?mode=device&secret="+apiSecret, nil); err == nil {

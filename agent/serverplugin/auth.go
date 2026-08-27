@@ -32,7 +32,11 @@ func (p *Plugin) Authenticate() func(w http.ResponseWriter, r *http.Request) (de
 			return id, true
 		}
 
-		id, ok := server.CheckAuth(w, r, a.APISecret(), a.TokenVerifier())
+		id, ok := server.CheckAuth(w, r, server.AuthOptions{
+			Secret:        a.APISecret(),
+			Verifier:      a.TokenVerifier(),
+			AllowLoopback: a.AllowLoopbackBypass(),
+		})
 		if !ok {
 			authWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 			return "", false

@@ -31,14 +31,14 @@ func TestCheckAuthAcceptsDeviceToken(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=device-token", "192.168.1.20:5000")
-	if _, ok := CheckAuth(w, r, "shared-secret", verifier); !ok {
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", Verifier: verifier}); !ok {
 		t.Error("a paired device's token was rejected")
 	}
 
 	// Bearer is equivalent to the query parameter.
 	w, r = authReq(t, "/ws", "192.168.1.20:5000")
 	r.Header.Set("Authorization", "Bearer device-token")
-	if _, ok := CheckAuth(w, r, "shared-secret", verifier); !ok {
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", Verifier: verifier}); !ok {
 		t.Error("a token presented as a Bearer header was rejected")
 	}
 }
@@ -49,7 +49,7 @@ func TestCheckAuthRejectsRevokedToken(t *testing.T) {
 	verifier := fakeVerifier{valid: "still-paired", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=revoked-token", "192.168.1.20:5000")
-	if _, ok := CheckAuth(w, r, "shared-secret", verifier); ok {
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", Verifier: verifier}); ok {
 		t.Error("a revoked token was accepted")
 	}
 	if w.Code != http.StatusUnauthorized {
@@ -63,7 +63,7 @@ func TestCheckAuthStillAcceptsSharedSecret(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=shared-secret", "192.168.1.20:5000")
-	if _, ok := CheckAuth(w, r, "shared-secret", verifier); !ok {
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", Verifier: verifier}); !ok {
 		t.Error("the shared secret was rejected")
 	}
 }
@@ -74,21 +74,36 @@ func TestCheckAuthTokenWithoutSharedSecret(t *testing.T) {
 	verifier := fakeVerifier{valid: "device-token", deviceID: "dev-1"}
 
 	w, r := authReq(t, "/ws?secret=device-token", "192.168.1.20:5000")
-	if _, ok := CheckAuth(w, r, "", verifier); !ok {
+	if _, ok := CheckAuth(w, r, AuthOptions{Verifier: verifier}); !ok {
 		t.Error("a token was rejected when no shared secret is set")
 	}
 }
 
-func TestCheckAuthLoopbackBypassUnchanged(t *testing.T) {
+// Loopback is admitted without a credential only where AllowLoopback is set.
+func TestCheckAuthLoopbackBypassIsOptIn(t *testing.T) {
 	w, r := authReq(t, "/ws", "127.0.0.1:5000")
-	if _, ok := CheckAuth(w, r, "shared-secret", nil); !ok {
-		t.Error("loopback bypass regressed")
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret"}); ok {
+		t.Error("loopback was admitted with no credential and no bypass")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+
+	w, r = authReq(t, "/ws", "127.0.0.1:5000")
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", AllowLoopback: true}); !ok {
+		t.Error("the bypass did not admit a loopback request")
+	}
+
+	// The bypass covers loopback only.
+	w, r = authReq(t, "/ws", "192.168.1.20:5000")
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", AllowLoopback: true}); ok {
+		t.Error("the bypass admitted an off-host request")
 	}
 }
 
 func TestCheckAuthRejectsNothing(t *testing.T) {
 	w, r := authReq(t, "/ws", "192.168.1.20:5000")
-	if _, ok := CheckAuth(w, r, "shared-secret", fakeVerifier{valid: "device-token"}); ok {
+	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", Verifier: fakeVerifier{valid: "device-token"}}); ok {
 		t.Error("a request with no credential was accepted")
 	}
 	if w.Code != http.StatusUnauthorized {

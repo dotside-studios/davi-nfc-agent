@@ -20,6 +20,14 @@ import (
 func guardedEndpoint(t *testing.T, strict bool) (url string, a *agent.Agent, pairedToken string) {
 	t.Helper()
 
+	return guardedEndpointWith(t, strict, false)
+}
+
+// guardedEndpointWith is guardedEndpoint with the loopback bypass set too: the
+// test dialer connects over 127.0.0.1, so it sees either policy.
+func guardedEndpointWith(t *testing.T, strict, allowLoopback bool) (url string, a *agent.Agent, pairedToken string) {
+	t.Helper()
+
 	devices, err := agent.NewDeviceRegistry(t.TempDir())
 	if err != nil {
 		t.Fatalf("agent.NewDeviceRegistry: %v", err)
@@ -34,6 +42,7 @@ func guardedEndpoint(t *testing.T, strict bool) (url string, a *agent.Agent, pai
 		APISecret:           "shared-secret",
 		Devices:             devices,
 		RequirePairedDevice: strict,
+		AllowLoopbackBypass: allowLoopback,
 		ConfigDir:           t.TempDir(),
 		DevicePort:          freePort(t),
 	})
@@ -75,10 +84,9 @@ func dialStatus(t *testing.T, url string) int {
 }
 
 // Under strict mode a paired token gets in and nothing else does: not the
-// shared secret, and not the loopback bypass the test dialer would otherwise
-// benefit from, since httptest listens on 127.0.0.1.
+// shared secret, and not the loopback bypass, which is on for this agent.
 func TestStrictModeAdmitsOnlyPairedDevices(t *testing.T) {
-	url, _, token := guardedEndpoint(t, true)
+	url, _, token := guardedEndpointWith(t, true, true)
 
 	if code := dialStatus(t, url+"&secret="+token); code != http.StatusSwitchingProtocols {
 		t.Errorf("paired device got %d, want an upgrade", code)
@@ -91,12 +99,13 @@ func TestStrictModeAdmitsOnlyPairedDevices(t *testing.T) {
 	}
 }
 
-// With strict mode off, the previous behavior is intact.
-func TestNonStrictModeUnchanged(t *testing.T) {
+// With strict mode off, either credential admits a device. Loopback alone does
+// not, the bypass being off unless the agent was built with it.
+func TestNonStrictModeAdmitsEitherCredential(t *testing.T) {
 	url, _, token := guardedEndpoint(t, false)
 
-	if code := dialStatus(t, url); code != http.StatusSwitchingProtocols {
-		t.Errorf("loopback got %d, want an upgrade", code)
+	if code := dialStatus(t, url); code != http.StatusUnauthorized {
+		t.Errorf("loopback with no credential got %d, want 401", code)
 	}
 	if code := dialStatus(t, url+"&secret=shared-secret"); code != http.StatusSwitchingProtocols {
 		t.Errorf("shared secret got %d, want an upgrade", code)
@@ -106,16 +115,36 @@ func TestNonStrictModeUnchanged(t *testing.T) {
 	}
 }
 
+// With the bypass on, a loopback connection needs no credential.
+func TestLoopbackBypassIsOptIn(t *testing.T) {
+	url, a, _ := guardedEndpointWith(t, false, true)
+
+	if !a.AllowLoopbackBypass() {
+		t.Error("AllowLoopbackBypass did not report the setting")
+	}
+	if code := dialStatus(t, url); code != http.StatusSwitchingProtocols {
+		t.Errorf("loopback with the bypass on got %d, want an upgrade", code)
+	}
+
+	// RequirePairedDevice withdraws it again.
+	a.SetRequirePairedDevice(true)
+
+	if code := dialStatus(t, url); code != http.StatusUnauthorized {
+		t.Errorf("loopback under the paired-device requirement got %d, want 401", code)
+	}
+}
+
 // The requirement is settable while the agent runs, so it can be tried against
 // a real device without a restart.
 func TestStrictModeTogglesAtRuntime(t *testing.T) {
 	url, a, _ := guardedEndpoint(t, false)
+	url += "&secret=shared-secret"
 
 	if a.RequirePairedDevice() {
 		t.Error("strict mode defaulted on")
 	}
 	if code := dialStatus(t, url); code != http.StatusSwitchingProtocols {
-		t.Fatalf("loopback got %d before the toggle, want an upgrade", code)
+		t.Fatalf("the shared secret got %d before the toggle, want an upgrade", code)
 	}
 
 	a.SetRequirePairedDevice(true)
@@ -124,13 +153,13 @@ func TestStrictModeTogglesAtRuntime(t *testing.T) {
 		t.Error("RequirePairedDevice did not report the change")
 	}
 	if code := dialStatus(t, url); code != http.StatusUnauthorized {
-		t.Errorf("loopback got %d after the toggle, want 401", code)
+		t.Errorf("the shared secret got %d after the toggle, want 401", code)
 	}
 
 	a.SetRequirePairedDevice(false)
 
 	if code := dialStatus(t, url); code != http.StatusSwitchingProtocols {
-		t.Errorf("loopback got %d after turning it off, want an upgrade", code)
+		t.Errorf("the shared secret got %d after turning it off, want an upgrade", code)
 	}
 }
 

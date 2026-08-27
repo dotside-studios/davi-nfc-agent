@@ -24,7 +24,7 @@ func (s *App) setupDevicesMenu() {
 	s.mRequirePaired = s.mDevicesMenu.AddCheckbox(
 		"Require pairing",
 		false,
-		traymenu.Tooltip("Admit only devices that have paired. The shared secret and loopback bypass stop admitting devices; browser consoles are unaffected."),
+		traymenu.Tooltip("Admit only devices that have paired. The shared secret stops admitting devices; browser consoles are unaffected."),
 		traymenu.OnClick(s.handleRequirePaired),
 	)
 

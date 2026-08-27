@@ -112,6 +112,7 @@ func main() {
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
+			AllowLoopbackBypass:  rt.Agent.AllowLoopbackBypass,
 			OriginPolicy:         servers.OriginPolicy(),
 			TokenVerifier:        rt.Agent.TokenVerifier(),
 			Tags:                 rt.Agent,

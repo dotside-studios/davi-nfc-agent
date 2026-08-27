@@ -87,7 +87,10 @@ func deviceGate(cfg stackConfig) func(w http.ResponseWriter, r *http.Request) (s
 		if cfg.RequirePaired {
 			return server.CheckPairedDevice(w, r, cfg.TokenVerifier)
 		}
-		return server.CheckAuth(w, r, cfg.APISecret, cfg.TokenVerifier)
+		return server.CheckAuth(w, r, server.AuthOptions{
+			Secret:   cfg.APISecret,
+			Verifier: cfg.TokenVerifier,
+		})
 	}
 }
 

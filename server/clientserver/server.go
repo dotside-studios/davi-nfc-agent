@@ -20,6 +20,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// clientRequestQueue is how many requests one connection may have outstanding
+// before the agent refuses with BUSY. Requests are served one at a time, so
+// this bounds a client that asks faster than the reader can answer; blocking
+// the read loop instead would hide the next disconnect.
+const clientRequestQueue = 8
+
 // Server handles client connections for consuming NFC data.
 type Server struct {
 	config Config
@@ -114,6 +120,10 @@ type clientSession struct {
 	// distinguishable from one issuing writes.
 	writes int
 	locks  int
+
+	// cancel ends the operations this client asked for. Called when the
+	// connection drops and by Disconnect.
+	cancel context.CancelFunc
 }
 
 // ClientInfo describes a connected client for display.
@@ -154,9 +164,10 @@ func (s *Server) Clients() []ClientInfo {
 func (s *Server) Disconnect(clientID string) bool {
 	s.clientsMux.RLock()
 	var target *wsconn.SafeConn
+	var cancel context.CancelFunc
 	for conn, c := range s.clients {
 		if c.id == clientID {
-			target = conn
+			target, cancel = conn, c.cancel
 			break
 		}
 	}
@@ -167,6 +178,9 @@ func (s *Server) Disconnect(clientID string) bool {
 	}
 
 	clientLog.Printf("Disconnecting client %s at an operator's request", clientID[:8])
+	if cancel != nil {
+		cancel()
+	}
 	_ = target.Close()
 	return true
 }
@@ -232,6 +246,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn := wsconn.NewSafeConn(wsConn)
 	clientID := uuid.New().String()
 
+	// Ends when the client goes away, so an operation still running is told
+	// that whoever asked for it is gone.
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Add to clients map
 	s.clientsMux.Lock()
 	s.clients[conn] = &clientSession{
@@ -240,6 +258,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		remoteAddr:  r.RemoteAddr,
 		userAgent:   r.Header.Get("User-Agent"),
 		connectedAt: time.Now(),
+		cancel:      cancel,
 	}
 	s.clientsMux.Unlock()
 	s.notifyChange()
@@ -247,12 +266,38 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientLog.Printf("Client connected: %s (total: %d)", clientID[:8], s.clientCount())
 
 	defer func() {
+		cancel()
 		_ = conn.Close()
 		s.clientsMux.Lock()
 		delete(s.clients, conn)
 		s.clientsMux.Unlock()
 		clientLog.Printf("Client disconnected: %s (total: %d)", clientID[:8], s.clientCount())
 		s.notifyChange()
+	}()
+
+	// Requests are dispatched on their own goroutine so that reading continues
+	// while one is being served. Serving inline left the loop inside a handler
+	// for the length of a tag operation, which is where a disconnect goes
+	// unnoticed: nothing reads, so nothing sees EOF, and the operation runs to
+	// completion for a client that is no longer there.
+	requests := make(chan protocol.WebSocketRequest, clientRequestQueue)
+	var dispatching sync.WaitGroup
+	dispatching.Add(1)
+	go func() {
+		defer dispatching.Done()
+		// One at a time, which is the order requests were served in before.
+		for req := range requests {
+			s.dispatch(ctx, conn, clientID, req)
+		}
+	}()
+
+	// Registered after the cleanup above, so it runs first: cancelling before
+	// waiting is what lets an operation still in flight return. Waiting for the
+	// dispatch goroutine first would block on the very context this ends.
+	defer func() {
+		cancel()
+		close(requests)
+		dispatching.Wait()
 	}()
 
 	// Handle incoming messages
@@ -262,7 +307,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				clientWarn.Printf("WebSocket read error: %v", err)
 			}
-			break
+			return
 		}
 
 		var req protocol.WebSocketRequest
@@ -272,35 +317,48 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Handle message types
-		switch req.Type {
-		case server.WSMessageTypeWriteRequest:
-			s.countOperation(conn, "write")
-			s.handleWriteRequest(conn, clientID, req)
-		case server.WSMessageTypeLockRequest:
-			s.countOperation(conn, "lock")
-			s.handleLockRequest(conn, clientID, req)
-		case server.WSMessageTypeCapabilitiesRequest:
-			s.handleCapabilitiesRequest(conn, clientID, req)
-		case server.WSMessageTypeTransceiveRequest:
-			s.countOperation(conn, "transceive")
-			s.handleTransceiveRequest(conn, clientID, req)
+		select {
+		case requests <- req:
 		default:
-			clientWarn.Printf("Unknown message type: %s", req.Type)
-			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
+			// The queue is what bounds a client that asks faster than the
+			// reader can answer. Refusing is the backpressure; blocking here
+			// would stop reading and hide the next disconnect.
+			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeBusy,
+				"Too many requests outstanding on this connection; retry when the earlier ones answer")
 		}
 	}
 }
 
+// dispatch serves one request. Called from the connection's dispatch goroutine,
+// one at a time.
+func (s *Server) dispatch(ctx context.Context, conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
+	switch req.Type {
+	case server.WSMessageTypeWriteRequest:
+		s.countOperation(conn, "write")
+		s.handleWriteRequest(ctx, conn, clientID, req)
+	case server.WSMessageTypeLockRequest:
+		s.countOperation(conn, "lock")
+		s.handleLockRequest(ctx, conn, clientID, req)
+	case server.WSMessageTypeCapabilitiesRequest:
+		s.handleCapabilitiesRequest(ctx, conn, clientID, req)
+	case server.WSMessageTypeTransceiveRequest:
+		s.countOperation(conn, "transceive")
+		s.handleTransceiveRequest(ctx, conn, clientID, req)
+	default:
+		clientWarn.Printf("Unknown message type: %s", req.Type)
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
+	}
+}
+
 // handleWriteRequest encodes a message onto the tag the client names.
-func (s *Server) handleWriteRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleWriteRequest(ctx context.Context, conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	var writeReq server.WriteRequest
 	if !decodePayload(req.Payload, &writeReq) {
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Failed to parse write request")
 		return
 	}
 
-	result, err := s.ops().Write(context.Background(), server.WriteOp{
+	result, err := s.ops().Write(ctx, server.WriteOp{
 		Target:  targetOf(writeReq.UID, writeReq.DeviceID, writeReq.AllowUntargeted),
 		Request: writeReq,
 		// A client that wants a retry deduplicated supplies a stable key. The
@@ -328,10 +386,10 @@ func (s *Server) handleWriteRequest(conn *wsconn.SafeConn, clientID string, req 
 }
 
 // handleLockRequest makes the named tag permanently read-only.
-func (s *Server) handleLockRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleLockRequest(ctx context.Context, conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	target := tagTarget(req.Payload)
 
-	result, err := s.ops().Lock(context.Background(), server.LockOp{
+	result, err := s.ops().Lock(ctx, server.LockOp{
 		Target:         targetOf(target.UID, target.DeviceID, target.AllowUntargeted),
 		IdempotencyKey: firstNonEmpty(target.IdempotencyKey, req.ID),
 	})
@@ -344,7 +402,7 @@ func (s *Server) handleLockRequest(conn *wsconn.SafeConn, clientID string, req p
 }
 
 // handleTransceiveRequest exchanges raw bytes with the named tag.
-func (s *Server) handleTransceiveRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleTransceiveRequest(ctx context.Context, conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	var payload struct {
 		Data            string `json:"data"`
 		Raw             bool   `json:"raw"`
@@ -367,7 +425,7 @@ func (s *Server) handleTransceiveRequest(conn *wsconn.SafeConn, clientID string,
 		return
 	}
 
-	resp, err := s.ops().Transceive(context.Background(), server.TransceiveOp{
+	resp, err := s.ops().Transceive(ctx, server.TransceiveOp{
 		Target: targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
 		Data:   data,
 		Raw:    payload.Raw,
@@ -383,10 +441,10 @@ func (s *Server) handleTransceiveRequest(conn *wsconn.SafeConn, clientID string,
 }
 
 // handleCapabilitiesRequest reports what the named tag supports.
-func (s *Server) handleCapabilitiesRequest(conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
+func (s *Server) handleCapabilitiesRequest(ctx context.Context, conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
 	target := tagTarget(req.Payload)
 
-	caps, err := s.ops().Capabilities(context.Background(), server.CapabilitiesOp{
+	caps, err := s.ops().Capabilities(ctx, server.CapabilitiesOp{
 		Target: targetOf(target.UID, target.DeviceID, target.AllowUntargeted),
 	})
 	if err != nil {

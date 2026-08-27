@@ -38,9 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published within `ScanPublishTimeout`, so overflow is a number rather than a
   log line
 - `BUSY` error code for a request the agent could not start because earlier work
-  is still draining: a reader still finishing an operation whose caller gave up.
-  Retryable. `nfc.ErrCodeBusy`, `nfc.NewBusyError` and `nfc.ErrReaderBusy` are
-  its internal counterparts
+  is still draining: a reader still finishing an operation whose caller gave up,
+  or more requests outstanding on one connection than it queues (8). Retryable.
+  `nfc.ErrCodeBusy`, `nfc.NewBusyError` and `nfc.ErrReaderBusy` are its internal
+  counterparts
 - `MULTIPLE_TAGS` error code for more than one tag in the field where the
   operation needs exactly one. Not retryable: the user has to separate them
   first. Both guards raised an untyped `fmt.Errorf`, so a real and
@@ -526,6 +527,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A client that disconnects mid-operation now cancels it. The websocket read
+  loop served each request inline, so while a write was running nothing was
+  reading the socket and the disconnect went unnoticed until the write had
+  finished. Reading and dispatch are separate goroutines, and the context the
+  operation runs under ends when the connection drops or when an operator calls
+  `Disconnect`. Requests are still served one at a time per connection
 - A tag operation whose caller gave up no longer runs beside the next one. On a
   timeout the reader released `operationMutex` while the abandoned goroutine was
   still driving the tag, so the following request acquired the mutex and the two

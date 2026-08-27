@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 

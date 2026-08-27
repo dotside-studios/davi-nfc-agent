@@ -1,6 +1,6 @@
 //go:build !windows
 
-package tls
+package secure
 
 import "os"
 

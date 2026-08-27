@@ -122,16 +122,17 @@ jobs:
 
       - name: Build the macOS packages
         # Only the tray needs cgo on darwin (fyne.io/systray talks to Cocoa),
-        # which an Ubuntu runner cannot do. Everything else, including the
-        # agent and the console, which import no GUI, is type-checked here, so
-        # agent/tray and the cmd that embeds it are the only darwin gaps.
+        # which an Ubuntu runner cannot do. Everything else is type-checked
+        # here, so agent/tray and the cmd that embeds it are the only darwin
+        # gaps. The list is computed rather than written out: a package added
+        # or moved is covered without anyone remembering to add it.
         env:
           CGO_ENABLED: '0'
         run: |
+          packages=$(go list ./... | grep -vE '/(agent/tray|traymenu/fynetray|cmd/[^/]+)$')
           for arch in amd64 arm64; do
             echo "== darwin/$arch"
-            GOOS=darwin GOARCH=$arch go build \
-              ./agent ./agent/console ./nfc/... ./server/... ./tls/... ./protocol/...
+            GOOS=darwin GOARCH=$arch go build $packages
           done
 
   web:

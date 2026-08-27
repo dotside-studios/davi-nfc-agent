@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -522,13 +521,23 @@ func (a *Agent) SetReaderFeedback(on bool) {
 	a.ApplyPreferences(func(p *Preferences) { p.ReaderFeedback = on })
 }
 
-// TokenVerifier recognises the per-device credentials this agent issued at
-// pairing, for whatever admits a connection presenting one. Nil on an agent
-// built without a registry, which admits nobody on a credential.
+// TokenVerifier recognises per-device credentials issued at pairing. It is
+// [server.TokenVerifier], declared here so the agent names no server package:
+// what admits a connection is a plugin's business, and Go satisfies the
+// interface either way.
+type TokenVerifier interface {
+	// VerifyToken reports whether a presented token belongs to a paired
+	// device, returning its ID for logging.
+	VerifyToken(token string) (deviceID string, ok bool)
+}
+
+// TokenVerifier reports the credentials this agent issued at pairing, for
+// whatever admits a connection presenting one. Nil on an agent built without a
+// registry, which admits nobody on a credential.
 //
 // Take it from here rather than from Devices: a nil registry assigned to the
 // interface is not a nil interface, and the caller's nil check would miss it.
-func (a *Agent) TokenVerifier() server.TokenVerifier {
+func (a *Agent) TokenVerifier() TokenVerifier {
 	if a.devices == nil {
 		return nil
 	}

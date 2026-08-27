@@ -3,7 +3,6 @@ package agent
 import (
 	"log"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
@@ -127,44 +126,19 @@ func TestDefaultConfigDirUsesTheGivenName(t *testing.T) {
 	}
 }
 
-// Which certificate a listener should serve: the one Options named, else the
-// one Setup manages, else none. This is where -cert and -key land, so a
-// certificate named on the command line has to win over the managed one.
-func TestSetupResolvesTheCertificateToServe(t *testing.T) {
-	managedOpts := testOptions(t)
-	managedOpts.AutoTLS = true
+// What Options names about the certificate reaches the agent as it is. Setup
+// provisions nothing: a program that had tls.Provision manage one passes the
+// pin it reported, and the agent hands that to devices unchanged.
+func TestSetupPassesThePublicKeyPinThrough(t *testing.T) {
+	withPin := testOptions(t)
+	withPin.PublicKeyPin = "sha256/abcdef"
 
-	managed, err := Setup(managedOpts, nfc.NewMockManager())
+	rt, err := Setup(withPin, nfc.NewMockManager())
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if managed.Certificates == nil {
-		t.Fatal("Setup managed no certificate, so there is nothing to fall back to")
-	}
-	if managed.CertFile != managed.Certificates.GetCertFile() {
-		t.Errorf("CertFile = %q, want the managed one (%q)", managed.CertFile, managed.Certificates.GetCertFile())
-	}
-
-	namedOpts := testOptions(t)
-	namedOpts.CertFile, namedOpts.KeyFile = "/tmp/named.pem", "/tmp/named.key"
-
-	named, err := Setup(namedOpts, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if named.CertFile != "/tmp/named.pem" || named.KeyFile != "/tmp/named.key" {
-		t.Errorf("CertFile/KeyFile = %q/%q, want the pair Options named", named.CertFile, named.KeyFile)
-	}
-
-	noneOpts := testOptions(t)
-	noneOpts.AutoTLS = false
-
-	none, err := Setup(noneOpts, nfc.NewMockManager())
-	if err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if none.CertFile != "" || none.KeyFile != "" {
-		t.Errorf("CertFile/KeyFile = %q/%q, want empty", none.CertFile, none.KeyFile)
+	if got := rt.Agent.PublicKeyPin(); got != "sha256/abcdef" {
+		t.Errorf("PublicKeyPin() = %q, want the one Options named", got)
 	}
 }
 
@@ -214,12 +188,5 @@ func TestSetupPassesOptionsThroughToTheAgent(t *testing.T) {
 	}
 	if got := a.ConfigDir(); got != opts.ConfigDir {
 		t.Errorf("config dir = %q, want %q", got, opts.ConfigDir)
-	}
-
-	// The allowlist is the server plugin's, so Setup parses what the flags
-	// named and leaves it on the Runtime for the plugin to serve behind.
-	want := []string{"console.example", "shop.example"}
-	if got := rt.AllowedOrigins; !slices.Equal(got, want) {
-		t.Errorf("Runtime.AllowedOrigins = %v, want %v", got, want)
 	}
 }

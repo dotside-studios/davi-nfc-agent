@@ -15,6 +15,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
@@ -622,11 +623,11 @@ func TestAnUnmanagedCertificateDoesNotStartAWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent.Setup: %v", err)
 	}
-	if rt.Certificates != nil {
-		t.Fatal("this build managed a certificate, so there is no typed nil to normalise")
-	}
 
-	if err := rt.Agent.Plugins.Add(&Plugin{Certificates: rt.Certificates}); err != nil {
+	// What a build with no certificate holds: a nil *tls.Manager, which is not
+	// a nil interface once it reaches the field.
+	var unmanaged *tlspkg.Manager
+	if err := rt.Agent.Plugins.Add(&Plugin{Certificates: unmanaged}); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}
 	if err := rt.Agent.Start(rt.DevicePath); err != nil {

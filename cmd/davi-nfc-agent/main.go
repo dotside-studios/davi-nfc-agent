@@ -25,9 +25,18 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
+)
+
+// What this program reports while it assembles the agent. On the agent's
+// channel because that is where an operator looked for these lines before
+// provisioning moved out of Setup, and the console filters the log by source.
+var (
+	startupLog  = logbuf.Channel("agent", logbuf.LevelInfo)
+	startupWarn = logbuf.Channel("agent", logbuf.LevelWarn)
 )
 
 func main() {
@@ -61,21 +70,41 @@ func main() {
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
+	// The certificate this agent manages for itself, under the same config
+	// directory the agent resolves. Provisioning it is the program's: the
+	// agent neither serves it nor hands out its authority.
+	if opts.ConfigDir == "" {
+		opts.ConfigDir = agent.DefaultConfigDir(opts.Info.OrDefault().DirName)
+	}
+	var certs tlspkg.Provisioned
+	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
+		provisioned, err := tlspkg.Provision(opts.ConfigDir, opts.InstallCA)
+		if err != nil {
+			startupWarn.Printf("Auto-TLS failed: %v (running without TLS)", err)
+		} else {
+			certs = provisioned
+			opts.CertFile, opts.KeyFile = certs.CertFile, certs.KeyFile
+			opts.PublicKeyPin = certs.PublicKeyPin
+			// Native devices authenticate the agent by this value rather than
+			// by a trust store, so log it where a first run will show it.
+			startupLog.Printf("Agent public key pin: %s", certs.PublicKeyPin)
+		}
+	}
+
 	rt, err := agent.Setup(opts, manager)
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
-	// The certificate this agent serves, and the entry that makes browsers
-	// accept it.
-	trust := &trustplugin.Plugin{Manager: rt.Certificates}
+	// The entry that makes browsers accept the certificate above.
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
 
-	// The listener and everything on it. Setup resolved which certificate to
-	// serve; registering no server plugin leaves an agent that serves nothing.
+	// The listener and everything on it. Registering no server plugin leaves
+	// an agent that serves nothing.
 	servers := &serverplugin.Plugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+		Config:         listener.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}
 
 	// The two halves of /ws, both built here. The agent decides who is admitted
@@ -109,7 +138,7 @@ func main() {
 	// covers.
 	var pairing *pairingplugin.Plugin
 	if opts.BootstrapPort > 0 {
-		pairing = pairingplugin.New(rt.Agent, opts.BootstrapPort, rt.Certificates)
+		pairing = pairingplugin.New(rt.Agent, opts.BootstrapPort, certs.Manager)
 		servers.Add(serverplugin.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",

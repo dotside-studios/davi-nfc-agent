@@ -21,6 +21,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
@@ -89,6 +90,14 @@ func start(t *testing.T, opts options) *harness {
 	hardware := nfc.NewMockManager()
 	hardware.MockDevice.SetTags(opts.Tags)
 
+	// The certificate the listener serves, provisioned before Setup as a
+	// program does: the agent neither serves it nor hands out its authority.
+	certs, err := tlspkg.Provision(o.ConfigDir, false)
+	if err != nil {
+		t.Fatalf("tls.Provision: %v", err)
+	}
+	o.CertFile, o.KeyFile, o.PublicKeyPin = certs.CertFile, certs.KeyFile, certs.PublicKeyPin
+
 	rt, err := agent.Setup(o, multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: hardware},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
@@ -103,11 +112,11 @@ func start(t *testing.T, opts options) *harness {
 	// entries go to a menu that draws nothing. The certificate the listener
 	// serves and the authority pairing hands out are the trust plugin's, not
 	// the agent's.
-	trust := &trustplugin.Plugin{Manager: rt.Certificates}
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
 	servers := &serverplugin.Plugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(o.AllowedOrigins),
 	}
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
@@ -135,7 +144,7 @@ func start(t *testing.T, opts options) *harness {
 	// are mounted.
 	var pairing *pairingplugin.Plugin
 	if opts.Pairing {
-		pairing = pairingplugin.New(rt.Agent, freePort(t), rt.Certificates)
+		pairing = pairingplugin.New(rt.Agent, freePort(t), certs.Manager)
 		servers.Add(serverplugin.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",

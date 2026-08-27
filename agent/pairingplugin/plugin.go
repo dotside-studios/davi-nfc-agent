@@ -7,8 +7,8 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 

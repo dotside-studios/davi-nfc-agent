@@ -160,6 +160,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Package `agent` has no third-party dependencies, matching `nfc`. Four edges
+  carried the other 15:
+  `Agent.TokenVerifier` named `server.TokenVerifier`, which is now
+  `agent.TokenVerifier`, an identical interface Go satisfies either way;
+  `Setup` built the `tls.Manager`, which is now `tls.Provision`, called by the
+  program before `Setup` with the config directory the agent will use;
+  `Setup` called `server.ParseAllowedOrigins`, which the program calls for
+  `serverplugin.Plugin.AllowedOrigins`;
+  and the device registry minted IDs with `google/uuid`, which is now
+  `crypto/rand`. Stored IDs are unaffected; only new pairings differ
+- `Runtime` loses `Certificates`, `CertFile`, `KeyFile` and `AllowedOrigins`,
+  which came from `tls` and `server`, and gains `ConfigDir`, the directory
+  `Setup` resolved. `Options` gains `PublicKeyPin`, which `tls.Provision`
+  reports, and `Setup` no longer reads `AutoTLS` or `InstallCA`
+- `secure.Dir` and `secure.File` are `tls.SecureDir` and `tls.SecureFile`
+  moved. They restrict a path to the current user and have nothing to do with
+  TLS, and `agent`, `server` and `tls` all called them
+- `tls` is `secure/tls`. The package and its contents are unchanged; what a
+  build imports is `.../secure/tls`. Certificates, the local authority and the
+  credentials a device pairs with belong under the same tree as the file
+  permissions guarding them on disk
 - The shipped plugins are packages of their own: `agent/serverplugin`,
   `agent/pairingplugin` and `agent/trustplugin`, with `ServerPlugin`,
   `PairingPlugin` and `TrustPlugin` renamed to `Plugin` in each.

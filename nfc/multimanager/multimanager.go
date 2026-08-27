@@ -17,22 +17,44 @@ import (
 // runtime, so the map needs no lock and callers can hold a manager without
 // worrying that it will be swapped underneath them.
 type MultiManager struct {
-	managers         map[string]nfc.Manager // managerName -> Manager instance
-	managerOrder     []string               // Fallback order
-	deviceChangeChan chan struct{}          // Aggregated device change channel
-	stopForward      chan struct{}          // Stop channel forwarding
-	closeOnce        sync.Once              // Close is idempotent
+	managers     map[string]nfc.Manager // managerName -> Manager instance
+	managerOrder []string               // Fallback order
+	stopForward  chan struct{}          // Stop channel forwarding
+	closeOnce    sync.Once              // Close is idempotent
 
 	// scans is every child's scans as one signal, so whatever consumes them
 	// subscribes here rather than to each manager it happens to know about.
 	// Raw, as the children report them: reading the tag is the supervisor's.
 	scans event.Signal[nfc.ScannedTag]
 
+	// deviceChanges is every child's device changes as one signal, fanned out
+	// to each caller of DeviceChanges rather than raced over a single shared
+	// channel: DeviceChanges is called once by the agent's own watcher and once
+	// by the supervisor's, on the same MultiManager, and a shared channel would
+	// let one steal the wakeup meant for both.
+	deviceChanges event.Signal[struct{}]
+
+	// changesMu guards the channels DeviceChanges has handed out, so Close can
+	// close every one of them rather than leaving a caller's select blocked
+	// forever on a channel nothing will ever write to again.
+	changesMu sync.Mutex
+	watches   []deviceChangeWatch
+	closed    bool
+
 	// listErrMu guards lastListErr, the last listing error reported per manager,
 	// so a persistent one is logged once rather than on every poll. The tray,
 	// the console and the device watcher all poll the list.
 	listErrMu   sync.Mutex
 	lastListErr map[string]string
+}
+
+// deviceChangeWatch is one call's stake in DeviceChanges: closing stop tells
+// its forwarder goroutine to end the channel it handed out. The goroutine is
+// the sole writer to that channel, so it is also the only thing that may
+// close it: Close cannot close it directly without racing a send already in
+// flight from the fan-out signal.
+type deviceChangeWatch struct {
+	stop chan struct{}
 }
 
 // ManagerEntry represents a named manager for MultiManager initialization.
@@ -52,10 +74,9 @@ type ManagerEntry struct {
 //	)
 func NewMultiManager(entries ...ManagerEntry) *MultiManager {
 	mm := &MultiManager{
-		managers:         make(map[string]nfc.Manager),
-		managerOrder:     []string{},
-		deviceChangeChan: make(chan struct{}, 1),
-		stopForward:      make(chan struct{}),
+		managers:     make(map[string]nfc.Manager),
+		managerOrder: []string{},
+		stopForward:  make(chan struct{}),
 	}
 
 	for _, entry := range entries {
@@ -178,7 +199,8 @@ func qualify(manager, path string) string {
 	return fmt.Sprintf("%s:%s", manager, path)
 }
 
-// Close stops forwarding and closes every manager that can be closed.
+// Close stops forwarding, ends every channel DeviceChanges has returned, and
+// closes every manager that can be closed.
 //
 // The test is a bare Close method rather than an interface from the server
 // package. Requiring a server-side interface meant no manager ever matched, so
@@ -186,6 +208,16 @@ func qualify(manager, path string) string {
 func (mm *MultiManager) Close() {
 	mm.closeOnce.Do(func() {
 		close(mm.stopForward)
+
+		mm.changesMu.Lock()
+		mm.closed = true
+		watches := mm.watches
+		mm.watches = nil
+		mm.changesMu.Unlock()
+
+		for _, w := range watches {
+			close(w.stop)
+		}
 
 		for name, manager := range mm.managers {
 			if closer, ok := manager.(interface{ Close() }); ok {
@@ -291,13 +323,56 @@ func (mm *MultiManager) holderFor(deviceID string) (nfc.TagHolder, error) {
 // Scans carries what every child manager's devices report, as reported.
 func (mm *MultiManager) Scans() *event.Signal[nfc.ScannedTag] { return &mm.scans }
 
-// DeviceChanges returns a channel that signals when devices are registered or unregistered
-// in any of the child managers.
+// DeviceChanges returns a channel that signals when devices are registered or
+// unregistered in any of the child managers. Each call gets its own channel,
+// so more than one watcher can read from the same MultiManager without
+// racing over a shared one: a change wakes every caller, not whichever
+// happened to receive first.
+//
+// Close ends every channel DeviceChanges has returned, including one asked
+// for after Close already ran.
 func (mm *MultiManager) DeviceChanges() <-chan struct{} {
-	return mm.deviceChangeChan
+	ch := make(chan struct{}, 1)
+
+	mm.changesMu.Lock()
+	if mm.closed {
+		mm.changesMu.Unlock()
+		close(ch)
+		return ch
+	}
+	stop := make(chan struct{})
+	mm.watches = append(mm.watches, deviceChangeWatch{stop: stop})
+	mm.changesMu.Unlock()
+
+	// relay carries the fan-out signal for this call alone; ch is what the
+	// caller reads. Routed through a private goroutine rather than a handler
+	// connected straight to ch, so ch has exactly one writer and that writer
+	// is the only thing that closes it: closing it from Close, while a
+	// handler already dispatched by Emit might still be sending to it, is
+	// the write-after-close race a bare Connect callback would have.
+	relay, stopRelay := mm.deviceChanges.Channel(1)
+	go func() {
+		defer close(ch)
+		defer stopRelay()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-relay:
+				select {
+				case ch <- struct{}{}:
+				default:
+					// Not yet consumed; the caller will see the pending one.
+				}
+			}
+		}
+	}()
+
+	return ch
 }
 
-// forwardDeviceChanges forwards device change events from a child manager to the aggregated channel.
+// forwardDeviceChanges forwards device change events from a child manager onto
+// the fan-out signal every DeviceChanges caller watches.
 func (mm *MultiManager) forwardDeviceChanges(ch <-chan struct{}) {
 	for {
 		select {
@@ -307,12 +382,7 @@ func (mm *MultiManager) forwardDeviceChanges(ch <-chan struct{}) {
 			if !ok {
 				return
 			}
-			// Forward to aggregated channel
-			select {
-			case mm.deviceChangeChan <- struct{}{}:
-			default:
-				// Channel full, skip
-			}
+			mm.deviceChanges.Emit(struct{}{})
 		}
 	}
 }

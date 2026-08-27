@@ -8,6 +8,7 @@ package clipboard
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -111,4 +112,19 @@ func pipe(path string, args []string, text string) error {
 		return err
 	}
 	return cmd.Wait()
+}
+
+// CopyValue puts a value on the clipboard and reports what happened on logger,
+// which is the only feedback a tray menu has for a copy. A blank value or a nil
+// logger copies nothing.
+func CopyValue(logger *log.Logger, what, value string) {
+	if value == "" || logger == nil {
+		return
+	}
+
+	if err := Copy(value); err != nil {
+		logger.Printf("Failed to copy the %s: %v", what, err)
+		return
+	}
+	logger.Printf("Copied the %s to the clipboard", what)
 }

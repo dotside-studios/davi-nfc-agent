@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `event.Property`. `Tag`, `Reader` and `Any` carry traffic and stay
   `event.Signal`. `Events().Devices` reports an empty list on an agent built
   without a registry rather than staying silent
-- `ServerPlugin.Events` reports the connected client count and the allowlist as
-  properties, and `ServerPlugin.OriginState` reads the allowlist as one value:
-  the allowed origins, those refused since startup, and the session-wide bypass
+- `serverplugin.Plugin.Events` reports the connected client count and the
+  allowlist as properties, and `serverplugin.Plugin.OriginState` reads the
+  allowlist as one value: the allowed origins, those refused since startup, and
+  the session-wide bypass
 - `Agent.ApplyPreferences` changes the preferences as one value and answers with
   what the agent holds afterwards. The single-field setters (`SetReaderMode`,
   `SetCardTypeFilter`, `SetPinnedDevice`, `SetDevicePort`,
@@ -48,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   startup, to read off the kiosk screen, so a device can pin the pairing
   connection to a value that never crossed the network
 - `tls.BootstrapServer.PairHandler` serves pairing, to mount on the agent's
-  listener as an `agent.Endpoint`
+  listener as an `serverplugin.Endpoint`
 - `logbuf.Channel` gives a package a logger under a name at a level, and
   `logbuf.Install` names the ring those write into. `nfc`, `nfc/remotenfc`,
   `nfc/multimanager`, `nfc/pcsc`, `server`, `server/clientserver`,
@@ -62,17 +63,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the caller said so
 
 
-- `ServerPlugin.CheckOrigin` reports the origin check the listener applies, and
-  `ServerPlugin.OriginPolicy` the same allowlist as a `server.OriginPolicy`, for
-  whatever serves a WebSocket endpoint beside it. Both resolve per request, so
-  they can be handed to something built before the plugin activates. `ServerPlugin.OnOriginsChange`
-  follows the allowlist from something built before the plugin activates
+- `serverplugin.Plugin.CheckOrigin` reports the origin check the listener
+  applies, and `serverplugin.Plugin.OriginPolicy` the same allowlist as a
+  `server.OriginPolicy`, for whatever serves a WebSocket endpoint beside it.
+  Both resolve per request, so they can be handed to something built before the
+  plugin activates. `serverplugin.Plugin.OnOriginsChange` follows the allowlist
+  from something built before the plugin activates
 - `clientserver.Server` is an `http.Handler`: `ServeWS` is `ServeHTTP`, so it is
   mounted as `ServeMode[server.ModeClient]` the way a device endpoint is mounted
   under `server.ModeDevice`
 - `Agent.TokenVerifier` reports the per-device credentials the agent issued at
   pairing, for whatever admits a connection presenting one
-- `ServerPlugin.ClientCount`, `Clients`, `DisconnectClient` and
+- `serverplugin.Plugin.ClientCount`, `Clients`, `DisconnectClient` and
   `OnClientsChange` report on and act on the clients connected right now. A
   subscription outlives the server behind it, so it survives a restart
 - The agent operates every reader through `nfc.Supervisor` rather than opening
@@ -112,9 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   route with `ctx.Mount` and a tray entry with `ctx.Systray`. Plugins are Go
   values the program constructs and registers with `Agent.Plugins.Add`; nothing
   is loaded at run time
-- Three plugins ship: `agent.ServerPlugin` owns the listener and its
-  `agent.Endpoint`s, `agent.PairingPlugin` runs the pairing server and its tray
-  entries, `agent.TrustPlugin` holds the certificate the other two read
+- Three plugins ship: `serverplugin.Plugin` owns the listener and its
+  `serverplugin.Endpoint`s, `pairingplugin.Plugin` runs the pairing server and
+  its tray entries, `trustplugin.Plugin` holds the certificate the other two
+  read
 - `traymenu.Discard` and `traymenu.Section` as a `Container`
 - Subscriptions: `Agent.Events()` publishes what the agent reports as typed
   signals, connected to at any time and disconnected through the handle each
@@ -157,15 +160,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `ServerPlugin.OnOriginsChange` returns an `*event.Connection`, so a subscriber
+- The shipped plugins are packages of their own: `agent/serverplugin`,
+  `agent/pairingplugin` and `agent/trustplugin`, with `ServerPlugin`,
+  `PairingPlugin` and `TrustPlugin` renamed to `Plugin` in each.
+  `agent.Endpoint` is `serverplugin.Endpoint`, `agent.OriginState` is
+  `serverplugin.OriginState`, `agent.ServerEvents` is `serverplugin.Events`,
+  and `NewPairingPlugin`, `PairingFor`, `NewPairingServer`, `PairingConfig` and
+  `NewPairingIssuer` are `pairingplugin.New`, `ServerFor`, `NewServer`,
+  `ServerConfig` and `NewIssuer`. They were plugins in structure and part of
+  the core package in fact, so leaving one out of a build removed nothing from
+  the binary. Package `agent` drops the mDNS stack from its dependencies;
+  `tls` and `server` still reach it through `Setup` and `Agent.TokenVerifier`
+- `Agent.ServerRebound` raises `Events().Servers`, which is how a plugin
+  reports that its listener bound again. The server plugin called an
+  unexported method for this
+- `clipboard.CopyValue` copies a value and logs the result, which was an
+  unexported helper in `agent/menu.go` that only the plugins used
+- `server/netinfo` reports the addresses this machine serves on:
+  `netinfo.LocalIPs` is `agent.LocalIPs` moved, and `netinfo.ServiceAddress`
+  is the host and port a tray entry or a console page hands out. The agent
+  core called neither, and the two plugins and the console each built the
+  address themselves
+- `serverplugin.Plugin.OnOriginsChange` returns an `*event.Connection`, so a subscriber
   can stop following. Both it and `OnClientsChange` are deprecated in favour of
-  `ServerPlugin.Events`; neither replays on connect, as before
+  `serverplugin.Plugin.Events`; neither replays on connect, as before
 - Pairing is served from the agent's listener, at `/pair`, instead of the
   cleartext bootstrap listener. The PIN travelled as a query parameter and the
   response carried the device token and the agent's `publicKeyPin`, so an
   observer on the LAN read the credential and an active attacker could
   substitute a key pin of their own. A build mounts it with
-  `servers.Add(agent.Endpoint{Pattern: "/pair", Handler: pairing.Server.Server().PairHandler()})`.
+  `servers.Add(serverplugin.Endpoint{Pattern: "/pair", Handler: pairing.Server.Server().PairHandler()})`.
   The bootstrap listener keeps its port and stays cleartext, since it hands out
   the certificate authority to a device that does not trust the agent's
   certificate yet; it no longer routes `/pair`, and `/pair` refuses a cleartext
@@ -182,7 +206,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SupportsEvents`. How a device reports a scan says nothing about whether it
   can exchange bytes with a tag; only `DeviceTransceiver` decides that, and the
   PC/SC device now declares it
-- `ServerPlugin.Authenticate` is the credential check for a device endpoint,
+- `serverplugin.Plugin.Authenticate` is the credential check for a device endpoint,
   replacing `server.DeviceAuth` and `Agent.DeviceAuth`. A build passes
   `servers.Authenticate()` where it passed `rt.Agent.DeviceAuth.Check`. It sits
   beside `CheckOrigin` and resolves per request the same way, so it can be
@@ -214,17 +238,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection, and connections already open are left alone
 - The clients connected to an agent are the server plugin's, not the agent's.
   `Agent.ClientCount`, `Clients` and `DisconnectClient` are the same three
-  methods on `ServerPlugin`, and `Events().Clients` is
-  `ServerPlugin.OnClientsChange`. The agent no longer holds a pointer to the
+  methods on `serverplugin.Plugin`, and `Events().Clients` is
+  `serverplugin.Plugin.OnClientsChange`. The agent no longer holds a pointer to the
   server serving them
 - `agent.OriginStore` and `agent.ParseAllowedOrigins` are `server.OriginStore`
   and `server.ParseAllowedOrigins`, beside the origin checks that read them, and
-  the allowlist is `agent.ServerPlugin`'s: it builds the store under the agent's
-  config directory, seeds it from `ServerPlugin.AllowedOrigins`, consults it on
+  the allowlist is `serverplugin.Plugin`'s: it builds the store under the agent's
+  config directory, seeds it from `serverplugin.Plugin.AllowedOrigins`, consults it on
   every upgrade and owns the tray's **Allowed Origins** section. `Setup` parses
   what the flags named onto `Runtime.AllowedOrigins` for the plugin to serve
   behind. An agent serving nothing holds no allowlist
-- `agent.ServerPlugin` serves the clients. It mounts `/ws` and the health checks
+- `serverplugin.Plugin` serves the clients. It mounts `/ws` and the health checks
   itself and routes a connection by the mode it declares; `ServeMode` names what
   serves each, browser clients included. A build declares its own client server,
   as it already declared its device endpoint, and one that declares neither
@@ -303,11 +327,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same value a second way is gone too. The JSON shape is unchanged
 - `wsconn` moved to `server/wsconn`. `server.SafeConn` and `server.NewSafeConn`,
   which were aliases onto it, are gone: take `wsconn.SafeConn` directly
-- `ServerPlugin` and `PairingPlugin` no longer take a `*TrustPlugin`. Each takes
-  what it needs: `ServerPlugin.Config` the certificate files, with `Setup`
-  resolving them onto `Runtime.CertFile`/`KeyFile`, `ServerPlugin.Certificates`
-  the reissue signal, and `NewPairingPlugin` a `tls.CertificateAuthority`.
-  `TrustPlugin` keeps the tray entry that installs the local authority and loses
+- `serverplugin.Plugin` and `pairingplugin.Plugin` no longer take a `*trustplugin.Plugin`. Each takes
+  what it needs: `serverplugin.Plugin.Config` the certificate files, with `Setup`
+  resolving them onto `Runtime.CertFile`/`KeyFile`, `serverplugin.Plugin.Certificates`
+  the reissue signal, and `pairingplugin.New` a `tls.CertificateAuthority`.
+  `trustplugin.Plugin` keeps the tray entry that installs the local authority and loses
   `CertFile`, `KeyFile`, `Authority` and `Watcher`
 - The `webui` package merged into `agent/console`, which now holds the gate, the
   routes, the state snapshot, the dispatcher, the `Host` adapter and the
@@ -317,12 +341,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/ws` and the two health checks, as data for whatever mounts it. `Setup` builds
   no listener and no pairing server: the program registers both as plugins. Gone
   with it: `Config.Server`, `Agent.UnifiedServer`, `Runtime.Server`
-- The agent holds no certificate. `agent.TrustPlugin` wraps the `*tls.Manager`
+- The agent holds no certificate. `trustplugin.Plugin` wraps the `*tls.Manager`
   from `Runtime.Certificates`, and the pairing server and listener take narrower
   contracts: `PairingConfig.CA` is `tls.CertificateAuthority`, two methods rather
   than the whole manager
 - `tls.Manager` reports every reissue on `CertificateWatcher.WatchReissues`, and
-  `ServerPlugin` rebinds on one, so installing a CA no longer needs a restart
+  `serverplugin.Plugin` rebinds on one, so installing a CA no longer needs a restart
 - The server plugin owns the tray's Server URLs submenu: the device and client
   addresses, the API secret, and their copy and regenerate actions moved out of
   `agent/tray`
@@ -397,7 +421,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agent.DeviceEndpointOptions`. A program builds its device endpoint from what
   the agent answers, `DeviceAuth.Check`, `TagModificationAllowed` and
   `PublicKeyPin`, plus `servers.CheckOrigin()`, and mounts it as
-  `ServerPlugin.ServeMode[server.ModeDevice]` rather than handing the agent a
+  `serverplugin.Plugin.ServeMode[server.ModeDevice]` rather than handing the agent a
   builder to call
 - `Agent.ClientServer`, `Agent.Routes` and `agent.Route`. What the agent serves
   is the server plugin's, so the agent holds no server and hands over no routes.

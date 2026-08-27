@@ -246,7 +246,7 @@ Everything in `agent/console/` carries `//go:build !nowebui` except
 the stubs under the opposite tag.
 
 The agent itself needs no tag either way, and does not know the console at all.
-`Endpoints` returns `[]agent.Endpoint`, which the program hands to the server
+`Endpoints` returns `[]serverplugin.Endpoint`, which the program hands to the server
 plugin like any other route, so the dependency runs one way: `agent/console`
 imports `agent`, never the reverse, and `main` is the only place that wires the
 two together. Under `nowebui` that call returns nothing and the rest of the

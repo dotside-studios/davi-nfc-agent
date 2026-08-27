@@ -27,6 +27,9 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -66,12 +69,12 @@ func main() {
 
 	// The tray entry that installs the local authority, so browsers on this
 	// machine accept the agent.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	trust := &trustplugin.Plugin{Manager: rt.Certificates}
 
 	// The listener and everything on it. Setup builds no listener; the program
 	// decides what this agent serves. Setup resolved which certificate to
 	// serve; Certificates is what rebinds the listener when it is reissued.
-	servers := &agent.ServerPlugin{
+	servers := &serverplugin.Plugin{
 		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates:   rt.Certificates,
 		AllowedOrigins: rt.AllowedOrigins,
@@ -101,7 +104,7 @@ func main() {
 	// Pairing: a listener of its own, and the tray entries that hand out its
 	// address and PIN. The agent holds no pairing server, so it is built here
 	// and passed to the console. It hands the authority to a device that pairs.
-	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
+	pairing := pairingplugin.New(rt.Agent, opts.BootstrapPort, rt.Certificates)
 
 	app := tray.New(rt)
 
@@ -142,25 +145,25 @@ be declared before the port exists. See [Plugins](#plugins).
 
 The certificate is the `*tls.Manager` that `Setup` returns as
 `rt.Certificates`, alongside `rt.CertFile` and `rt.KeyFile`, the pair a listener
-should serve. Each plugin takes the narrow part it needs: `ServerPlugin.Config`
-the files and `ServerPlugin.Certificates` the reissue signal, `NewPairingPlugin`
+should serve. Each plugin takes the narrow part it needs: `serverplugin.Plugin.Config`
+the files and `serverplugin.Plugin.Certificates` the reissue signal, `pairingplugin.New`
 the authority a pairing device is given. A build serving a certificate
 provisioned elsewhere passes that pair and leaves `Certificates` nil, there
 being nothing to reissue.
 
-`agent.TrustPlugin` wraps the same manager for the one job the others do not do:
+`trustplugin.Plugin` wraps the same manager for the one job the others do not do:
 the tray entry that installs the local authority, hidden once there is nothing
 left to install. `console.Config.Trust` takes it so the same install can be
 started from a page. Leave `Manager` nil and the plugin is inert.
 
-Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
+Pairing is `pairingplugin.Plugin`, which runs the pairing server and owns the
 menu entries that hand out its address and PIN.
-`agent.NewPairingPlugin(a, port, trust)` takes the device registry, the key pin
+`pairingplugin.New(a, port, trust)` takes the device registry, the key pin
 and the name from the agent, so nothing already given to `Setup` is repeated.
 Omit the plugin and the build pairs no devices: the console is handed `nil` and
 reports pairing as disabled. For the listener without the menu entries, register
-the component directly with `agent.PairingFor(a, port, ca)` and `ctx.Use` or an
-`agent.Endpoint`.
+the component directly with `pairingplugin.ServerFor(a, port, ca)` and `ctx.Use` or an
+`serverplugin.Endpoint`.
 
 The NFC backend is `Setup`'s second argument, which is why every package beneath
 `cmd` builds without one. A manager reports what its devices scan through
@@ -266,24 +269,24 @@ none leaves an agent that drives the reader and serves nothing.
 
 | Plugin | Owns |
 |---|---|
-| `agent.ServerPlugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
-| `agent.PairingPlugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
-| `agent.TrustPlugin` | The entry that installs the local certificate authority |
+| `serverplugin.Plugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
+| `pairingplugin.Plugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
+| `trustplugin.Plugin` | The entry that installs the local certificate authority |
 
 ```go
-trust := &agent.TrustPlugin{Manager: rt.Certificates}
-servers := &agent.ServerPlugin{
+trust := &trustplugin.Plugin{Manager: rt.Certificates}
+servers := &serverplugin.Plugin{
 	Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 	Certificates:   rt.Certificates,
 	AllowedOrigins: rt.AllowedOrigins,
 }
-pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
+pairing := pairingplugin.New(rt.Agent, 9472, rt.Certificates)
 
 // Pairing issues a durable credential and the key pin a device recognises this
 // agent by, so it is served from the listener that already serves the
 // certificate that pin covers. Port 9472 stays cleartext: it hands out the
 // certificate authority to a device that does not trust that certificate yet.
-servers.Add(agent.Endpoint{
+servers.Add(serverplugin.Endpoint{
 	Name:    "pairing",
 	Pattern: "/pair",
 	Handler: pairing.Server.Server().PairHandler(),
@@ -296,12 +299,12 @@ The server plugin goes on first. It publishes the listener with `ctx.Serve`,
 which is what backs `ctx.Mount` for every plugin registered after it, and an
 `agent.Mounter` is one method wide so the agent never names a server type.
 
-What goes on that listener is an `agent.Endpoint`: a route, something with a
+What goes on that listener is an `serverplugin.Endpoint`: a route, something with a
 lifetime, a menu entry, or any combination.
 
 ```go
-servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
-servers.Add(agent.Endpoint{Name: "queue drain", Component: drain})
+servers.Add(serverplugin.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
+servers.Add(serverplugin.Endpoint{Name: "queue drain", Component: drain})
 ```
 
 The plugin mounts what the agent is reached on first and reserves it: `/ws`,
@@ -359,10 +362,10 @@ the agent is serving and goes down before it. Give it `Certificates` and a
 reissued certificate rebinds it on its own; leave it nil for one that never
 changes underneath.
 
-`PairingPlugin` and `TrustPlugin` tolerate being nil, so a build that registers
+`pairingplugin.Plugin` and `trustplugin.Plugin` tolerate being nil, so a build that registers
 neither hands `nil` to the console and it reports both as unavailable. The
-per-field details are on the types themselves: `go doc agent.ServerPlugin`,
-`agent.Endpoint`, `agent.NewPairingPlugin`, `agent.TrustPlugin`.
+per-field details are on the types themselves: `go doc serverplugin.Plugin`,
+`serverplugin.Endpoint`, `pairingplugin.New`, `trustplugin.Plugin`.
 
 The pairing entries follow the server, so rotating the PIN from the menu or from
 the console relabels both. The trust entry is shown only while there is
@@ -473,6 +476,7 @@ import (
 	"syscall"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -494,7 +498,7 @@ func main() {
 	// The listener, serving browser clients on /ws and the health checks beside
 	// it. Leave it out for a service that reads cards and serves no HTTP. Setup
 	// resolved the certificate; blank leaves the listener serving plain HTTP.
-	servers := &agent.ServerPlugin{
+	servers := &serverplugin.Plugin{
 		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates:   rt.Certificates,
 		AllowedOrigins: rt.AllowedOrigins,
@@ -548,7 +552,7 @@ rt, err := agent.Setup(agent.DefaultOptions(), manager)
 if err != nil {
 	log.Fatal(err)
 }
-rt.Agent.Plugins.Add(&agent.ServerPlugin{
+rt.Agent.Plugins.Add(&serverplugin.Plugin{
 	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 	Certificates: rt.Certificates,
 })

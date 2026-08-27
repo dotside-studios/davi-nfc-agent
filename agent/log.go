@@ -10,7 +10,3 @@ var (
 	agentLog  = logbuf.Channel("agent", logbuf.LevelInfo)
 	agentWarn = logbuf.Channel("agent", logbuf.LevelWarn)
 )
-
-// deviceWarn reports rejected device connections on the device endpoint's
-// channel, beside the connections it refused.
-var deviceWarn = logbuf.Channel("device", logbuf.LevelWarn)

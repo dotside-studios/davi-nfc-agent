@@ -1,9 +1,10 @@
-package agent
+package serverplugin
 
 import (
 	"net/http"
 	"testing"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -13,14 +14,14 @@ import (
 // something following one is not woken by the other. The console takes both,
 // since either changes what an open page shows.
 func TestAPreferenceChangeDoesNotLookLikeAClientChange(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 
 	clients, preferences := 0, 0
 	p.OnClientsChange(func(int) { clients++ })
-	a.Events().Preferences.Connect(func(Preferences) { preferences++ })
+	a.Events().Preferences.Connect(func(agent.Preferences) { preferences++ })
 
-	// Preferences is a Property, so connecting replayed the current value.
+	// agent.Preferences is a Property, so connecting replayed the current value.
 	preferences = 0
 
 	a.SetReaderMode(nfc.ModeReadOnly)
@@ -38,7 +39,7 @@ func TestAPreferenceChangeDoesNotLookLikeAClientChange(t *testing.T) {
 // once snapshotted there, which left a late one seeing preference changes but
 // no client ones.
 func TestALateClientSubscriberIsStillCalled(t *testing.T) {
-	p := &ServerPlugin{}
+	p := &Plugin{}
 	a := serverAgent(t, p)
 
 	if err := a.Start(""); err != nil {
@@ -63,7 +64,7 @@ func TestALateClientSubscriberIsStillCalled(t *testing.T) {
 // server is reported on the same way as one the plugin built.
 func TestASubscriberFollowsTheServerTheBuildSupplied(t *testing.T) {
 	supplied := clientserver.New(clientserver.Config{})
-	p := &ServerPlugin{ServeMode: map[string]http.Handler{server.ModeClient: supplied}}
+	p := &Plugin{ServeMode: map[string]http.Handler{server.ModeClient: supplied}}
 
 	got := -1
 	sub := p.OnClientsChange(func(clients int) { got = clients })

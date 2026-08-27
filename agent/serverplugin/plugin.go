@@ -1,4 +1,4 @@
-package agent
+package serverplugin
 
 import (
 	"context"
@@ -11,11 +11,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
+	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -44,7 +47,7 @@ type Endpoint struct {
 
 	// Component, when set, starts and stops with the agent, in the order the
 	// endpoints are listed.
-	Component Component
+	Component agent.Component
 
 	// Menu, when set, adds the endpoint's entries to the tray's Server URLs
 	// submenu, beside the addresses the agent serves from the same listener.
@@ -68,14 +71,14 @@ func (e Endpoint) name() string {
 	}
 }
 
-// ServerPlugin is the agent's listener and everything served from it.
+// Plugin is the agent's listener and everything served from it.
 //
 // It owns the [listener.Server]. It builds one from Config or serves the one it
 // is given, mounts what the agent is reached on, publishes it for the plugins
 // registered after it, then mounts the endpoints registered here. A build decides what the agent
 // serves by registering one and listing what goes on it:
 //
-//	a.Plugins.Add(&agent.ServerPlugin{Endpoints: []agent.Endpoint{
+//	a.Plugins.Add(&serverplugin.Plugin{Endpoints: []serverplugin.Endpoint{
 //		{Name: "control API", Pattern: "/control/", Handler: console.Routes()},
 //		{Name: "control center", Pattern: "/", Handler: console.Assets()},
 //	}})
@@ -88,7 +91,7 @@ func (e Endpoint) name() string {
 //
 // There is one of these per agent. A second has no listener to publish and says
 // so rather than quietly serving nothing.
-type ServerPlugin struct {
+type Plugin struct {
 	// Config is the listener to build, read only when Server is nil. The port,
 	// the certificate and the advertised name fall back to the agent's own, so
 	// a plugin registered with no configuration serves what the agent was set
@@ -100,7 +103,7 @@ type ServerPlugin struct {
 	Server *listener.Server
 
 	// Endpoints are served in order: each is mounted, its component
-	// registered, and its menu entries added. See [ServerPlugin.Add].
+	// registered, and its menu entries added. See [Plugin.Add].
 	Endpoints []Endpoint
 
 	// MenuTitle names the tray submenu the addresses are listed under. Blank
@@ -149,12 +152,12 @@ type ServerPlugin struct {
 	secret   *traymenu.Item
 	logger   *log.Logger
 	failures *log.Logger
-	agent    *Agent
+	agent    *agent.Agent
 
 	// events is what the plugin reports, published by Events. It republishes
 	// what the server and the store behind it report, so a subscriber connects
 	// to the plugin rather than to whichever of them this build put there.
-	events     ServerEvents
+	events     Events
 	eventsOnce sync.Once
 
 	// The allowlist entries, redrawn from the store rather than from clicks.
@@ -162,11 +165,11 @@ type ServerPlugin struct {
 	originAllowAny *traymenu.Item
 }
 
-// ServerEvents is what the server plugin reports. Both are [event.Property], so
+// Events is what the server plugin reports. Both are [event.Property], so
 // connecting answers with the current value: a console built alongside the
 // plugin draws its first page without reading the plugin separately, and
 // without missing what changed in between.
-type ServerEvents struct {
+type Events struct {
 	// Clients carries the connected count after each connect and disconnect,
 	// and 0 while nothing is serving them.
 	Clients event.Property[int]
@@ -191,7 +194,7 @@ type OriginState struct {
 
 // Events is what the plugin reports. Live before the plugin activates, so a
 // console built alongside it subscribes without waiting.
-func (p *ServerPlugin) Events() *ServerEvents {
+func (p *Plugin) Events() *Events {
 	p.eventsOnce.Do(func() {
 		p.events.Clients.Current = p.ClientCount
 		p.events.Origins.Current = p.OriginState
@@ -199,26 +202,26 @@ func (p *ServerPlugin) Events() *ServerEvents {
 	return &p.events
 }
 
-var _ Plugin = (*ServerPlugin)(nil)
+var _ agent.Plugin = (*Plugin)(nil)
 
 // Name identifies the plugin.
-func (p *ServerPlugin) Name() string { return "server" }
+func (p *Plugin) Name() string { return "server" }
 
 // Add registers endpoints, in order. Call it before the agent activates its
 // plugins. This is how a program puts what only it knows about, its control
 // center or its own routes, on the listener the agent was set up with.
-func (p *ServerPlugin) Add(endpoints ...Endpoint) {
+func (p *Plugin) Add(endpoints ...Endpoint) {
 	p.Endpoints = append(p.Endpoints, endpoints...)
 }
 
 // Listener returns the server the plugin serves from: the one it was given, or
 // the one it built at activation. Nil before activation when neither.
-func (p *ServerPlugin) Listener() *listener.Server { return p.Server }
+func (p *Plugin) Listener() *listener.Server { return p.Server }
 
 // CertFile is the certificate being served, empty when none is, and TLSEnabled
 // reports the same as a question. Both are what the listener resolved, which is
 // not always what any one place configured.
-func (p *ServerPlugin) CertFile() string {
+func (p *Plugin) CertFile() string {
 	if p == nil || p.Server == nil {
 		return ""
 	}
@@ -226,7 +229,7 @@ func (p *ServerPlugin) CertFile() string {
 }
 
 // TLSEnabled reports whether the listener is serving HTTPS and WSS.
-func (p *ServerPlugin) TLSEnabled() bool {
+func (p *Plugin) TLSEnabled() bool {
 	if p == nil || p.Server == nil {
 		return false
 	}
@@ -237,7 +240,7 @@ func (p *ServerPlugin) TLSEnabled() bool {
 // It differs from the agent's configured port once a preference saves a
 // different one, since the listener keeps the port it was built with, and is 0
 // before activation.
-func (p *ServerPlugin) Port() int {
+func (p *Plugin) Port() int {
 	if p == nil || p.Server == nil {
 		return 0
 	}
@@ -248,7 +251,7 @@ func (p *ServerPlugin) Port() int {
 //
 // It stops at the first endpoint it cannot register, failing the agent's start.
 // A control center missing its API is worse than one that is not there.
-func (p *ServerPlugin) Activate(ctx AgentContext) error {
+func (p *Plugin) Activate(ctx agent.AgentContext) error {
 	p.logger = ctx.Logger()
 	p.failures = ctx.LoggerAt(logbuf.LevelError)
 	p.agent = ctx.Agent
@@ -298,9 +301,9 @@ func (p *ServerPlugin) Activate(ctx AgentContext) error {
 //
 // Whoever reissues a certificate does not call this. The manager reports the
 // reissue and the watch below binds again; see [tlspkg.CertificateWatcher].
-func (p *ServerPlugin) Rebind() error {
+func (p *Plugin) Rebind() error {
 	if p.Server == nil {
-		return fmt.Errorf("agent: no listener to rebind")
+		return fmt.Errorf("serverplugin: no listener to rebind")
 	}
 
 	p.logf("Rebinding the listener...")
@@ -315,7 +318,7 @@ func (p *ServerPlugin) Rebind() error {
 
 	p.logf("Listener rebound successfully")
 	if p.agent != nil {
-		p.agent.fireServerRestart()
+		p.agent.ServerRebound()
 	}
 	return nil
 }
@@ -325,7 +328,7 @@ func (p *ServerPlugin) Rebind() error {
 // lifecycle rather than something the agent does about servers specifically.
 type listenerComponent struct {
 	server *listener.Server
-	agent  *Agent
+	agent  *agent.Agent
 }
 
 func (l *listenerComponent) Name() string { return "listener" }
@@ -343,17 +346,17 @@ func (l *listenerComponent) Stop() error {
 // credential a client presents to them. The plugin owns it because it owns the
 // listener: what is served from a port is what the thing holding the port
 // knows.
-func (p *ServerPlugin) serverURLs(ctx AgentContext) error {
+func (p *Plugin) serverURLs(ctx agent.AgentContext) error {
 	menu := ctx.Systray.Section(p.menuTitle(), traymenu.Tooltip("Addresses this agent serves on"))
 
 	p.device = menu.Set("device", "Device: Not running", traymenu.Tooltip("The URL a reader or a phone connects to"), traymenu.Disabled())
 	menu.Set("copy-device", "  Copy Device URL",
-		traymenu.OnClick(func() { copyValue(p.logger, "device URL", p.deviceURL()) }),
+		traymenu.OnClick(func() { clipboard.CopyValue(p.logger, "device URL", p.deviceURL()) }),
 	)
 
 	p.client = menu.Set("client", "Client: Not running", traymenu.Tooltip("The URL a web app connects to"), traymenu.Disabled())
 	menu.Set("copy-client", "  Copy Client URL",
-		traymenu.OnClick(func() { copyValue(p.logger, "client URL", p.clientURL()) }),
+		traymenu.OnClick(func() { clipboard.CopyValue(p.logger, "client URL", p.clientURL()) }),
 	)
 
 	// Then whatever is mounted on the same listener, each under its own name.
@@ -369,13 +372,13 @@ func (p *ServerPlugin) serverURLs(ctx AgentContext) error {
 	// The addresses follow the machine's own, so they are redrawn whenever the
 	// agent starts or stops and whenever the listener is bound again.
 	p.refresh(ctx.Agent)
-	ctx.Events.State.Connect(func(State) { p.refresh(ctx.Agent) })
+	ctx.Events.State.Connect(func(agent.State) { p.refresh(ctx.Agent) })
 	ctx.Events.Servers.Connect(func(int) { p.refresh(ctx.Agent) })
 	return nil
 }
 
 // apiSecret adds the credential entries, which mean nothing without one.
-func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
+func (p *Plugin) apiSecret(ctx agent.AgentContext, menu *traymenu.Section) {
 	if ctx.Agent.APISecret() == "" {
 		return
 	}
@@ -385,7 +388,7 @@ func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
 		traymenu.Disabled(),
 	)
 	menu.Set("copy-secret", "  Copy API Secret",
-		traymenu.OnClick(func() { copyValue(p.logger, "API secret", ctx.Agent.APISecret()) }),
+		traymenu.OnClick(func() { clipboard.CopyValue(p.logger, "API secret", ctx.Agent.APISecret()) }),
 	)
 	menu.Set("rotate-secret", "  Regenerate API Secret",
 		traymenu.Tooltip("Generate a fresh secret; every phone must handshake again"),
@@ -403,7 +406,7 @@ func (p *ServerPlugin) apiSecret(ctx AgentContext, menu *traymenu.Section) {
 
 // refresh brings the addresses back in step with what is being served. Safe
 // from any goroutine, as the hooks calling it need.
-func (p *ServerPlugin) refresh(a *Agent) {
+func (p *Plugin) refresh(a *agent.Agent) {
 	if !a.Running() {
 		p.device.SetTitle("Device: Not running")
 		p.client.SetTitle("Client: Not running")
@@ -420,18 +423,18 @@ func (p *ServerPlugin) refresh(a *Agent) {
 // clientURL is where a web app connects, and deviceURL where a reader or a
 // phone does. They share the port and the path, and differ by the mode a
 // device declares.
-func (p *ServerPlugin) clientURL() string {
+func (p *Plugin) clientURL() string {
 	scheme := "ws"
 	if p.Config.TLSEnabled() {
 		scheme = "wss"
 	}
-	return scheme + "://" + serviceAddress(serviceHost(), p.Port()) + "/ws"
+	return scheme + "://" + netinfo.ServiceAddress(p.Port()) + "/ws"
 }
 
-func (p *ServerPlugin) deviceURL() string { return p.clientURL() + "?mode=device" }
+func (p *Plugin) deviceURL() string { return p.clientURL() + "?mode=device" }
 
 // endpointURL is where an endpoint answers, empty for one with no route.
-func (p *ServerPlugin) endpointURL(endpoint Endpoint) string {
+func (p *Plugin) endpointURL(endpoint Endpoint) string {
 	if endpoint.Pattern == "" {
 		return ""
 	}
@@ -440,7 +443,7 @@ func (p *ServerPlugin) endpointURL(endpoint Endpoint) string {
 	if p.Config.TLSEnabled() {
 		scheme = "https"
 	}
-	return scheme + "://" + serviceAddress(serviceHost(), p.Port()) + endpoint.Pattern
+	return scheme + "://" + netinfo.ServiceAddress(p.Port()) + endpoint.Pattern
 }
 
 // redact shows enough of a secret to tell it apart from the one it replaced,
@@ -455,7 +458,7 @@ func redact(secret string) string {
 	return secret
 }
 
-func (p *ServerPlugin) logf(format string, args ...any) {
+func (p *Plugin) logf(format string, args ...any) {
 	if p.logger != nil {
 		p.logger.Printf(format, args...)
 	}
@@ -463,7 +466,7 @@ func (p *ServerPlugin) logf(format string, args ...any) {
 
 // failf reports something that did not work. The severity is stated here rather
 // than left for the console to read off the words.
-func (p *ServerPlugin) failf(format string, args ...any) {
+func (p *Plugin) failf(format string, args ...any) {
 	if p.failures != nil {
 		p.failures.Printf(format, args...)
 		return
@@ -473,7 +476,7 @@ func (p *ServerPlugin) failf(format string, args ...any) {
 
 // register wires one endpoint: its route and its lifetime. Its menu entries
 // come later, with the addresses; see serverURLs.
-func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint) error {
+func (p *Plugin) register(ctx agent.AgentContext, endpoint Endpoint) error {
 	if endpoint.Pattern != "" {
 		if endpoint.Handler == nil {
 			return fmt.Errorf("endpoint %q: mounted on %q with no handler", endpoint.name(), endpoint.Pattern)
@@ -496,7 +499,7 @@ func (p *ServerPlugin) register(ctx AgentContext, endpoint Endpoint) error {
 // certificate is reissued. It is here rather than on the agent because the
 // certificate is this plugin's configuration: an agent that serves no HTTP has
 // nothing to keep current.
-func (p *ServerPlugin) watchCertificates(ctx AgentContext) error {
+func (p *Plugin) watchCertificates(ctx agent.AgentContext) error {
 	// A nil *tls.Manager assigned to this interface is not a nil interface, and
 	// its methods dereference the receiver. Normalised here as
 	// tls.NewBootstrapServer does for the authority.
@@ -556,7 +559,7 @@ func (w *certificateWatch) Stop() error {
 }
 
 // config fills what Config left blank from the agent.
-func (p *ServerPlugin) config(a *Agent) listener.Config {
+func (p *Plugin) config(a *agent.Agent) listener.Config {
 	cfg := p.Config
 	if cfg.Port == 0 {
 		cfg.Port = a.DevicePort()
@@ -567,7 +570,7 @@ func (p *ServerPlugin) config(a *Agent) listener.Config {
 	return cfg
 }
 
-func (p *ServerPlugin) menuTitle() string {
+func (p *Plugin) menuTitle() string {
 	if p.MenuTitle != "" {
 		return p.MenuTitle
 	}
@@ -578,7 +581,7 @@ func (p *ServerPlugin) menuTitle() string {
 // activation and for a build serving clients with something else. As with the
 // listener accessors, a build that registered no plugin holds a nil one and is
 // answered rather than panicked.
-func (p *ServerPlugin) serving() *clientserver.Server {
+func (p *Plugin) serving() *clientserver.Server {
 	if p == nil {
 		return nil
 	}
@@ -588,7 +591,7 @@ func (p *ServerPlugin) serving() *clientserver.Server {
 
 // ClientCount is how many clients are connected, 0 when nothing is serving
 // them.
-func (p *ServerPlugin) ClientCount() int {
+func (p *Plugin) ClientCount() int {
 	serving := p.serving()
 	if serving == nil {
 		return 0
@@ -597,7 +600,7 @@ func (p *ServerPlugin) ClientCount() int {
 }
 
 // Clients lists the connected clients, most recently connected first.
-func (p *ServerPlugin) Clients() []clientserver.ClientInfo {
+func (p *Plugin) Clients() []clientserver.ClientInfo {
 	serving := p.serving()
 	if serving == nil {
 		return nil
@@ -607,7 +610,7 @@ func (p *ServerPlugin) Clients() []clientserver.ClientInfo {
 
 // DisconnectClient drops one client's connection. It reports an error for a
 // client that is not connected, which includes one that just left.
-func (p *ServerPlugin) DisconnectClient(id string) error {
+func (p *Plugin) DisconnectClient(id string) error {
 	serving := p.serving()
 	if serving == nil {
 		return errors.New("nothing is serving clients")
@@ -622,7 +625,7 @@ func (p *ServerPlugin) DisconnectClient(id string) error {
 // disconnect. The connection it returns removes it.
 //
 // Deprecated: use Events().Clients, which also reports the current count.
-func (p *ServerPlugin) OnClientsChange(fn func(int)) *event.Connection {
+func (p *Plugin) OnClientsChange(fn func(int)) *event.Connection {
 	if p == nil {
 		return nil
 	}
@@ -631,7 +634,7 @@ func (p *ServerPlugin) OnClientsChange(fn func(int)) *event.Connection {
 
 // serveModes republishes what the client server reports, so a subscriber
 // connects to the plugin rather than to the server the build mounted.
-func (p *ServerPlugin) serveModes() {
+func (p *Plugin) serveModes() {
 	if srv := p.serving(); srv != nil {
 		srv.OnClientsChange(p.Events().Clients.Emit)
 	}
@@ -640,7 +643,7 @@ func (p *ServerPlugin) serveModes() {
 // wsHandler routes a connection to the handler for the mode it declares.
 // Clients take the modes nothing is mounted for too: a connection naming a mode
 // this build does not run is not a device it can answer.
-func (p *ServerPlugin) wsHandler() http.Handler {
+func (p *Plugin) wsHandler() http.Handler {
 	byMode := maps.Clone(p.ServeMode)
 	clients := p.whileRunning(byMode[server.ModeClient])
 	delete(byMode, server.ModeClient)
@@ -652,7 +655,7 @@ func (p *ServerPlugin) wsHandler() http.Handler {
 // before it is told so rather than left holding a connection that reports
 // nothing. Devices are not gated: a driver decides for itself what to do with
 // one that connects early.
-func (p *ServerPlugin) whileRunning(h http.Handler) http.Handler {
+func (p *Plugin) whileRunning(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h == nil {
 			http.Error(w, "this agent serves no clients", http.StatusServiceUnavailable)
@@ -669,7 +672,7 @@ func (p *ServerPlugin) whileRunning(h http.Handler) http.Handler {
 // healthHandler reports that the agent is up and how many clients it is
 // serving. Mounted at both /health and /api/v1/health: the two spellings
 // predate each other and clients in the wild use both.
-func (p *ServerPlugin) healthHandler() http.Handler {
+func (p *Plugin) healthHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

@@ -15,7 +15,10 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -65,11 +68,11 @@ func main() {
 
 	// The certificate this agent serves, and the entry that makes browsers
 	// accept it.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	trust := &trustplugin.Plugin{Manager: rt.Certificates}
 
 	// The listener and everything on it. Setup resolved which certificate to
 	// serve; registering no server plugin leaves an agent that serves nothing.
-	servers := &agent.ServerPlugin{
+	servers := &serverplugin.Plugin{
 		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
 		Certificates:   rt.Certificates,
 		AllowedOrigins: rt.AllowedOrigins,
@@ -104,10 +107,10 @@ func main() {
 	// durable credential and the key pin a device recognises this agent by, so
 	// it mounts on the listener already serving the certificate that pin
 	// covers.
-	var pairing *agent.PairingPlugin
+	var pairing *pairingplugin.Plugin
 	if opts.BootstrapPort > 0 {
-		pairing = agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
-		servers.Add(agent.Endpoint{
+		pairing = pairingplugin.New(rt.Agent, opts.BootstrapPort, rt.Certificates)
+		servers.Add(serverplugin.Endpoint{
 			Name:    "pairing",
 			Pattern: "/pair",
 			Handler: pairing.Server.Server().PairHandler(),

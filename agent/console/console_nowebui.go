@@ -7,6 +7,9 @@ import (
 	"net/http"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 )
 
@@ -22,9 +25,9 @@ type Server struct{}
 type Config struct {
 	Agent   *agent.Agent
 	Logs    *logbuf.Ring
-	Servers *agent.ServerPlugin
-	Pairing *agent.PairingPlugin
-	Trust   *agent.TrustPlugin
+	Servers *serverplugin.Plugin
+	Pairing *pairingplugin.Plugin
+	Trust   *trustplugin.Plugin
 	Quit    func()
 }
 
@@ -34,8 +37,8 @@ func New(Config) *Server { return nil }
 func (s *Server) Routes() http.Handler { return nil }
 
 // Endpoints reports that this build serves no console.
-func (s *Server) Endpoints() []agent.Endpoint { return nil }
-func (s *Server) Assets() http.Handler        { return nil }
+func (s *Server) Endpoints() []serverplugin.Endpoint { return nil }
+func (s *Server) Assets() http.Handler               { return nil }
 
 // NotifyChange is what the agent's changes call to wake an open page.
 func (s *Server) NotifyChange() {}

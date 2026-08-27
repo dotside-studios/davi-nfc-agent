@@ -1,30 +1,33 @@
-package agent
+package pairingplugin
 
 import (
 	"fmt"
 	"log"
 	"net/url"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/clipboard"
+	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
-// PairingPlugin runs the pairing server and puts its entries on the tray: the
+// Plugin runs the pairing server and puts its entries on the tray: the
 // pairing page's address, the PIN a phone must present, and the actions that
 // copy or replace them.
 //
-// It is a wrapper around [PairingServer], which is the component that binds the
+// It is a wrapper around [Server], which is the component that binds the
 // listener. Registering the plugin is what a build does to pair devices:
 //
-//	pairing := agent.NewPairingPlugin(rt.Agent, 9472)
+//	pairing := pairingplugin.New(rt.Agent, 9472, rt.Certificates)
 //	rt.Agent.Plugins.Add(pairing)
 //
 // A build wanting the listener without the menu registers the component on its
-// own instead, through [AgentContext.Use] or an [Endpoint].
-type PairingPlugin struct {
-	// Server is the pairing server it runs. Required; NewPairingPlugin builds
+// own instead, through [agent.AgentContext.Use] or a [serverplugin.Endpoint].
+type Plugin struct {
+	// Server is the pairing server it runs. Required; New builds
 	// one, and a caller with its own passes it here.
-	Server *PairingServer
+	Server *Server
 
 	// MenuTitle names the submenu its entries go under. Blank uses "Pairing".
 	MenuTitle string
@@ -35,27 +38,27 @@ type PairingPlugin struct {
 	logger  *log.Logger
 }
 
-var _ Plugin = (*PairingPlugin)(nil)
+var _ agent.Plugin = (*Plugin)(nil)
 
-// NewPairingPlugin builds the pairing server for a, listening on port and
+// New builds the pairing server for a, listening on port and
 // handing out ca to a device that pairs, and the plugin that runs it. Pass
 // Runtime.Certificates, or nil for a build with no authority to give. See
-// [PairingFor].
+// [ServerFor].
 //
 // A zero port is a build that pairs no devices: it returns nil, and every
 // method tolerates one.
-func NewPairingPlugin(a *Agent, port int, ca tlspkg.CertificateAuthority) *PairingPlugin {
+func New(a *agent.Agent, port int, ca tlspkg.CertificateAuthority) *Plugin {
 	if port <= 0 {
 		return nil
 	}
-	return &PairingPlugin{Server: PairingFor(a, port, ca)}
+	return &Plugin{Server: ServerFor(a, port, ca)}
 }
 
 // Name identifies the plugin.
-func (p *PairingPlugin) Name() string { return "pairing" }
+func (p *Plugin) Name() string { return "pairing" }
 
 // Port reports the port the pairing server listens on, 0 when there is none.
-func (p *PairingPlugin) Port() int {
+func (p *Plugin) Port() int {
 	if p == nil {
 		return 0
 	}
@@ -64,7 +67,7 @@ func (p *PairingPlugin) Port() int {
 
 // PIN is the code a phone must present to pair, empty when there is no pairing
 // server.
-func (p *PairingPlugin) PIN() string {
+func (p *Plugin) PIN() string {
 	if p == nil {
 		return ""
 	}
@@ -74,7 +77,7 @@ func (p *PairingPlugin) PIN() string {
 // RotatePIN issues a fresh PIN, invalidating the pairing URLs carrying the old
 // one, and relabels the menu entries that show it. Safe to call from anywhere
 // that offers the action, the control center included.
-func (p *PairingPlugin) RotatePIN() string {
+func (p *Plugin) RotatePIN() string {
 	if p == nil {
 		return ""
 	}
@@ -86,17 +89,17 @@ func (p *PairingPlugin) RotatePIN() string {
 // URL is the pairing page, carrying the PIN so a link clicked from a chat goes
 // straight through. Always HTTP: a phone reaches this before it trusts the
 // agent's certificate, which it comes here to collect.
-func (p *PairingPlugin) URL() string {
+func (p *Plugin) URL() string {
 	port := p.Port()
 	if port == 0 {
 		return ""
 	}
 
-	return "http://" + serviceAddress(serviceHost(), port) + "/?pin=" + url.QueryEscape(p.PIN())
+	return "http://" + netinfo.ServiceAddress(port) + "/?pin=" + url.QueryEscape(p.PIN())
 }
 
 // Activate registers the pairing server and adds the plugin's menu entries.
-func (p *PairingPlugin) Activate(ctx AgentContext) error {
+func (p *Plugin) Activate(ctx agent.AgentContext) error {
 	if p == nil {
 		return nil
 	}
@@ -112,12 +115,12 @@ func (p *PairingPlugin) Activate(ctx AgentContext) error {
 	p.address = section.Set("address", "Pair Phone: --", traymenu.Disabled())
 	section.Set("copy-address", "Copy Pairing URL",
 		traymenu.Tooltip("Copy the phone-pairing URL to the clipboard"),
-		traymenu.OnClick(func() { copyValue(p.logger, "phone-pairing URL", p.URL()) }),
+		traymenu.OnClick(func() { clipboard.CopyValue(p.logger, "phone-pairing URL", p.URL()) }),
 	)
 	p.pin = section.Set("pin", "Pairing PIN: --", traymenu.Disabled())
 	section.Set("copy-pin", "Copy Pairing PIN",
 		traymenu.Tooltip("Copy the 6-digit pairing PIN to the clipboard"),
-		traymenu.OnClick(func() { copyValue(p.logger, "pairing PIN", p.PIN()) }),
+		traymenu.OnClick(func() { clipboard.CopyValue(p.logger, "pairing PIN", p.PIN()) }),
 	)
 	section.Set("rotate", "Regenerate Pairing PIN",
 		traymenu.Tooltip("Generate a fresh PIN; existing pairing URLs become invalid"),
@@ -130,14 +133,14 @@ func (p *PairingPlugin) Activate(ctx AgentContext) error {
 	// The address follows the machine's own, so it is redrawn whenever a
 	// listener binds again as well as when the agent starts and stops.
 	p.refresh()
-	ctx.Events.State.Connect(func(State) { p.refresh() })
+	ctx.Events.State.Connect(func(agent.State) { p.refresh() })
 	ctx.Events.Servers.Connect(func(int) { p.refresh() })
 	return nil
 }
 
 // refresh brings the labels back in step with the server. Safe from any
 // goroutine, as the hooks calling it need.
-func (p *PairingPlugin) refresh() {
+func (p *Plugin) refresh() {
 	if p.address != nil {
 		p.address.SetTitle("Pair Phone: " + p.URL())
 	}
@@ -146,13 +149,13 @@ func (p *PairingPlugin) refresh() {
 	}
 }
 
-func (p *PairingPlugin) logf(format string, args ...any) {
+func (p *Plugin) logf(format string, args ...any) {
 	if p.logger != nil {
 		p.logger.Printf(format, args...)
 	}
 }
 
-func (p *PairingPlugin) menuTitle() string {
+func (p *Plugin) menuTitle() string {
 	if p.MenuTitle != "" {
 		return p.MenuTitle
 	}

@@ -1,10 +1,12 @@
-package agent
+package pairingplugin
 
 import (
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
@@ -19,17 +21,17 @@ func reachable(url string) bool {
 }
 
 // TestPairingFollowsTheAgent is the ownership split this component closes.
-// Setup used to start the pairing listener itself and nothing but the command's
-// signal handler ever closed it, so Agent.Stop left it bound.
+// agent.Setup used to start the pairing listener itself and nothing but the command's
+// signal handler ever closed it, so agent.Agent.Stop left it bound.
 func TestPairingFollowsTheAgent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9487
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
-	if err := rt.Agent.Use(PairingFor(rt.Agent, 9489, nil)); err != nil {
+	if err := rt.Agent.Use(ServerFor(rt.Agent, 9489, nil)); err != nil {
 		t.Fatalf("Use: %v", err)
 	}
 
@@ -57,26 +59,26 @@ func TestPairingFollowsTheAgent(t *testing.T) {
 	}
 }
 
-// Setup builds no pairing server: whether an agent pairs devices, and what
+// agent.Setup builds no pairing server: whether an agent pairs devices, and what
 // displays the PIN, is the program's decision.
 func TestSetupBuildsNoPairingServer(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9491
 	opts.BootstrapPort = 9472
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 	if n := len(rt.Agent.Components()); n != 0 {
 		t.Errorf("Components() = %d, want none registered", n)
 	}
 }
 
-// A build without pairing holds a nil *PairingServer, and every caller asking
+// A build without pairing holds a nil *Server, and every caller asking
 // it for the PIN would otherwise have to check first.
 func TestANilPairingServerReportsItsAbsence(t *testing.T) {
-	var pairing *PairingServer
+	var pairing *Server
 
 	if got := pairing.Port(); got != 0 {
 		t.Errorf("Port() = %d, want 0", got)
@@ -92,15 +94,15 @@ func TestANilPairingServerReportsItsAbsence(t *testing.T) {
 	}
 }
 
-// PairingFor takes what the pairing server needs from the agent, so a program
-// repeats none of what it already told Setup.
+// ServerFor takes what the pairing server needs from the agent, so a program
+// repeats none of what it already told agent.Setup.
 func TestPairingForTakesTheAgentsConfiguration(t *testing.T) {
-	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	rt, err := agent.Setup(testOptions(t), nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	pairing := PairingFor(rt.Agent, 9495, nil)
+	pairing := ServerFor(rt.Agent, 9495, nil)
 	if got := pairing.Port(); got != 9495 {
 		t.Errorf("Port() = %d, want 9495", got)
 	}
@@ -115,13 +117,13 @@ func TestPairingRegistersAsAnEndpointComponent(t *testing.T) {
 	opts := testOptions(t)
 	opts.DevicePort = 9493
 
-	rt, err := Setup(opts, nfc.NewMockManager())
+	rt, err := agent.Setup(opts, nfc.NewMockManager())
 	if err != nil {
-		t.Fatalf("Setup: %v", err)
+		t.Fatalf("agent.Setup: %v", err)
 	}
 
-	pairing := PairingFor(rt.Agent, 9497, nil)
-	servers := &ServerPlugin{Endpoints: []Endpoint{{Name: "pairing", Component: pairing}}}
+	pairing := ServerFor(rt.Agent, 9497, nil)
+	servers := &serverplugin.Plugin{Endpoints: []serverplugin.Endpoint{{Name: "pairing", Component: pairing}}}
 	if err := rt.Agent.Plugins.Add(servers); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}

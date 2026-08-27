@@ -45,9 +45,11 @@ jobs:
         shell: bash
         run: ./scripts/build.sh ${{ matrix.goos }} ${{ matrix.goarch }}
 
-      - name: Install qemu (linux/arm64 cross only)
+      - name: Install qemu and arm64 libc (linux/arm64 cross only)
         if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
-        run: sudo apt-get install -y qemu-user-static
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static libc6-dev-arm64-cross
 
       - name: Smoke test artifact
         env:

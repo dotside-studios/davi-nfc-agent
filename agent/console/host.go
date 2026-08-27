@@ -11,6 +11,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
+	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 )
 
 // host adapts the agent to Host. Every reach the console makes into the agent
@@ -68,7 +69,7 @@ func (h *host) Port() int          { return h.servers.Port() }
 func (h *host) BootstrapPort() int { return h.pairing.Port() }
 func (h *host) CertFile() string   { return h.servers.CertFile() }
 func (h *host) TLSEnabled() bool   { return h.servers.TLSEnabled() }
-func (h *host) LocalIPs() []string { return agent.LocalIPs() }
+func (h *host) LocalIPs() []string { return netinfo.LocalIPs() }
 
 func (h *host) ClientCount() int { return h.servers.ClientCount() }
 

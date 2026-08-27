@@ -176,6 +176,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unexported method for this
 - `clipboard.CopyValue` copies a value and logs the result, which was an
   unexported helper in `agent/menu.go` that only the plugins used
+- `server/netinfo` reports the addresses this machine serves on:
+  `netinfo.LocalIPs` is `agent.LocalIPs` moved, and `netinfo.ServiceAddress`
+  is the host and port a tray entry or a console page hands out. The agent
+  core called neither, and the two plugins and the console each built the
+  address themselves
 - `serverplugin.Plugin.OnOriginsChange` returns an `*event.Connection`, so a subscriber
   can stop following. Both it and `OnClientsChange` are deprecated in favour of
   `serverplugin.Plugin.Events`; neither replays on connect, as before

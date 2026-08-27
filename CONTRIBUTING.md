@@ -134,6 +134,7 @@ davi-nfc-agent/
 │   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
 │   ├── clientserver/    # Client connections, and the tag operations they ask
 │   │                    #   for, resolved against whatever holds the tag
+│   ├── netinfo/         # The addresses this machine serves on
 │   └── wsconn/          # Write-safe WebSocket wrapper shared by the above
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
 │   └── fynetray/        # The real tray, on fyne.io/systray

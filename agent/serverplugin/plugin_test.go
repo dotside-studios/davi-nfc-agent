@@ -18,6 +18,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
+	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 	"github.com/gorilla/websocket"
 )
@@ -136,7 +137,7 @@ func TestServerPluginRegistersItsEndpoints(t *testing.T) {
 	if !runs(a, "listener") {
 		t.Errorf("Components() = %v, want the listener among them", names(a))
 	}
-	if item := fake.Find("Server URLs", "Extras: http://"+net.JoinHostPort(serviceHost(), strconv.Itoa(p.Listener().Port()))+"/extras/"); item == nil {
+	if item := fake.Find("Server URLs", "Extras: http://"+netinfo.ServiceAddress(p.Listener().Port())+"/extras/"); item == nil {
 		t.Errorf("the endpoint's menu entry is missing, or does not carry its address:\n%s", fake.Render())
 	}
 }

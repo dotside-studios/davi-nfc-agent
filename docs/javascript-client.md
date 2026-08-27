@@ -66,7 +66,7 @@ Rebuild `client/dist` with `make client` after changing `client/src`.
 ```javascript
 // Create client instance
 const client = new NFCClient('http://localhost:9470', {
-  apiSecret: 'your-secret',  // Optional
+  apiSecret: 'your-secret',  // Required whenever the agent has one set
   autoReconnect: true        // Auto-reconnect on disconnect
 });
 
@@ -128,6 +128,13 @@ remembered from an earlier scan cannot act on whatever it is holding now. The
 client forgets its tag when the tag leaves, so a write after removal is refused
 rather than landing on whatever appears next.
 
+**The reader the operator picked.** When a reader is selected in the console or
+the tray, that reader's tags are the only ones broadcast and the only ones a
+request can reach. Naming another reader, or a UID only another reader has seen,
+fails with `NO_CARD`, and `allowUntargeted` resolves among the selected reader
+alone. Paired phones are unaffected. A client naming the tag it was last told
+about needs no change.
+
 ## API Reference
 
 ### Constructor
@@ -139,7 +146,7 @@ new NFCClient(serverUrl, options?)
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `serverUrl` | string | Base URL of the NFC Agent server |
-| `options.apiSecret` | string | Optional API secret for authentication |
+| `options.apiSecret` | string | The agent's API secret. Required whenever the agent has one set, from the agent's own host too. See [The loopback bypass](api.md#the-loopback-bypass) |
 | `options.autoReconnect` | boolean | Auto-reconnect on disconnect (default: true) |
 | `options.reconnectDelay` | number | Milliseconds before the first retry, doubling per attempt (default: 250) |
 | `options.maxReconnectDelay` | number | Ceiling for that doubling (default: 5000) |
@@ -293,7 +300,8 @@ client.on('error', (err) => { /* ... */ });
 
 `deviceStatus` describes the agent's own reader, so its `cardPresent` says
 nothing about a tag a paired phone is holding, and is false
-the whole time one is. `tagRemoved` is the event to act on.
+the whole time one is. `tagRemoved` is the event to act on. Its `device` names
+the reader it describes; agents that do not send it leave it undefined.
 
 ### Errors
 
@@ -301,12 +309,21 @@ A refused operation rejects with an `NFCRequestError` carrying the agent's
 [error code](api.md#error-codes) and whether repeating the request could
 plausibly succeed.
 
+A connection serves one request at a time and queues a bounded number of the
+rest. Beyond that the agent answers `BUSY`, which is retryable, so await
+operations rather than fanning them out. Requests in flight are cancelled when
+the connection drops; the library rejects them on close as it already did.
+
 ```javascript
 try {
   await client.write({ records });
 } catch (err) {
   if (err.retryable) {
     // TAG_REMOVED, WRITE_FAILED, NO_CARD: present the tag again
+    // BUSY: earlier work has not finished; retry once it answers
+  } else if (err.code === 'MULTIPLE_TAGS') {
+    // More than one card in the field; retrying changes nothing until they
+    // are separated.
   } else {
     // READ_ONLY, CAPACITY_EXCEEDED, TAG_MISMATCH: retrying wastes a round trip
     console.error(err.code, err.message);
@@ -436,9 +453,14 @@ client.on('tagData', (data: TagData) => {
 
 Exported types: `TagData`, `TagMessage`, `NDEFRecord`, `TagCapabilities`,
 `TagTarget`, `WriteRequest`, `WriteRecord`, `WriteResponse`, `LockResponse`,
-`TransceiveRequest`, `DeviceStatus`, `NFCErrorEvent`, `NFCClientOptions`,
-`HealthCheckResponse`, `AgentDiagnosis`. See `client/src/session/types.ts` for
-the full definitions.
+`TransceiveRequest`, `DeviceStatus`, `NFCErrorCode`, `NFCErrorCodeValue`,
+`NFCErrorEvent`, `NFCClientOptions`, `HealthCheckResponse`, `AgentDiagnosis`,
+`RawTagPayload`, `WireMessage`. See `client/src/session/types.ts` for the full
+definitions.
+
+`NFCErrorCode` is the union of the codes this release knows, for a switch the
+compiler can check. `NFCErrorCodeValue` is what `err.code` is declared as: that
+union widened to any string, so a code added by a newer agent still type-checks.
 
 ---
 
@@ -447,6 +469,19 @@ the full definitions.
 Use `NFCDeviceClient` to connect to the **agent** (port 9470) as an NFC device. This is a universal library that works in both Node.js and browser environments, allowing any NFC-capable device to act as a reader.
 
 The library is **NFC-source agnostic** - integrate with any NFC library (WebNFC, React Native NFC Manager, etc.) by calling `scanTag()` when your NFC library detects a tag.
+
+Pair the device first: read the agent's `davi-pair://` QR off the kiosk screen,
+pin the TLS connection to its `spki`, and POST to
+`https://<agent-host>:9470/pair?pin=<code>`. Pairing is served from the agent's
+port, not the cleartext bootstrap listener, and is refused with
+`426 Upgrade Required` over cleartext from anything but loopback. See
+[Device setup](device-setup.md#1-pair). Present the `deviceToken` as `?secret=`
+on the URL below, or as an `Authorization: Bearer` header; loopback needs one
+too, unless the agent runs with `-allow-loopback-bypass`.
+
+The device endpoint caps an inbound frame at 256 KB and drops the session of a
+device that exceeds it. Revoking a device's credential closes its session with a
+policy-violation close (1008). Both arrive as `disconnected`.
 
 ## Installation
 

@@ -1,4 +1,9 @@
 export interface NFCClientOptions {
+    /**
+     * Sent as `?secret=` on the upgrade. Required from loopback too, unless the
+     * agent runs with `-allow-loopback-bypass`. A missing or wrong secret fails
+     * the upgrade with 401, which surfaces as a failed connection, not a close.
+     */
     apiSecret?: string;
     autoReconnect?: boolean;
     /** First retry delay. Later attempts double it, up to `maxReconnectDelay`. */
@@ -64,6 +69,7 @@ export interface TagMessage {
 export interface TagCapabilities {
     canRead?: boolean;
     canWrite?: boolean;
+    /** Can be true for a tag a paired device holds, if that device declares it. */
     canTransceive?: boolean;
     canLock?: boolean;
     isReadOnly?: boolean;
@@ -105,7 +111,8 @@ export interface TagData {
 }
 export interface DeviceStatus {
     connected: boolean;
-    deviceName?: string;
+    /** The reader this describes. Absent on agents that do not send it. */
+    device?: string;
     message?: string;
     /**
      * Whether the agent's own reader holds a card. It says nothing about a tag a
@@ -113,9 +120,27 @@ export interface DeviceStatus {
      */
     cardPresent?: boolean;
 }
+/**
+ * The error codes the agent sends, as of this release. Whether a retry can
+ * work is `retryable` on the error, not a property of the code here.
+ */
+export type NFCErrorCode = "PARSE_ERROR" | "INVALID_PAYLOAD" | "INVALID_REQUEST" | "INVALID_MESSAGE_TYPE" | "UNKNOWN_TYPE" | "INVALID_DEVICE" | "REGISTRATION_FAILED" | "TAG_SEND_FAILED" | "READ_ERROR" | "LOCK_FAILED" | "CAPABILITIES_FAILED" | "SESSION_LOCKED" | "NO_CARD" | "TAG_MISMATCH" | "TAG_NOT_NAMED" | "TIMEOUT" | "DEVICE_GONE" | "INTERNAL_ERROR" | "UNKNOWN_ERROR" | "NOT_SUPPORTED" | "TAG_REMOVED" | "AUTH_FAILED" | "READ_FAILED" | "WRITE_FAILED" | "TRANSCEIVE_FAILED" | "TAG_NOT_CONNECTED" | "READ_ONLY" | "CAPACITY_EXCEEDED" | "INVALID_DATA"
+/** More than one tag in the field. Separate them and try again. */
+ | "MULTIPLE_TAGS"
+/**
+ * Earlier work has not finished: a reader completing an operation its caller
+ * abandoned, or more requests outstanding than the connection queues.
+ */
+ | "BUSY";
+/**
+ * What `code` is declared as: a known code, or any string, so a code added by a
+ * newer agent is carried rather than rejected. Switch on `NFCErrorCode` to have
+ * the compiler check the arms.
+ */
+export type NFCErrorCodeValue = NFCErrorCode | (string & {});
 export interface NFCErrorEvent {
     error: Error;
-    code?: string;
+    code?: NFCErrorCodeValue;
     /** Whether repeating the identical request could plausibly succeed. */
     retryable?: boolean;
     op?: string;
@@ -144,11 +169,13 @@ export interface WriteResponse {
     locked?: boolean;
 }
 export interface LockResponse {
-    message: string;
+    /** Not sent by the agent; a lock answers with the result alone. */
+    message?: string;
     uid?: string;
     tagType?: string;
     locked?: boolean;
 }
+/** No `idempotencyKey`: the agent reads one on writes and locks only. */
 export interface TransceiveRequest extends TagTarget {
     data: Uint8Array;
     /**

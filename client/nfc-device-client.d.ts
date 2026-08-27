@@ -1,5 +1,21 @@
 /**
  * TypeScript type definitions for NFC Device Client
+ *
+ * Pair before connecting: the agent's QR carries the address, its public key
+ * pin and the PIN as `davi-pair://<host>:9470/?spki=...&code=123456&name=...`.
+ * Pin the TLS connection to `spki`, POST to
+ * `https://<host>:9470/pair?pin=<code>`, and store the `deviceToken` from the
+ * response. Pairing is served from the agent's port, not the cleartext
+ * bootstrap listener, and is refused with 426 over cleartext from anything but
+ * loopback.
+ *
+ * Present the token, or the shared API secret, as `?secret=` on the server URL
+ * or as an `Authorization: Bearer` header. Loopback needs one too, unless the
+ * agent runs with `-allow-loopback-bypass`.
+ *
+ * The device endpoint caps an inbound frame at 256 KB. Revoking a device's
+ * credential closes its session with a policy-violation close (1008). Both
+ * arrive here as `disconnected`.
  */
 
 /**

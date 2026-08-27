@@ -3,6 +3,7 @@ import type {
   HealthCheckResponse,
   LockResponse,
   NFCClientOptions,
+  NFCErrorCodeValue,
   NFCErrorEvent,
   NFCEventHandler,
   NFCEventName,
@@ -39,7 +40,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 /** A refused request, with the agent's code and whether a retry could work. */
 export class NFCRequestError extends Error {
-  readonly code?: string;
+  readonly code?: NFCErrorCodeValue;
   readonly retryable?: boolean;
   readonly op?: string;
   readonly tagUID?: string;
@@ -47,7 +48,7 @@ export class NFCRequestError extends Error {
   constructor(
     message: string,
     detail: {
-      code?: string;
+      code?: NFCErrorCodeValue;
       retryable?: boolean;
       op?: string;
       tagUID?: string;
@@ -422,13 +423,18 @@ export class NFCClient {
 }
 
 function errorDetail(payload: unknown): {
-  code?: string;
+  code?: NFCErrorCodeValue;
   retryable?: boolean;
   op?: string;
   tagUID?: string;
 } {
   const detail = payload as
-    | { code?: string; retryable?: boolean; op?: string; tagUID?: string }
+    | {
+        code?: NFCErrorCodeValue;
+        retryable?: boolean;
+        op?: string;
+        tagUID?: string;
+      }
     | undefined;
   if (!detail || typeof detail !== "object") return {};
   return {

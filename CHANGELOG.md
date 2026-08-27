@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The client library types the agent's error codes. `NFCErrorCode` is the union
+  of the codes it knows, `MULTIPLE_TAGS` and `BUSY` included; `NFCErrorCodeValue`
+  is what `err.code` is declared as, that union widened to any string, so a code
+  added by a newer agent is carried rather than rejected. `RawTagPayload` and
+  `WireMessage` are exported from the package root, which a consumer parsing
+  raw frames could not name before
 - `event.Property[T]` is a `Signal[T]` that also reports the value it carries:
   connecting calls the handler with the current value before returning, so a
   subscriber draws its first frame from the signal it follows instead of reading
@@ -165,6 +171,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BUSY` is in the protocol reference and the client library's error guidance.
+  It was added to `protocol` without reaching either
+- The client library's docs match the agent: the API secret is required from
+  loopback unless `-allow-loopback-bypass` is set, the selected reader scopes
+  what a client can act on so naming another reader's tag fails `NO_CARD`,
+  `MULTIPLE_TAGS` is not retryable, and a device pairs against
+  `https://<host>:9470/pair` pinned to the `spki` its `davi-pair://` QR carries
+  rather than the cleartext bootstrap listener. `DeviceStatus.device` replaces
+  `deviceName`, which the agent never sent, and `LockResponse.message` is
+  optional, which it always was
 - `console.Config` takes the components rather than the plugins wrapping them:
   `Pairing` is a `*pairing.Gate`, `Certificates` a `*tls.Manager`, and
   `BootstrapPort` the port the old `Pairing` plugin reported. Both exist before
@@ -544,6 +560,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `deviceStatus` reaches a client in the documented shape. `nfc.DeviceStatus` is
+  marshalled straight onto the wire and carried no json tags, so the payload
+  arrived as `Connected`/`Message`/`CardPresent` where `docs/api.md` and the
+  client library read `connected`/`message`/`cardPresent`. Every field a client
+  read was undefined, which left the library's "the reader reports no card, so
+  forget the tag it was holding" branch dead. `device` names the reader the
+  status describes
 - A scan reaches the console's log. The line naming what was read went to
   stdout through `fmt.Printf`, so it bypassed the agent's logger and the ring
   behind it: the one line an operator watches for while tapping a card was the

@@ -83,6 +83,14 @@ func (m *holdingManager) TransceiveTag(deviceID, tagUID string, data []byte, raw
 
 // The aggregate is what the agent asks, so a tag held by a child has to be
 // reachable through it.
+func TestImplementsTagHolder(t *testing.T) {
+	// nfc.TagsHeldBy asserts these at runtime, so a signature that drifts out
+	// of nfc.TagHolder degrades to "no device holds tags" instead of failing to
+	// build.
+	var _ nfc.TagHolder = (*MultiManager)(nil)
+	var _ nfc.TagHolder = (*holdingManager)(nil)
+}
+
 func TestMultiManagerAnswersForTagsItsChildrenHold(t *testing.T) {
 	phones := newHoldingManager("smartphone", map[string]string{"phone-1": "04A1B2C3"})
 	mm := NewMultiManager(

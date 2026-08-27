@@ -277,6 +277,10 @@ func TestASupervisorNamesAReaderHoldingATagItCouldNotRead(t *testing.T) {
 	}
 }
 
+// TagsHeldBy asserts TagHolder at runtime, so a fake that drifts out of the
+// interface stops standing in for a phone driver without failing to build.
+var _ TagHolder = (*holdingManager)(nil)
+
 // holdingManager is a manager whose devices hold tags of their own, which is
 // what the phone driver is.
 type holdingManager struct {

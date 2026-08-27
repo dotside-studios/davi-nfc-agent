@@ -25,6 +25,14 @@ func TestManagerImplementsNFCManager(t *testing.T) {
 	var _ nfc.Manager = (*Manager)(nil)
 }
 
+func TestManagerImplementsTagHolder(t *testing.T) {
+	// nfc.TagsHeldBy asserts this at runtime, so a signature that drifts out of
+	// nfc.TagHolder degrades to "no device holds tags" instead of failing to
+	// build. deviceops.go deliberately names nothing of its consumers, so the
+	// assertion lives here rather than beside the methods.
+	var _ nfc.TagHolder = (*Manager)(nil)
+}
+
 func TestManagerRegisterDevice(t *testing.T) {
 	m := NewManager(30 * time.Second)
 	defer m.Close()

@@ -136,6 +136,10 @@ func TestAnUnnamedOperationIsRefusedWhenNothingIsAdmitted(t *testing.T) {
 // phoneManager holds a tag the way a phone driver does: it reports its own
 // scans and answers for what its devices hold, and the agent never opened it as
 // a reader.
+// nfc.TagsHeldBy asserts TagHolder at runtime, so a fake that drifts out of the
+// interface stops standing in for a phone driver without failing to build.
+var _ nfc.TagHolder = (*phoneManager)(nil)
+
 type phoneManager struct {
 	nfc.Manager
 	device string

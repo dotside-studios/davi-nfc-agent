@@ -10,9 +10,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/pairing"
 )
 
-// reader is a locally attached backend: it has no endpoint, no identity, and no
-// session to end. Nothing about a credential applies to it, and this manager
-// must leave it exactly as it found it.
+// reader is a locally attached backend: no endpoint, no identity, no session to
+// end. This manager must leave it as it found it.
 type reader struct{}
 
 func (reader) OpenDevice(string) (nfc.Device, error) { return nil, errNotOpened }
@@ -90,10 +89,9 @@ func over(t *testing.T, child nfc.Manager) *pairednfc.Manager {
 	return m
 }
 
-// A reader attached to this machine is beneath this manager and untouched by it,
-// even with paired devices required. There is no endpoint in front of it and no
-// identity to check, so gating it would take the readers away from a build that
-// simply turned the requirement on.
+// A reader beneath this manager is untouched by it, even with paired devices
+// required. Gating it would take the readers away from a build that only turned
+// the requirement on.
 func TestALocalReaderIsUnaffected(t *testing.T) {
 	m := over(t, reader{})
 	m.Require(func() bool { return true })
@@ -112,8 +110,8 @@ func TestALocalReaderIsUnaffected(t *testing.T) {
 	}
 }
 
-// A revoked credential names a device on a backend that holds sessions. A
-// backend that holds none is asked nothing and reports nothing.
+// Revocation reaches a backend that holds sessions. One that holds none reports
+// nothing.
 func TestRevokingReachesOnlyABackendThatHoldsSessions(t *testing.T) {
 	p := newPhone()
 	m := over(t, p)
@@ -142,8 +140,8 @@ func TestRevokingReachesOnlyABackendThatHoldsSessions(t *testing.T) {
 	}
 }
 
-// Scans pass through. They are not filtered: a scan only exists because the
-// endpoint already admitted the device that reported it.
+// Scans pass through unfiltered: a scan only exists because the endpoint
+// already admitted the device that reported it.
 func TestScansReachSubscribersThroughTheManager(t *testing.T) {
 	p := newPhone()
 	m := over(t, p)
@@ -160,9 +158,8 @@ func TestScansReachSubscribersThroughTheManager(t *testing.T) {
 	}
 }
 
-// A child that reports no scans must still leave OnScan safe. This manager
-// always satisfies TagReporter, so handing back the child's nil signal would
-// have OnScan call Connect on it.
+// This manager always satisfies TagReporter, so handing back a reader-only
+// child's nil signal would have OnScan call Connect on it.
 func TestOnScanIsSafeOverABackendThatReportsNone(t *testing.T) {
 	m := over(t, reader{})
 
@@ -173,8 +170,8 @@ func TestOnScanIsSafeOverABackendThatReportsNone(t *testing.T) {
 
 // nfc.TagHolder is satisfied all-or-nothing. Implementing part of it leaves
 // TagsHeldBy reporting that nothing holds a tag, and every operation on a tag a
-// device reported fails as though the tag were gone — which is exactly what a
-// partial forward here did.
+// device reported fails as though the tag were gone, which is what a partial
+// forward here did.
 func TestTheWholeTagRouterContractIsForwarded(t *testing.T) {
 	m := over(t, newPhone())
 
@@ -205,8 +202,8 @@ func TestTheWholeTagRouterContractIsForwarded(t *testing.T) {
 }
 
 // A backend holding no tags answers the router with an error rather than a
-// panic, and TagsHeldBy still finds this manager, since it cannot implement the
-// interface conditionally.
+// panic. This manager cannot implement the interface conditionally, so
+// TagsHeldBy still finds it.
 func TestTheRouterOverABackendHoldingNoTags(t *testing.T) {
 	m := over(t, reader{})
 

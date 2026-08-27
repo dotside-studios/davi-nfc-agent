@@ -59,16 +59,14 @@ func main() {
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
-	// The paired-device manager: the credential store, the pairing machinery,
-	// and the check that admits a device, over the backends above. It is what
-	// the agent holds, so this build cannot have the readers without the policy
-	// that decides who reaches them.
+	// The paired-device manager over the backends above: the credential store,
+	// the pairing machinery, and the check that admits a device. It is what the
+	// agent holds, so this build cannot have the readers without the policy
+	// deciding who reaches them. Hand backends to Setup instead, and mount the
+	// device endpoint bare, and the build pairs nobody and admits everyone.
 	//
-	// Leave it out — hand `backends` to Setup and mount the device endpoint bare
-	// — and this build pairs nobody and admits everyone.
-	//
-	// The pin and the port are read per pairing rather than captured: both are
-	// settled by Setup below, and both can change while the endpoint stays up.
+	// The pin and the port are read per pairing rather than captured: Setup
+	// settles both below, and both can change while the endpoint stays up.
 	var rt *agent.Runtime
 	paired, err := pairednfc.New(backends, pairednfc.Options{
 		ConfigDir:    agent.ResolveConfigDir(opts),
@@ -87,10 +85,9 @@ func main() {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
-	// What the manager admits on, now that the agent holds it: the shared
-	// secret as a peer credential to a paired token, and the preference that
-	// drops both it and the loopback bypass. Read per connection, so changing
-	// either from the control center takes effect on the next one.
+	// What it admits on, now that the agent holds the preferences: the shared
+	// secret as a peer credential to a paired token, and the requirement that
+	// drops both it and the loopback bypass. Read per connection.
 	paired.UseSecret(rt.Agent.APISecret)
 	paired.Require(rt.Agent.RequirePairedDevice)
 	paired.UseCertificateAuthority(rt.Certificates)
@@ -119,9 +116,9 @@ func main() {
 			Scans:                &rt.Agent.Events().Tag,
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
-		// The driver serves the protocol; the paired-device manager in front of
-		// it decides who gets that far, and names the device it admitted so the
-		// driver registers it under the identity it paired with.
+		// The driver serves the protocol; Admit decides who gets that far, and
+		// names the device it admitted so the driver registers it under the
+		// identity it paired with.
 		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
@@ -133,9 +130,8 @@ func main() {
 	// hand out its address and PIN.
 	//
 	// That listener is cleartext: it hands out the certificate authority to a
-	// device that does not trust the agent's certificate yet. Pairing issues a
-	// durable credential and the key pin a device recognises this agent by, so
-	// it mounts on the listener already serving the certificate that pin
+	// device that does not trust the agent's certificate yet. Pairing itself
+	// mounts on the listener already serving the certificate its key pin
 	// covers.
 	var pairingPlugin *agent.PairingPlugin
 	if opts.BootstrapPort > 0 {

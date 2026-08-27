@@ -39,11 +39,10 @@ var _ Plugin = (*PairingPlugin)(nil)
 
 // NewPairingPlugin runs server's listener on port and puts its entries on the
 // tray. server is the pairing machinery, which belongs to whatever owns the
-// credentials — see [pairing.Server] and the paired-device manager that builds
-// one.
+// credentials; the paired-device manager builds one.
 //
-// A zero port, or no server, is a build that pairs no devices: it returns nil,
-// and every method tolerates one.
+// A zero port, or no server, returns nil, and every method tolerates a nil
+// plugin.
 func NewPairingPlugin(server *pairing.Server, port int) *PairingPlugin {
 	if port <= 0 || server == nil {
 		return nil

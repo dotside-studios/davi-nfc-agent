@@ -20,9 +20,9 @@ func (p pairingIssuer) Pair(name, platform string) (string, string, error) {
 	return device.ID, token, nil
 }
 
-// PublicKeyPin reports the agent's identity as it stands now. It is read per
-// pairing rather than captured, because the pin follows the certificate and a
-// certificate can be reissued while the endpoint stays up.
+// PublicKeyPin reports the agent's identity as it stands now. Read per pairing
+// rather than captured: the pin follows the certificate, which can be reissued
+// while the endpoint stays up.
 func (p pairingIssuer) PublicKeyPin() string {
 	if p.pin == nil {
 		return ""

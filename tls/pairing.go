@@ -39,9 +39,8 @@ type PairingResponse struct {
 // SetPairingIssuer enables the /pair endpoint. Without one the endpoint reports
 // that pairing is unavailable rather than 404, so a device can tell an agent
 // that cannot pair from a wrong address.
-// agentPort is a function because it is read per pairing: the port the agent
-// serves on can be changed from the control center while this endpoint stays
-// up, and a device handed the stale one cannot connect.
+// agentPort is read per pairing: the port the agent serves on can change while
+// this endpoint stays up, and a device handed the stale one cannot connect.
 func (s *BootstrapServer) SetPairingIssuer(issuer PairingIssuer, agentPort func() int) {
 	s.pairMu.Lock()
 	defer s.pairMu.Unlock()

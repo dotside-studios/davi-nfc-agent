@@ -11,8 +11,8 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
-// The machinery is the component: a build bolts this on and gets a credential
-// store, rather than assembling one beside it and remembering to hand it over.
+// The machinery is the component: bolting this on gets a credential store,
+// rather than assembling one beside it and remembering to hand it over.
 func TestTheManagerBuildsItsOwnRegistry(t *testing.T) {
 	dir := t.TempDir()
 
@@ -31,8 +31,7 @@ func TestTheManagerBuildsItsOwnRegistry(t *testing.T) {
 	}
 }
 
-// The store is what persists, so a device paired before a restart is still
-// paired after one.
+// A device paired before a restart is still paired after one.
 func TestAPairingSurvivesRebuildingTheManager(t *testing.T) {
 	dir := t.TempDir()
 
@@ -62,8 +61,8 @@ func TestAPairingSurvivesRebuildingTheManager(t *testing.T) {
 	}
 }
 
-// A config directory that cannot be read is not a reason to refuse to start. The
-// agent serves, the devices are kept in memory, and the operator is told.
+// A config directory that cannot be read is not a reason to refuse to start:
+// the agent serves and the devices are kept in memory.
 func TestAnUnreadableConfigDirStillBuilds(t *testing.T) {
 	dir := t.TempDir()
 	// A file where the registry expects a directory entry it can parse.
@@ -83,8 +82,8 @@ func TestAnUnreadableConfigDirStillBuilds(t *testing.T) {
 	}
 }
 
-// A build that already holds a store passes it, which is what agent.New is
-// documented to allow and what a test wants.
+// A build that already holds a store passes it, which agent.New is documented
+// to allow.
 func TestASuppliedRegistryIsUsed(t *testing.T) {
 	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
@@ -104,14 +103,13 @@ func TestASuppliedRegistryIsUsed(t *testing.T) {
 	}
 }
 
-// What the manager hands out are two narrow capabilities rather than the
-// registry: a store to read and revoke, and a verifier to check. Minting a
-// credential is neither, and stays inside with the pairing server that issues
-// it.
+// The manager hands out two narrow capabilities rather than the registry: a
+// store to read and revoke, and a verifier to check. Minting stays inside with
+// the pairing server.
 //
-// The narrowing is the compiler's — a caller holding a pairing.Store cannot
-// reach Pair without deliberately asserting its way back to the registry — so
-// this pins the types rather than probing the value.
+// The narrowing is the compiler's, since a caller holding a pairing.Store
+// cannot reach Pair without asserting its way back to the registry, so this
+// pins the types rather than probing the value.
 func TestTheManagerHandsOutNarrowCapabilities(t *testing.T) {
 	m := over(t, reader{})
 

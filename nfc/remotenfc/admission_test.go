@@ -31,8 +31,8 @@ func dialDevice(t *testing.T, url string) (*websocket.Conn, int) {
 }
 
 // This driver decides nothing about who may connect. Mounted on its own it
-// serves every device that reaches it, which is what a build with no
-// credentials at all wants, and what every test here relies on.
+// serves every device that reaches it, which is what the other tests here rely
+// on.
 func TestBareHandlerAdmitsEveryDevice(t *testing.T) {
 	m := remotenfc.NewManager(remotenfc.DeviceTimeout)
 	defer m.Close()
@@ -48,7 +48,6 @@ func TestBareHandlerAdmitsEveryDevice(t *testing.T) {
 }
 
 // Whatever stands in front decides, and its refusal is what the device sees.
-// The driver is not consulted and never learns why.
 func TestAWrapperCanRefuse(t *testing.T) {
 	m := remotenfc.NewManager(remotenfc.DeviceTimeout)
 	defer m.Close()

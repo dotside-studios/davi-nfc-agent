@@ -11,7 +11,7 @@ import (
 )
 
 // admitAs mounts the endpoint behind something that names every connection id,
-// the way a credential check in front of it would.
+// the way a credential check would.
 func admitAs(t *testing.T, m *Manager, id string) string {
 	t.Helper()
 
@@ -27,9 +27,9 @@ func admitAs(t *testing.T, m *Manager, id string) string {
 }
 
 // The identity a connection was admitted under is the identity the device
-// registers with. Without this a paired device would get a fresh ID on every
-// connection, and nothing could match its session back to the credential it
-// holds — revoking it would end no session at all.
+// registers with. Without it a paired device would get a fresh ID on every
+// connection, nothing could match its session to the credential it holds, and
+// revoking it would end no session.
 func TestADeviceRegistersUnderTheIdentityItWasAdmittedWith(t *testing.T) {
 	m := NewManager(time.Minute)
 
@@ -40,9 +40,8 @@ func TestADeviceRegistersUnderTheIdentityItWasAdmittedWith(t *testing.T) {
 	}
 }
 
-// Nothing admitted this connection, so the driver names it itself. This is what
-// an endpoint mounted with no credential check in front of it does, and it is
-// deliberate: a build that wires no admission serves every device.
+// Nothing admitted this connection, so the driver names it itself. An endpoint
+// mounted with no credential check in front of it serves every device.
 func TestAnUnadmittedDeviceRegistersUnderAMintedIdentity(t *testing.T) {
 	m, url := serveManager(t, time.Minute)
 
@@ -56,8 +55,8 @@ func TestAnUnadmittedDeviceRegistersUnderAMintedIdentity(t *testing.T) {
 	}
 }
 
-// Two unadmitted devices are two devices. The minted identity is per
-// connection, so they must not collide into one registration.
+// The minted identity is per connection, so two unadmitted devices must not
+// collide into one registration.
 func TestUnadmittedDevicesGetDistinctIdentities(t *testing.T) {
 	m, url := serveManager(t, time.Minute)
 

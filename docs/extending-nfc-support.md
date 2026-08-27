@@ -28,7 +28,7 @@ A backend implements no authentication of its own. Devices that dial in reach
 it through `pairednfc.Manager.Admit`, which checks the credential and names the
 device it admitted; the backend reads that name with `deviceid.Of(r)` and
 registers the device under it, or mints one when nothing admitted the
-connection. Being beneath the manager gates nothing on its own — a reader
+connection. Being beneath the manager gates nothing on its own: a reader
 attached to this machine serves no endpoint and is untouched.
 
 ### Core Interfaces

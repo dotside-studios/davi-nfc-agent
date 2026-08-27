@@ -50,9 +50,9 @@ type Options struct {
 	KeyFile  string
 
 	// Devices is the credential store the agent reports and revokes through.
-	// Nil has Setup load one from ConfigDir, which is what a build with no
-	// paired-device manager wants; a build with one passes that manager's, so
-	// the agent and the thing admitting devices read the same store.
+	// Nil has Setup load one from ConfigDir. A build with a paired-device
+	// manager passes that manager's, so the agent and the thing admitting
+	// devices read the same store.
 	Devices pairing.Store
 
 	AutoTLS             bool
@@ -175,9 +175,9 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	// The credential store: the one the caller's paired-device manager owns, or
-	// one loaded here for a build that has no such manager. Each device gets its
-	// own credential, so one can be revoked without logging out the rest.
+	// The caller's store, or one loaded here for a build with no paired-device
+	// manager. Each device gets its own credential, so one can be revoked
+	// without logging out the rest.
 	devices := opts.Devices
 	if devices == nil {
 		loaded, err := pairing.NewRegistry(configDir)
@@ -248,8 +248,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	}, nil
 }
 
-// ResolveConfigDir reports where opts says the agent's state lives: what it
-// names, or the platform default for this build.
+// ResolveConfigDir reports where the agent's state lives: what opts names, or
+// the platform default for this build.
 //
 // Exported because a program assembling components that hold config-directory
 // state builds them before Setup, and both must land on the same directory.

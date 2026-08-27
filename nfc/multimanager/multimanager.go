@@ -353,9 +353,9 @@ func (mm *MultiManager) clearListError(name string) {
 // DisconnectDevice ends the session for deviceID on whichever child holds it,
 // reporting whether any did.
 //
-// It asks every child rather than resolving the name first: a device ID here is
-// the identity a device holds with its driver, not a qualified path, so there
-// is nothing in it that names the manager holding it.
+// It asks every child rather than resolving the name first: a device ID is the
+// identity a device holds with its driver, not a qualified path, so nothing in
+// it names the manager holding it.
 func (mm *MultiManager) DisconnectDevice(deviceID, reason string) bool {
 	disconnected := false
 	for _, name := range mm.managerOrder {

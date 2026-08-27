@@ -55,12 +55,9 @@ func pairOne(t *testing.T, m *pairednfc.Manager) (string, string) {
 	return device.ID, token
 }
 
-// reach presents a credential to the wrapped endpoint from somewhere off this
-// machine, and reports the status.
-//
+// reach presents a credential from off this machine and reports the status.
 // Off this machine deliberately: a loopback request bypasses the shared secret,
 // so a test driving one through 127.0.0.1 would pass whatever the check did.
-// See [reachFromLoopback].
 func reach(t *testing.T, endpoint http.Handler, secret string) int {
 	t.Helper()
 	return call(endpoint, secret, "192.0.2.7:34512")
@@ -86,9 +83,9 @@ func call(endpoint http.Handler, secret, remoteAddr string) int {
 	return rec.Code
 }
 
-// The identity a paired device is admitted under is the one it paired with, and
-// it reaches the backend on the request. Without it a paired device would
-// register under a fresh ID every connection and revoking it would end nothing.
+// A paired device is admitted under the identity it paired with, and that
+// identity reaches the backend. Without it a paired device would register under
+// a fresh ID every connection and revoking it would end nothing.
 func TestAPairedTokenIsAdmittedUnderItsOwnIdentity(t *testing.T) {
 	m, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
 	id, token := pairOne(t, m)
@@ -104,8 +101,8 @@ func TestAPairedTokenIsAdmittedUnderItsOwnIdentity(t *testing.T) {
 	}
 }
 
-// The shared secret is a peer credential, not a replacement. It admits, but it
-// names nobody: there is no device to revoke behind it.
+// The shared secret admits but names nobody: there is no device to revoke
+// behind it.
 func TestTheSharedSecretAdmitsWithoutNamingADevice(t *testing.T) {
 	_, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
 
@@ -128,9 +125,8 @@ func TestAWrongSecretIsRefused(t *testing.T) {
 	}
 }
 
-// The secret is read per connection, so rotating it takes effect without
-// anything being rebuilt. It used to be captured, leaving the endpoint admitting
-// a secret the console had already rotated away.
+// The secret is read per connection. It used to be captured, leaving the
+// endpoint admitting a secret the console had already rotated away.
 func TestTheSecretIsReadPerConnection(t *testing.T) {
 	secret := "old"
 	_, _, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return secret }})
@@ -166,8 +162,8 @@ func TestRequirePairedDropsTheSharedSecret(t *testing.T) {
 	}
 }
 
-// The machine that has just handed itself over has revoked every device. An
-// empty registry under RequirePaired admits nobody, rather than falling open.
+// Revoking the last device must not fall open. An empty registry under
+// RequirePaired admits nobody.
 func TestRequirePairedWithNoPairedDevicesAdmitsNobody(t *testing.T) {
 	m, _, endpoint := gate(t, pairednfc.Policy{
 		Secret:        func() string { return "shared" },
@@ -188,7 +184,7 @@ func TestRequirePairedWithNoPairedDevicesAdmitsNobody(t *testing.T) {
 }
 
 // The kiosk front end runs on this machine and has never had to know the
-// secret. That bypass survives, and it names nobody.
+// secret. The bypass survives, and names nobody.
 func TestALoopbackRequestBypassesTheSharedSecret(t *testing.T) {
 	_, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
 
@@ -200,8 +196,7 @@ func TestALoopbackRequestBypassesTheSharedSecret(t *testing.T) {
 	}
 }
 
-// RequirePaired drops the bypass too. A device on this machine holding no
-// credential is still a device holding no credential.
+// RequirePaired drops the bypass too.
 func TestRequirePairedDropsTheLoopbackBypass(t *testing.T) {
 	_, _, endpoint := gate(t, pairednfc.Policy{
 		Secret:        func() string { return "shared" },
@@ -213,8 +208,8 @@ func TestRequirePairedDropsTheLoopbackBypass(t *testing.T) {
 	}
 }
 
-// A build with no secret and no paired devices admits everyone, which is what an
-// agent reached only over a trusted transport has always done.
+// A build with no secret and no paired devices admits everyone, which is what
+// an agent reached only over a trusted transport wants.
 func TestWithNoCredentialsAtAllEveryDeviceIsAdmitted(t *testing.T) {
 	_, seen, endpoint := gate(t, pairednfc.Policy{})
 

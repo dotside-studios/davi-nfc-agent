@@ -27,10 +27,9 @@ type ServerOptions struct {
 	// PublicKeyPin is what a device records to recognise this agent later, and
 	// AgentPort is the port it is told to connect to afterwards.
 	//
-	// Both are functions because both are read per pairing, not captured: the
-	// certificate can be reissued and the port can be changed from the control
-	// center while this endpoint stays up. A device handed a stale value cannot
-	// connect, and nothing about the failure points back here.
+	// Both are read per pairing rather than captured: the certificate can be
+	// reissued and the port changed while this endpoint stays up, and a device
+	// handed a stale value cannot connect.
 	PublicKeyPin func() string
 	AgentPort    func() int
 }
@@ -51,8 +50,7 @@ type Server struct {
 
 // NewServer builds the pairing server. It binds nothing until Listen.
 func NewServer(opts ServerOptions) *Server {
-	// Port 0 here: the bootstrap server is told where to listen by Listen, and
-	// a Server that is only mounted never listens at all.
+	// Port 0: Listen sets it, and a Server that is only mounted never listens.
 	bootstrap := tlspkg.NewBootstrapServer(opts.CA, 0)
 
 	if opts.AppName != "" {
@@ -65,9 +63,9 @@ func NewServer(opts ServerOptions) *Server {
 	return &Server{bootstrap: bootstrap, opts: opts}
 }
 
-// UseCertificateAuthority names the authority handed out to a device that is
-// pairing, for a build that settles its certificate after assembling this. Call
-// it before Listen.
+// UseCertificateAuthority names the authority handed out to a pairing device,
+// for a build that settles its certificate after assembling this. Call it
+// before Listen.
 func (s *Server) UseCertificateAuthority(ca tlspkg.CertificateAuthority) {
 	if s == nil {
 		return
@@ -92,9 +90,9 @@ func (s *Server) PairHandler() http.Handler {
 
 // Listen binds the certificate-distribution listener on port.
 //
-// That listener is cleartext on purpose: it hands the certificate authority to
-// a device that does not trust the agent's certificate yet, which is the reason
-// it is coming here. Pairing itself is not served from it; see [PairHandler].
+// Cleartext on purpose: it hands the certificate authority to a device that
+// does not trust the agent's certificate yet. Pairing itself is not served from
+// it; see [Server.PairHandler].
 func (s *Server) Listen(port int) error {
 	if s == nil {
 		return nil

@@ -92,9 +92,9 @@ func OnScan(m Manager, fn func(ScannedTag)) *event.Connection {
 // sessions it can end by identity.
 //
 // A credential is checked once, when a device connects, so revoking one does
-// nothing to a device already connected. Whatever owns the credentials ends the
-// session here; a manager whose devices are polled through a reader has no
-// session to end and does not implement this.
+// nothing to a device already connected: whatever owns the credentials ends the
+// session here. A manager whose devices are polled through a reader holds no
+// session and does not implement this.
 type DeviceDisconnector interface {
 	// DisconnectDevice ends the session held by deviceID, reporting whether
 	// there was one. reason is what the device is told.
@@ -102,8 +102,7 @@ type DeviceDisconnector interface {
 }
 
 // Disconnect ends the session m holds for deviceID, reporting whether there was
-// one. False for a manager that holds no sessions, which is every manager whose
-// devices are polled through a reader.
+// one. False for a manager that holds no sessions.
 func Disconnect(m Manager, deviceID, reason string) bool {
 	disconnector, ok := m.(DeviceDisconnector)
 	if !ok {

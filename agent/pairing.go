@@ -6,14 +6,11 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/pairing"
 )
 
-// PairingServer runs the pairing server's own listener as a component of the
-// agent, so it starts and stops with the agent rather than being started in
-// Setup and stopped by whoever remembers to.
+// PairingServer runs a [pairing.Server]'s own listener as a component of the
+// agent, so it starts and stops with the agent.
 //
-// The pairing machinery itself lives with whatever owns the credentials — see
-// [pairing.Server], which the paired-device manager builds. This is only the
-// lifetime: what binds the cleartext listener that hands out the certificate
-// authority, and what closes it again.
+// This is only the lifetime. The pairing machinery lives with whatever owns the
+// credentials, which is the paired-device manager.
 type PairingServer struct {
 	server *pairing.Server
 	port   int

@@ -187,8 +187,8 @@ the tray entry that installs the local authority, hidden once there is nothing
 left to install. `console.Config.Trust` takes it so the same install can be
 started from a page. Leave `Manager` nil and the plugin is inert.
 
-Pairing is two things now. The machinery — the credential store, the PIN, and
-the endpoint that issues a credential — belongs to `pairednfc.Manager`, which
+Pairing is two things now. The machinery (the credential store, the PIN, and
+the endpoint that issues a credential) belongs to `pairednfc.Manager`, which
 builds a `pairing.Server` of its own from `Options.ConfigDir`. The plugin,
 `agent.PairingPlugin`, runs that server's cleartext listener and owns the menu
 entries that hand out its address and PIN:
@@ -200,9 +200,9 @@ the console is handed `nil`. For the listener without the menu entries, register
 
 Omit the **paired-device manager** and the build pairs nobody and admits
 everyone: hand `backends` to `Setup` and mount the device endpoint bare. That is
-what a build reached only over a trusted transport, and every test, wants — a
-bare `remotenfc` endpoint mints an identity for each connection, so devices
-still register, just under no credential.
+what a build reached only over a trusted transport, and every test, wants. A
+bare `remotenfc` endpoint mints an identity per connection, so devices still
+register, just under no credential.
 
 The NFC backend is `Setup`'s second argument, which is why every package beneath
 `cmd` builds without one. A manager reports what its devices scan through

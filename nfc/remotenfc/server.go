@@ -35,11 +35,10 @@ type ServerOptions struct {
 // It also stores opts on the manager, since the capabilities a tag reports
 // depend on them. Call it once, before serving.
 //
-// The handler admits every device that reaches it. Deciding which devices may
-// connect is not this driver's: mount the handler behind something that checks
-// a credential and names the device it admitted — see [pairednfc.Manager.Admit]
-// — and mount it bare for a build that admits everyone, which is what a device
-// endpoint reached only over a trusted transport, and every test, wants.
+// The handler admits every device that reaches it. Which devices may connect is
+// not this driver's decision: mount it behind something that checks a
+// credential and names the device it admitted (pairednfc.Manager.Admit), or
+// mount it bare for a build reached only over a trusted transport.
 func (m *Manager) Handler(opts ServerOptions) http.Handler {
 	m.mu.Lock()
 	m.publicKeyPin = opts.PublicKeyPin
@@ -67,9 +66,8 @@ type deviceEndpoint struct {
 }
 
 func (e *deviceEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Whoever admitted this connection named it; nothing did if it is empty,
-	// and the device registers under an identity of this manager's minting.
-	// This driver has no idea what a credential is: see [pairednfc.Manager.Admit].
+	// Whoever admitted this connection named it. Empty means nothing did, and
+	// the device registers under an identity of this manager's minting.
 	admitted := deviceid.Of(r)
 
 	wsConn, err := e.upgrader.Upgrade(w, r, nil)

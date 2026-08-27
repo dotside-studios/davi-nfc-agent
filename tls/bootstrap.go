@@ -68,9 +68,9 @@ type BootstrapServer struct {
 	pairMu     sync.RWMutex
 	pairIssuer PairingIssuer
 
-	// agentPort is read per request rather than stored, because the port the
-	// agent serves on can be changed while this listener stays up. A device
-	// handed the old one has no way back.
+	// agentPort is read per request rather than stored: the port the agent
+	// serves on can change while this listener stays up, and a device handed
+	// the old one cannot connect.
 	agentPort func() int
 }
 
@@ -206,10 +206,9 @@ func generatePIN() string {
 	return fmt.Sprintf("%06d", binary.BigEndian.Uint32(b[:])%1_000_000)
 }
 
-// UseCertificateAuthority names the authority handed out to a device that is
-// pairing, for a caller that builds this server before the authority exists —
-// which is the normal order, since the certificate is settled while the agent
-// is being assembled.
+// UseCertificateAuthority names the authority handed out to a pairing device,
+// for a caller that builds this server before the certificate is settled, which
+// is the normal order.
 //
 // Call it before Start. A nil *Manager boxed into the interface is unboxed
 // here, as in the constructor.
@@ -220,11 +219,8 @@ func (s *BootstrapServer) UseCertificateAuthority(ca CertificateAuthority) {
 	s.manager = ca
 }
 
-// SetPort names the port Start will bind. It exists so a server can be built
-// before the port is settled, which is the normal case: the component holding
-// it is assembled before the agent has resolved its listeners.
-//
-// Changing it after Start has no effect on the listener already bound.
+// SetPort names the port Start will bind, so a server can be built before the
+// port is settled. Changing it after Start does not move a bound listener.
 func (s *BootstrapServer) SetPort(port int) { s.port = port }
 
 // Port reports the port Start will bind, or has bound.

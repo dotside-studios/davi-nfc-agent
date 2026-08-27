@@ -39,10 +39,9 @@ func pairOver(t *testing.T, h http.Handler, pin string) map[string]any {
 // The port a pairing device is told to connect to is read when it pairs, not
 // captured when the endpoint was built.
 //
-// It used to be captured. The port is a saved preference the operator can change
-// from the control center, so a device that paired after such a change was handed
-// the old port and could not connect — and nothing about the failure pointed
-// back at pairing.
+// It used to be captured. The port is a saved preference the operator can
+// change from the control center, so a device pairing after such a change was
+// handed the old port and could not connect.
 func TestThePairingResponseCarriesTheCurrentPort(t *testing.T) {
 	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
@@ -71,7 +70,7 @@ func TestThePairingResponseCarriesTheCurrentPort(t *testing.T) {
 }
 
 // The key pin follows the certificate, which can be reissued while the endpoint
-// stays up, so it is read per pairing for the same reason.
+// stays up, so it is read per pairing too.
 func TestThePairingResponseCarriesTheCurrentKeyPin(t *testing.T) {
 	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
@@ -130,7 +129,7 @@ func TestPairingIssuesADistinctCredentialEachTime(t *testing.T) {
 }
 
 // A build handing out a certificate authority and nothing else serves the pages
-// but pairs nobody, rather than issuing credentials into a store it has not got.
+// but pairs nobody, rather than issuing into a store it has not got.
 func TestAServerWithNoRegistryPairsNobody(t *testing.T) {
 	server := pairing.NewServer(pairing.ServerOptions{})
 
@@ -159,9 +158,9 @@ func pairInTheClear(h http.Handler, pin, remoteAddr string) int {
 	return rec.Code
 }
 
-// The credential and the key pin would both be readable in the clear, and the
-// pin substitutable by anyone in the path, so pairing over a cleartext
-// connection from off this machine is refused.
+// The credential and the key pin would be readable in the clear, and the pin
+// substitutable by anyone in the path, so cleartext pairing from off this
+// machine is refused.
 func TestPairingRefusesCleartextFromOffThisMachine(t *testing.T) {
 	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {
@@ -181,9 +180,8 @@ func TestPairingRefusesCleartextFromOffThisMachine(t *testing.T) {
 	}
 }
 
-// From this machine there is no path to observe or substitute anything on, so
-// cleartext is allowed there — the same reasoning as the loopback bypass on the
-// device endpoint.
+// From this machine there is no path to observe or substitute on, so cleartext
+// is allowed, as with the loopback bypass on the device endpoint.
 func TestPairingAllowsCleartextFromThisMachine(t *testing.T) {
 	registry, err := pairing.NewRegistry(t.TempDir())
 	if err != nil {

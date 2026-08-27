@@ -1,12 +1,10 @@
-// Package pairing issues and stores the credentials a device pairs with.
+// Package pairing issues the credentials a device pairs with and stores them
+// on disk, under the permissions [secure.Dir] and [secure.File] apply.
 //
-// It sits under secure because that is what secure holds: the files an agent
-// persists that nothing else should read. The registry writes device
-// credentials to disk through [secure.Dir] and [secure.File], and the server
-// issues them through secure/tls, whose bootstrap endpoint it wraps.
+// [Registry] is the store; [Server] is the endpoint that issues into it,
+// wrapping the bootstrap server in secure/tls.
 //
-// What gates an HTTP request on one of these credentials is not here. That
-// takes an http.ResponseWriter and belongs with what serves the request; see
+// Checking one of these credentials on a request is not here: see
 // server.CheckAuth and pairednfc.Manager.Admit.
 package pairing
 

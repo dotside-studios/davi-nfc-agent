@@ -12,14 +12,13 @@ import (
 // through a reader.
 var errNoHolder = errors.New("pairednfc: no device beneath this manager holds tags")
 
-// The manager half is pure delegation. It filters no listings: a backend whose
+// The manager half is pure delegation, and filters no listings: a backend whose
 // devices dial in registers one only after it is admitted, so with RequirePaired
 // on, a device holding no credential never registers and never appears.
 //
-// The position is for the rest: this is the manager the agent holds, and it is
-// where the revocation subscription lives. Filtering would matter for a backend
-// the agent dials out to, which enumerates its devices from configuration and
-// passes through no endpoint. None exists yet.
+// A backend the agent dials out to would need filtering here, since it
+// enumerates its devices from configuration and passes through no endpoint.
+// None exists yet.
 
 // OpenDevice opens a device on the child.
 func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {

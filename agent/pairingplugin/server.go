@@ -8,11 +8,10 @@ import (
 )
 
 // Server runs a [pairing.Server]'s own listener as a component of the agent, so
-// it starts and stops with the agent rather than being started in Setup and
-// stopped by whoever remembers to.
+// it starts and stops with the agent.
 //
-// This is only the lifetime. The pairing machinery lives with whatever owns the
-// credentials, which is the paired-device manager; see pairednfc.Manager.
+// The lifetime is all it adds. The pairing machinery belongs to whatever owns
+// the credentials; see pairednfc.Manager.
 type Server struct {
 	server *pairing.Server
 	port   int

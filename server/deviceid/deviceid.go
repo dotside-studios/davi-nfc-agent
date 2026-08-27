@@ -4,10 +4,6 @@
 // A leaf package so the two ends need not depend on each other: the component
 // that admits knows what a credential is, and the backend that serves the
 // connection knows only whether somebody named it.
-//
-// It sits under server because it is request plumbing: it carries a value on an
-// http.Request between what gates one and what serves it. Nothing here persists
-// a credential, which is what secure/pairing does.
 package deviceid
 
 import (

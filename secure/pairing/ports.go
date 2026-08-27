@@ -3,15 +3,12 @@ package pairing
 import "github.com/dotside-studios/davi-nfc-agent/event"
 
 // Store is a credential registry to read and revoke: the only half anything
-// outside the pairing machinery needs.
+// outside the pairing machinery needs. Minting a credential and checking one
+// stay with whatever owns the registry.
 //
-// Minting a credential and checking one are absent on purpose. They belong to
-// whatever owns the registry, which is the component serving pairing.
-//
-// An interface rather than *Registry because a store for credentials this agent
-// must present, for a reader it dials out to rather than one that dials in,
-// answers these same six questions over quite different state. [Registry]
-// cannot serve that: it keeps only a hash.
+// An interface rather than *Registry so a store of credentials this agent must
+// present, rather than verify, can answer the same six questions. [Registry]
+// cannot: it keeps only a hash.
 type Store interface {
 	// List returns the paired devices, most recently paired first.
 	List() []Device

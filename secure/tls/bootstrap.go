@@ -74,8 +74,8 @@ type BootstrapServer struct {
 	agentPort func() int
 }
 
-// port reports the agent's port for a device that is pairing now, 0 when
-// nothing supplied one.
+// agentPortNow reports the port a device pairing now is told to connect to, 0
+// when nothing supplied one.
 func (s *BootstrapServer) agentPortNow(fn func() int) int {
 	if fn == nil {
 		return 0
@@ -206,25 +206,9 @@ func generatePIN() string {
 	return fmt.Sprintf("%06d", binary.BigEndian.Uint32(b[:])%1_000_000)
 }
 
-// UseCertificateAuthority names the authority handed out to a pairing device,
-// for a caller that builds this server before the certificate is settled, which
-// is the normal order.
-//
-// Call it before Start. A nil *Manager boxed into the interface is unboxed
-// here, as in the constructor.
-func (s *BootstrapServer) UseCertificateAuthority(ca CertificateAuthority) {
-	if m, ok := ca.(*Manager); ok && m == nil {
-		ca = nil
-	}
-	s.manager = ca
-}
-
 // SetPort names the port Start will bind, so a server can be built before the
 // port is settled. Changing it after Start does not move a bound listener.
 func (s *BootstrapServer) SetPort(port int) { s.port = port }
-
-// Port reports the port Start will bind, or has bound.
-func (s *BootstrapServer) Port() int { return s.port }
 
 // Start brings up the HTTP server and logs the pairing details.
 func (s *BootstrapServer) Start() error {

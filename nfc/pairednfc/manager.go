@@ -157,11 +157,9 @@ func (m *Manager) UseSecret(secret func() string) {
 	m.policy.Secret = secret
 }
 
-// UsePort sets the port a paired device is told to connect to afterwards.
-//
-// A setter because the port is a saved preference the operator can change,
-// which the agent holds; this manager is assembled before it. Passing the
-// agent's accessor keeps the value read per pairing rather than captured.
+// UsePort sets the port a paired device is told to connect to afterwards, for a
+// build assembling this manager before the thing holding the preference. Pass
+// an accessor rather than a value: the port is read per pairing.
 func (m *Manager) UsePort(agentPort func() int) {
 	m.pairing.UsePort(agentPort)
 }

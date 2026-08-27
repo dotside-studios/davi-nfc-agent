@@ -93,9 +93,8 @@ func main() {
 	}
 
 	// The paired-device manager over the backends above: the credential store,
-	// the pairing machinery, and the check that admits a device. It is what the
-	// agent holds, so this build cannot have the readers without the policy
-	// deciding who reaches them. Hand backends to Setup instead, and mount the
+	// the pairing machinery, and the check that admits a device. It is the
+	// manager the agent holds. Hand backends to Setup instead, and mount the
 	// device endpoint bare, and the build pairs nobody and admits everyone.
 	paired, err := pairednfc.New(backends, pairednfc.Options{
 		ConfigDir:    opts.ConfigDir,
@@ -117,9 +116,8 @@ func main() {
 	}
 
 	// What it admits on, and what a pairing device is told to connect to, now
-	// that the agent holds them. All read per use: the secret can be rotated,
-	// the requirement withdrawn and the port changed while the endpoints stay
-	// up.
+	// that the agent holds them. All read per use, so rotating the secret,
+	// withdrawing the requirement or changing the port needs nothing rebuilt.
 	paired.UseSecret(rt.Agent.APISecret)
 	paired.Require(rt.Agent.RequirePairedDevice)
 	paired.UsePort(rt.Agent.DevicePort)

@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -115,7 +116,7 @@ func TestReader_WriteCardData(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Write data to card
-	err = reader.WriteCardData("Test Message")
+	err = reader.WriteCardData(context.Background(), "Test Message")
 	if err != nil {
 		t.Errorf("WriteCardData() failed: %v", err)
 	}
@@ -316,7 +317,7 @@ func TestReader_ModeReadOnly(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Attempt to write should fail
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err == nil {
 		t.Error("Expected write to fail in read-only mode")
 	}
@@ -365,7 +366,7 @@ func TestReader_ModeWriteOnly(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Write should succeed
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err != nil {
 		t.Errorf("Expected write to succeed in write-only mode, got error: %v", err)
 	}
@@ -424,7 +425,7 @@ func TestReader_ModeReadWrite(t *testing.T) {
 	}
 
 	// Write should also work
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err != nil {
 		t.Errorf("Expected write to succeed in read/write mode, got error: %v", err)
 	}
@@ -500,7 +501,7 @@ func TestReader_WriteErrorPropagation(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Attempt write - should fail and return error
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err == nil {
 		t.Error("Expected write to fail when tag returns error, but got no error")
 	}
@@ -544,7 +545,7 @@ func TestReader_MultipleCardsGuard(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Attempt write - should fail due to multiple cards
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err == nil {
 		t.Fatal("Expected write to fail when multiple cards are detected, but got no error")
 	}
@@ -598,7 +599,7 @@ func TestReader_UIDMismatchGuard(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Attempt write - should fail due to UID mismatch
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err == nil {
 		t.Fatal("Expected write to fail when card UID doesn't match cache, but got no error")
 	}
@@ -642,7 +643,7 @@ func TestReader_SingleCardWriteSucceeds(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Attempt write - should succeed
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err != nil {
 		t.Errorf("Expected write to succeed with single matching card, got error: %v", err)
 	}
@@ -704,7 +705,7 @@ func TestReader_WriteOnlyModeCachePopulation(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Write should succeed even without explicit cache population
-	err = reader.WriteCardData("Test Write")
+	err = reader.WriteCardData(context.Background(), "Test Write")
 	if err != nil {
 		t.Errorf("Expected write to succeed in write-only mode after cache population, got error: %v", err)
 	}
@@ -753,7 +754,7 @@ func TestReader_WriteMessageWithOptions_TextRecord(t *testing.T) {
 	ndefMsg := msg.MustBuild()
 
 	// Write with overwrite option
-	err = reader.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	err = reader.WriteMessageWithOptions(context.Background(), ndefMsg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -820,7 +821,7 @@ func TestReader_WriteMessageWithOptions_URIRecord(t *testing.T) {
 	ndefMsg := msg.MustBuild()
 
 	// Write URI message
-	err = reader.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	err = reader.WriteMessageWithOptions(context.Background(), ndefMsg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -887,7 +888,7 @@ func TestReader_WriteMessageWithOptions_AppendMode(t *testing.T) {
 	ndefMsg := msg.MustBuild()
 
 	// Write in append mode
-	err = reader.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	err = reader.WriteMessageWithOptions(context.Background(), ndefMsg, WriteOptions{
 		Overwrite: false,
 		Index:     -1, // -1 means append
 	})
@@ -971,7 +972,7 @@ func TestReader_WriteMessageWithOptions_ReplaceAtIndex(t *testing.T) {
 	ndefMsg := msg.MustBuild()
 
 	// Write to replace record at index 1
-	err = reader.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	err = reader.WriteMessageWithOptions(context.Background(), ndefMsg, WriteOptions{
 		Overwrite: false,
 		Index:     1,
 	})
@@ -1047,7 +1048,7 @@ func TestReader_WriteMessageWithOptions_MultipleCards(t *testing.T) {
 	ndefMsg := msg.MustBuild()
 
 	// Attempt write - should fail with multiple cards
-	err = reader.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	err = reader.WriteMessageWithOptions(context.Background(), ndefMsg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})
@@ -1090,7 +1091,7 @@ func TestReader_WriteMessageWithOptions_NoCard(t *testing.T) {
 	ndefMsg := msg.MustBuild()
 
 	// Attempt write - should fail with no card
-	err = reader.WriteMessageWithOptions(ndefMsg, WriteOptions{
+	err = reader.WriteMessageWithOptions(context.Background(), ndefMsg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 	})

@@ -2,6 +2,7 @@
 package multimanager
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -218,41 +219,41 @@ func (mm *MultiManager) DevicesHoldingTags() []string {
 }
 
 // WriteTag asks the manager whose device is holding the tag to encode onto it.
-func (mm *MultiManager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
+func (mm *MultiManager) WriteTag(ctx context.Context, deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
 	holder, err := mm.holderFor(deviceID)
 	if err != nil {
 		return nil, err
 	}
-	return holder.WriteTag(deviceID, tagUID, msg, lock, idempotencyKey)
+	return holder.WriteTag(ctx, deviceID, tagUID, msg, lock, idempotencyKey)
 }
 
 // LockTag asks the manager whose device is holding the tag to make it
 // permanently read-only.
-func (mm *MultiManager) LockTag(deviceID, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
+func (mm *MultiManager) LockTag(ctx context.Context, deviceID, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
 	holder, err := mm.holderFor(deviceID)
 	if err != nil {
 		return nil, err
 	}
-	return holder.LockTag(deviceID, tagUID, idempotencyKey)
+	return holder.LockTag(ctx, deviceID, tagUID, idempotencyKey)
 }
 
 // TagCapabilities reports what the tag a device is holding supports.
-func (mm *MultiManager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapabilities, error) {
+func (mm *MultiManager) TagCapabilities(ctx context.Context, deviceID, tagUID string) (*nfc.TagCapabilities, error) {
 	holder, err := mm.holderFor(deviceID)
 	if err != nil {
 		return nil, err
 	}
-	return holder.TagCapabilities(deviceID, tagUID)
+	return holder.TagCapabilities(ctx, deviceID, tagUID)
 }
 
 // TransceiveTag asks the manager whose device is holding the tag to exchange
 // raw bytes with it.
-func (mm *MultiManager) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+func (mm *MultiManager) TransceiveTag(ctx context.Context, deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
 	holder, err := mm.holderFor(deviceID)
 	if err != nil {
 		return nil, err
 	}
-	return holder.TransceiveTag(deviceID, tagUID, data, raw)
+	return holder.TransceiveTag(ctx, deviceID, tagUID, data, raw)
 }
 
 // holders lists the child managers whose devices hold tags, in registration

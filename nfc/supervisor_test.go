@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -217,19 +218,19 @@ func TestASupervisorHoldsAnOperationToTheTagItNamed(t *testing.T) {
 
 	s := startedSupervisor(t, m)
 
-	if _, err := s.WriteTag("mock:usb:001", "04FFFFFF", textMessage("for another tag"), false, ""); !errors.Is(err, ErrTagUIDMismatch) {
+	if _, err := s.WriteTag(context.Background(), "mock:usb:001", "04FFFFFF", textMessage("for another tag"), false, ""); !errors.Is(err, ErrTagUIDMismatch) {
 		t.Errorf("WriteTag err = %v, want ErrTagUIDMismatch", err)
 	}
-	if _, err := s.LockTag("mock:usb:001", "04FFFFFF", ""); !errors.Is(err, ErrTagUIDMismatch) {
+	if _, err := s.LockTag(context.Background(), "mock:usb:001", "04FFFFFF", ""); !errors.Is(err, ErrTagUIDMismatch) {
 		t.Errorf("LockTag err = %v, want ErrTagUIDMismatch", err)
 	}
 	if tag.IsReadOnly {
 		t.Error("a tag the caller did not name was locked, which cannot be undone")
 	}
-	if _, err := s.TransceiveTag("mock:usb:001", "04FFFFFF", []byte{0x30, 0x00}, true); !errors.Is(err, ErrTagUIDMismatch) {
+	if _, err := s.TransceiveTag(context.Background(), "mock:usb:001", "04FFFFFF", []byte{0x30, 0x00}, true); !errors.Is(err, ErrTagUIDMismatch) {
 		t.Errorf("TransceiveTag err = %v, want ErrTagUIDMismatch", err)
 	}
-	if _, err := s.TagCapabilities("mock:usb:001", "04FFFFFF"); !errors.Is(err, ErrTagUIDMismatch) {
+	if _, err := s.TagCapabilities(context.Background(), "mock:usb:001", "04FFFFFF"); !errors.Is(err, ErrTagUIDMismatch) {
 		t.Errorf("TagCapabilities err = %v, want ErrTagUIDMismatch", err)
 	}
 }
@@ -253,7 +254,7 @@ func TestASupervisorAnswersForTheManagersDevices(t *testing.T) {
 		t.Error("a device that reports its own scans was reported as a reader the supervisor opened")
 	}
 
-	if _, err := s.WriteTag("phone-9f2a", "04DEADBEEF", NewNDEFMessage(), false, "key-1"); err != nil {
+	if _, err := s.WriteTag(context.Background(), "phone-9f2a", "04DEADBEEF", NewNDEFMessage(), false, "key-1"); err != nil {
 		t.Fatalf("WriteTag: %v", err)
 	}
 	if !m.wrote["phone-9f2a"] {
@@ -276,6 +277,10 @@ func TestASupervisorNamesAReaderHoldingATagItCouldNotRead(t *testing.T) {
 		t.Errorf("TagOn = %q, %q, %v; want the reader holding a tag it cannot name", device, uid, ok)
 	}
 }
+
+// TagsHeldBy asserts TagHolder at runtime, so a fake that drifts out of the
+// interface stops standing in for a phone driver without failing to build.
+var _ TagHolder = (*holdingManager)(nil)
 
 // holdingManager is a manager whose devices hold tags of their own, which is
 // what the phone driver is.
@@ -310,7 +315,7 @@ func (m *holdingManager) DevicesHoldingTags() []string {
 	return out
 }
 
-func (m *holdingManager) WriteTag(device, uid string, _ *NDEFMessage, lock bool, _ string) (*WriteResult, error) {
+func (m *holdingManager) WriteTag(_ context.Context, device, uid string, _ *NDEFMessage, lock bool, _ string) (*WriteResult, error) {
 	if _, ok := m.held[device]; !ok {
 		return nil, errors.New("device is not holding a tag")
 	}
@@ -321,15 +326,15 @@ func (m *holdingManager) WriteTag(device, uid string, _ *NDEFMessage, lock bool,
 	return &WriteResult{UID: uid, Locked: lock}, nil
 }
 
-func (m *holdingManager) LockTag(device, uid, _ string) (*LockResult, error) {
+func (m *holdingManager) LockTag(_ context.Context, device, uid, _ string) (*LockResult, error) {
 	return &LockResult{UID: uid, Locked: true}, nil
 }
 
-func (m *holdingManager) TransceiveTag(_, _ string, data []byte, _ bool) ([]byte, error) {
+func (m *holdingManager) TransceiveTag(_ context.Context, _, _ string, data []byte, _ bool) ([]byte, error) {
 	return data, nil
 }
 
-func (m *holdingManager) TagCapabilities(device, _ string) (*TagCapabilities, error) {
+func (m *holdingManager) TagCapabilities(_ context.Context, device, _ string) (*TagCapabilities, error) {
 	uid, ok := m.held[device]
 	if !ok {
 		return nil, errors.New("device is not holding a tag")

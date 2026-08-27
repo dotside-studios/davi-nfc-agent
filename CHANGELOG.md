@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `remotenfc.Manager.Dropped` counts the scans and removals that could not be
   published within `ScanPublishTimeout`, so overflow is a number rather than a
   log line
+- `BUSY` error code for a request the agent could not start because earlier work
+  is still draining: a reader still finishing an operation whose caller gave up,
+  or more requests outstanding on one connection than it queues (8). Retryable.
+  `nfc.ErrCodeBusy`, `nfc.NewBusyError` and `nfc.ErrReaderBusy` are its internal
+  counterparts
 - `MULTIPLE_TAGS` error code for more than one tag in the field where the
   operation needs exactly one. Not retryable: the user has to separate them
   first. Both guards raised an untyped `fmt.Errorf`, so a real and
@@ -184,6 +189,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin, which builds its listener when it activates
 - `pairing.Server.OnPINChange` reports a rotation, and the tray entries follow
   it rather than the control that rotated the PIN
+- `nfc.TagHolder`'s four operations take a `context.Context` first argument:
+  `WriteTag`, `LockTag`, `TransceiveTag` and `TagCapabilities`. `TagOn` and
+  `DevicesHoldingTags` are unchanged, since both answer from memory. The same
+  argument is added to the matching methods on `nfc.Supervisor`, `agent.Agent`,
+  `multimanager.MultiManager` and `remotenfc.Manager`, to
+  `Supervisor.WriteMessage`, `Lock`, `Transceive` and `Capabilities`, and to
+  `remotenfc.Manager.WriteToDevice` and `TransceiveWithDevice`. Breaking for an
+  embedder that implements `nfc.TagHolder` or calls these directly; add the
+  parameter and pass the caller's context, or `context.Background()`
+- `server.TagOps` implementations now pass the context they are given down to
+  the holder instead of discarding it. The context reaching a reader operation
+  bounds the wait alongside the reader's own operation timeout, whichever
+  expires first. Cancelling does not abort a PC/SC transfer already in progress,
+  so a tag may still be written after the caller has given up
+- `remotenfc.Manager.request` returns `ctx.Err()` when the context ends, instead
+  of waiting out the full device timeout. The pending entry is removed either way
 - The loopback bypass is off unless asked for. A connection from the agent's own
   host was admitted with no credential whenever an API secret was set, which
   admitted every other account on that host, every local proxy and every port
@@ -550,6 +571,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a device revoked from the tray left the console listing what it loaded. Its
   own revoke still redrew, since every console action redraws
 - A PIN rotated from the tray reaches an open console page, which it never did
+- A client that disconnects mid-operation now cancels it. The websocket read
+  loop served each request inline, so while a write was running nothing was
+  reading the socket and the disconnect went unnoticed until the write had
+  finished. Reading and dispatch are separate goroutines, and the context the
+  operation runs under ends when the connection drops or when an operator calls
+  `Disconnect`. Requests are still served one at a time per connection
+- A tag operation whose caller gave up no longer runs beside the next one. On a
+  timeout the reader released `operationMutex` while the abandoned goroutine was
+  still driving the tag, so the following request acquired the mutex and the two
+  interleaved: a write's verification read could land between another write's
+  attempts. The operation now holds the reader until it actually returns. A
+  request arriving meanwhile waits one operation timeout for it and is then
+  refused with `BUSY`, which is retryable
+- Abandoned tag operations are counted and logged instead of disappearing, and
+  the reader waits for them when it stops, bounded at twice the operation
+  timeout so a stuck PC/SC transfer cannot hang shutdown
+- `pcsc.Manager.DeviceChanges` no longer leaks its polling goroutine. The
+  goroutine ran `for range ticker.C` with no stop path, so it outlived the
+  manager and the process kept polling PC/SC after shutdown. It now selects on a
+  stop channel and closes the channel it returned. `pcsc.Manager.Close` stops
+  the watches and releases the PC/SC context; `multimanager.MultiManager.Close`
+  already fans out to children implementing `Close()`, so agent shutdown reaches
+  it. Consumers must treat a closed channel as the end of the watch, which
+  `nfc.Supervisor` and `agent.Agent` already did
 - A preference change announces once, with every field in place.
   `console.host.ApplyPreferences` called six setters in turn and each raised
   `Events().Preferences` and `Events().Any`, so one `settings.save` emitted up

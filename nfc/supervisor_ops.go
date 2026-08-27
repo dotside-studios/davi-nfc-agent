@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"fmt"
 	"sort"
 )
@@ -177,11 +178,11 @@ func (s *Supervisor) heldElsewhere(device string) TagHolder {
 //
 // The idempotency key is a device's: a reader is asked once and answers for
 // what it did, where a device may have applied the write already.
-func (s *Supervisor) WriteTag(device, tagUID string, msg *NDEFMessage, lock bool, idempotencyKey string) (*WriteResult, error) {
+func (s *Supervisor) WriteTag(ctx context.Context, device, tagUID string, msg *NDEFMessage, lock bool, idempotencyKey string) (*WriteResult, error) {
 	if holder := s.heldElsewhere(device); holder != nil {
-		return holder.WriteTag(device, tagUID, msg, lock, idempotencyKey)
+		return holder.WriteTag(ctx, device, tagUID, msg, lock, idempotencyKey)
 	}
-	return s.WriteMessage(device, msg, WriteOptions{
+	return s.WriteMessage(ctx, device, msg, WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 		Lock:      lock,
@@ -190,28 +191,28 @@ func (s *Supervisor) WriteTag(device, tagUID string, msg *NDEFMessage, lock bool
 }
 
 // LockTag makes the tag the named device is holding permanently read-only.
-func (s *Supervisor) LockTag(device, tagUID, idempotencyKey string) (*LockResult, error) {
+func (s *Supervisor) LockTag(ctx context.Context, device, tagUID, idempotencyKey string) (*LockResult, error) {
 	if holder := s.heldElsewhere(device); holder != nil {
-		return holder.LockTag(device, tagUID, idempotencyKey)
+		return holder.LockTag(ctx, device, tagUID, idempotencyKey)
 	}
-	return s.Lock(device, tagUID)
+	return s.Lock(ctx, device, tagUID)
 }
 
 // TransceiveTag exchanges raw bytes with the tag the named device is holding. A
 // reader speaks to the tag directly, so raw is what it always is there.
-func (s *Supervisor) TransceiveTag(device, tagUID string, data []byte, raw bool) ([]byte, error) {
+func (s *Supervisor) TransceiveTag(ctx context.Context, device, tagUID string, data []byte, raw bool) ([]byte, error) {
 	if holder := s.heldElsewhere(device); holder != nil {
-		return holder.TransceiveTag(device, tagUID, data, raw)
+		return holder.TransceiveTag(ctx, device, tagUID, data, raw)
 	}
-	return s.Transceive(device, data, tagUID)
+	return s.Transceive(ctx, device, data, tagUID)
 }
 
 // TagCapabilities reports what the tag the named device is holding supports.
-func (s *Supervisor) TagCapabilities(device, tagUID string) (*TagCapabilities, error) {
+func (s *Supervisor) TagCapabilities(ctx context.Context, device, tagUID string) (*TagCapabilities, error) {
 	if holder := s.heldElsewhere(device); holder != nil {
-		return holder.TagCapabilities(device, tagUID)
+		return holder.TagCapabilities(ctx, device, tagUID)
 	}
-	return s.Capabilities(device, tagUID)
+	return s.Capabilities(ctx, device, tagUID)
 }
 
 // Operates reports whether this is a reader the supervisor opened, as opposed
@@ -228,40 +229,40 @@ func (s *Supervisor) Operates(device string) bool {
 // does not queue behind another's.
 
 // WriteMessage encodes a message onto the tag on the named reader.
-func (s *Supervisor) WriteMessage(device string, msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
+func (s *Supervisor) WriteMessage(ctx context.Context, device string, msg *NDEFMessage, opts WriteOptions) (*WriteResult, error) {
 	_, reader, err := s.readerFor(device)
 	if err != nil {
 		return nil, err
 	}
-	return reader.WriteMessageWithResult(msg, opts)
+	return reader.WriteMessageWithResult(ctx, msg, opts)
 }
 
 // Lock makes the tag on the named reader read-only. expectUID refuses a tag
 // other than the one the caller named.
-func (s *Supervisor) Lock(device, expectUID string) (*LockResult, error) {
+func (s *Supervisor) Lock(ctx context.Context, device, expectUID string) (*LockResult, error) {
 	_, reader, err := s.readerFor(device)
 	if err != nil {
 		return nil, err
 	}
-	return reader.LockCardExpecting(expectUID)
+	return reader.LockCardExpecting(ctx, expectUID)
 }
 
 // Transceive exchanges raw bytes with the tag on the named reader.
-func (s *Supervisor) Transceive(device string, data []byte, expectUID string) ([]byte, error) {
+func (s *Supervisor) Transceive(ctx context.Context, device string, data []byte, expectUID string) ([]byte, error) {
 	_, reader, err := s.readerFor(device)
 	if err != nil {
 		return nil, err
 	}
-	return reader.TransceiveExpecting(data, expectUID)
+	return reader.TransceiveExpecting(ctx, data, expectUID)
 }
 
 // Capabilities reports what the tag on the named reader supports.
-func (s *Supervisor) Capabilities(device, expectUID string) (*TagCapabilities, error) {
+func (s *Supervisor) Capabilities(ctx context.Context, device, expectUID string) (*TagCapabilities, error) {
 	_, reader, err := s.readerFor(device)
 	if err != nil {
 		return nil, err
 	}
-	return reader.GetCapabilitiesExpecting(expectUID)
+	return reader.GetCapabilitiesExpecting(ctx, expectUID)
 }
 
 // readerFor resolves the reader an operation applies to. An empty device names

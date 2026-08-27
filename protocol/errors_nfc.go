@@ -21,6 +21,7 @@ var wireErrorCodes = map[nfc.ErrorCode]ErrorCode{
 	nfc.ErrCodeCapacityExceeded: ErrCodeCapacityExceeded,
 	nfc.ErrCodeInvalidData:      ErrCodeInvalidData,
 	nfc.ErrCodeMultipleTags:     ErrCodeMultipleTags,
+	nfc.ErrCodeBusy:             ErrCodeBusy,
 }
 
 // InternalErrorCode maps a wire code back to the nfc code it came from, for

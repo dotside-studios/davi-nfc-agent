@@ -60,6 +60,12 @@ const (
 	// operation needs exactly one. Not retryable: the user has to separate
 	// them first.
 	ErrCodeMultipleTags ErrorCode = "MULTIPLE_TAGS"
+
+	// ErrCodeBusy reports that the agent could not start the operation because
+	// it is still working on an earlier one: a reader whose previous operation
+	// was abandoned but has not finished, or a connection with more requests
+	// outstanding than it can queue. Retryable once the earlier work drains.
+	ErrCodeBusy ErrorCode = "BUSY"
 )
 
 // ErrorPayload is the payload of an error response. `code` carries the same
@@ -87,6 +93,7 @@ var retryableCodes = map[ErrorCode]bool{
 	ErrCodeNoCard:           true,
 	ErrCodeTimeout:          true,
 	ErrCodeInternal:         true,
+	ErrCodeBusy:             true,
 }
 
 // Retryable reports whether repeating the request could plausibly succeed.

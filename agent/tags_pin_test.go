@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -68,19 +69,19 @@ func TestNamingTheExcludedReaderIsRefused(t *testing.T) {
 		t.Error("the excluded reader reported a tag")
 	}
 
-	if _, err := a.WriteTag("mock:usb:001", "04A1B2C3", nfc.NewNDEFMessage(), false, ""); err == nil {
+	if _, err := a.WriteTag(context.Background(), "mock:usb:001", "04A1B2C3", nfc.NewNDEFMessage(), false, ""); err == nil {
 		t.Error("a write to the excluded reader was accepted")
 	} else if !strings.Contains(err.Error(), "mock:usb:001") {
 		t.Errorf("the refusal reads %q, want it to name the reader", err)
 	}
 
-	if _, err := a.LockTag("mock:usb:001", "04A1B2C3", ""); err == nil {
+	if _, err := a.LockTag(context.Background(), "mock:usb:001", "04A1B2C3", ""); err == nil {
 		t.Error("a lock on the excluded reader was accepted")
 	}
-	if _, err := a.TransceiveTag("mock:usb:001", "04A1B2C3", []byte{0x30, 0x00}, true); err == nil {
+	if _, err := a.TransceiveTag(context.Background(), "mock:usb:001", "04A1B2C3", []byte{0x30, 0x00}, true); err == nil {
 		t.Error("a transceive on the excluded reader was accepted")
 	}
-	if _, err := a.TagCapabilities("mock:usb:001", "04A1B2C3"); err == nil {
+	if _, err := a.TagCapabilities(context.Background(), "mock:usb:001", "04A1B2C3"); err == nil {
 		t.Error("capabilities of a tag on the excluded reader were reported")
 	}
 }
@@ -136,6 +137,10 @@ func TestAnUnnamedOperationIsRefusedWhenNothingIsAdmitted(t *testing.T) {
 // phoneManager holds a tag the way a phone driver does: it reports its own
 // scans and answers for what its devices hold, and the agent never opened it as
 // a reader.
+// nfc.TagsHeldBy asserts TagHolder at runtime, so a fake that drifts out of the
+// interface stops standing in for a phone driver without failing to build.
+var _ nfc.TagHolder = (*phoneManager)(nil)
+
 type phoneManager struct {
 	nfc.Manager
 	device string
@@ -151,22 +156,22 @@ func (m *phoneManager) TagOn(device string) (string, string, bool) {
 
 func (m *phoneManager) DevicesHoldingTags() []string { return []string{m.device} }
 
-func (m *phoneManager) WriteTag(device, uid string, _ *nfc.NDEFMessage, lock bool, _ string) (*nfc.WriteResult, error) {
+func (m *phoneManager) WriteTag(_ context.Context, device, uid string, _ *nfc.NDEFMessage, lock bool, _ string) (*nfc.WriteResult, error) {
 	if device != m.device {
 		return nil, errors.New("not this device")
 	}
 	return &nfc.WriteResult{UID: uid, Locked: lock}, nil
 }
 
-func (m *phoneManager) LockTag(device, uid, _ string) (*nfc.LockResult, error) {
+func (m *phoneManager) LockTag(_ context.Context, device, uid, _ string) (*nfc.LockResult, error) {
 	return &nfc.LockResult{UID: uid, Locked: true}, nil
 }
 
-func (m *phoneManager) TransceiveTag(_, _ string, data []byte, _ bool) ([]byte, error) {
+func (m *phoneManager) TransceiveTag(_ context.Context, _, _ string, data []byte, _ bool) ([]byte, error) {
 	return data, nil
 }
 
-func (m *phoneManager) TagCapabilities(_, uid string) (*nfc.TagCapabilities, error) {
+func (m *phoneManager) TagCapabilities(_ context.Context, _, uid string) (*nfc.TagCapabilities, error) {
 	caps := nfc.GetTagCapabilities(nfc.NewMockTag(uid))
 	return &caps, nil
 }
@@ -193,7 +198,7 @@ func TestAPinnedReaderLeavesADevicesTagsReachable(t *testing.T) {
 	if _, _, ok := a.TagOn("phone-9f2a"); !ok {
 		t.Error("pinning a reader hid the phone's tag")
 	}
-	if _, err := a.WriteTag("phone-9f2a", "04ABCDEF", nfc.NewNDEFMessage(), false, ""); err != nil {
+	if _, err := a.WriteTag(context.Background(), "phone-9f2a", "04ABCDEF", nfc.NewNDEFMessage(), false, ""); err != nil {
 		t.Errorf("pinning a reader refused a write to the phone: %v", err)
 	}
 

@@ -1,13 +1,11 @@
-package pairednfc_test
+package pairing_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 )
 
@@ -16,10 +14,7 @@ import (
 func TestTheManagerBuildsItsOwnRegistry(t *testing.T) {
 	dir := t.TempDir()
 
-	m, err := pairednfc.New(nfc.NewMockManager(), pairednfc.Options{ConfigDir: dir})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	m := pairing.New(nil, pairing.Options{ConfigDir: dir})
 	if m.PairedDevices() == nil {
 		t.Fatal("the manager holds no credential store")
 	}
@@ -35,10 +30,7 @@ func TestTheManagerBuildsItsOwnRegistry(t *testing.T) {
 func TestAPairingSurvivesRebuildingTheManager(t *testing.T) {
 	dir := t.TempDir()
 
-	before, err := pairednfc.New(nfc.NewMockManager(), pairednfc.Options{ConfigDir: dir})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	before := pairing.New(nil, pairing.Options{ConfigDir: dir})
 	registry, ok := before.PairedDevices().(*pairing.Registry)
 	if !ok {
 		t.Fatalf("the store is %T, not a registry", before.PairedDevices())
@@ -48,10 +40,7 @@ func TestAPairingSurvivesRebuildingTheManager(t *testing.T) {
 		t.Fatalf("Pair: %v", err)
 	}
 
-	after, err := pairednfc.New(nfc.NewMockManager(), pairednfc.Options{ConfigDir: dir})
-	if err != nil {
-		t.Fatalf("New after restart: %v", err)
-	}
+	after := pairing.New(nil, pairing.Options{ConfigDir: dir})
 
 	if got := after.PairedDevices().Count(); got != 1 {
 		t.Fatalf("the rebuilt manager holds %d devices, want 1", got)
@@ -70,10 +59,7 @@ func TestAnUnreadableConfigDirStillBuilds(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	m, err := pairednfc.New(nfc.NewMockManager(), pairednfc.Options{ConfigDir: dir})
-	if err != nil {
-		t.Fatalf("New reported an error for an unreadable store: %v", err)
-	}
+	m := pairing.New(nil, pairing.Options{ConfigDir: dir})
 	if m.PairedDevices() == nil {
 		t.Fatal("no store at all after an unreadable one")
 	}
@@ -93,10 +79,7 @@ func TestASuppliedRegistryIsUsed(t *testing.T) {
 		t.Fatalf("Pair: %v", err)
 	}
 
-	m, err := pairednfc.New(nfc.NewMockManager(), pairednfc.Options{Registry: registry})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	m := pairing.New(nil, pairing.Options{Registry: registry})
 
 	if got := m.PairedDevices().Count(); got != 1 {
 		t.Errorf("Count() = %d, want the supplied registry's one device", got)
@@ -111,7 +94,7 @@ func TestASuppliedRegistryIsUsed(t *testing.T) {
 // cannot reach Pair without asserting its way back to the registry, so this
 // pins the types rather than probing the value.
 func TestTheManagerHandsOutNarrowCapabilities(t *testing.T) {
-	m := over(t, reader{})
+	m := pairing.New(nil, pairing.Options{ConfigDir: t.TempDir()})
 
 	var store pairing.Store = m.PairedDevices()
 	var verifier server.TokenVerifier = m.TokenVerifier()
@@ -134,8 +117,54 @@ func TestTheManagerHandsOutNarrowCapabilities(t *testing.T) {
 	}
 }
 
-func TestNewRefusesNoChild(t *testing.T) {
-	if _, err := pairednfc.New(nil, pairednfc.Options{}); err == nil {
-		t.Error("New over no manager reported no error")
+// A build whose backends hold no sessions to end passes nil. Revoking still
+// works; there is simply nothing to disconnect.
+func TestAGateWithNoSessionsToEnd(t *testing.T) {
+	g := pairing.New(nil, pairing.Options{ConfigDir: t.TempDir()})
+
+	registry, ok := g.PairedDevices().(*pairing.Registry)
+	if !ok {
+		t.Fatalf("the store is %T, not a registry", g.PairedDevices())
 	}
+	device, _, err := registry.Pair("phone", "android")
+	if err != nil {
+		t.Fatalf("Pair: %v", err)
+	}
+
+	if err := registry.Revoke(device.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if g.PairedDevices().Count() != 0 {
+		t.Error("the revoked device is still in the store")
+	}
+}
+
+// Revocation reaches the backend that holds the session.
+func TestRevokingEndsTheSession(t *testing.T) {
+	ended := []string{}
+	g := pairing.New(sessionsFunc(func(id, _ string) bool {
+		ended = append(ended, id)
+		return true
+	}), pairing.Options{ConfigDir: t.TempDir()})
+
+	registry := g.PairedDevices().(*pairing.Registry)
+	device, _, err := registry.Pair("phone", "android")
+	if err != nil {
+		t.Fatalf("Pair: %v", err)
+	}
+
+	if err := registry.Revoke(device.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	if len(ended) != 1 || ended[0] != device.ID {
+		t.Errorf("sessions ended for %v, want just %q", ended, device.ID)
+	}
+}
+
+// sessionsFunc adapts a function to pairing.Sessions.
+type sessionsFunc func(deviceID, reason string) bool
+
+func (f sessionsFunc) DisconnectDevice(deviceID, reason string) bool {
+	return f(deviceID, reason)
 }

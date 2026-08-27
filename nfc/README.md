@@ -2,7 +2,7 @@
 
 A Go package providing a unified, high-level abstraction for NFC operations across multiple card types.
 
-The package itself is transport-agnostic: it defines the tag and device interfaces and the tag drivers, while the backends that implement them live beside it (`nfc/pcsc` for readers attached to this machine, `nfc/remotenfc` for a phone acting as a reader). `nfc/pairednfc` sits over whichever of them a build uses and decides which devices are admitted at all.
+The package itself is transport-agnostic: it defines the tag and device interfaces and the tag drivers, while the backends that implement them live beside it (`nfc/pcsc` for readers attached to this machine, `nfc/remotenfc` for a phone acting as a reader). Which devices are admitted at all is not this package's: see `secure/pairing`, which wraps a backend's endpoint rather than sitting in the manager tree.
 
 ## Overview
 

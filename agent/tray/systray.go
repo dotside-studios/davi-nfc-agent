@@ -37,10 +37,6 @@ type App struct {
 	modes     *traymenu.Radio[nfc.ReaderMode]
 
 	// Paired device menu items
-	mDevicesMenu      *traymenu.Item
-	mRevokeAllDevices *traymenu.Item
-	mRequirePaired    *traymenu.Item
-	pairedDevices     *traymenu.List[string]
 
 	// Reader feedback toggle
 	mReaderFeedback *traymenu.Item
@@ -75,9 +71,6 @@ func (s *App) SyncPreferencesToMenu(next agent.Preferences) {
 
 	s.cardTypes.Set(next.CardTypes)
 
-	if s.mRequirePaired != nil {
-		s.mRequirePaired.SetChecked(next.RequirePairedDevice)
-	}
 	if s.mReaderFeedback != nil {
 		s.mReaderFeedback.SetChecked(next.ReaderFeedback)
 	}
@@ -137,10 +130,6 @@ func (s *App) setupUI() {
 	s.menu.AddSeparator()
 
 	s.setupCardFilterMenu()
-
-	s.menu.AddSeparator()
-
-	s.setupDevicesMenu()
 
 	s.menu.AddSeparator()
 

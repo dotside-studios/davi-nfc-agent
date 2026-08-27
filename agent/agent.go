@@ -2,7 +2,6 @@ package agent
 
 import (
 	"errors"
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"io"
 	"log"
 	"os"
@@ -71,9 +70,6 @@ type Config struct {
 
 	// ConfigDir is where the API secret and other state persist.
 	ConfigDir string
-
-	// Devices holds the paired devices and their per-device credentials.
-	Devices pairing.Store
 
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
@@ -145,7 +141,6 @@ type Agent struct {
 	logger              *log.Logger
 	manager             nfc.Manager
 	configDir           string
-	devices             pairing.Store
 	devicePort          int
 	publicKeyPin        string
 	requirePairedDevice bool
@@ -226,7 +221,6 @@ func New(cfg Config) *Agent {
 		manager:             cfg.Manager,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
-		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
 		requirePairedDevice: cfg.RequirePairedDevice,
@@ -242,7 +236,6 @@ func New(cfg Config) *Agent {
 	}
 
 	a.publishEvents()
-	a.watchStores()
 	a.watchManager()
 
 	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
@@ -304,9 +297,8 @@ func (a *Agent) Readers() []string {
 	}
 	return readers
 }
-func (a *Agent) Logger() *log.Logger    { return a.logger }
-func (a *Agent) ConfigDir() string      { return a.configDir }
-func (a *Agent) Devices() pairing.Store { return a.devices }
+func (a *Agent) Logger() *log.Logger { return a.logger }
+func (a *Agent) ConfigDir() string   { return a.configDir }
 
 // APISecret is the secret non-loopback connections must present. Read on every
 // upgrade by whatever checks it, so it follows a rotation.

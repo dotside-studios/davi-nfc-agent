@@ -6,10 +6,6 @@ This guide explains how to add support for new NFC readers or tag types to the d
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    pairednfc.Manager                        │
-│  Owns the credentials; Admit() wraps a backend's endpoint   │
-│         Optional: leave it out and every device is admitted │
-├─────────────────────────────────────────────────────────────┤
 │                      MultiManager                           │
 │     Aggregates multiple managers, routes device requests    │
 ├──────────────────┬──────────────────┬───────────────────────┤
@@ -24,12 +20,15 @@ This guide explains how to add support for new NFC readers or tag types to the d
        Tag[]              Tag[]               Tag[]
 ```
 
-A backend implements no authentication of its own. Devices that dial in reach
-it through `pairednfc.Manager.Admit`, which checks the credential and names the
-device it admitted; the backend reads that name with `deviceid.Of(r)` and
-registers the device under it, or mints one when nothing admitted the
-connection. Being beneath the manager gates nothing on its own: a reader
-attached to this machine serves no endpoint and is untouched.
+A backend implements no authentication of its own. Devices that dial in reach it
+through `pairing.Gate.Admit`, which wraps the backend's endpoint at the mount,
+checks the credential and names the device it admitted; the backend reads that
+name with `deviceid.Of(r)` and registers the device under it, or mints one when
+nothing admitted the connection.
+
+The gate is not in this tree. It wraps endpoints, so a backend with none — a
+reader attached to this machine — is untouched by it. What it asks of the tree
+is `DisconnectDevice`, so revoking a credential ends the session holding it.
 
 ### Core Interfaces
 

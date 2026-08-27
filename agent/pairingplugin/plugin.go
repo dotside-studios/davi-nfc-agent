@@ -29,6 +29,10 @@ type Plugin struct {
 	// one, and a caller with its own passes it here.
 	Server *Server
 
+	// Devices is the credential store the paired-device menu lists and revokes
+	// from. Nil leaves that submenu out.
+	Devices pairing.Store
+
 	// MenuTitle names the submenu its entries go under. Blank uses "Pairing".
 	MenuTitle string
 
@@ -36,21 +40,30 @@ type Plugin struct {
 	address *traymenu.Item
 	pin     *traymenu.Item
 	logger  *log.Logger
+
+	// The paired-device submenu and the entries that act on it.
+	agent         *agent.Agent
+	devicesMenu   *traymenu.Item
+	pairedDevices *traymenu.List[string]
+	requirePaired *traymenu.Item
+	revokeAll     *traymenu.Item
 }
 
 var _ agent.Plugin = (*Plugin)(nil)
 
-// New runs server's listener on port and puts its entries on the tray. server
-// is the pairing machinery, which belongs to whatever owns the credentials; the
-// paired-device manager builds one.
+// New runs the gate's pairing listener on port and puts pairing's entries on
+// the tray: the address and PIN, and the paired devices to list and revoke.
 //
-// A zero port, or no server, returns nil, and every method tolerates a nil
+// A zero port, or no gate, returns nil, and every method tolerates a nil
 // plugin.
-func New(server *pairing.Server, port int) *Plugin {
-	if port <= 0 || server == nil {
+func New(gate *pairing.Gate, port int) *Plugin {
+	if port <= 0 || gate == nil {
 		return nil
 	}
-	return &Plugin{Server: NewServer(server, port)}
+	return &Plugin{
+		Server:  NewServer(gate.PairingServer(), port),
+		Devices: gate.PairedDevices(),
+	}
 }
 
 // Name identifies the plugin.
@@ -109,6 +122,7 @@ func (p *Plugin) Activate(ctx agent.AgentContext) error {
 		return err
 	}
 	p.logger = ctx.Logger()
+	p.agent = ctx.Agent
 
 	section := ctx.Systray.Section(p.menuTitle(), traymenu.Tooltip("Pair a phone with this agent"))
 	p.address = section.Set("address", "Pair Phone: --", traymenu.Disabled())
@@ -128,6 +142,14 @@ func (p *Plugin) Activate(ctx agent.AgentContext) error {
 			p.logf("Pairing PIN rotated to %s", fresh)
 		}),
 	)
+
+	// The paired devices go under the same section: one place on the menu for
+	// everything about pairing.
+	if p.Devices != nil {
+		p.setupDevicesMenu(section)
+		p.Devices.OnChange(p.refreshDevicesMenu)
+		p.refreshDevicesMenu()
+	}
 
 	// The address follows the machine's own, so it is redrawn whenever a
 	// listener binds again as well as when the agent starts and stops.

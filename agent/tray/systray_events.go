@@ -3,7 +3,6 @@ package tray
 import (
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 )
 
 // subscribe follows the agent, which is what keeps the menu in step with a
@@ -23,7 +22,6 @@ func (s *App) subscribe() {
 	events.Readers.Connect(s.applyReaders)
 	events.Tag.Connect(s.showCard)
 	events.Reader.Connect(s.showReaderStatus)
-	events.Devices.Connect(func([]pairing.Device) { s.refreshDevicesMenu() })
 }
 
 // showState follows the agent's lifecycle, including a stop the tray did not

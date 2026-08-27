@@ -1,13 +1,11 @@
-package pairednfc_test
+package pairing_test
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 )
 
@@ -20,16 +18,13 @@ type admitted struct {
 
 // gate builds a manager over a mock backend and wraps an endpoint that records
 // the identity it was reached with.
-func gate(t *testing.T, policy pairednfc.Policy) (*pairednfc.Manager, *admitted, http.Handler) {
+func gate(t *testing.T, policy pairing.Policy) (*pairing.Gate, *admitted, http.Handler) {
 	t.Helper()
 
-	m, err := pairednfc.New(nfc.NewMockManager(), pairednfc.Options{
+	m := pairing.New(nil, pairing.Options{
 		ConfigDir: t.TempDir(),
 		Policy:    policy,
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 
 	seen := &admitted{}
 	endpoint := m.Admit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +36,7 @@ func gate(t *testing.T, policy pairednfc.Policy) (*pairednfc.Manager, *admitted,
 }
 
 // pairOne issues a credential and returns the token a device would present.
-func pairOne(t *testing.T, m *pairednfc.Manager) (string, string) {
+func pairOne(t *testing.T, m *pairing.Gate) (string, string) {
 	t.Helper()
 
 	registry, ok := m.PairedDevices().(*pairing.Registry)
@@ -87,7 +82,7 @@ func call(endpoint http.Handler, secret, remoteAddr string) int {
 // identity reaches the backend. Without it a paired device would register under
 // a fresh ID every connection and revoking it would end nothing.
 func TestAPairedTokenIsAdmittedUnderItsOwnIdentity(t *testing.T) {
-	m, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
+	m, seen, endpoint := gate(t, pairing.Policy{Secret: func() string { return "shared" }})
 	id, token := pairOne(t, m)
 
 	if status := reach(t, endpoint, token); status != http.StatusOK {
@@ -104,7 +99,7 @@ func TestAPairedTokenIsAdmittedUnderItsOwnIdentity(t *testing.T) {
 // The shared secret admits but names nobody: there is no device to revoke
 // behind it.
 func TestTheSharedSecretAdmitsWithoutNamingADevice(t *testing.T) {
-	_, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
+	_, seen, endpoint := gate(t, pairing.Policy{Secret: func() string { return "shared" }})
 
 	if status := reach(t, endpoint, "shared"); status != http.StatusOK {
 		t.Fatalf("the shared secret was refused (status %d)", status)
@@ -115,7 +110,7 @@ func TestTheSharedSecretAdmitsWithoutNamingADevice(t *testing.T) {
 }
 
 func TestAWrongSecretIsRefused(t *testing.T) {
-	_, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
+	_, seen, endpoint := gate(t, pairing.Policy{Secret: func() string { return "shared" }})
 
 	if status := reach(t, endpoint, "wrong"); status != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", status, http.StatusUnauthorized)
@@ -129,7 +124,7 @@ func TestAWrongSecretIsRefused(t *testing.T) {
 // endpoint admitting a secret the console had already rotated away.
 func TestTheSecretIsReadPerConnection(t *testing.T) {
 	secret := "old"
-	_, _, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return secret }})
+	_, _, endpoint := gate(t, pairing.Policy{Secret: func() string { return secret }})
 
 	if status := reach(t, endpoint, "old"); status != http.StatusOK {
 		t.Fatalf("the current secret was refused (status %d)", status)
@@ -148,7 +143,7 @@ func TestTheSecretIsReadPerConnection(t *testing.T) {
 // RequirePaired drops the shared secret as well as the bypass: only a credential
 // issued at pairing admits.
 func TestRequirePairedDropsTheSharedSecret(t *testing.T) {
-	m, _, endpoint := gate(t, pairednfc.Policy{
+	m, _, endpoint := gate(t, pairing.Policy{
 		Secret:        func() string { return "shared" },
 		RequirePaired: func() bool { return true },
 	})
@@ -165,7 +160,7 @@ func TestRequirePairedDropsTheSharedSecret(t *testing.T) {
 // Revoking the last device must not fall open. An empty registry under
 // RequirePaired admits nobody.
 func TestRequirePairedWithNoPairedDevicesAdmitsNobody(t *testing.T) {
-	m, _, endpoint := gate(t, pairednfc.Policy{
+	m, _, endpoint := gate(t, pairing.Policy{
 		Secret:        func() string { return "shared" },
 		RequirePaired: func() bool { return true },
 	})
@@ -186,7 +181,7 @@ func TestRequirePairedWithNoPairedDevicesAdmitsNobody(t *testing.T) {
 // Loopback names the host, not a client on it, so it presents the secret like
 // any other address unless the build asked otherwise.
 func TestALoopbackRequestIsNotAdmittedByDefault(t *testing.T) {
-	_, seen, endpoint := gate(t, pairednfc.Policy{Secret: func() string { return "shared" }})
+	_, seen, endpoint := gate(t, pairing.Policy{Secret: func() string { return "shared" }})
 
 	if status := reachFromLoopback(t, endpoint, ""); status != http.StatusUnauthorized {
 		t.Errorf("a request from this machine was admitted with no credential (status %d)", status)
@@ -203,7 +198,7 @@ func TestALoopbackRequestIsNotAdmittedByDefault(t *testing.T) {
 // A build whose local client cannot be given the secret asks for the bypass. It
 // admits, and names nobody.
 func TestTheLoopbackBypassAdmitsWhenAskedFor(t *testing.T) {
-	_, seen, endpoint := gate(t, pairednfc.Policy{
+	_, seen, endpoint := gate(t, pairing.Policy{
 		Secret:        func() string { return "shared" },
 		AllowLoopback: func() bool { return true },
 	})
@@ -218,7 +213,7 @@ func TestTheLoopbackBypassAdmitsWhenAskedFor(t *testing.T) {
 
 // The bypass reaches no further than this host, however it is set.
 func TestTheLoopbackBypassAdmitsNothingOffThisHost(t *testing.T) {
-	_, _, endpoint := gate(t, pairednfc.Policy{
+	_, _, endpoint := gate(t, pairing.Policy{
 		Secret:        func() string { return "shared" },
 		AllowLoopback: func() bool { return true },
 	})
@@ -230,7 +225,7 @@ func TestTheLoopbackBypassAdmitsNothingOffThisHost(t *testing.T) {
 
 // RequirePaired drops the bypass even where the build asked for it.
 func TestRequirePairedDropsTheLoopbackBypass(t *testing.T) {
-	_, _, endpoint := gate(t, pairednfc.Policy{
+	_, _, endpoint := gate(t, pairing.Policy{
 		Secret:        func() string { return "shared" },
 		AllowLoopback: func() bool { return true },
 		RequirePaired: func() bool { return true },
@@ -244,7 +239,7 @@ func TestRequirePairedDropsTheLoopbackBypass(t *testing.T) {
 // A build with no secret and no paired devices admits everyone, which is what
 // an agent reached only over a trusted transport wants.
 func TestWithNoCredentialsAtAllEveryDeviceIsAdmitted(t *testing.T) {
-	_, seen, endpoint := gate(t, pairednfc.Policy{})
+	_, seen, endpoint := gate(t, pairing.Policy{})
 
 	if status := reach(t, endpoint, ""); status != http.StatusOK {
 		t.Fatalf("a device was refused by a policy holding no credentials (status %d)", status)

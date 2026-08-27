@@ -34,7 +34,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
@@ -80,21 +79,14 @@ func main() {
 	// pairing machinery, and the check that admits a device. It is what the
 	// agent holds, so this build cannot have the readers without the policy
 	// deciding who reaches them. Leave it out and every device is admitted.
-	paired, err := pairednfc.New(backends, pairednfc.Options{
+	paired := pairing.New(backends, pairing.Options{
 		ConfigDir:    opts.ConfigDir,
 		CA:           certs.Manager,
 		AppName:      opts.Info.OrDefault().DisplayName,
 		PublicKeyPin: func() string { return certs.PublicKeyPin },
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	// The agent reports and revokes through the same store the manager admits
-	// on, rather than loading a second one.
-	opts.Devices = paired.PairedDevices()
-
-	rt, err := agent.Setup(opts, paired)
+	rt, err := agent.Setup(opts, backends)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -145,7 +137,7 @@ func main() {
 	// Pairing: a listener of its own, and the tray entries that hand out its
 	// address and PIN. The machinery belongs to the paired-device manager; this
 	// plugin runs its listener and shows its PIN.
-	pairing := pairingplugin.New(paired.PairingServer(), opts.BootstrapPort)
+	pairing := pairingplugin.New(paired, opts.BootstrapPort)
 
 	app := tray.New(rt)
 
@@ -201,18 +193,24 @@ the tray entry that installs the local authority, hidden once there is nothing
 left to install. `console.Config.Trust` takes it so the same install can be
 started from a page. Leave `Manager` nil and the plugin is inert.
 
-Pairing is two things. The machinery (the credential store, the PIN, and the
-endpoint that issues a credential) belongs to `pairednfc.Manager`, which builds
-a `pairing.Server` of its own from `Options.ConfigDir`. The plugin,
-`pairingplugin.Plugin`, runs that server's cleartext listener and owns the menu
-entries that hand out its address and PIN:
-`pairingplugin.New(paired.PairingServer(), port)`. Mount `/pair` from the
-manager, not the plugin: `paired.PairHandler()` exists whatever the build does
-about the cleartext listener, so omitting the plugin leaves devices pairing over
-`/pair` with no CA download and no menu entries, and the console handed `nil`.
-For the listener without the menu entries, register
+Pairing is `pairing.Gate`: the credential store, the endpoint that issues into
+it, the check that admits on it, and the revocation that ends a session when one
+is withdrawn. It is not a manager and is not in the manager tree. What it needs
+of a backend is `pairing.Sessions`, one method, so a revocation can reach a
+session already open; pass the manager tree, or nil for backends holding none.
+
+`pairingplugin.Plugin` runs the gate's cleartext listener and owns pairing's
+tray entries: the address, the PIN, and the paired devices to list and revoke.
+`pairingplugin.New(paired, port)`. Mount `/pair` from the gate, not the plugin:
+`paired.PairHandler()` exists whatever the build does about the cleartext
+listener, so omitting the plugin leaves devices pairing over `/pair` with no CA
+download and no menu entries, and the console handed `nil`. For the listener
+without the menu entries, register
 `pairingplugin.NewServer(paired.PairingServer(), port)` with `ctx.Use` or a
 `serverplugin.Endpoint`.
+
+The agent holds none of this. It neither stores credentials nor reports them, so
+`agent` links no third-party package at all.
 
 Omit the **paired-device manager** and the build pairs nobody and admits
 everyone: hand `backends` to `Setup` and mount the device endpoint bare. That is
@@ -335,7 +333,7 @@ servers := &serverplugin.Plugin{
 	Certificates:   certs.Manager,
 	AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 }
-pairing := pairingplugin.New(paired.PairingServer(), 9472)
+pairing := pairingplugin.New(paired, 9472)
 
 // Pairing issues a durable credential and the key pin a device recognises this
 // agent by, so it is served from the listener that already serves the
@@ -392,7 +390,7 @@ they can be handed over before the plugin has a store and follow an origin
 allowed while the agent runs.
 
 The credential check for a device endpoint is not the plugin's. It belongs to
-whatever owns the credentials, which is `pairednfc.Manager`: wrap the endpoint
+whatever owns the credentials, which is `pairing.Gate`: wrap the endpoint
 in `paired.Admit(...)` at the mount. Its policy comes from `UseSecret`,
 `Require` and `AllowLoopback`, each read per request, so rotating the secret,
 withdrawing the paired-device requirement or changing the bypass needs nothing

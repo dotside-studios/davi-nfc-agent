@@ -1,7 +1,6 @@
 package tray
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
@@ -18,26 +17,6 @@ func TestAPreferenceChangedElsewhereRedrawsTheMenu(t *testing.T) {
 
 	if got, _ := app.modes.Value(); got != nfc.ModeWriteOnly {
 		t.Errorf("the menu shows %v, want %v", got, nfc.ModeWriteOnly)
-	}
-}
-
-// A device paired from the console or over the pairing server shows up without
-// the operator reopening the menu.
-func TestADevicePairedElsewhereRedrawsTheMenu(t *testing.T) {
-	registry, err := pairing.NewRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-	app, _ := newTestTray(t, agent)
-
-	if _, _, err := registry.Pair("phone", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-
-	rows := app.pairedDevices.Rows()
-	if len(rows) != 1 || rows[0].Title != "phone (android)" {
-		t.Errorf("the menu shows %v, want the paired device", rows)
 	}
 }
 

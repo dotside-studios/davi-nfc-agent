@@ -60,7 +60,7 @@ func indexOf(titles []string, want string) int {
 // section the tray hands the plugins rather than in its own URLs submenu.
 func TestPairingEntriesComeFromThePlugin(t *testing.T) {
 	a := newTestAgent()
-	pairing := pairingplugin.New(pairinglib.NewServer(pairinglib.ServerOptions{}), 9498)
+	pairing := pairingplugin.New(pairinglib.New(nil, pairinglib.Options{}), 9498)
 	if err := a.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}

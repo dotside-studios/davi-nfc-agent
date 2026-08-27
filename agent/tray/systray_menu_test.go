@@ -1,7 +1,6 @@
 package tray
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"io"
 	"log"
 	"strings"
@@ -68,8 +67,6 @@ func TestMenuLayout(t *testing.T) {
 		"Flash and Beep on Scan",
 		"----",
 		"Card Type Filter",
-		"----",
-		"Paired Devices",
 		"----",
 		"Start Agent",
 		"Stop Agent",
@@ -254,70 +251,6 @@ func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 	app.mReaderFeedback.Click()
 	if app.mReaderFeedback.Checked() || agent.ReaderFeedback() {
 		t.Error("clicking again did not turn the feedback back off")
-	}
-}
-
-func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {
-	registry, err := pairing.NewRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-
-	app, _ := newTestTray(t, agent)
-
-	if app.mDevicesMenu.Title() != "Paired Devices (none)" {
-		t.Errorf("title = %q, want %q", app.mDevicesMenu.Title(), "Paired Devices (none)")
-	}
-	if app.mRevokeAllDevices.Visible() {
-		t.Error("Revoke all devices is offered with nothing paired")
-	}
-
-	if _, _, err := registry.Pair("Pixel", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-	app.refreshDevicesMenu()
-
-	if app.mDevicesMenu.Title() != "Paired Devices (1)" {
-		t.Errorf("title = %q, want %q", app.mDevicesMenu.Title(), "Paired Devices (1)")
-	}
-	rows := app.pairedDevices.Rows()
-	if len(rows) != 1 || rows[0].Title != "Pixel (android)" {
-		t.Fatalf("rows = %v, want one row labelled %q", rows, "Pixel (android)")
-	}
-
-	app.pairedDevices.Items()[0].Click()
-
-	if registry.Count() != 0 {
-		t.Fatal("the device was not revoked")
-	}
-	if app.pairedDevices.Len() != 0 {
-		t.Fatal("the revoked device is still on the menu")
-	}
-}
-
-func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
-	registry, err := pairing.NewRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-
-	app, _ := newTestTray(t, agent)
-
-	// Nothing is paired, so requiring pairing would refuse every device.
-	app.mRequirePaired.Click()
-	if app.mRequirePaired.Checked() || agent.RequirePairedDevice() {
-		t.Fatal("pairing was required with no paired device to admit")
-	}
-
-	if _, _, err := registry.Pair("Pixel", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-	app.mRequirePaired.Click()
-
-	if !app.mRequirePaired.Checked() || !agent.RequirePairedDevice() {
-		t.Fatal("pairing was not required once a device had paired")
 	}
 }
 

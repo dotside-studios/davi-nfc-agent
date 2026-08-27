@@ -1,4 +1,4 @@
-package pairednfc
+package pairing
 
 import (
 	"net/http"
@@ -17,9 +17,9 @@ import (
 // manager's tree: a reader attached to this machine serves no endpoint and is
 // not gated. Mounting an endpoint unwrapped serves devices with no credential
 // check at all.
-func (m *Manager) Admit(next http.Handler) http.Handler {
+func (g *Gate) Admit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := m.authenticate(w, r)
+		id, ok := g.authenticate(w, r)
 		if !ok {
 			return
 		}
@@ -32,14 +32,14 @@ func (m *Manager) Admit(next http.Handler) http.Handler {
 //
 // The policy is read here rather than captured, so rotating the secret or
 // withdrawing the requirement takes effect on the next connection.
-func (m *Manager) authenticate(w http.ResponseWriter, r *http.Request) (string, bool) {
-	if m.policy.requirePaired() {
+func (g *Gate) authenticate(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if g.policy.requirePaired() {
 		// Neither the shared secret nor the loopback bypass applies. An empty
 		// registry admits nobody, including on the machine that has just
 		// revoked its last device.
-		id, ok := server.CheckPairedDevice(w, r, m.registry)
+		id, ok := server.CheckPairedDevice(w, r, g.registry)
 		if !ok {
-			pairedWarn.Printf("Connection refused from %s: no paired-device credential", r.RemoteAddr)
+			admitWarn.Printf("Connection refused from %s: no paired-device credential", r.RemoteAddr)
 			return "", false
 		}
 		return id, true
@@ -50,12 +50,12 @@ func (m *Manager) authenticate(w http.ResponseWriter, r *http.Request) (string, 
 	// replacement: a paired device is admitted on its own credential whatever
 	// the secret is set to, which is what makes revoking one device meaningful.
 	id, ok := server.CheckAuth(w, r, server.AuthOptions{
-		Secret:        m.policy.secret(),
-		Verifier:      m.registry,
-		AllowLoopback: m.policy.allowLoopback(),
+		Secret:        g.policy.secret(),
+		Verifier:      g.registry,
+		AllowLoopback: g.policy.allowLoopback(),
 	})
 	if !ok {
-		pairedWarn.Printf("Connection refused from %s: bad or missing credential", r.RemoteAddr)
+		admitWarn.Printf("Connection refused from %s: bad or missing credential", r.RemoteAddr)
 		return "", false
 	}
 	return id, true

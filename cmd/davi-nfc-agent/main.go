@@ -23,9 +23,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -96,21 +96,16 @@ func main() {
 	// the pairing machinery, and the check that admits a device. It is the
 	// manager the agent holds. Hand backends to Setup instead, and mount the
 	// device endpoint bare, and the build pairs nobody and admits everyone.
-	paired, err := pairednfc.New(backends, pairednfc.Options{
+	paired := pairing.New(backends, pairing.Options{
 		ConfigDir:    opts.ConfigDir,
 		CA:           certs.Manager,
 		AppName:      opts.Info.OrDefault().DisplayName,
 		PublicKeyPin: func() string { return certs.PublicKeyPin },
 	})
-	if err != nil {
-		log.Fatalf("Failed to start: %v", err)
-	}
 
 	// The agent reports and revokes through the same store the manager admits
 	// on, rather than loading a second one.
-	opts.Devices = paired.PairedDevices()
-
-	rt, err := agent.Setup(opts, paired)
+	rt, err := agent.Setup(opts, backends)
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
@@ -173,7 +168,7 @@ func main() {
 	// devices still pair over /pair above.
 	var pairing *pairingplugin.Plugin
 	if opts.BootstrapPort > 0 {
-		pairing = pairingplugin.New(paired.PairingServer(), opts.BootstrapPort)
+		pairing = pairingplugin.New(paired, opts.BootstrapPort)
 	}
 
 	app := tray.New(rt)

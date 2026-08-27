@@ -2,12 +2,11 @@ package pairing_test
 
 import (
 	"encoding/json"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 )
 
 // pairOver posts a pairing request to the handler, over TLS as the endpoint

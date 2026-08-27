@@ -112,7 +112,7 @@ func pairDevice(t *testing.T, h *harness) pairedDevice {
 	// Pairing is pinned to the key the device learned out of band, which is the
 	// point: the credential and the pin are issued over a channel that value
 	// already authenticates.
-	resp, err := h.httpClient(t).Post(h.Pair+"/pair?pin="+h.Credentials.PIN(), "application/json", bytes.NewReader(body))
+	resp, err := h.httpClient(t).Post(h.Pair+"/pair?pin="+h.Credentials.PairingServer().PIN(), "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST /pair: %v", err)
 	}
@@ -132,7 +132,7 @@ func pairDevice(t *testing.T, h *harness) pairedDevice {
 func TestARevokedDeviceIsRefused(t *testing.T) {
 	h := start(t, options{Pairing: true})
 
-	pin := h.Pairing.PIN()
+	pin := h.Credentials.PairingServer().PIN()
 	resp, err := h.httpClient(t).Post(h.Pair+"/pair?pin="+pin, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST /pair: %v", err)
@@ -148,7 +148,7 @@ func TestARevokedDeviceIsRefused(t *testing.T) {
 	}
 
 	h.Agent.SetRequirePairedDevice(true)
-	if err := h.Agent.Devices().Revoke(paired.DeviceID); err != nil {
+	if err := h.Credentials.PairedDevices().Revoke(paired.DeviceID); err != nil {
 		t.Fatalf("revoke the device: %v", err)
 	}
 

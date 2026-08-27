@@ -140,7 +140,7 @@ func (h *host) RegenerateCertificate() error {
 func (h *host) managesCertificates() bool { return h.trust.Manages() }
 
 func (h *host) PairedDevices() []PairedDevice {
-	if h.agent.Devices() == nil {
+	if h.pairing.PairedDevices() == nil {
 		return nil
 	}
 
@@ -151,7 +151,7 @@ func (h *host) PairedDevices() []PairedDevice {
 		online[id] = true
 	}
 
-	paired := h.agent.Devices().List()
+	paired := h.pairing.PairedDevices().List()
 	out := make([]PairedDevice, 0, len(paired))
 	for _, d := range paired {
 		out = append(out, PairedDevice{
@@ -167,17 +167,17 @@ func (h *host) PairedDevices() []PairedDevice {
 }
 
 func (h *host) RevokeDevice(id string) error {
-	if h.agent.Devices() == nil {
+	if h.pairing.PairedDevices() == nil {
 		return errors.New("no device registry")
 	}
-	return h.agent.Devices().Revoke(id)
+	return h.pairing.PairedDevices().Revoke(id)
 }
 
 func (h *host) RevokeAllDevices() error {
-	if h.agent.Devices() == nil {
+	if h.pairing.PairedDevices() == nil {
 		return errors.New("no device registry")
 	}
-	return h.agent.Devices().RevokeAll()
+	return h.pairing.PairedDevices().RevokeAll()
 }
 
 // The allowlist belongs to what serves the connections it admits, so these ask

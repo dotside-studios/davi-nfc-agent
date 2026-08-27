@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"strconv"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
@@ -15,7 +14,6 @@ const (
 	ChangeState Change = iota
 	ChangePreferences
 	ChangeServers
-	ChangeDevices
 )
 
 func (c Change) String() string {
@@ -26,8 +24,6 @@ func (c Change) String() string {
 		return "preferences"
 	case ChangeServers:
 		return "servers"
-	case ChangeDevices:
-		return "devices"
 	}
 	return "change(" + strconv.Itoa(int(c)) + ")"
 }
@@ -70,10 +66,6 @@ type Events struct {
 	// value is [Agent.Readers] either way.
 	Readers event.Property[[]string]
 
-	// Devices carries the paired devices after each pairing and revocation.
-	// Empty on an agent built without a registry.
-	Devices event.Property[[]pairing.Device]
-
 	// Tag carries every scan the agent broadcasts, so a program embedding the
 	// agent acts on cards without connecting to its own WebSocket endpoint.
 	//
@@ -99,21 +91,6 @@ func (a *Agent) publishEvents() {
 	a.events.Preferences.Current = a.Preferences
 	a.events.Servers.Current = a.DevicePort
 	a.events.Readers.Current = a.Readers
-	a.events.Devices.Current = func() []pairing.Device {
-		if a.devices == nil {
-			return nil
-		}
-		return a.devices.List()
-	}
-}
-
-// watchStores republishes the device store through the agent, so a subscriber
-// follows one surface rather than two. Called from New, before the
-// agent is handed out.
-func (a *Agent) watchStores() {
-	if a.devices != nil {
-		a.devices.OnChange(func() { a.fireDevicesChanged(a.devices.List()) })
-	}
 }
 
 // watchManager republishes the manager's device changes as Events().Readers. It
@@ -159,11 +136,6 @@ func (a *Agent) ServerRebound() { a.fireServerRestart() }
 func (a *Agent) fireServerRestart() {
 	a.events.Servers.Emit(a.DevicePort())
 	a.events.Any.Emit(ChangeServers)
-}
-
-func (a *Agent) fireDevicesChanged(devices []pairing.Device) {
-	a.events.Devices.Emit(devices)
-	a.events.Any.Emit(ChangeDevices)
 }
 
 func (a *Agent) fireReaderStatus(status nfc.DeviceStatus) {

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"os"
 	"path/filepath"
 
@@ -46,12 +45,6 @@ type Options struct {
 	// plugin.
 	CertFile string
 	KeyFile  string
-
-	// Devices is the credential store the agent reports and revokes through.
-	// Nil has Setup load one from ConfigDir. A build with a paired-device
-	// manager passes that manager's, so the agent and the thing admitting
-	// devices read the same store.
-	Devices pairing.Store
 
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues. It reaches the agent as it is; [tls.Provision] reports one for
@@ -157,19 +150,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	// The caller's store, or one loaded here for a build with no paired-device
-	// manager. Each device gets its own credential, so one can be revoked
-	// without logging out the rest.
-	devices := opts.Devices
-	if devices == nil {
-		loaded, err := pairing.NewRegistry(configDir)
-		if err != nil {
-			agentWarn.Printf("failed to load paired devices: %v", err)
-			loaded, _ = pairing.NewRegistry("")
-		}
-		devices = loaded
-	}
-
 	// Asked for on the command line or in the environment, as opposed to
 	// remembered from a previous run. The distinction matters below: a stored
 	// preference may raise the requirement but not withdraw one set here.
@@ -192,9 +172,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	if askedForPairing {
 		agentLog.Printf("Paired devices required: the shared secret no longer admits a device")
-		if devices.Count() == 0 {
-			agentWarn.Printf("no devices are paired yet, so every device connection will be refused until one pairs")
-		}
 	}
 
 	// Everything the agent runs on is settled by this point, which is why it
@@ -208,7 +185,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		DevicePort:          devicePort,
 		APISecret:           apiSecret,
 		ConfigDir:           configDir,
-		Devices:             devices,
 		PublicKeyPin:        opts.PublicKeyPin,
 		Logs:                opts.Logs,
 		RequirePairedDevice: askedForPairing,

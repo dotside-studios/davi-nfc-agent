@@ -19,7 +19,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/pairednfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
@@ -54,12 +53,12 @@ type harness struct {
 
 	// Devices is the phone driver the test built and handed over, Servers what
 	// the agent is served from, and Pairing the pairing plugin, when the test
-	// asked for one. Credentials is the pairing server behind /pair, which the
-	// paired-device manager holds whether or not the plugin was built.
+	// asked for one. Credentials is the gate that issues and checks them, held
+	// whether or not the plugin was built.
 	Devices     *remotenfc.Manager
 	Servers     *serverplugin.Plugin
 	Pairing     *pairingplugin.Plugin
-	Credentials *pairing.Server
+	Credentials *pairing.Gate
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
@@ -111,17 +110,13 @@ func start(t *testing.T, opts options) *harness {
 	// The paired-device manager over them: the credential store, the pairing
 	// machinery and the check that admits a device. It is what the agent holds,
 	// so this build cannot have the readers without the policy guarding them.
-	paired, err := pairednfc.New(backends, pairednfc.Options{
+	paired := pairing.New(backends, pairing.Options{
 		ConfigDir:    o.ConfigDir,
 		CA:           certs.Manager,
 		PublicKeyPin: func() string { return certs.PublicKeyPin },
 	})
-	if err != nil {
-		t.Fatalf("pairednfc.New: %v", err)
-	}
-	o.Devices = paired.PairedDevices()
 
-	rt, err := agent.Setup(o, paired)
+	rt, err := agent.Setup(o, backends)
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -175,7 +170,7 @@ func start(t *testing.T, opts options) *harness {
 	// is issued over it. Only a test wanting that listener asks for the plugin.
 	var pairing *pairingplugin.Plugin
 	if opts.Pairing {
-		pairing = pairingplugin.New(paired.PairingServer(), freePort(t))
+		pairing = pairingplugin.New(paired, freePort(t))
 	}
 
 	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
@@ -195,7 +190,7 @@ func start(t *testing.T, opts options) *harness {
 		Servers:     servers,
 		Hardware:    hardware.MockDevice,
 		Pairing:     pairing,
-		Credentials: paired.PairingServer(),
+		Credentials: paired,
 		Origin:      "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
 		scans:       make(chan nfc.NFCData, 32),
 	}

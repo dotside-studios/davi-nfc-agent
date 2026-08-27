@@ -81,9 +81,8 @@ func (s *Server) apiSecret() string {
 	return s.config.APISecret()
 }
 
-// allowLoopbackBypass reports whether a connection from the host itself may
-// skip the secret. False for a server configured with no policy, which is the
-// safe reading: loopback names a host, not a client.
+// allowLoopbackBypass reports whether a connection from this host may skip the
+// secret. False when no policy is configured.
 func (s *Server) allowLoopbackBypass() bool {
 	return s.config.AllowLoopbackBypass != nil && s.config.AllowLoopbackBypass()
 }

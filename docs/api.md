@@ -476,8 +476,7 @@ const ws = new WebSocket('ws://localhost:9470/ws?secret=your-secret');
 ```
 
 A client on the agent's own host presents the secret like any other. See
-[The loopback bypass](#the-loopback-bypass) for the setting that exempts it,
-and why it is off.
+[The loopback bypass](#the-loopback-bypass) for the setting that exempts it.
 
 ### Session Behavior
 
@@ -1027,17 +1026,17 @@ socket.send(JSON.stringify({
 
 ## The loopback bypass
 
-A connection from the agent's own host presents a credential like any other:
-the shared API secret, or a token issued at pairing. Loopback names the host and
-not a client, so admitting it credential-free admits every account on that host,
-every local proxy, and every port forward into it.
+A connection from the agent's own host presents the shared API secret or a
+token issued at pairing, like any other connection. Loopback identifies the
+host, so admitting it without a credential also admits other accounts on that
+host, local proxies, and port forwards into it.
 
-`-allow-loopback-bypass` (or `DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1`) restores the
-credential-free admission, for a setup whose local client has no way to be given
-the secret. It applies to the shared secret only: under
-[Requiring pairing](#requiring-pairing) a device connection still needs a paired
-credential, and the console's own control surface is unaffected — it requires
-loopback, its own origin, and a session token regardless.
+`-allow-loopback-bypass` (or `DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1`) admits loopback
+with no credential, for a local client that cannot be given the secret. It
+covers the shared secret only: under [Requiring pairing](#requiring-pairing) a
+device connection still needs a paired credential. The console's control surface
+is unaffected either way, requiring loopback, its own origin and a session
+token.
 
 The shipped console reads the secret from its session and sends it, so it needs
 nothing here.

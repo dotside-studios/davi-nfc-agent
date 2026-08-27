@@ -6,13 +6,9 @@ import (
 	"net/http"
 )
 
-// IsLoopbackRequest returns true if r originates from a loopback IP
-// (127.0.0.0/8 or ::1), read from RemoteAddr alone: a forwarding header is
-// written by whoever sent the request and cannot be evidence of where it came
-// from.
-//
-// It answers for the host, not for a user on it, which is why the bypass it
-// backs ([AuthOptions.AllowLoopback]) has to be asked for.
+// IsLoopbackRequest reports whether r came from a loopback IP (127.0.0.0/8 or
+// ::1), read from RemoteAddr. Forwarding headers are not consulted: the sender
+// writes them.
 func IsLoopbackRequest(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -26,8 +22,8 @@ func IsLoopbackRequest(r *http.Request) bool {
 }
 
 // CheckAPISecret enforces the API secret on a WebSocket upgrade
-// request. A loopback request is admitted on its credential like any other:
-// the bypass is opt-in, and CheckAuth is where it is asked for.
+// request. Loopback presents the secret like any other address; the bypass is
+// [AuthOptions.AllowLoopback], which CheckAuth takes.
 //
 // Returns true if the request should be allowed to proceed; if it
 // returns false the response has already been written. The expected
@@ -51,7 +47,7 @@ type TokenVerifier interface {
 	VerifyToken(token string) (deviceID string, ok bool)
 }
 
-// AuthOptions is what a connection may be admitted on.
+// AuthOptions are the credentials a connection may be admitted on.
 type AuthOptions struct {
 	// Secret is the shared API secret. Empty performs no check at all, which
 	// is the development default.
@@ -61,14 +57,9 @@ type AuthOptions struct {
 	// build that does not pair devices.
 	Verifier TokenVerifier
 
-	// AllowLoopback admits a request arriving from 127.0.0.0/8 or ::1 with no
-	// credential at all.
-	//
-	// Off unless a deployment asks for it, because loopback identifies the
-	// host and not a user: every other account on it, every local proxy, and
-	// every port forward into it inherits the admission along with the browser
-	// the bypass was meant for. A frontend on the host can be handed the
-	// secret instead.
+	// AllowLoopback admits a request from 127.0.0.0/8 or ::1 with no
+	// credential. Off by default: loopback identifies the host, so it also
+	// admits other accounts on it, local proxies, and port forwards into it.
 	AllowLoopback bool
 }
 
@@ -81,7 +72,7 @@ type AuthOptions struct {
 //
 // deviceID names the paired device the credential belongs to, and is empty for
 // an admission that identifies nobody: the shared secret, or the loopback
-// bypass where it has been turned on.
+// bypass where AllowLoopback is set.
 func CheckAuth(w http.ResponseWriter, r *http.Request, opts AuthOptions) (deviceID string, ok bool) {
 	presented := presentedCredential(r)
 

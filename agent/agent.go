@@ -86,12 +86,11 @@ type Config struct {
 
 	Logs *logbuf.Ring
 
-	// AllowLoopbackBypass admits a connection from the host itself with no
-	// credential at all, which is how a frontend on the kiosk was reached
-	// before it was given the secret. Off unless a deployment asks for it:
-	// loopback names the host, so every account, local proxy and port forward
-	// on it is admitted too. Settled at construction, unlike the requirement
-	// below, because it widens what is admitted rather than narrowing it.
+	// AllowLoopbackBypass admits a connection from this host with no
+	// credential. Off by default: loopback identifies the host, so it also
+	// admits other accounts on it, local proxies, and port forwards into it.
+	// Settled at construction, unlike the requirement below: it widens what is
+	// admitted rather than narrowing it.
 	AllowLoopbackBypass bool
 
 	// RequirePairedDevice admits only devices holding a paired credential,
@@ -330,11 +329,9 @@ func (a *Agent) DevicePort() int {
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
 
-// AllowLoopbackBypass reports whether a connection from the host itself is
-// admitted without a credential. Read on every upgrade by whatever checks it.
-//
-// It says nothing about a device connection under [Agent.RequirePairedDevice],
-// which withdraws the bypass whatever this reports.
+// AllowLoopbackBypass reports whether a connection from this host is admitted
+// without a credential, read on every upgrade by whatever checks it.
+// [Agent.RequirePairedDevice] withdraws it for device connections regardless.
 func (a *Agent) AllowLoopbackBypass() bool { return a.allowLoopbackBypass }
 
 func (a *Agent) RequirePairedDevice() bool {

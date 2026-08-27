@@ -79,8 +79,7 @@ func TestCheckAuthTokenWithoutSharedSecret(t *testing.T) {
 	}
 }
 
-// Loopback is a credential-free admission only where it was asked for, since
-// it names the host rather than anything on it.
+// Loopback is admitted without a credential only where AllowLoopback is set.
 func TestCheckAuthLoopbackBypassIsOptIn(t *testing.T) {
 	w, r := authReq(t, "/ws", "127.0.0.1:5000")
 	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret"}); ok {
@@ -95,7 +94,7 @@ func TestCheckAuthLoopbackBypassIsOptIn(t *testing.T) {
 		t.Error("the bypass did not admit a loopback request")
 	}
 
-	// The bypass is loopback's alone: it does not widen anything else.
+	// The bypass covers loopback only.
 	w, r = authReq(t, "/ws", "192.168.1.20:5000")
 	if _, ok := CheckAuth(w, r, AuthOptions{Secret: "shared-secret", AllowLoopback: true}); ok {
 		t.Error("the bypass admitted an off-host request")

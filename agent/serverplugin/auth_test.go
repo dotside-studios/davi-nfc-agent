@@ -23,8 +23,8 @@ func guardedEndpoint(t *testing.T, strict bool) (url string, a *agent.Agent, pai
 	return guardedEndpointWith(t, strict, false)
 }
 
-// guardedEndpointWith is guardedEndpoint with the loopback bypass decided too,
-// since the test dialer connects over loopback and so sees either policy.
+// guardedEndpointWith is guardedEndpoint with the loopback bypass set too: the
+// test dialer connects over 127.0.0.1, so it sees either policy.
 func guardedEndpointWith(t *testing.T, strict, allowLoopback bool) (url string, a *agent.Agent, pairedToken string) {
 	t.Helper()
 
@@ -84,8 +84,7 @@ func dialStatus(t *testing.T, url string) int {
 }
 
 // Under strict mode a paired token gets in and nothing else does: not the
-// shared secret, and not the loopback bypass, which the test dialer would
-// otherwise benefit from since httptest listens on 127.0.0.1.
+// shared secret, and not the loopback bypass, which is on for this agent.
 func TestStrictModeAdmitsOnlyPairedDevices(t *testing.T) {
 	url, _, token := guardedEndpointWith(t, true, true)
 
@@ -100,8 +99,8 @@ func TestStrictModeAdmitsOnlyPairedDevices(t *testing.T) {
 	}
 }
 
-// With strict mode off, either credential admits a device. Loopback is not one
-// of them: the bypass is off unless the agent was built with it.
+// With strict mode off, either credential admits a device. Loopback alone does
+// not, the bypass being off unless the agent was built with it.
 func TestNonStrictModeAdmitsEitherCredential(t *testing.T) {
 	url, _, token := guardedEndpoint(t, false)
 
@@ -116,8 +115,7 @@ func TestNonStrictModeAdmitsEitherCredential(t *testing.T) {
 	}
 }
 
-// The bypass admits a bare loopback connection where the agent was built with
-// it, which is what a deployment turning it back on is asking for.
+// With the bypass on, a loopback connection needs no credential.
 func TestLoopbackBypassIsOptIn(t *testing.T) {
 	url, a, _ := guardedEndpointWith(t, false, true)
 
@@ -128,8 +126,7 @@ func TestLoopbackBypassIsOptIn(t *testing.T) {
 		t.Errorf("loopback with the bypass on got %d, want an upgrade", code)
 	}
 
-	// And it is withdrawn again by the paired-device requirement, which is the
-	// stricter of the two policies.
+	// RequirePairedDevice withdraws it again.
 	a.SetRequirePairedDevice(true)
 
 	if code := dialStatus(t, url); code != http.StatusUnauthorized {

@@ -15,11 +15,10 @@ type Config struct {
 	// returning empty, requires no secret, which is the development default.
 	APISecret func() string
 
-	// AllowLoopbackBypass reports whether a connection from the host itself
-	// may skip the secret, read per connection so the policy can change under
-	// a running server. Nil requires the secret from loopback like anywhere
-	// else; see [server.AuthOptions.AllowLoopback] for why that is the
-	// default.
+	// AllowLoopbackBypass reports whether a connection from this host may skip
+	// the secret, read per connection so the policy can change under a running
+	// server. Nil requires the secret from loopback too; see
+	// [server.AuthOptions.AllowLoopback].
 	AllowLoopbackBypass func() bool
 
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]

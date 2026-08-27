@@ -29,8 +29,8 @@ import (
 )
 
 // apiSecret is the shared secret every agent here runs with, and every
-// connection below presents: the loopback bypass these tests would otherwise
-// ride is off unless an agent is built with it.
+// connection below presents: the loopback bypass is off unless an agent is
+// built with it.
 const apiSecret = "e2e-shared-secret"
 
 // timeout bounds every wait. Generous on purpose: these tests bind real

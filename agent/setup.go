@@ -60,10 +60,9 @@ type Options struct {
 	InstallCA           bool
 	RequirePairedDevice bool
 
-	// AllowLoopbackBypass restores the credential-free admission of
-	// connections from the host itself. Off by default; see
-	// [Config.AllowLoopbackBypass]. Setup also reads
-	// DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1 for it.
+	// AllowLoopbackBypass admits connections from this host with no
+	// credential; see [Config.AllowLoopbackBypass]. Off by default. Setup also
+	// reads DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1.
 	AllowLoopbackBypass bool
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
@@ -163,8 +162,8 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// preference may raise the requirement but not withdraw one set here.
 	askedForPairing := opts.RequirePairedDevice || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
 
-	// Same distinction for the loopback bypass, which is off unless this run
-	// asks for it: nothing stored can turn it back on.
+	// Same distinction for the loopback bypass: off unless this run asks for
+	// it, and nothing stored turns it on.
 	askedForLoopbackBypass := opts.AllowLoopbackBypass || os.Getenv("DAVI_NFC_ALLOW_LOOPBACK_BYPASS") == "1"
 
 	devicePort := opts.DevicePort

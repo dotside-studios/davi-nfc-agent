@@ -188,8 +188,7 @@ Once your devices pair, the agent can be set to admit nothing else. See
 [Requiring pairing](api.md#requiring-pairing). Until then the shared API secret
 still works, so an unpaired device is not locked out. A device connecting over
 loopback presents a credential too, unless the agent was started with
-`-allow-loopback-bypass`; see
-[The loopback bypass](api.md#the-loopback-bypass).
+`-allow-loopback-bypass`. See [The loopback bypass](api.md#the-loopback-bypass).
 
 ## Troubleshooting
 

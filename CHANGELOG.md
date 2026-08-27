@@ -161,19 +161,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The loopback bypass is off unless asked for. A connection from the agent's own
-  host was admitted with no credential at all whenever an API secret was set,
-  which admitted every other account on that host, every local proxy, and every
-  port forward into it along with the frontend the bypass was written for.
+  host was admitted with no credential whenever an API secret was set, which
+  admitted every other account on that host, every local proxy and every port
+  forward into it along with the frontend the bypass was written for.
   `-allow-loopback-bypass` (or `DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1`, or
-  `agent.Config.AllowLoopbackBypass`) restores it for a setup whose local client
-  cannot be given the secret. The shipped console reads the secret from its
-  session and sends it, so it is unaffected, as is the console's own control
-  surface, which requires loopback, its own origin and a session token
-  regardless
+  `agent.Config.AllowLoopbackBypass`) restores it for a local client that cannot
+  be given the secret. The shipped console sends the secret from its session, so
+  it is unaffected, as is the console's control surface, which requires
+  loopback, its own origin and a session token regardless
 - `server.CheckAuth` takes a `server.AuthOptions` in place of the secret and
-  verifier arguments, since what a connection may be admitted on is now three
-  things rather than two. `AuthOptions.AllowLoopback` is the bypass, off in the
-  zero value; `clientserver.Config.AllowLoopbackBypass` and
+  verifier arguments. `AuthOptions.AllowLoopback` is the bypass, off in the zero
+  value; `clientserver.Config.AllowLoopbackBypass` and
   `agent.Agent.AllowLoopbackBypass` report it per connection.
   `server.CheckAPISecret` and `server.CheckPairedDevice` keep their signatures
 - Package `agent` has no third-party dependencies, matching `nfc`. Four edges

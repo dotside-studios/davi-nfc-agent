@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"github.com/dotside-studios/davi-nfc-agent/secure"
 	"math/big"
 	"net"
 	"os"
@@ -63,7 +64,7 @@ func (m *Manager) loadOrCreateLeafKey() (*ecdsa.PrivateKey, error) {
 	if err := os.WriteFile(path, encoded, 0600); err != nil {
 		return nil, fmt.Errorf("write agent key: %w", err)
 	}
-	_ = SecureFile(path)
+	_ = secure.File(path)
 
 	return key, nil
 }
@@ -148,7 +149,7 @@ func (m *Manager) issueLeaf(hosts []string, parent *x509.Certificate, parentKey 
 	if err := os.WriteFile(m.keyFile, keyPEM, 0600); err != nil {
 		return fmt.Errorf("write key: %w", err)
 	}
-	_ = SecureFile(m.keyFile)
+	_ = secure.File(m.keyFile)
 
 	return nil
 }

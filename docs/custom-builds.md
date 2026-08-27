@@ -39,6 +39,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
 func main() {
@@ -62,6 +63,18 @@ func main() {
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
+	// The certificate this agent manages for itself, under the config
+	// directory the agent resolves. Provisioning it is the program's: the
+	// agent neither serves it nor hands out its authority.
+	if opts.ConfigDir == "" {
+		opts.ConfigDir = agent.DefaultConfigDir(opts.Info.OrDefault().DirName)
+	}
+	certs, err := tlspkg.Provision(opts.ConfigDir, opts.InstallCA)
+	if err != nil {
+		log.Fatal(err)
+	}
+	opts.CertFile, opts.KeyFile, opts.PublicKeyPin = certs.CertFile, certs.KeyFile, certs.PublicKeyPin
+
 	rt, err := agent.Setup(opts, manager)
 	if err != nil {
 		log.Fatal(err)
@@ -69,15 +82,15 @@ func main() {
 
 	// The tray entry that installs the local authority, so browsers on this
 	// machine accept the agent.
-	trust := &trustplugin.Plugin{Manager: rt.Certificates}
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
 
 	// The listener and everything on it. Setup builds no listener; the program
 	// decides what this agent serves. Setup resolved which certificate to
 	// serve; Certificates is what rebinds the listener when it is reissued.
 	servers := &serverplugin.Plugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}
 
 	// The two halves of /ws, both declared here. The agent decides who is
@@ -104,7 +117,7 @@ func main() {
 	// Pairing: a listener of its own, and the tray entries that hand out its
 	// address and PIN. The agent holds no pairing server, so it is built here
 	// and passed to the console. It hands the authority to a device that pairs.
-	pairing := pairingplugin.New(rt.Agent, opts.BootstrapPort, rt.Certificates)
+	pairing := pairingplugin.New(rt.Agent, opts.BootstrapPort, certs.Manager)
 
 	app := tray.New(rt)
 
@@ -143,13 +156,17 @@ registers, not part of `Setup`. An agent with none of them drives the reader and
 serves no HTTP, which is a valid build. Binding happens at start, so routes can
 be declared before the port exists. See [Plugins](#plugins).
 
-The certificate is the `*tls.Manager` that `Setup` returns as
-`rt.Certificates`, alongside `rt.CertFile` and `rt.KeyFile`, the pair a listener
-should serve. Each plugin takes the narrow part it needs: `serverplugin.Plugin.Config`
-the files and `serverplugin.Plugin.Certificates` the reissue signal, `pairingplugin.New`
-the authority a pairing device is given. A build serving a certificate
-provisioned elsewhere passes that pair and leaves `Certificates` nil, there
-being nothing to reissue.
+The certificate is `tls.Provision`'s, called before `Setup` with the config
+directory the agent will use. It reports the `*tls.Manager`, the pair a listener
+serves, and the public key pin, which goes on `Options.PublicKeyPin` so the
+agent hands it to devices. `Setup` provisions nothing: what serves a
+certificate, hands out its authority and offers to install it is the program's.
+
+Each plugin takes the narrow part it needs: `serverplugin.Plugin.Config` the
+files and `serverplugin.Plugin.Certificates` the reissue signal,
+`pairingplugin.New` the authority a pairing device is given. A build serving a
+certificate provisioned elsewhere names the pair on `Options` and leaves
+`Certificates` nil, there being nothing to reissue.
 
 `trustplugin.Plugin` wraps the same manager for the one job the others do not do:
 the tray entry that installs the local authority, hidden once there is nothing
@@ -274,13 +291,13 @@ none leaves an agent that drives the reader and serves nothing.
 | `trustplugin.Plugin` | The entry that installs the local certificate authority |
 
 ```go
-trust := &trustplugin.Plugin{Manager: rt.Certificates}
+trust := &trustplugin.Plugin{Manager: certs.Manager}
 servers := &serverplugin.Plugin{
-	Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-	Certificates:   rt.Certificates,
-	AllowedOrigins: rt.AllowedOrigins,
+	Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+	Certificates:   certs.Manager,
+	AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 }
-pairing := pairingplugin.New(rt.Agent, 9472, rt.Certificates)
+pairing := pairingplugin.New(rt.Agent, 9472, certs.Manager)
 
 // Pairing issues a durable credential and the key pin a device recognises this
 // agent by, so it is served from the listener that already serves the
@@ -499,9 +516,9 @@ func main() {
 	// it. Leave it out for a service that reads cards and serves no HTTP. Setup
 	// resolved the certificate; blank leaves the listener serving plain HTTP.
 	servers := &serverplugin.Plugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
@@ -553,8 +570,8 @@ if err != nil {
 	log.Fatal(err)
 }
 rt.Agent.Plugins.Add(&serverplugin.Plugin{
-	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-	Certificates: rt.Certificates,
+	Config:       listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+	Certificates: certs.Manager,
 })
 ```
 

@@ -139,6 +139,7 @@ davi-nfc-agent/
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
 │   └── fynetray/        # The real tray, on fyne.io/systray
 ├── clipboard/           # Copying text to the system clipboard
+├── secure/              # Restricting a file or directory to the current user
 ├── tls/                 # Auto-TLS certificate management
 ├── protocol/            # Protocol definitions
 ├── client/              # TypeScript client library (src/), plus its built dist/

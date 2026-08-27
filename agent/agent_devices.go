@@ -15,8 +15,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
-	"github.com/google/uuid"
+	"github.com/dotside-studios/davi-nfc-agent/secure"
 )
 
 // devicesFileName holds the paired-device registry, beside the API secret.
@@ -126,7 +125,7 @@ func (r *DeviceRegistry) Pair(name, platform string) (*PairedDevice, string, err
 	token := base64.RawURLEncoding.EncodeToString(raw[:])
 
 	device := &PairedDevice{
-		ID:        uuid.NewString(),
+		ID:        newDeviceID(),
 		Name:      name,
 		Platform:  platform,
 		TokenHash: hashToken(token),
@@ -239,7 +238,7 @@ func (r *DeviceRegistry) saveLocked() error {
 	if err := os.MkdirAll(r.configDir, 0700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	_ = tlspkg.SecureDir(r.configDir)
+	_ = secure.Dir(r.configDir)
 
 	devices := make([]*PairedDevice, 0, len(r.devices))
 	for _, device := range r.devices {
@@ -256,8 +255,21 @@ func (r *DeviceRegistry) saveLocked() error {
 	if err := os.WriteFile(path, append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("write devices file: %w", err)
 	}
-	_ = tlspkg.SecureFile(path)
+	_ = secure.File(path)
 	return nil
+}
+
+// newDeviceID mints an identity for a paired device. Opaque and unique is all
+// it has to be: nothing reads a structure back out of it.
+func newDeviceID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		// crypto/rand does not fail on any supported platform, and a device
+		// that cannot be told apart from another is worse than refusing to
+		// pair.
+		panic("agent: cannot read random bytes for a device ID: " + err.Error())
+	}
+	return hex.EncodeToString(raw[:])
 }
 
 func hashToken(token string) string {

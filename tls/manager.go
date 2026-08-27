@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotside-studios/davi-nfc-agent/secure"
 	"github.com/jittering/truststore"
 )
 
@@ -114,7 +115,7 @@ func (m *Manager) EnsureCertificates() (certFile, keyFile string, err error) {
 	if err := os.MkdirAll(m.tlsDir, 0700); err != nil {
 		return "", "", fmt.Errorf("failed to create TLS directory: %w", err)
 	}
-	if err := secureDir(m.tlsDir); err != nil {
+	if err := secure.Dir(m.tlsDir); err != nil {
 		m.logger.Printf("Warning: failed to lock down TLS directory permissions: %v", err)
 	}
 
@@ -223,7 +224,7 @@ func (m *Manager) writeCachedHosts(hosts []string) error {
 	}
 
 	// Re-apply restrictive ACL on Windows where the mode bits are advisory.
-	if err := secureFile(m.hostsFile); err != nil {
+	if err := secure.File(m.hostsFile); err != nil {
 		m.logger.Printf("Warning: failed to lock down hosts file permissions: %v", err)
 	}
 	return nil
@@ -270,7 +271,7 @@ func (m *Manager) generateCertificates(hosts []string) error {
 	if err := os.MkdirAll(m.caDir, 0700); err != nil {
 		return fmt.Errorf("failed to create CA directory: %w", err)
 	}
-	if err := secureDir(m.caDir); err != nil {
+	if err := secure.Dir(m.caDir); err != nil {
 		m.logger.Printf("Warning: failed to lock down CA directory permissions: %v", err)
 	}
 	if err := os.Setenv("CAROOT", m.caDir); err != nil {

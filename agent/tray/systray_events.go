@@ -22,7 +22,6 @@ func (s *App) subscribe() {
 	events.Readers.Connect(s.applyReaders)
 	events.Tag.Connect(s.showCard)
 	events.Reader.Connect(s.showReaderStatus)
-	events.Devices.Connect(func([]agent.PairedDevice) { s.refreshDevicesMenu() })
 }
 
 // showState follows the agent's lifecycle, including a stop the tray did not

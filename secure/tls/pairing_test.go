@@ -36,7 +36,7 @@ func newPairingServer(t *testing.T) (*BootstrapServer, *stubIssuer) {
 
 	s := NewBootstrapServer(newFakeCAReader(t), 0)
 	issuer := &stubIssuer{}
-	s.SetPairingIssuer(issuer, 9470)
+	s.SetPairingIssuer(issuer, func() int { return 9470 })
 	return s, issuer
 }
 
@@ -169,7 +169,7 @@ func TestPairLocksAfterRepeatedWrongPIN(t *testing.T) {
 func TestPairWorksWithoutCA(t *testing.T) {
 	s := NewBootstrapServer(nil, 0)
 	issuer := &stubIssuer{}
-	s.SetPairingIssuer(issuer, 9470)
+	s.SetPairingIssuer(issuer, func() int { return 9470 })
 
 	r := pairRequest(http.MethodPost, "/pair?pin="+s.PIN(), nil)
 	w := httptest.NewRecorder()

@@ -71,9 +71,6 @@ type Config struct {
 	// ConfigDir is where the API secret and other state persist.
 	ConfigDir string
 
-	// Devices holds the paired devices and their per-device credentials.
-	Devices *DeviceRegistry
-
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
@@ -144,7 +141,6 @@ type Agent struct {
 	logger              *log.Logger
 	manager             nfc.Manager
 	configDir           string
-	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
 	requirePairedDevice bool
@@ -225,7 +221,6 @@ func New(cfg Config) *Agent {
 		manager:             cfg.Manager,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
-		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
 		requirePairedDevice: cfg.RequirePairedDevice,
@@ -241,7 +236,6 @@ func New(cfg Config) *Agent {
 	}
 
 	a.publishEvents()
-	a.watchStores()
 	a.watchManager()
 
 	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
@@ -303,9 +297,8 @@ func (a *Agent) Readers() []string {
 	}
 	return readers
 }
-func (a *Agent) Logger() *log.Logger      { return a.logger }
-func (a *Agent) ConfigDir() string        { return a.configDir }
-func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+func (a *Agent) Logger() *log.Logger { return a.logger }
+func (a *Agent) ConfigDir() string   { return a.configDir }
 
 // APISecret is the secret non-loopback connections must present. Read on every
 // upgrade by whatever checks it, so it follows a rotation.
@@ -533,27 +526,4 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
 	a.ApplyPreferences(func(p *Preferences) { p.ReaderFeedback = on })
-}
-
-// TokenVerifier recognises per-device credentials issued at pairing. It is
-// [server.TokenVerifier], declared here so the agent names no server package:
-// what admits a connection is a plugin's business, and Go satisfies the
-// interface either way.
-type TokenVerifier interface {
-	// VerifyToken reports whether a presented token belongs to a paired
-	// device, returning its ID for logging.
-	VerifyToken(token string) (deviceID string, ok bool)
-}
-
-// TokenVerifier reports the credentials this agent issued at pairing, for
-// whatever admits a connection presenting one. Nil on an agent built without a
-// registry, which admits nobody on a credential.
-//
-// Take it from here rather than from Devices: a nil registry assigned to the
-// interface is not a nil interface, and the caller's nil check would miss it.
-func (a *Agent) TokenVerifier() TokenVerifier {
-	if a.devices == nil {
-		return nil
-	}
-	return a.devices
 }

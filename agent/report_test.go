@@ -63,32 +63,3 @@ func TestOnlineDevicesAreNoneWithoutADriver(t *testing.T) {
 		t.Errorf("OnlineDevices() = %v, want nil", got)
 	}
 }
-
-// The credential check is the agent's to answer, for whatever admits a
-// connection presenting one. An agent with no registry answers a nil
-// interface rather than a nil registry inside one, which a caller's nil check
-// would miss.
-func TestTheAgentAnswersForItsCredentials(t *testing.T) {
-	none := New(Config{Manager: nfc.NewMockManager()})
-	if none.TokenVerifier() != nil {
-		t.Error("an agent with no registry reports a verifier")
-	}
-
-	registry, err := NewDeviceRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
-	}
-	_, token, err := registry.Pair("phone", "android")
-	if err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-
-	a := New(Config{Manager: nfc.NewMockManager(), Devices: registry})
-	verifier := a.TokenVerifier()
-	if verifier == nil {
-		t.Fatal("an agent with a registry reports no verifier")
-	}
-	if id, ok := verifier.VerifyToken(token); !ok || id == "" {
-		t.Errorf("VerifyToken on a paired device's credential = (%q, %v), want it recognised", id, ok)
-	}
-}

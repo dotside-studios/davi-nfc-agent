@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 	"github.com/dotside-studios/davi-nfc-agent/server/wsconn"
 	"github.com/gorilla/websocket"
 )
@@ -28,43 +28,6 @@ type ServerOptions struct {
 	// A function because it is read per registration: the pin follows the
 	// certificate, which can be reissued while the endpoint stays up.
 	PublicKeyPin func() string
-
-	// Authenticate admits or rejects a device before the upgrade, writing its
-	// own response when it rejects, and names the device it admitted. This
-	// driver speaks the device protocol and has no idea what a credential is
-	// here, so the check is supplied; see agent.ServerPlugin.Authenticate for
-	// the agent's.
-	//
-	// A device admitted under a name registers under it. An empty name
-	// identifies nobody, and the device is given one for the connection.
-	//
-	// Required. A nil Authenticate is refused at Handler unless
-	// AllowUnauthenticated says otherwise, because the endpoint is otherwise
-	// open to anyone who can reach the port.
-	Authenticate func(w http.ResponseWriter, r *http.Request) (deviceID string, ok bool)
-
-	// AllowUnauthenticated serves devices with no check at all. For a driver
-	// reached only over a trusted transport, and for tests.
-	AllowUnauthenticated bool
-
-	// Revocations reports credentials that have stopped being valid, so the
-	// sessions holding them can be ended.
-	//
-	// Authenticate runs once, at the upgrade. Without this, a device revoked
-	// while connected keeps streaming scans and accepting writes until it
-	// reconnects, which for a heartbeating device is never. It sits beside
-	// Authenticate because a missing subscription is otherwise invisible:
-	// everything works and revocation quietly does not.
-	//
-	// Nil where credentials cannot be revoked one at a time, such as a single
-	// shared secret.
-	Revocations RevocationSource
-}
-
-// RevocationSource is the part of a credential store this driver needs: which
-// devices have just lost their credential. See agent.DeviceRegistry.
-type RevocationSource interface {
-	OnRevoke(fn func(ids []string)) *event.Connection
 }
 
 // Handler returns the HTTP handler serving device connections.
@@ -72,36 +35,18 @@ type RevocationSource interface {
 // It also stores opts on the manager, since the capabilities a tag reports
 // depend on them. Call it once, before serving.
 //
-// Without opts.Authenticate, and without AllowUnauthenticated to say that is
-// deliberate, the returned handler refuses every connection rather than serving
-// an open device endpoint. Forgetting the check is otherwise silent: the
-// upgrade succeeds and the device registers.
+// The handler admits every device that reaches it. Which devices may connect is
+// not this driver's decision: mount it behind something that checks a
+// credential and names the device it admitted (pairednfc.Manager.Admit), or
+// mount it bare for a build reached only over a trusted transport.
 func (m *Manager) Handler(opts ServerOptions) http.Handler {
-	var revocations *event.Connection
-	if opts.Revocations != nil {
-		revocations = opts.Revocations.OnRevoke(func(ids []string) {
-			for _, id := range ids {
-				m.DisconnectDevice(id, "device revoked")
-			}
-		})
-	}
-
 	m.mu.Lock()
 	m.publicKeyPin = opts.PublicKeyPin
 	m.allowTagModification = opts.AllowTagModification
-	m.revocations = revocations
 	m.mu.Unlock()
 
-	if opts.Authenticate == nil && !opts.AllowUnauthenticated {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			deviceWarn.Printf("Connection from %s refused: no authenticator configured", r.RemoteAddr)
-			http.Error(w, "device endpoint is not configured for authentication", http.StatusServiceUnavailable)
-		})
-	}
-
 	return &deviceEndpoint{
-		manager:      m,
-		authenticate: opts.Authenticate,
+		manager: m,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:  opts.CheckOrigin,
 			Subprotocols: DeviceSubprotocols,
@@ -116,20 +61,14 @@ func IsDeviceConnection(r *http.Request) bool {
 }
 
 type deviceEndpoint struct {
-	manager      *Manager
-	authenticate func(w http.ResponseWriter, r *http.Request) (string, bool)
-	upgrader     websocket.Upgrader
+	manager  *Manager
+	upgrader websocket.Upgrader
 }
 
 func (e *deviceEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var admitted string
-	if e.authenticate != nil {
-		id, ok := e.authenticate(w, r)
-		if !ok {
-			return
-		}
-		admitted = id
-	}
+	// Whoever admitted this connection named it. Empty means nothing did, and
+	// the device registers under an identity of this manager's minting.
+	admitted := deviceid.Of(r)
 
 	wsConn, err := e.upgrader.Upgrade(w, r, nil)
 	if err != nil {

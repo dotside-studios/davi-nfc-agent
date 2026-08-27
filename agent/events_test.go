@@ -30,15 +30,11 @@ func TestAnyNamesEveryChange(t *testing.T) {
 	a.fireState(StateRunning)
 	a.SetReaderMode(nfc.ModeReadOnly)
 	a.fireServerRestart()
-	if _, _, err := a.Devices().Pair("phone", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
 
 	want := []Change{
 		ChangeState,
 		ChangePreferences,
 		ChangeServers,
-		ChangeDevices,
 	}
 	if len(seen) != len(want) {
 		t.Fatalf("Any carried %v, want %v", seen, want)
@@ -99,21 +95,6 @@ func TestPreferencesCarriesTheNewValue(t *testing.T) {
 
 	if got.Mode != nfc.ModeReadOnly {
 		t.Errorf("subscriber saw mode %v, want %v", got.Mode, nfc.ModeReadOnly)
-	}
-}
-
-func TestDevicesCarriesTheRegistry(t *testing.T) {
-	a := eventsAgent(t)
-
-	var got []PairedDevice
-	a.Events().Devices.Connect(func(d []PairedDevice) { got = d })
-
-	if _, _, err := a.Devices().Pair("phone", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-
-	if len(got) != 1 || got[0].Name != "phone" {
-		t.Errorf("subscriber saw %v, want the one paired device", got)
 	}
 }
 
@@ -219,9 +200,6 @@ func TestReaderChangesReachSubscribers(t *testing.T) {
 func TestTheStateSignalsReportTheCurrentValue(t *testing.T) {
 	a := eventsAgent(t)
 	a.SetReaderMode(nfc.ModeReadOnly)
-	if _, _, err := a.Devices().Pair("phone", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
 
 	events := a.Events()
 
@@ -249,11 +227,6 @@ func TestTheStateSignalsReportTheCurrentValue(t *testing.T) {
 		t.Errorf("Readers replayed %v, want %v", readers, a.Readers())
 	}
 
-	var devices []PairedDevice
-	events.Devices.Connect(func(d []PairedDevice) { devices = d })
-	if len(devices) != 1 {
-		t.Errorf("Devices replayed %d devices, want 1", len(devices))
-	}
 }
 
 // Scans and reader status are traffic: there is no current one to replay, and a
@@ -273,22 +246,5 @@ func TestTrafficSignalsDoNotReplay(t *testing.T) {
 	a.Events().Reader.Connect(func(nfc.DeviceStatus) { status++ })
 	if status != 0 {
 		t.Errorf("Reader replayed %d times, want 0", status)
-	}
-}
-
-// An agent built without a registry has no devices rather than no answer, so a
-// subscriber renders an empty list instead of guarding for one.
-func TestDevicesReplaysWithoutARegistry(t *testing.T) {
-	a := New(Config{Manager: nfc.NewMockManager()})
-
-	called := false
-	a.Events().Devices.Connect(func(d []PairedDevice) {
-		called = true
-		if len(d) != 0 {
-			t.Errorf("replayed %d devices, want 0", len(d))
-		}
-	})
-	if !called {
-		t.Error("Devices did not replay on an agent with no registry")
 	}
 }

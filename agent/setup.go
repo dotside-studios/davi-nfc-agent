@@ -125,8 +125,9 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	info := opts.Info.OrDefault()
 	agentLog.Printf("Starting %s %s", info.Name, info.FullVersion())
 
-	// Resolve the config directory once, for both the TLS manager and the
-	// persistent API secret.
+	// Resolve the config directory once, for both the credential store and the
+	// persistent API secret. A program assembling components that hold state
+	// there sets opts.ConfigDir itself, so both land on the same directory.
 	configDir := opts.ConfigDir
 	if configDir == "" {
 		configDir = DefaultConfigDir(info.DirName)
@@ -147,14 +148,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 				agentLog.Printf("Generated new API secret at %s", configDir)
 			}
 		}
-	}
-
-	// Load the paired-device registry. Each device gets its own credential, so
-	// one can be revoked without logging out the rest.
-	devices, err := NewDeviceRegistry(configDir)
-	if err != nil {
-		agentWarn.Printf("failed to load paired devices: %v", err)
-		devices, _ = NewDeviceRegistry("")
 	}
 
 	// Asked for on the command line or in the environment, as opposed to
@@ -179,9 +172,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	if askedForPairing {
 		agentLog.Printf("Paired devices required: the shared secret no longer admits a device")
-		if devices.Count() == 0 {
-			agentWarn.Printf("no devices are paired yet, so every device connection will be refused until one pairs")
-		}
 	}
 
 	// Everything the agent runs on is settled by this point, which is why it
@@ -195,7 +185,6 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		DevicePort:          devicePort,
 		APISecret:           apiSecret,
 		ConfigDir:           configDir,
-		Devices:             devices,
 		PublicKeyPin:        opts.PublicKeyPin,
 		Logs:                opts.Logs,
 		RequirePairedDevice: askedForPairing,

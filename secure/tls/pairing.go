@@ -39,7 +39,9 @@ type PairingResponse struct {
 // SetPairingIssuer enables the /pair endpoint. Without one the endpoint reports
 // that pairing is unavailable rather than 404, so a device can tell an agent
 // that cannot pair from a wrong address.
-func (s *BootstrapServer) SetPairingIssuer(issuer PairingIssuer, agentPort int) {
+// agentPort is read per pairing: the port the agent serves on can change while
+// this endpoint stays up, and a device handed the stale one cannot connect.
+func (s *BootstrapServer) SetPairingIssuer(issuer PairingIssuer, agentPort func() int) {
 	s.pairMu.Lock()
 	defer s.pairMu.Unlock()
 	s.pairIssuer = issuer
@@ -81,7 +83,7 @@ func (s *BootstrapServer) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.pairMu.RLock()
-	issuer, agentPort := s.pairIssuer, s.agentPort
+	issuer, port := s.pairIssuer, s.agentPort
 	s.pairMu.RUnlock()
 
 	if issuer == nil {
@@ -115,7 +117,7 @@ func (s *BootstrapServer) handlePair(w http.ResponseWriter, r *http.Request) {
 		DeviceID:     id,
 		DeviceToken:  token,
 		PublicKeyPin: issuer.PublicKeyPin(),
-		AgentPort:    agentPort,
+		AgentPort:    s.agentPortNow(port),
 	})
 }
 

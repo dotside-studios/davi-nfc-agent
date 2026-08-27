@@ -349,3 +349,20 @@ func (mm *MultiManager) clearListError(name string) {
 		multiLog.Printf("manager '%s' is listing devices again", name)
 	}
 }
+
+// DisconnectDevice ends the session for deviceID on whichever child holds it,
+// reporting whether any did.
+//
+// It asks every child rather than resolving the name first: a device ID is the
+// identity a device holds with its driver, not a qualified path, so nothing in
+// it names the manager holding it.
+func (mm *MultiManager) DisconnectDevice(deviceID, reason string) bool {
+	disconnected := false
+	for _, name := range mm.managerOrder {
+		if nfc.Disconnect(mm.managers[name], deviceID, reason) {
+			multiLog.Printf("Disconnected device %s on manager %s: %s", deviceID, name, reason)
+			disconnected = true
+		}
+	}
+	return disconnected
+}

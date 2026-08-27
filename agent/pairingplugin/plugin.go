@@ -7,7 +7,7 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -19,7 +19,7 @@ import (
 // It is a wrapper around [Server], which is the component that binds the
 // listener. Registering the plugin is what a build does to pair devices:
 //
-//	pairing := pairingplugin.New(rt.Agent, 9472, rt.Certificates)
+//	pairing := pairingplugin.New(paired.PairingServer(), 9472)
 //	rt.Agent.Plugins.Add(pairing)
 //
 // A build wanting the listener without the menu registers the component on its
@@ -29,6 +29,10 @@ type Plugin struct {
 	// one, and a caller with its own passes it here.
 	Server *Server
 
+	// Devices is the credential store the paired-device menu lists and revokes
+	// from. Nil leaves that submenu out.
+	Devices pairing.Store
+
 	// MenuTitle names the submenu its entries go under. Blank uses "Pairing".
 	MenuTitle string
 
@@ -36,22 +40,30 @@ type Plugin struct {
 	address *traymenu.Item
 	pin     *traymenu.Item
 	logger  *log.Logger
+
+	// The paired-device submenu and the entries that act on it.
+	agent         *agent.Agent
+	devicesMenu   *traymenu.Item
+	pairedDevices *traymenu.List[string]
+	requirePaired *traymenu.Item
+	revokeAll     *traymenu.Item
 }
 
 var _ agent.Plugin = (*Plugin)(nil)
 
-// New builds the pairing server for a, listening on port and
-// handing out ca to a device that pairs, and the plugin that runs it. Pass
-// Runtime.Certificates, or nil for a build with no authority to give. See
-// [ServerFor].
+// New runs the gate's pairing listener on port and puts pairing's entries on
+// the tray: the address and PIN, and the paired devices to list and revoke.
 //
-// A zero port is a build that pairs no devices: it returns nil, and every
-// method tolerates one.
-func New(a *agent.Agent, port int, ca tlspkg.CertificateAuthority) *Plugin {
-	if port <= 0 {
+// A zero port, or no gate, returns nil, and every method tolerates a nil
+// plugin.
+func New(gate *pairing.Gate, port int) *Plugin {
+	if port <= 0 || gate == nil {
 		return nil
 	}
-	return &Plugin{Server: ServerFor(a, port, ca)}
+	return &Plugin{
+		Server:  NewServer(gate.PairingServer(), port),
+		Devices: gate.PairedDevices(),
+	}
 }
 
 // Name identifies the plugin.
@@ -110,6 +122,7 @@ func (p *Plugin) Activate(ctx agent.AgentContext) error {
 		return err
 	}
 	p.logger = ctx.Logger()
+	p.agent = ctx.Agent
 
 	section := ctx.Systray.Section(p.menuTitle(), traymenu.Tooltip("Pair a phone with this agent"))
 	p.address = section.Set("address", "Pair Phone: --", traymenu.Disabled())
@@ -129,6 +142,14 @@ func (p *Plugin) Activate(ctx agent.AgentContext) error {
 			p.logf("Pairing PIN rotated to %s", fresh)
 		}),
 	)
+
+	// The paired devices go under the same section: one place on the menu for
+	// everything about pairing.
+	if p.Devices != nil {
+		p.setupDevicesMenu(section)
+		p.Devices.OnChange(p.refreshDevicesMenu)
+		p.refreshDevicesMenu()
+	}
 
 	// The address follows the machine's own, so it is redrawn whenever a
 	// listener binds again as well as when the agent starts and stops.

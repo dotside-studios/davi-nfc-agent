@@ -67,7 +67,20 @@ type BootstrapServer struct {
 	// agent has no device registry.
 	pairMu     sync.RWMutex
 	pairIssuer PairingIssuer
-	agentPort  int
+
+	// agentPort is read per request rather than stored: the port the agent
+	// serves on can change while this listener stays up, and a device handed
+	// the old one cannot connect.
+	agentPort func() int
+}
+
+// agentPortNow reports the port a device pairing now is told to connect to, 0
+// when nothing supplied one.
+func (s *BootstrapServer) agentPortNow(fn func() int) int {
+	if fn == nil {
+		return 0
+	}
+	return fn()
 }
 
 // NewBootstrapServer creates a server with a fresh random 6-digit PIN.
@@ -117,12 +130,13 @@ func (s *BootstrapServer) PairingURI(host string) (PairingURI, error) {
 	}
 
 	s.pairMu.RLock()
-	issuer, agentPort := s.pairIssuer, s.agentPort
+	issuer, port := s.pairIssuer, s.agentPort
 	s.pairMu.RUnlock()
 
 	if issuer == nil {
 		return PairingURI{}, fmt.Errorf("pairing is not enabled on this agent")
 	}
+	agentPort := s.agentPortNow(port)
 	if agentPort == 0 {
 		return PairingURI{}, fmt.Errorf("pairing does not know the agent's port")
 	}
@@ -191,6 +205,10 @@ func generatePIN() string {
 	}
 	return fmt.Sprintf("%06d", binary.BigEndian.Uint32(b[:])%1_000_000)
 }
+
+// SetPort names the port Start will bind, so a server can be built before the
+// port is settled. Changing it after Start does not move a bound listener.
+func (s *BootstrapServer) SetPort(port int) { s.port = port }
 
 // Start brings up the HTTP server and logs the pairing details.
 func (s *BootstrapServer) Start() error {

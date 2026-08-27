@@ -71,7 +71,7 @@ func servedConsole(t *testing.T) served {
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            a.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        a.TokenVerifier(),
+			TokenVerifier:        nil,
 			Tags:                 a,
 			AllowTagModification: a.TagModificationAllowed,
 			Scans:                &a.Events().Tag,

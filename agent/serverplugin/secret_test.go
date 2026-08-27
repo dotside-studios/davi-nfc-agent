@@ -11,59 +11,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
-// admitsSecret asks the device endpoint's gate whether it would admit a
-// connection presenting secret, from an address the loopback bypass misses.
-func admitsSecret(t *testing.T, gate func(http.ResponseWriter, *http.Request) (string, bool), secret string) bool {
-	t.Helper()
-
-	req := httptest.NewRequest(http.MethodGet, "/ws?mode=device&secret="+secret, nil)
-	req.RemoteAddr = "192.0.2.10:4444"
-
-	_, ok := gate(httptest.NewRecorder(), req)
-	return ok
-}
-
-// Rotating the secret revokes the old one everywhere it is checked. The device
-// endpoint's gate held the secret it was built with, so a rotation left it
-// admitting the old secret and refusing the one the console had just handed the
-// operator: the control that exists to revoke access revoked nothing.
-func TestRotatingTheSecretReachesTheDeviceEndpoint(t *testing.T) {
-	p := &Plugin{}
-	a := agent.New(agent.Config{
-		Manager:    nfc.NewMockManager(),
-		Logger:     log.New(io.Discard, "", 0),
-		APISecret:  "old-secret",
-		ConfigDir:  t.TempDir(),
-		DevicePort: freePort(t),
-	})
-	if err := a.Plugins.Add(p); err != nil {
-		t.Fatalf("Plugins.Add: %v", err)
-	}
-	gate := p.Authenticate()
-	if err := a.Activate(nil); err != nil {
-		t.Fatalf("Activate: %v", err)
-	}
-
-	if !admitsSecret(t, gate, "old-secret") {
-		t.Fatal("the secret the agent was built with was refused")
-	}
-
-	fresh, err := a.RotateAPISecret()
-	if err != nil {
-		t.Fatalf("RotateAPISecret: %v", err)
-	}
-
-	if admitsSecret(t, gate, "old-secret") {
-		t.Error("the rotated-away secret is still admitted")
-	}
-	if !admitsSecret(t, gate, fresh) {
-		t.Error("the fresh secret is refused")
-	}
-	if got := a.APISecret(); got != fresh {
-		t.Errorf("APISecret() = %q, want the fresh secret", got)
-	}
-}
-
 // The client server reads the secret per connection too, so a rotation needs
 // nothing rebuilt for clients either.
 func TestRotatingTheSecretNeedsNoRestart(t *testing.T) {

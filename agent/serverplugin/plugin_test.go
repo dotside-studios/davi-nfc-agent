@@ -60,7 +60,7 @@ func serveClients(p *Plugin, a *agent.Agent) {
 	p.ServeMode[server.ModeClient] = clientserver.New(clientserver.Config{
 		APISecret:            a.APISecret,
 		OriginPolicy:         p.OriginPolicy(),
-		TokenVerifier:        a.TokenVerifier(),
+		TokenVerifier:        nil,
 		Tags:                 a,
 		AllowTagModification: a.TagModificationAllowed,
 		Scans:                &a.Events().Tag,

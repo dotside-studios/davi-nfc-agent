@@ -20,26 +20,6 @@ func TestAPreferenceChangedElsewhereRedrawsTheMenu(t *testing.T) {
 	}
 }
 
-// A device paired from the console or over the pairing server shows up without
-// the operator reopening the menu.
-func TestADevicePairedElsewhereRedrawsTheMenu(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-	app, _ := newTestTray(t, agent)
-
-	if _, _, err := registry.Pair("phone", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-
-	rows := app.pairedDevices.Rows()
-	if len(rows) != 1 || rows[0].Title != "phone (android)" {
-		t.Errorf("the menu shows %v, want the paired device", rows)
-	}
-}
-
 // The card lines follow the scans and the reader's status, which is what
 // replaced polling the last card twice a second.
 func TestTheCardLinesFollowTheReader(t *testing.T) {

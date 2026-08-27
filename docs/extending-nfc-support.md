@@ -62,10 +62,12 @@ func NewManager() *MyManager {
 func (m *MyManager) Devices() ([]nfc.DeviceListing, error) {
     // Enumerate connected devices, naming them "myreader:usb:001" or
     // "myreader:192.168.1.100".
-    return []nfc.DeviceListing{{
-        Path:         "myreader:default",
-        Capabilities: nfc.DeviceCapabilities{CanPoll: true, CanTransceive: true},
-    }}, nil
+    return []nfc.DeviceListing{
+        {
+            Path:         "myreader:default",
+            Capabilities: nfc.DeviceCapabilities{CanPoll: true, CanTransceive: true},
+        },
+    }, nil
 }
 
 // OpenDevice opens a device by its identifier

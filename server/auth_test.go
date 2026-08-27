@@ -43,7 +43,8 @@ func TestCheckAPISecret(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "no secret configured allows all", secret: "", query: "", remote: "1.2.3.4:5", wantOK: true},
-		{name: "loopback bypass", secret: want, query: "", remote: "127.0.0.1:5", wantOK: true},
+		{name: "loopback still needs the secret", secret: want, query: "", remote: "127.0.0.1:5", wantOK: false, wantStatus: http.StatusUnauthorized},
+		{name: "loopback presenting the secret", secret: want, query: want, remote: "127.0.0.1:5", wantOK: true},
 		{name: "matching query param", secret: want, query: want, remote: "1.2.3.4:5", wantOK: true},
 		{name: "matching bearer header", secret: want, authHeader: "Bearer " + want, remote: "1.2.3.4:5", wantOK: true},
 		{name: "wrong query", secret: want, query: "wrong", remote: "1.2.3.4:5", wantOK: false, wantStatus: http.StatusUnauthorized},

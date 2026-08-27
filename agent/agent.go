@@ -86,8 +86,16 @@ type Config struct {
 
 	Logs *logbuf.Ring
 
+	// AllowLoopbackBypass admits a connection from the host itself with no
+	// credential at all, which is how a frontend on the kiosk was reached
+	// before it was given the secret. Off unless a deployment asks for it:
+	// loopback names the host, so every account, local proxy and port forward
+	// on it is admitted too. Settled at construction, unlike the requirement
+	// below, because it widens what is admitted rather than narrowing it.
+	AllowLoopbackBypass bool
+
 	// RequirePairedDevice admits only devices holding a paired credential,
-	// withdrawing the shared secret and loopback bypass for device
+	// withdrawing the shared secret, and any loopback bypass, for device
 	// connections. Browser clients are unaffected. Changeable at runtime
 	// through SetRequirePairedDevice.
 	RequirePairedDevice bool
@@ -141,6 +149,7 @@ type Agent struct {
 	devicePort          int
 	publicKeyPin        string
 	requirePairedDevice bool
+	allowLoopbackBypass bool
 	readerFeedback      bool
 	logs                *logbuf.Ring
 	suppliedLogger      bool
@@ -221,6 +230,7 @@ func New(cfg Config) *Agent {
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
 		requirePairedDevice: cfg.RequirePairedDevice,
+		allowLoopbackBypass: cfg.AllowLoopbackBypass,
 		readerMode:          cfg.Mode,
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
@@ -319,6 +329,13 @@ func (a *Agent) DevicePort() int {
 	return a.devicePort
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
+
+// AllowLoopbackBypass reports whether a connection from the host itself is
+// admitted without a credential. Read on every upgrade by whatever checks it.
+//
+// It says nothing about a device connection under [Agent.RequirePairedDevice],
+// which withdraws the bypass whatever this reports.
+func (a *Agent) AllowLoopbackBypass() bool { return a.allowLoopbackBypass }
 
 func (a *Agent) RequirePairedDevice() bool {
 	a.settingsMu.RLock()

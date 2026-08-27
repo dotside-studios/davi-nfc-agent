@@ -60,6 +60,12 @@ type Options struct {
 	InstallCA           bool
 	RequirePairedDevice bool
 
+	// AllowLoopbackBypass restores the credential-free admission of
+	// connections from the host itself. Off by default; see
+	// [Config.AllowLoopbackBypass]. Setup also reads
+	// DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1 for it.
+	AllowLoopbackBypass bool
+
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
 	// may carry, and ReaderFeedback has the reader announce what it does. They
 	// go to the agent as they are: nothing is read back from a file, so what a
@@ -157,6 +163,10 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// preference may raise the requirement but not withdraw one set here.
 	askedForPairing := opts.RequirePairedDevice || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
 
+	// Same distinction for the loopback bypass, which is off unless this run
+	// asks for it: nothing stored can turn it back on.
+	askedForLoopbackBypass := opts.AllowLoopbackBypass || os.Getenv("DAVI_NFC_ALLOW_LOOPBACK_BYPASS") == "1"
+
 	devicePort := opts.DevicePort
 	if devicePort == 0 {
 		// Options built by hand rather than from flags: the default, not a
@@ -164,8 +174,12 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		devicePort = DefaultDevicePort
 	}
 
+	if askedForLoopbackBypass {
+		agentWarn.Printf("Loopback bypass enabled: anything on this host reaches the agent without the API secret")
+	}
+
 	if askedForPairing {
-		agentLog.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
+		agentLog.Printf("Paired devices required: the shared secret no longer admits a device")
 		if devices.Count() == 0 {
 			agentWarn.Printf("no devices are paired yet, so every device connection will be refused until one pairs")
 		}
@@ -186,6 +200,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		PublicKeyPin:        opts.PublicKeyPin,
 		Logs:                opts.Logs,
 		RequirePairedDevice: askedForPairing,
+		AllowLoopbackBypass: askedForLoopbackBypass,
 		ReaderFeedback:      opts.ReaderFeedback,
 		Mode:                opts.Mode,
 		CardTypes:           opts.CardTypes,

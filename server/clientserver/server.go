@@ -81,6 +81,13 @@ func (s *Server) apiSecret() string {
 	return s.config.APISecret()
 }
 
+// allowLoopbackBypass reports whether a connection from the host itself may
+// skip the secret. False for a server configured with no policy, which is the
+// safe reading: loopback names a host, not a client.
+func (s *Server) allowLoopbackBypass() bool {
+	return s.config.AllowLoopbackBypass != nil && s.config.AllowLoopbackBypass()
+}
+
 // ServeHTTP upgrades a client connection. The server checks the API secret and
 // the origin itself, so it is safe to mount directly on a shared listener.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +214,12 @@ func (s *Server) clientCount() int {
 
 // handleWebSocket handles WebSocket connections from clients.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.CheckAuth(w, r, s.apiSecret(), s.config.TokenVerifier); !ok {
+	auth := server.AuthOptions{
+		Secret:        s.apiSecret(),
+		Verifier:      s.config.TokenVerifier,
+		AllowLoopback: s.allowLoopbackBypass(),
+	}
+	if _, ok := server.CheckAuth(w, r, auth); !ok {
 		clientWarn.Printf("WebSocket connection rejected from %s: bad/missing API secret", r.RemoteAddr)
 		return
 	}

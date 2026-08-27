@@ -384,7 +384,7 @@ func (p *Plugin) apiSecret(ctx agent.AgentContext, menu *traymenu.Section) {
 	}
 
 	p.secret = menu.Set("secret", "API Secret: hidden",
-		traymenu.Tooltip("Required from non-loopback phones and clients"),
+		traymenu.Tooltip("Required from every phone and client, this host included"),
 		traymenu.Disabled(),
 	)
 	menu.Set("copy-secret", "  Copy API Secret",

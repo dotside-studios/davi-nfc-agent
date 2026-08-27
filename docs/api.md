@@ -70,12 +70,11 @@ Wrong PINs lock pairing after five attempts until the agent restarts.
 
 #### Requiring pairing
 
-By default a device may also present the shared API secret, and a device
-connecting over loopback needs no credential at all. Both remain so that
+By default a device may also present the shared API secret. It remains so that
 upgrading strands nothing.
 
 `-require-paired-devices` (or **Require pairing** in the tray, or
-`DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws both: only a credential issued at
+`DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws it: only a credential issued at
 pairing admits a device. Turn it on once the devices you care about have
 paired. With none paired, every device connection is refused.
 
@@ -475,6 +474,10 @@ const ws = new WebSocket('ws://localhost:9470/ws');
 ```javascript
 const ws = new WebSocket('ws://localhost:9470/ws?secret=your-secret');
 ```
+
+A client on the agent's own host presents the secret like any other. See
+[The loopback bypass](#the-loopback-bypass) for the setting that exempts it,
+and why it is off.
 
 ### Session Behavior
 
@@ -1021,6 +1024,23 @@ socket.send(JSON.stringify({
 ```
 
 ---
+
+## The loopback bypass
+
+A connection from the agent's own host presents a credential like any other:
+the shared API secret, or a token issued at pairing. Loopback names the host and
+not a client, so admitting it credential-free admits every account on that host,
+every local proxy, and every port forward into it.
+
+`-allow-loopback-bypass` (or `DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1`) restores the
+credential-free admission, for a setup whose local client has no way to be given
+the secret. It applies to the shared secret only: under
+[Requiring pairing](#requiring-pairing) a device connection still needs a paired
+credential, and the console's own control surface is unaffected — it requires
+loopback, its own origin, and a session token regardless.
+
+The shipped console reads the secret from its session and sends it, so it needs
+nothing here.
 
 ## REST API
 

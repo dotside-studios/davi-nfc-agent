@@ -10,11 +10,17 @@ import (
 // and TLS are owned by the unified server, so this carries only what the client
 // handlers need.
 type Config struct {
-	// APISecret is the secret required from non-loopback connections, read on
-	// every one so a rotation takes effect without rebuilding the server. Nil,
-	// or one returning empty, requires no secret, which is the development
-	// default.
+	// APISecret is the secret required on every connection, read on each one
+	// so a rotation takes effect without rebuilding the server. Nil, or one
+	// returning empty, requires no secret, which is the development default.
 	APISecret func() string
+
+	// AllowLoopbackBypass reports whether a connection from the host itself
+	// may skip the secret, read per connection so the policy can change under
+	// a running server. Nil requires the secret from loopback like anywhere
+	// else; see [server.AuthOptions.AllowLoopback] for why that is the
+	// default.
+	AllowLoopbackBypass func() bool
 
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]
 	// to disable origin checking entirely (NOT recommended).

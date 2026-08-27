@@ -76,7 +76,8 @@ export function useTags(secret?: string): Tags {
   }, [])
 
   useEffect(() => {
-    // Loopback is exempt from the secret; sent anyway in case that narrows.
+    // The secret is required from the console like anywhere else: loopback is
+    // exempt only where the agent was started with -allow-loopback-bypass.
     // The console watches its agent for as long as it is open, so it never
     // stops retrying.
     const nfc = new NFCClient(location.origin, {

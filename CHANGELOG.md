@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `console.Config` takes the components rather than the plugins wrapping them:
+  `Pairing` is a `*pairing.Gate`, `Certificates` a `*tls.Manager`, and
+  `BootstrapPort` the port the old `Pairing` plugin reported. Both exist before
+  the console does, and `pairingplugin.New` only unpacks the gate, so the
+  console reached them through a wrapper for nothing. `Servers` stays the
+  plugin, which builds its listener when it activates
+- `pairing.Server.OnPINChange` reports a rotation, and the tray entries follow
+  it rather than the control that rotated the PIN
 - The loopback bypass is off unless asked for. A connection from the agent's own
   host was admitted with no credential whenever an API secret was set, which
   admitted every other account on that host, every local proxy and every port
@@ -506,6 +514,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A pairing or revocation made outside the console redraws an open page again.
+  The agent reported device changes until the registry moved to
+  `secure/pairing`, and nothing re-subscribed, so a phone completing pairing or
+  a device revoked from the tray left the console listing what it loaded. Its
+  own revoke still redrew, since every console action redraws
+- A PIN rotated from the tray reaches an open console page, which it never did
 - A preference change announces once, with every field in place.
   `console.host.ApplyPreferences` called six setters in turn and each raised
   `Events().Preferences` and `Events().Any`, so one `settings.save` emitted up

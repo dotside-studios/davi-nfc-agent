@@ -1,10 +1,8 @@
 export interface NFCClientOptions {
     /**
-     * The agent's shared API secret, sent as `?secret=` on the upgrade. Required
-     * from the agent's own host too: the loopback bypass is off unless the agent
-     * was started with `-allow-loopback-bypass`. Without it the upgrade is
-     * refused with a plain 401, which surfaces as a failed connection rather
-     * than a close code.
+     * Sent as `?secret=` on the upgrade. Required from loopback too, unless the
+     * agent runs with `-allow-loopback-bypass`. A missing or wrong secret fails
+     * the upgrade with 401, which surfaces as a failed connection, not a close.
      */
     apiSecret?: string;
     autoReconnect?: boolean;
@@ -71,11 +69,7 @@ export interface TagMessage {
 export interface TagCapabilities {
     canRead?: boolean;
     canWrite?: boolean;
-    /**
-     * True for a tag a paired device is holding too, when that device declared
-     * it. How a device reports a scan says nothing about whether it can exchange
-     * bytes with the tag.
-     */
+    /** Can be true for a tag a paired device holds, if that device declares it. */
     canTransceive?: boolean;
     canLock?: boolean;
     isReadOnly?: boolean;
@@ -117,7 +111,7 @@ export interface TagData {
 }
 export interface DeviceStatus {
     connected: boolean;
-    /** The reader this describes. Absent from agents before 1.2. */
+    /** The reader this describes. Absent on agents that do not send it. */
     device?: string;
     message?: string;
     /**
@@ -127,27 +121,21 @@ export interface DeviceStatus {
     cardPresent?: boolean;
 }
 /**
- * The error codes the agent speaks, as of this release. Eleven are retryable —
- * `TAG_REMOVED`, `READ_FAILED`, `WRITE_FAILED`, `TRANSCEIVE_FAILED`,
- * `TAG_NOT_CONNECTED`, `TAG_SEND_FAILED`, `READ_ERROR`, `NO_CARD`, `TIMEOUT`,
- * `INTERNAL_ERROR` and `BUSY` — and the rest are decisions that repeating
- * cannot change. Read `retryable` off the error rather than this list: the
- * agent decides per error.
+ * The error codes the agent sends, as of this release. Whether a retry can
+ * work is `retryable` on the error, not a property of the code here.
  */
 export type NFCErrorCode = "PARSE_ERROR" | "INVALID_PAYLOAD" | "INVALID_REQUEST" | "INVALID_MESSAGE_TYPE" | "UNKNOWN_TYPE" | "INVALID_DEVICE" | "REGISTRATION_FAILED" | "TAG_SEND_FAILED" | "READ_ERROR" | "LOCK_FAILED" | "CAPABILITIES_FAILED" | "SESSION_LOCKED" | "NO_CARD" | "TAG_MISMATCH" | "TAG_NOT_NAMED" | "TIMEOUT" | "DEVICE_GONE" | "INTERNAL_ERROR" | "UNKNOWN_ERROR" | "NOT_SUPPORTED" | "TAG_REMOVED" | "AUTH_FAILED" | "READ_FAILED" | "WRITE_FAILED" | "TRANSCEIVE_FAILED" | "TAG_NOT_CONNECTED" | "READ_ONLY" | "CAPACITY_EXCEEDED" | "INVALID_DATA"
 /** More than one tag in the field. Separate them and try again. */
  | "MULTIPLE_TAGS"
 /**
- * The agent could not start the operation because earlier work is still
- * running: a reader finishing an operation whose caller gave up, or this
- * connection with more than eight requests outstanding. Retryable once that
- * drains.
+ * Earlier work has not finished: a reader completing an operation its caller
+ * abandoned, or more requests outstanding than the connection queues.
  */
  | "BUSY";
 /**
- * A code off the wire: one this release knows, or one a newer agent added.
- * Switch on `NFCErrorCode` where you want the compiler to check the arms, but
- * never refuse a code because this library predates it.
+ * What `code` is declared as: a known code, or any string, so a code added by a
+ * newer agent is carried rather than rejected. Switch on `NFCErrorCode` to have
+ * the compiler check the arms.
  */
 export type NFCErrorCodeValue = NFCErrorCode | (string & {});
 export interface NFCErrorEvent {
@@ -181,12 +169,13 @@ export interface WriteResponse {
     locked?: boolean;
 }
 export interface LockResponse {
-    /** Absent: the agent answers a lock with the result alone. */
+    /** Not sent by the agent; a lock answers with the result alone. */
     message?: string;
     uid?: string;
     tagType?: string;
     locked?: boolean;
 }
+/** No `idempotencyKey`: the agent reads one on writes and locks only. */
 export interface TransceiveRequest extends TagTarget {
     data: Uint8Array;
     /**

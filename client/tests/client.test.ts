@@ -466,8 +466,6 @@ describe("tag operations", () => {
       payload: { code: "MULTIPLE_TAGS", retryable: false, op: "WriteData" },
     });
 
-    // Not retryable: the operator has to separate the cards first, so a client
-    // that retries on `retryable` must not retry this one.
     await expect(writing).rejects.toMatchObject({
       name: "NFCRequestError",
       code: "MULTIPLE_TAGS",

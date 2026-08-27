@@ -131,11 +131,9 @@ rather than landing on whatever appears next.
 **The reader the operator picked.** When a reader is selected in the console or
 the tray, that reader's tags are the only ones broadcast and the only ones a
 request can reach. Naming another reader, or a UID only another reader has seen,
-fails with `NO_CARD` as though nothing were holding it, and `allowUntargeted`
-resolves among the selected reader alone. Paired phones are unaffected: the
-operator picked which reader to work with, not which phone. What the client is
-shown is what it can act on, so a client that names the tag it was last told
-about needs nothing here.
+fails with `NO_CARD`, and `allowUntargeted` resolves among the selected reader
+alone. Paired phones are unaffected. A client naming the tag it was last told
+about needs no change.
 
 ## API Reference
 
@@ -303,7 +301,7 @@ client.on('error', (err) => { /* ... */ });
 `deviceStatus` describes the agent's own reader, so its `cardPresent` says
 nothing about a tag a paired phone is holding, and is false
 the whole time one is. `tagRemoved` is the event to act on. Its `device` names
-the reader it describes, which agents before 1.2 did not send.
+the reader it describes; agents that do not send it leave it undefined.
 
 ### Errors
 
@@ -311,12 +309,10 @@ A refused operation rejects with an `NFCRequestError` carrying the agent's
 [error code](api.md#error-codes) and whether repeating the request could
 plausibly succeed.
 
-The agent serves one request per connection at a time and queues the rest, up
-to eight. A ninth outstanding request is refused with a retryable `BUSY` rather
-than queued without limit, so a caller firing operations faster than the reader
-answers should await them rather than fanning them out. Requests still in
-flight are cancelled when the connection drops, which the library surfaces as
-the pending-request rejection it already raises on close.
+A connection serves one request at a time and queues a bounded number of the
+rest. Beyond that the agent answers `BUSY`, which is retryable, so await
+operations rather than fanning them out. Requests in flight are cancelled when
+the connection drops; the library rejects them on close as it already did.
 
 ```javascript
 try {
@@ -326,8 +322,8 @@ try {
     // TAG_REMOVED, WRITE_FAILED, NO_CARD: present the tag again
     // BUSY: earlier work has not finished; retry once it answers
   } else if (err.code === 'MULTIPLE_TAGS') {
-    // More than one card in the field. Retrying changes nothing until the
-    // operator separates them.
+    // More than one card in the field; retrying changes nothing until they
+    // are separated.
   } else {
     // READ_ONLY, CAPACITY_EXCEEDED, TAG_MISMATCH: retrying wastes a round trip
     console.error(err.code, err.message);
@@ -463,9 +459,8 @@ Exported types: `TagData`, `TagMessage`, `NDEFRecord`, `TagCapabilities`,
 definitions.
 
 `NFCErrorCode` is the union of the codes this release knows, for a switch the
-compiler can check. `NFCErrorCodeValue` is what `err.code` actually is: that
-union widened to any string, so a code a newer agent adds still type-checks
-rather than being refused by a library that predates it.
+compiler can check. `NFCErrorCodeValue` is what `err.code` is declared as: that
+union widened to any string, so a code added by a newer agent still type-checks.
 
 ---
 
@@ -478,16 +473,15 @@ The library is **NFC-source agnostic** - integrate with any NFC library (WebNFC,
 Pair the device first: read the agent's `davi-pair://` QR off the kiosk screen,
 pin the TLS connection to its `spki`, and POST to
 `https://<agent-host>:9470/pair?pin=<code>`. Pairing is served from the agent's
-own port, not the cleartext bootstrap listener on 9472, and is refused with
+port, not the cleartext bootstrap listener, and is refused with
 `426 Upgrade Required` over cleartext from anything but loopback. See
-[Device setup](device-setup.md#1-pair). Present the `deviceToken` it answers
-with as `?secret=` on the URL below, or as an `Authorization: Bearer` header;
-loopback needs one too, unless the agent runs with `-allow-loopback-bypass`.
+[Device setup](device-setup.md#1-pair). Present the `deviceToken` as `?secret=`
+on the URL below, or as an `Authorization: Bearer` header; loopback needs one
+too, unless the agent runs with `-allow-loopback-bypass`.
 
-Two limits to design for: the device endpoint caps an inbound frame at 256 KB
-and drops the session of a device that exceeds it, and revoking a device's
-credential closes its session immediately with a policy-violation close (1008).
-Both arrive as `disconnected`.
+The device endpoint caps an inbound frame at 256 KB and drops the session of a
+device that exceeds it. Revoking a device's credential closes its session with a
+policy-violation close (1008). Both arrive as `disconnected`.
 
 ## Installation
 

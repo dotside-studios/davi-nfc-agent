@@ -27,11 +27,9 @@ func TestBroadcastWithNoClientsIsFine(t *testing.T) {
 		Broadcast(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04000001"))})
 }
 
-// The deviceStatus payload is the shape docs/api.md documents and the client
-// library reads. It is nfc.DeviceStatus marshalled directly, so the field names
-// are that struct's json tags: without them Go exported the Go names and every
-// client read undefined, which left the client library's "the reader has no
-// card, so forget the tag it was holding" branch dead.
+// The deviceStatus payload carries the field names docs/api.md documents.
+// nfc.DeviceStatus is marshalled directly, so without json tags it carried the
+// Go names and every field a client read was undefined.
 func TestDeviceStatusIsBroadcastInTheDocumentedShape(t *testing.T) {
 	s := New(Config{AllowedOrigins: []string{"*"}})
 	conn := dial(t, s, "https://app.example.com")

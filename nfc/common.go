@@ -43,9 +43,8 @@ type NFCData struct {
 // DeviceStatus represents the status of the NFC device.
 // This type might be used by the main application to display status.
 //
-// The json tags are the wire shape: this value is broadcast to clients as the
-// payload of a deviceStatus message, so the field names are the ones
-// docs/api.md documents and the client library reads.
+// Marshalled directly as the payload of a deviceStatus message, so the json
+// tags are the wire field names.
 type DeviceStatus struct {
 	// Device names the reader this describes.
 	Device string `json:"device,omitempty"`

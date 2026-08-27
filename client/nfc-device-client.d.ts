@@ -1,21 +1,21 @@
 /**
  * TypeScript type definitions for NFC Device Client
  *
- * Pairing, before a device connects: read the agent's pairing QR off the kiosk
- * screen, which carries where to pair, the agent's public key pin and the PIN
- * as `davi-pair://<host>:9470/?spki=...&code=123456&name=...`. Pin the TLS
- * connection to `spki`, POST to `https://<host>:9470/pair?pin=<code>`, and keep
- * the `deviceToken` from the response; it is shown once. Pairing is served from
- * the agent's own port, not the cleartext bootstrap listener on 9472, and is
- * refused with 426 Upgrade Required over cleartext from anything but loopback.
+ * Pair before connecting: the agent's QR carries the address, its public key
+ * pin and the PIN as `davi-pair://<host>:9470/?spki=...&code=123456&name=...`.
+ * Pin the TLS connection to `spki`, POST to
+ * `https://<host>:9470/pair?pin=<code>`, and store the `deviceToken` from the
+ * response. Pairing is served from the agent's port, not the cleartext
+ * bootstrap listener, and is refused with 426 over cleartext from anything but
+ * loopback.
  *
  * Present the token, or the shared API secret, as `?secret=` on the server URL
- * or as an Authorization: Bearer header. Loopback needs one too, unless the
- * agent was started with `-allow-loopback-bypass`.
+ * or as an `Authorization: Bearer` header. Loopback needs one too, unless the
+ * agent runs with `-allow-loopback-bypass`.
  *
- * The device endpoint caps an inbound frame at 256 KB, and revoking a device's
- * credential closes its session with a policy-violation close (1008) rather
- * than waiting for it to reconnect. Both arrive here as `disconnected`.
+ * The device endpoint caps an inbound frame at 256 KB. Revoking a device's
+ * credential closes its session with a policy-violation close (1008). Both
+ * arrive here as `disconnected`.
  */
 
 /**

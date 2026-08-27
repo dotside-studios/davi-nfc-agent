@@ -136,11 +136,12 @@ export interface DeviceStatus {
 }
 
 /**
- * The error codes the agent speaks, as of this release. Not retryable unless
- * listed here as one: `TAG_SEND_FAILED`, `READ_ERROR`, `SESSION_LOCKED`,
- * `NO_CARD`, `TIMEOUT`, `DEVICE_GONE`, `READ_FAILED`, `WRITE_FAILED`,
- * `TRANSCEIVE_FAILED` and `TAG_NOT_CONNECTED` are. Read `retryable` off the
- * error rather than this list: the agent decides per error.
+ * The error codes the agent speaks, as of this release. Eleven are retryable —
+ * `TAG_REMOVED`, `READ_FAILED`, `WRITE_FAILED`, `TRANSCEIVE_FAILED`,
+ * `TAG_NOT_CONNECTED`, `TAG_SEND_FAILED`, `READ_ERROR`, `NO_CARD`, `TIMEOUT`,
+ * `INTERNAL_ERROR` and `BUSY` — and the rest are decisions that repeating
+ * cannot change. Read `retryable` off the error rather than this list: the
+ * agent decides per error.
  */
 export type NFCErrorCode =
   | "PARSE_ERROR"
@@ -173,7 +174,14 @@ export type NFCErrorCode =
   | "CAPACITY_EXCEEDED"
   | "INVALID_DATA"
   /** More than one tag in the field. Separate them and try again. */
-  | "MULTIPLE_TAGS";
+  | "MULTIPLE_TAGS"
+  /**
+   * The agent could not start the operation because earlier work is still
+   * running: a reader finishing an operation whose caller gave up, or this
+   * connection with more than eight requests outstanding. Retryable once that
+   * drains.
+   */
+  | "BUSY";
 
 /**
  * A code off the wire: one this release knows, or one a newer agent added.

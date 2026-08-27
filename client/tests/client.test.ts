@@ -475,6 +475,25 @@ describe("tag operations", () => {
     });
   });
 
+  it("reports a full request queue as a retryable BUSY", async () => {
+    const { client, ws } = await connected();
+    const writing = client.write({ records: [] });
+    const sent = JSON.parse(ws.send.mock.calls[0][0]);
+
+    ws.emit({
+      id: sent.id,
+      type: "error",
+      success: false,
+      error: "Too many requests outstanding on this connection",
+      payload: { code: "BUSY", retryable: true },
+    });
+
+    await expect(writing).rejects.toMatchObject({
+      code: "BUSY",
+      retryable: true,
+    });
+  });
+
   it("carries an error code this release does not know", async () => {
     const { client, ws } = await connected();
     const writing = client.write({ records: [] });

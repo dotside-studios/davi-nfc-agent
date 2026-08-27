@@ -1160,6 +1160,7 @@ Raised by the bridge itself, before reaching a tag.
 | `TIMEOUT` | yes | Operation timed out |
 | `DEVICE_GONE` | no | Target device disconnected |
 | `INTERNAL_ERROR` | yes | Unexpected agent-side failure |
+| `BUSY` | yes | Earlier work has not finished: a reader still completing an abandoned operation, or more than eight requests outstanding on this connection |
 | `UNKNOWN_ERROR` | no | Unclassified: never advertised as retryable |
 
 ### NFC errors

@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The client library types the agent's error codes. `NFCErrorCode` is the union
-  of the codes this release knows, `MULTIPLE_TAGS` included, for a switch the
-  compiler can check; `NFCErrorCodeValue` is what `err.code` is declared as,
+  of the codes this release knows, `MULTIPLE_TAGS` and `BUSY` included, for a
+  switch the compiler can check; `NFCErrorCodeValue` is what `err.code` is declared as,
   that union widened to any string, so a code a newer agent adds still
   type-checks rather than being refused by a library that predates it.
   `RawTagPayload` and `WireMessage` are exported from the package root too,
@@ -172,6 +172,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BUSY` is in the protocol reference and the client library's error guidance:
+  a connection serves one request at a time and queues eight, and the ninth
+  outstanding is refused rather than queued without limit. It was added to
+  `protocol` without reaching either
 - The client library's docs describe the agent on this branch: the API secret is
   required from the agent's own host too, unless it was started with
   `-allow-loopback-bypass`; the reader an operator picks scopes what a client

@@ -311,12 +311,20 @@ A refused operation rejects with an `NFCRequestError` carrying the agent's
 [error code](api.md#error-codes) and whether repeating the request could
 plausibly succeed.
 
+The agent serves one request per connection at a time and queues the rest, up
+to eight. A ninth outstanding request is refused with a retryable `BUSY` rather
+than queued without limit, so a caller firing operations faster than the reader
+answers should await them rather than fanning them out. Requests still in
+flight are cancelled when the connection drops, which the library surfaces as
+the pending-request rejection it already raises on close.
+
 ```javascript
 try {
   await client.write({ records });
 } catch (err) {
   if (err.retryable) {
     // TAG_REMOVED, WRITE_FAILED, NO_CARD: present the tag again
+    // BUSY: earlier work has not finished; retry once it answers
   } else if (err.code === 'MULTIPLE_TAGS') {
     // More than one card in the field. Retrying changes nothing until the
     // operator separates them.

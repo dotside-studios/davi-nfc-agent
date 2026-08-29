@@ -111,15 +111,24 @@ type Card struct {
     backend    Backend
 }
 
-// Field is the set of cards currently on one virtual device. Present/Remove are
-// the present/remove semantics both packages re-implement.
-type Field struct { /* cards, mutex */ }
-func (f *Field) Present(cards ...*Card)
-func (f *Field) Remove(uid string)
+// Field is the set of cards currently on one virtual device, and the single
+// source of truth for what it holds. Present/Remove mutate it and emit a change
+// — the field is event-driven internally, so presenting a card is synchronous
+// rather than "mutate, then wait for the next poll to notice."
+type Field struct { /* cards, mutex, change signal */ }
+func (f *Field) Present(cards ...*Card) // emits a change
+func (f *Field) Remove(uid string)      // emits a change
 
-// Device is an nfc.Device over a Field. Mode selects poll (GetTags) or event
-// (Scans + held-tag) semantics, covering nfctest's MockDevice and remotenfc's
-// Device respectively.
+// Device is an nfc.Device over a Field. Poll and event are NOT two device
+// implementations — they are two thin read-out adapters over the one Field,
+// selected at construction:
+//
+//   - PollMode:  advertise CanPoll; GetTags returns the field snapshot. No poll
+//     *loop* is needed (the snapshot is already current); the Supervisor opens
+//     and polls it. Stands in for a PC/SC reader.
+//   - EventMode: advertise SupportsEvents; on each field change emit a
+//     ScannedTag/removal through the Manager's TagReporter. The Supervisor never
+//     opens it. Stands in for a phone / push device (remotenfc).
 type Device struct { /* field, caps, mode */ }
 
 // Manager is an nfc.Manager + DeviceChangeNotifier (+ optional TagReporter) over
@@ -223,12 +232,44 @@ extraction makes cheap.
 
 Steps 2 and 3 are independent and can land in either order.
 
-## Risks & open questions
+## Poll vs event: resolved as one field, two adapters
 
-- **Poll vs event device modes.** `nfctest` uses poll-mode `MockDevice`
-  (`CanPoll`); `remotenfc` uses event-mode (`SupportsEvents`, `GetTags` returns
-  the held tag with a timeout). The core `Device` must support both cleanly
-  rather than forcing one — this is the main design pressure on the abstraction.
+The split is a hard either/or **at the Supervisor boundary**, keyed on `CanPoll`
+in the `DeviceListing`: `ListReaders` (`nfc/constants.go:68`) returns only
+`CanPoll` devices, which the Supervisor opens and polls via `GetTags()`; an
+event device (`CanPoll:false`, `SupportsEvents:true`) is never opened, and the
+Supervisor subscribes through `OnScan → TagReporter.Scans()`
+(`nfc/supervisor.go:224`) instead. So a device is discovered one way or the
+other, never both.
+
+The resolution is **not** to give the core `Device` two modes of divergent
+logic, nor to collapse everything to event-only. It is one event-driven `Field`
+with two thin read-out adapters (see `Device` above), because:
+
+- Present/remove *is* fundamentally an event. Making the `Field` the event
+  source means presenting a card is synchronous, which removes the timing dance
+  the current façade needs — the `time.Sleep(100ms)` in `NewEmulatedReader` and
+  the poll-until `AwaitLanes` loop both go away. This is the good part of the
+  "emit an event as it polls" idea: that *is* the event adapter.
+- Neither adapter needs a poll *loop*. `GetTags()` just returns the current
+  field snapshot (today's `MockDevice` already works this way), so keeping the
+  poll adapter costs almost nothing.
+- **Keep the poll adapter rather than going event-only.** The low-level poll
+  loop (reconnect, backpressure) is covered in package `nfc` with `MockDevice`
+  regardless. But `nfctest`'s multilane / throughput / concurrency sims are the
+  *only* integration coverage of the multi-reader **poll topology** — the
+  Supervisor reconcile + per-reader polling that real PC/SC readers use;
+  `remotenfc` covers the event fan-in topology. Event-only `nfctest` would
+  silently drop that stand-in. Retaining both also lets the fast in-memory
+  harness exercise *both* Supervisor processing paths (`deviceReader` poll-read
+  and `watchReported` event-read) — more coverage, not less.
+
+Default: event mode for the standalone virtual reader and `remotenfc` (already
+event); `nfctest` keeps poll as the default for its reader-topology sims and
+gains event as a one-line option. The mode is a construction-time adapter
+choice, not a fork in device logic.
+
+## Risks & open questions
 - **Snapshot vs live reads.** Route-backed tags set `ReadsAreSnapshot=true`
   (a write can't be confirmed by reading back); driver-backed tags read live.
   This is a per-`Backend` property, so it fits, but the capability-merge helper

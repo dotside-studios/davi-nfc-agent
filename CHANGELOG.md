@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The agent now **records every raw APDU exchange** in the client log, decoded
+  into what it does — "Raw exchange on ACS ACR122U (tag 04A1B2C3): UPDATE BINARY
+  — write 4 byte(s) to page/block 3; page 3 holds lock/OTP bytes …". A command
+  that changes the tag, or one the decoder cautions about, is logged at warning
+  level; the rest at info. It is logged before the exchange, so a command that
+  bricks a tag and never returns still leaves a trail, and it records the decoded
+  summary rather than the command bytes, so key material in a LOAD KEY or
+  authenticate never reaches the log. The channel does not second-guess a raw
+  command — the read-only mode and the off-by-default channel gate are the
+  consent — this is the accountability those gates could not provide on their own
+- `nfc`: a `FuzzExplain` target proves the APDU decoder answers any input without
+  panicking (it now decodes operator- and client-supplied bytes on the raw
+  channel) and holds its safety invariants — a command that mutates the tag, or
+  one it cannot recognise, is always reported as mutating. Its seed corpus runs
+  on every `go test`
+
 - A **gated raw APDU channel**. The raw exchange path (`transceiveRequest` /
   `tags.transceive`) is now behind a dedicated opt-in that is off by default and
   independent of the reader's read/write mode: a raw command reaches the tag

@@ -133,6 +133,10 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 		return nil, err
 	}
 
+	// Recorded before the exchange, so a command that fails or never returns —
+	// the ones that lock or brick a tag — still leaves a trail of what was sent.
+	auditRawExchange(req.Data, req.Raw, rt.device, rt.uid)
+
 	data, err := rt.holder.TransceiveTag(ctx, rt.device, rt.uid, req.Data, req.Raw)
 	if err != nil {
 		return nil, sourceFailure(err, rt.device, "exchange", protocol.ErrCodeTransceiveFailed)

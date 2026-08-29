@@ -66,6 +66,7 @@ export interface Settings {
   port: number
   requirePairedDevice: boolean
   readerFeedback: boolean
+  allowRawApdu: boolean
 }
 
 

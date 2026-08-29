@@ -6,7 +6,15 @@ import type { Tags } from '../useTags'
 import { Empty, Notice, Panel } from '../ui'
 
 /** Raw exchanges with the present tag, over the client transceive channel. */
-export function Apdu({ tags, writable }: { tags: Tags; writable: boolean }) {
+export function Apdu({
+  tags,
+  writable,
+  rawAllowed,
+}: {
+  tags: Tags
+  writable: boolean
+  rawAllowed: boolean
+}) {
   const [command, setCommand] = useState('FF CA 00 00 00')
   const [raw, setRaw] = useState(false)
   const [history, setHistory] = useState<Exchange[]>([])
@@ -17,7 +25,7 @@ export function Apdu({ tags, writable }: { tags: Tags; writable: boolean }) {
   const view = useRef<HTMLDivElement>(null)
 
   const parsed = parseHex(command)
-  const canSend = parsed !== null && !busy && writable
+  const canSend = parsed !== null && !busy && writable && rawAllowed
 
   useEffect(() => {
     const el = view.current
@@ -89,6 +97,14 @@ export function Apdu({ tags, writable }: { tags: Tags; writable: boolean }) {
         one-time-programmable bits or lock a tag permanently, none of which the agent can recognise
         or undo. Know what you are sending.
       </Notice>
+
+      {!rawAllowed ? (
+        <Notice kind="err">
+          The <b>raw APDU channel</b> is off, so raw exchanges are refused. Turn it on under the
+          reader controls on the Overview tab. It is off by default because the agent cannot vet what
+          a raw command does.
+        </Notice>
+      ) : null}
 
       {!writable ? (
         <Notice kind="err">

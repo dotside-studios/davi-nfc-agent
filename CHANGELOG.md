@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A **gated raw APDU channel**. The raw exchange path (`transceiveRequest` /
+  `tags.transceive`) is now behind a dedicated opt-in that is off by default and
+  independent of the reader's read/write mode: a raw command reaches the tag
+  unmodified and can burn OTP bits or lock a tag permanently, none of which the
+  agent can recognise or undo, so a writable agent still refuses one until an
+  operator opens the channel. Open it with `-allow-raw-apdu` (or
+  `DAVI_NFC_ALLOW_RAW_APDU=1`), the tray's *Allow Raw APDU Channel* toggle, or
+  the reader controls in the Control Center; the setting rides
+  `agent.Preferences.AllowRawAPDU` and is read per request, so a change reaches
+  connections already open. A refused exchange returns the new
+  `RAW_CHANNEL_DISABLED` error code, distinct from `READ_ONLY` (which the mode
+  gate still returns and which is reported first when both apply). Embedders
+  wire it through `clientserver.Config.AllowRawTransceive`; leaving it nil keeps
+  the previous behaviour of the mode being the only gate. See
+  [the API reference](docs/api.md#raw-exchange-transceive)
+
 ### Changed
 
 - A device may now report a non-hex UID, and the bridge carries it through

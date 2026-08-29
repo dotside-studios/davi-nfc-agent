@@ -98,6 +98,54 @@ func TestTransceiveAllowedInReadWriteMode(t *testing.T) {
 	}
 }
 
+// The raw APDU channel is a gate of its own: with it closed, a raw exchange is
+// refused even in a writable mode, and before any tag is looked for.
+func TestTransceiveRefusedWhenRawChannelDisabled(t *testing.T) {
+	cfg := configInMode(t, nfc.ModeReadWrite)
+	cfg.AllowRawTransceive = func() bool { return false }
+	s := newTagOps(cfg)
+
+	_, err := s.Transceive(context.Background(), server.TransceiveOp{
+		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},
+	})
+	if err == nil {
+		t.Fatal("a disabled raw channel allowed a raw exchange")
+	}
+	if got := codeOf(err); got != protocol.ErrCodeRawChannelDisabled {
+		t.Errorf("errorCode = %q, want %q", got, protocol.ErrCodeRawChannelDisabled)
+	}
+}
+
+// Read-only mode is reported as such even when the raw channel is open: the mode
+// is the first gate, so its refusal is the one a client sees.
+func TestTransceiveReportsReadOnlyBeforeRawChannel(t *testing.T) {
+	cfg := configInMode(t, nfc.ModeReadOnly)
+	cfg.AllowRawTransceive = func() bool { return true }
+	s := newTagOps(cfg)
+
+	_, err := s.Transceive(context.Background(), server.TransceiveOp{
+		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},
+	})
+	if got := codeOf(err); got != protocol.ErrCodeReadOnly {
+		t.Errorf("errorCode = %q, want %q", got, protocol.ErrCodeReadOnly)
+	}
+}
+
+// With the channel open and a writable mode, the exchange is not refused on
+// policy grounds; it gets as far as looking for a tag and fails on that instead.
+func TestTransceiveAllowedWhenRawChannelOpen(t *testing.T) {
+	cfg := configInMode(t, nfc.ModeReadWrite)
+	cfg.AllowRawTransceive = func() bool { return true }
+	s := newTagOps(cfg)
+
+	_, err := s.Transceive(context.Background(), server.TransceiveOp{
+		Data: []byte{0xFF, 0xCA, 0x00, 0x00, 0x00},
+	})
+	if got := codeOf(err); got == protocol.ErrCodeRawChannelDisabled || got == protocol.ErrCodeReadOnly {
+		t.Errorf("an open channel in a writable mode was refused on policy grounds: %q", got)
+	}
+}
+
 // A tag the reader could not read is still a tag to operate on: a blank or
 // damaged one is exactly what a client asks to write, and it never reaches the
 // reader's last scan. So an untargeted request routes to the reader holding it,

@@ -33,6 +33,34 @@ export function ModeControl({ state }: { state: ControlState }) {
   )
 }
 
+export function RawAPDUControl({ state }: { state: ControlState }) {
+  const act = useAction()
+  const { settings } = state
+
+  return (
+    <div className="stack">
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.allowRawApdu}
+          onChange={(e) =>
+            act.mutate({ name: 'settings.save', params: { ...settings, allowRawApdu: e.target.checked } })
+          }
+        />
+        <span>
+          Allow raw APDU channel{' '}
+          <span className="dim">— clients may send raw exchanges to a tag</span>
+        </span>
+      </label>
+      <div className="dim">
+        A raw command reaches the tag unmodified and can lock or brick it in ways the agent cannot
+        recognise or undo. Off by default; a writable mode is needed too.
+      </div>
+      {act.error ? <div className="err">{(act.error as Error).message}</div> : null}
+    </div>
+  )
+}
+
 export function CardFilterControl({ state }: { state: ControlState }) {
   const act = useAction()
   const filters = state.settings.cardTypes ?? []

@@ -7,7 +7,15 @@ import { ActionLink, Copyable, Dot, Empty, KV, Notice, Panel, Row } from '../ui'
 import { Apdu } from './Apdu'
 
 /** Tag inspector and NDEF composer. */
-export function Tag({ tags, writable }: { tags: Tags; writable: boolean }) {
+export function Tag({
+  tags,
+  writable,
+  rawAllowed,
+}: {
+  tags: Tags
+  writable: boolean
+  rawAllowed: boolean
+}) {
   const { tag, capabilities } = tags
 
   return (
@@ -19,7 +27,7 @@ export function Tag({ tags, writable }: { tags: Tags; writable: boolean }) {
       <div>
         {tag ? <Records records={tag.message?.records} text={tag.text} /> : null}
         <Composer tags={tags} writable={writable} />
-        <Apdu tags={tags} writable={writable} />
+        <Apdu tags={tags} writable={writable} rawAllowed={rawAllowed} />
       </div>
     </div>
   )

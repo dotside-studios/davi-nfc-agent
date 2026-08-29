@@ -161,6 +161,12 @@ export type NFCErrorCode =
   | "TRANSCEIVE_FAILED"
   | "TAG_NOT_CONNECTED"
   | "READ_ONLY"
+  /**
+   * The raw APDU channel is off. Distinct from `READ_ONLY`: the mode may allow
+   * writes, but raw exchanges stay refused until the operator opens the channel.
+   * Not retryable; the channel has to be enabled on the agent.
+   */
+  | "RAW_CHANNEL_DISABLED"
   | "CAPACITY_EXCEEDED"
   | "INVALID_DATA"
   /** More than one tag in the field. Separate them and try again. */

@@ -101,6 +101,13 @@ type Config struct {
 	// which also reaches the reader already running.
 	ReaderFeedback bool
 
+	// AllowRawAPDU opens the raw APDU channel, letting clients send raw
+	// exchanges to a tag. Off by default: a raw command reaches the tag
+	// unmodified and can lock or brick it in ways the agent cannot recognise or
+	// undo, so it stays gated behind this even in a writable mode. Changeable at
+	// runtime through SetRawAPDUEnabled.
+	AllowRawAPDU bool
+
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
 	// may carry, and DevicePath the reader to open, empty for auto-detect.
 	//
@@ -146,6 +153,7 @@ type Agent struct {
 	requirePairedDevice bool
 	allowLoopbackBypass bool
 	readerFeedback      bool
+	allowRawAPDU        bool
 	logs                *logbuf.Ring
 	suppliedLogger      bool
 
@@ -228,6 +236,7 @@ func New(cfg Config) *Agent {
 		readerMode:          cfg.Mode,
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
+		allowRawAPDU:        cfg.AllowRawAPDU,
 		cardTypes:           newCardTypeFilter(cfg.CardTypes),
 		logs:                cfg.Logs,
 		suppliedLogger:      suppliedLogger,
@@ -526,4 +535,11 @@ func (a *Agent) SetRequirePairedDevice(on bool) {
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
 	a.ApplyPreferences(func(p *Preferences) { p.ReaderFeedback = on })
+}
+
+// SetRawAPDUEnabled opens or closes the raw APDU channel. Whatever gates a raw
+// exchange reads it per request, so it takes effect immediately, on connections
+// already open as well as new ones.
+func (a *Agent) SetRawAPDUEnabled(on bool) {
+	a.ApplyPreferences(func(p *Preferences) { p.AllowRawAPDU = on })
 }

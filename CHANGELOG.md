@@ -24,8 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wire it through `clientserver.Config.AllowRawTransceive`; leaving it nil keeps
   the previous behaviour of the mode being the only gate. See
   [the API reference](docs/api.md#raw-exchange-transceive)
-
-### Changed
+- `nfc.Explain(cmd []byte, raw bool) APDUExplanation` decodes a command back into
+  what it does — a one-line summary, a class (`read`/`write`/`lock`/`auth`/
+  `select`/`info`/`reader-control`/`unknown`), a `Mutating` flag, and warnings for
+  an irreversible effect, a write to a lock/OTP page, a malformed length, or an
+  unrecognised command. It is deterministic and self-contained, covering the
+  PC/SC pseudo-APDU, DESFire-wrapped, ISO 7816-4 and native framing families the
+  agent already speaks (and unwrapping the direct-transmit envelope). It exists so
+  the APDU byte literals in this repository can be read and checked without an
+  APDU expert or an AI in the loop: a round-trip test decodes the output of every
+  builder in `nfc/apdu.go` and asserts the class, the meaning, and that every
+  declared length matches its data, so a malformed or mislabelled command fails
+  the build. It also underpins a safety net for the raw APDU channel, where the
+  same decode names what a command does before it reaches a tag
 
 - A device may now report a non-hex UID, and the bridge carries it through
   verbatim instead of rejecting it. A hex NFC serial is still normalized to the

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/virtualnfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
@@ -20,26 +21,17 @@ type tagRoute interface {
 	deviceCanTransceive(deviceID string) bool
 }
 
-// declaredFor answers one capability for this tag from the two claims that bear
-// on it: what the device said about this tag, and what it said about itself.
-//
-// A tag that declared it cannot is refused. Otherwise the device answers, and
-// its answer bounds the tag's: a bridge that cannot carry an operation at all
-// cannot carry it for any tag it holds.
-//
-// What makes that safe is that the device-level claim is now three-valued too.
-// A device that said nothing about itself no longer reads as one that refused,
-// so describing a tag while omitting its own block stopped vetoing the tag it
-// had just described.
-func (t *Tag) declaredFor(
-	ofTag func(protocol.TagCapabilities) bool,
-	ofDevice func(string) bool,
-) bool {
-	if can, declared := t.declared(ofTag); declared && !can {
-		return false
-	}
-	return ofDevice(t.sourceDevice)
+// tagCapSource presents a device's capability bounds for one tag to the shared
+// capability merge: a bridge that cannot carry an operation at all cannot carry
+// it for any tag it holds.
+type tagCapSource struct {
+	route    tagRoute
+	deviceID string
 }
+
+func (s tagCapSource) CanWrite() bool      { return s.route.deviceCanWrite(s.deviceID) }
+func (s tagCapSource) CanLock() bool       { return s.route.deviceCanLock(s.deviceID) }
+func (s tagCapSource) CanTransceive() bool { return s.route.deviceCanTransceive(s.deviceID) }
 
 // Tag wraps device NFC data in the nfc.Tag interface.
 //
@@ -83,99 +75,31 @@ func (t *Tag) NumericType() int {
 //
 // An operation is reported only when the tag supports it, the device declared
 // it, and the device is still connected. A capability that outlives its session
-// is a promise the Tag cannot keep.
+// is a promise the Tag cannot keep. The three-valued merge (declared,
+// undeclared, or read-only) and the snapshot-read rule are the shared core's.
 func (t *Tag) Capabilities() nfc.TagCapabilities {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-
-	var caps nfc.TagCapabilities
-	if t.declaredCaps != nil {
-		caps = *t.declaredCaps
-	}
-
-	if caps.TagFamily == "" {
-		caps.TagFamily = t.tagType
-	}
-	if caps.Technology == "" {
-		caps.Technology = t.technology
-	}
-	if !caps.SupportsNDEF {
-		caps.SupportsNDEF = t.ndefMsg != nil || t.ndefData != nil
-	}
-
-	caps.CanRead = true
-
-	// ReadData answers with what the device reported when it scanned, so a
-	// write cannot be confirmed by reading it back. Declared rather than
-	// special-cased, so the write pipeline skips a step it cannot trust
-	// instead of branching on what kind of tag this is.
-	caps.ReadsAreSnapshot = true
-
-	caps.CanWrite = t.canWrite()
-	caps.CanLock = t.canLock()
-	caps.CanTransceive = t.canTransceive()
-
-	return caps
+	return virtualnfc.MergeCapabilities(t.declaredCaps, t.capSource(), t.tagType, t.technology, t.ndefMsg != nil || t.ndefData != nil)
 }
 
-// declared reports what the tag said about one of its capabilities, and whether
-// it said anything at all.
-//
-// A tag that declared nothing is unknown, not incapable. Only a v1 device can
-// describe a tag it scanned; a v0 device sends what it can do and no more, and
-// the wire protocol keeps accepting that. Reading absence as a refusal would
-// leave every v0 device holding tags that can do nothing, which is the
-// hard-coded false this capability work exists to remove.
-func (t *Tag) declared(of func(protocol.TagCapabilities) bool) (value, ok bool) {
-	if t.declaredCaps == nil {
-		return false, false
-	}
-	return of(*t.declaredCaps), true
-}
-
-// readOnly reports whether the tag declared itself already locked. Absence of a
-// declaration is not a claim that it is.
-func (t *Tag) readOnly() bool {
-	ro, _ := t.declared(func(c protocol.TagCapabilities) bool { return c.IsReadOnly })
-	return ro
-}
-
-// canWrite reports whether a write would actually reach the tag. Callers must
-// hold at least a read lock.
-//
-// Three states, not two: a tag that declared it cannot be written is refused, a
-// tag that declared nothing defers to the device holding it, and a tag declared
-// read-only is refused however capable that device is.
-func (t *Tag) canWrite() bool {
-	if t.route == nil || t.readOnly() {
-		return false
-	}
-	return t.declaredFor(
-		func(c protocol.TagCapabilities) bool { return c.CanWrite },
-		t.route.deviceCanWrite,
-	)
-}
-
-func (t *Tag) canLock() bool {
-	if t.route == nil || t.readOnly() {
-		return false
-	}
-	return t.declaredFor(
-		func(c protocol.TagCapabilities) bool { return c.CanLock },
-		t.route.deviceCanLock,
-	)
-}
-
-// canTransceive reports whether a raw exchange would reach the tag. Callers
-// must hold at least a read lock.
-func (t *Tag) canTransceive() bool {
+// capSource is the device-bound capability source for this tag, or nil when the
+// tag has no route to a device. Callers hold at least a read lock.
+func (t *Tag) capSource() virtualnfc.CapabilitySource {
 	if t.route == nil {
-		return false
+		return nil
 	}
-	return t.declaredFor(
-		func(c protocol.TagCapabilities) bool { return c.CanTransceive },
-		t.route.deviceCanTransceive,
-	)
+	return tagCapSource{route: t.route, deviceID: t.sourceDevice}
+}
+
+// canWrite/canLock/canTransceive report whether an operation would actually
+// reach the tag, gating the operation methods below. Callers hold at least a
+// read lock.
+func (t *Tag) canWrite() bool { return virtualnfc.WriteAllowed(t.declaredCaps, t.capSource()) }
+func (t *Tag) canLock() bool  { return virtualnfc.LockAllowed(t.declaredCaps, t.capSource()) }
+
+func (t *Tag) canTransceive() bool {
+	return virtualnfc.TransceiveAllowed(t.declaredCaps, t.capSource())
 }
 
 // Transceive exchanges raw data with the tag through the device holding it.

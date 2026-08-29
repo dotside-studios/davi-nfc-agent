@@ -55,6 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tagData`. Recognizing and interpreting a non-NFC identifier is the consumer's
   job. See [the API reference](docs/api.md#non-nfc-scans-qr-and-barcodes)
 
+### Fixed
+
+- `nfc`: `SelectFileAPDU` selected an elementary file with the by-name parameters
+  (`P1=0x04`, `P2=0x00`) that belong to an application select, so on a compliant
+  ISO14443-4 Type 4 tag the CC and NDEF file selects would be answered `6A82`
+  (file not found) and read/write would fail. It now uses the file-identifier
+  form the NFC Forum Type 4 spec requires — `00 A4 00 0C Lc <fid>` — matching the
+  console's own presets. `SelectFileByAIDAPDU` is unchanged: `P1=0x04` is correct
+  for selecting an application by AID. This was surfaced by the new APDU decoder
+  and is now locked down by a Type 4 emulator: `nfctest.Type4` models an NDEF
+  application, its Capability Container and NDEF file with the real Type 4
+  selection rules, so a driver that builds either SELECT wrongly fails a
+  round-trip test rather than only a real tag
+
 ## [1.3.0] - 2026-08-29
 
 ### Added

@@ -143,10 +143,17 @@ func DirectTransmitAPDU(cmd []byte) []byte {
 	return BuildAPDU(CLAPCSC, INSDirectCmd, 0x00, 0x00, cmd, &le)
 }
 
-// SelectFileAPDU returns the APDU for selecting a file by ID
+// SelectFileAPDU returns the APDU for selecting an elementary file by its file
+// identifier: 00 A4 00 0C Lc <fid>, with P1=0x00 (select by EF identifier) and
+// P2=0x0C (no FCI in the response), which is the form NFC Forum Type 4 tags
+// require to select the CC and NDEF files. There is no Le: the select returns
+// only a status word.
+//
+// This is distinct from selecting an application, which is by DF name; see
+// SelectFileByAIDAPDU. Selecting an EF with the by-name P1 (0x04) is what a
+// compliant tag answers with 6A82.
 func SelectFileAPDU(fid []byte) []byte {
-	le := byte(0x00)
-	return BuildAPDU(CLAStandard, INSSelectFile, 0x04, 0x00, fid, &le)
+	return BuildAPDU(CLAStandard, INSSelectFile, 0x00, 0x0C, fid, nil)
 }
 
 // SelectFileByAIDAPDU returns the APDU for selecting application by AID

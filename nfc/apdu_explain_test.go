@@ -1,10 +1,32 @@
 package nfc
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+// Selecting an elementary file (the CC or NDEF file on a Type 4 tag) is by file
+// identifier — P1=0x00, P2=0x0C, no Le — not by DF name. The two SELECT builders
+// must not collapse into the same P1: selecting an EF with the by-name P1 is
+// what a compliant tag answers with 6A82.
+func TestSelectFileAPDUUsesEFSelectForm(t *testing.T) {
+	got := SelectFileAPDU([]byte{0xE1, 0x03})
+	want := []byte{0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03}
+	if !bytes.Equal(got, want) {
+		t.Errorf("SelectFileAPDU(E103) = % X, want % X (P1=00 select-by-EF-id, P2=0C no FCI, no Le)", got, want)
+	}
+
+	// The application select stays by DF name (P1=04), which is correct for an AID.
+	app := SelectFileByAIDAPDU(ndefAppAID)
+	if app[2] != 0x04 {
+		t.Errorf("SelectFileByAIDAPDU P1 = %02X, want 04 (select by DF name)", app[2])
+	}
+	if got[2] == app[2] {
+		t.Error("the EF select and the AID select use the same P1; they must differ")
+	}
+}
 
 // ExampleExplain shows what a raw exchange decodes to: the command, its class in
 // brackets, and the cautions a safety net should surface. Here a write lands on

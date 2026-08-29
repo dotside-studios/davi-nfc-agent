@@ -24,6 +24,7 @@ func TestRetryableClassification(t *testing.T) {
 	permanent := []ErrorCode{
 		ErrCodeNotSupported,
 		ErrCodeReadOnly,
+		ErrCodeRawChannelDisabled,
 		ErrCodeCapacityExceeded,
 		ErrCodeInvalidData,
 		ErrCodeParse,

@@ -31,6 +31,11 @@ type Preferences struct {
 
 	RequirePairedDevice bool
 	ReaderFeedback      bool
+
+	// AllowRawAPDU opens the raw APDU channel. Off by default: a raw exchange
+	// reaches the tag unmodified and can lock or brick it, so it stays refused,
+	// even in a writable mode, until this is set.
+	AllowRawAPDU bool
 }
 
 // preferencesJSON is the wire shape. The mode travels as its name, so a client
@@ -44,6 +49,7 @@ type preferencesJSON struct {
 	Port                int      `json:"port"`
 	RequirePairedDevice bool     `json:"requirePairedDevice"`
 	ReaderFeedback      bool     `json:"readerFeedback"`
+	AllowRawAPDU        bool     `json:"allowRawApdu"`
 }
 
 func (p Preferences) MarshalJSON() ([]byte, error) {
@@ -54,6 +60,7 @@ func (p Preferences) MarshalJSON() ([]byte, error) {
 		Port:                p.Port,
 		RequirePairedDevice: p.RequirePairedDevice,
 		ReaderFeedback:      p.ReaderFeedback,
+		AllowRawAPDU:        p.AllowRawAPDU,
 	})
 }
 
@@ -73,6 +80,7 @@ func (p *Preferences) UnmarshalJSON(data []byte) error {
 		Port:                w.Port,
 		RequirePairedDevice: w.RequirePairedDevice,
 		ReaderFeedback:      w.ReaderFeedback,
+		AllowRawAPDU:        w.AllowRawAPDU,
 	}
 	return nil
 }
@@ -103,6 +111,7 @@ func (a *Agent) preferencesLocked(readers *nfc.Supervisor) Preferences {
 		Port:                a.devicePort,
 		RequirePairedDevice: a.requirePairedDevice,
 		ReaderFeedback:      a.readerFeedback,
+		AllowRawAPDU:        a.allowRawAPDU,
 	}
 	if readers != nil {
 		p.Mode = readers.Mode()
@@ -155,6 +164,7 @@ func (a *Agent) ApplyPreferences(mutate func(*Preferences)) Preferences {
 	a.devicePort = next.Port
 	a.requirePairedDevice = next.RequirePairedDevice
 	a.readerFeedback = next.ReaderFeedback
+	a.allowRawAPDU = next.AllowRawAPDU
 	a.settingsMu.Unlock()
 
 	if !sameCardTypes(before.CardTypes, next.CardTypes) {
@@ -295,6 +305,7 @@ func samePreferences(a, b Preferences) bool {
 		a.Port == b.Port &&
 		a.RequirePairedDevice == b.RequirePairedDevice &&
 		a.ReaderFeedback == b.ReaderFeedback &&
+		a.AllowRawAPDU == b.AllowRawAPDU &&
 		sameCardTypes(a.CardTypes, b.CardTypes)
 }
 

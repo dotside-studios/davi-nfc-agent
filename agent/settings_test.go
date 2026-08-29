@@ -23,6 +23,7 @@ func TestEveryPreferenceChangeIsAnnounced(t *testing.T) {
 		{"device port", func(a *Agent) { a.SetDevicePort(9481) }},
 		{"require paired", func(a *Agent) { a.SetRequirePairedDevice(true) }},
 		{"reader feedback", func(a *Agent) { a.SetReaderFeedback(true) }},
+		{"raw apdu channel", func(a *Agent) { a.SetRawAPDUEnabled(true) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, err := Setup(testOptions(t), nfc.NewMockManager())
@@ -131,6 +132,48 @@ func TestApplyPreferencesAnswersWithWhatTheAgentHolds(t *testing.T) {
 	}
 	if !slices.Equal(rt.Agent.CardTypeFilter(), want) {
 		t.Errorf("the filter holds %v, want %v", rt.Agent.CardTypeFilter(), want)
+	}
+}
+
+// The raw APDU channel is off until an operator opens it, and RawAPDUAllowed
+// tracks the preference so whatever gates a raw exchange follows a live change.
+func TestRawAPDUAllowedTracksThePreference(t *testing.T) {
+	rt, err := Setup(testOptions(t), nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	if rt.Agent.RawAPDUAllowed() {
+		t.Fatal("the raw APDU channel is open before anyone opened it")
+	}
+
+	rt.Agent.SetRawAPDUEnabled(true)
+	if !rt.Agent.RawAPDUAllowed() {
+		t.Error("opening the channel did not reach RawAPDUAllowed")
+	}
+	if !rt.Agent.Preferences().AllowRawAPDU {
+		t.Error("the preference does not report the channel open")
+	}
+
+	rt.Agent.SetRawAPDUEnabled(false)
+	if rt.Agent.RawAPDUAllowed() {
+		t.Error("closing the channel did not reach RawAPDUAllowed")
+	}
+}
+
+// A launcher that asked for the channel starts with it open, so an operator who
+// opted in on the command line does not have to open it again in the console.
+func TestSetupOpensRawAPDUChannelWhenAsked(t *testing.T) {
+	opts := testOptions(t)
+	opts.AllowRawAPDU = true
+
+	rt, err := Setup(opts, nfc.NewMockManager())
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	if !rt.Agent.RawAPDUAllowed() {
+		t.Error("the launcher asked for the raw APDU channel, but it starts closed")
 	}
 }
 

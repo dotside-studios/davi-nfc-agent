@@ -41,6 +41,9 @@ type App struct {
 	// Reader feedback toggle
 	mReaderFeedback *traymenu.Item
 
+	// Raw APDU channel toggle
+	mRawAPDU *traymenu.Item
+
 	// Card type filter
 	cardTypes *traymenu.Checklist[string]
 }
@@ -73,6 +76,10 @@ func (s *App) SyncPreferencesToMenu(next agent.Preferences) {
 
 	if s.mReaderFeedback != nil {
 		s.mReaderFeedback.SetChecked(next.ReaderFeedback)
+	}
+
+	if s.mRawAPDU != nil {
+		s.mRawAPDU.SetChecked(next.AllowRawAPDU)
 	}
 }
 
@@ -126,6 +133,7 @@ func (s *App) setupUI() {
 
 	s.setupModeMenu()
 	s.setupFeedbackMenu()
+	s.setupRawAPDUMenu()
 
 	s.menu.AddSeparator()
 

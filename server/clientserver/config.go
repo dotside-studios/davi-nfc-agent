@@ -44,6 +44,15 @@ type Config struct {
 	// allows them, and the source enforces its own policy either way.
 	AllowTagModification func() bool
 
+	// AllowRawTransceive reports whether the raw APDU channel is open. It gates
+	// raw exchanges on their own, independently of AllowTagModification: a raw
+	// command reaches the tag unmodified and can brick it in ways the agent
+	// cannot recognise or undo, so it stays refused until the operator opens the
+	// channel even in a writable mode. Nil allows it, leaving the mode gate as
+	// the only one, which is what an embedder that has not opted into the extra
+	// gate gets.
+	AllowRawTransceive func() bool
+
 	// Ops replaces the operations the server would perform over Tags, for a
 	// build that has its own. Nil uses Tags; with neither, operations are
 	// refused, which is what an agent that is not running does.

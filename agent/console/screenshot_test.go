@@ -44,7 +44,7 @@ func TestScreenshotHarness(t *testing.T) {
 	host.localIPs = []string{"192.168.1.44"}
 	host.allowed = []string{"console.davi.social", "davi.social", "localhost:3000", "localhost:3002", "shop.davi.social"}
 	host.blocked = []string{"localhost:5173", "staging.example.com"}
-	host.settings = agent.Preferences{Mode: nfc.ModeReadWrite}
+	host.settings = agent.Preferences{Mode: nfc.ModeReadWrite, AllowRawAPDU: true}
 	host.seedDevices()
 	host.devices = append(host.devices, PairedDevice{
 		ID: "dev-3", Name: "Workshop ACR1252U", Platform: "reader",

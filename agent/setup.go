@@ -73,6 +73,12 @@ type Options struct {
 	CardTypes      []string
 	ReaderFeedback bool
 
+	// AllowRawAPDU opens the raw APDU channel at startup; see
+	// [Config.AllowRawAPDU]. Off by default, so a launcher that says nothing
+	// starts with raw exchanges refused. Setup also reads
+	// DAVI_NFC_ALLOW_RAW_APDU=1.
+	AllowRawAPDU bool
+
 	// Info is what this build calls itself; see agent.Config.Info. It decides
 	// the default config directory, so a program with its own identity should
 	// set it before Setup resolves any paths.
@@ -159,6 +165,9 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// it, and nothing stored turns it on.
 	askedForLoopbackBypass := opts.AllowLoopbackBypass || os.Getenv("DAVI_NFC_ALLOW_LOOPBACK_BYPASS") == "1"
 
+	// And for the raw APDU channel: off unless this run opens it.
+	askedForRawAPDU := opts.AllowRawAPDU || os.Getenv("DAVI_NFC_ALLOW_RAW_APDU") == "1"
+
 	devicePort := opts.DevicePort
 	if devicePort == 0 {
 		// Options built by hand rather than from flags: the default, not a
@@ -172,6 +181,10 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 
 	if askedForPairing {
 		agentLog.Printf("Paired devices required: the shared secret no longer admits a device")
+	}
+
+	if askedForRawAPDU {
+		agentWarn.Printf("Raw APDU channel enabled: clients can send raw exchanges that reach a tag unmodified")
 	}
 
 	// Everything the agent runs on is settled by this point, which is why it
@@ -190,6 +203,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		RequirePairedDevice: askedForPairing,
 		AllowLoopbackBypass: askedForLoopbackBypass,
 		ReaderFeedback:      opts.ReaderFeedback,
+		AllowRawAPDU:        askedForRawAPDU,
 		Mode:                opts.Mode,
 		CardTypes:           opts.CardTypes,
 		DevicePath:          opts.DevicePath,

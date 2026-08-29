@@ -305,9 +305,13 @@ func (m *Manager) handleDeviceResponse(deviceID string, req protocol.WebSocketRe
 		requestID = req.ID
 	}
 
+	// A device may only answer for its own requests, so the entry is removed only
+	// when the responder owns it. Deleting first and checking after let one device
+	// cancel another's in-flight request by echoing its ID, stranding the real
+	// waiter until its timeout.
 	m.pendingMu.Lock()
 	pending, ok := m.pending[requestID]
-	if ok {
+	if ok && pending.deviceID == deviceID {
 		delete(m.pending, requestID)
 	}
 	m.pendingMu.Unlock()
@@ -317,8 +321,8 @@ func (m *Manager) handleDeviceResponse(deviceID string, req protocol.WebSocketRe
 		return nil
 	}
 
-	// A device may only answer for its own requests.
 	if pending.deviceID != deviceID {
+		deviceWarn.Printf("Ignoring %s from %s for a request owned by %s", req.Type, deviceID, pending.deviceID)
 		return fmt.Errorf("response for %s came from %s", pending.deviceID, deviceID)
 	}
 

@@ -2,12 +2,11 @@ package nfctest
 
 import (
 	"context"
-	"fmt"
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/virtualnfc"
 )
 
 // Multi-lane emulation.
@@ -26,89 +25,15 @@ import (
 // The single-reader NewEmulatedReader is the right tool for tag-driver and
 // write-path behaviour; EmulatedLanes is for the orchestration across readers —
 // routing, isolation between lanes, and hot-plug reconciliation.
-
-// laneManager is a Manager offering one independent pollable device per lane,
-// keyed by lane name. Unlike nfc.MockManager, which hands the same device to
-// every path, each lane here has its own device and its own tags, so the
-// supervisor opens a genuinely separate reader per lane. It notifies device
-// changes so the supervisor reconciles when a lane is plugged or unplugged.
-type laneManager struct {
-	mu      sync.Mutex
-	devices map[string]*nfc.MockDevice
-	changes chan struct{}
-}
-
-func newLaneManager() *laneManager {
-	return &laneManager{
-		devices: make(map[string]*nfc.MockDevice),
-		changes: make(chan struct{}, 1),
-	}
-}
-
-// OpenDevice returns the device for the named lane. The supervisor connects each
-// reader by the lane path it listed, so this must honour the path rather than
-// return a single shared device.
-func (m *laneManager) OpenDevice(path string) (nfc.Device, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	dev, ok := m.devices[path]
-	if !ok {
-		return nil, fmt.Errorf("nfctest: no lane %q", path)
-	}
-	dev.IsOpen = true
-	return dev, nil
-}
-
-// Devices lists every plugged lane as a pollable reader, in a stable order.
-func (m *laneManager) Devices() ([]nfc.DeviceListing, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	paths := make([]string, 0, len(m.devices))
-	for path := range m.devices {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-
-	out := make([]nfc.DeviceListing, 0, len(paths))
-	for _, path := range paths {
-		out = append(out, nfc.DeviceListing{
-			Path:         path,
-			ID:           path,
-			Capabilities: nfc.DeviceCapabilities{CanPoll: true, CanTransceive: true, DeviceType: "mock"},
-		})
-	}
-	return out, nil
-}
-
-// DeviceChanges lets the supervisor learn when a lane is plugged or unplugged.
-func (m *laneManager) DeviceChanges() <-chan struct{} { return m.changes }
-
-func (m *laneManager) notify() {
-	select {
-	case m.changes <- struct{}{}:
-	default:
-	}
-}
-
-func (m *laneManager) add(path string, dev *nfc.MockDevice) {
-	m.mu.Lock()
-	m.devices[path] = dev
-	m.mu.Unlock()
-	m.notify()
-}
-
-func (m *laneManager) remove(path string) {
-	m.mu.Lock()
-	delete(m.devices, path)
-	m.mu.Unlock()
-	m.notify()
-}
+//
+// Each lane is a polled virtualnfc.Device on one virtualnfc.Manager, so the
+// supervisor opens a genuinely separate reader per lane and reconciles when a
+// lane is plugged or unplugged.
 
 // lane is one reader's field: the device the supervisor polls and the cards
 // currently on it.
 type lane struct {
-	dev   *nfc.MockDevice
+	dev   *virtualnfc.Device
 	cards []*EmulatedCard
 }
 
@@ -118,7 +43,7 @@ type lane struct {
 type EmulatedLanes struct {
 	*nfc.Supervisor
 	tb    TB
-	mgr   *laneManager
+	mgr   *virtualnfc.Manager
 	mu    sync.Mutex
 	lanes map[string]*lane
 }
@@ -129,12 +54,11 @@ type EmulatedLanes struct {
 func NewEmulatedLanes(tb TB, names ...string) *EmulatedLanes {
 	tb.Helper()
 
-	mgr := newLaneManager()
+	mgr := virtualnfc.NewManager()
 	l := &EmulatedLanes{tb: tb, mgr: mgr, lanes: make(map[string]*lane)}
 	for _, name := range names {
-		dev := nfc.NewMockDevice()
-		dev.DeviceConnection = name
-		mgr.devices[name] = dev
+		dev := virtualnfc.NewDevice(name, virtualnfc.PollMode, "mock")
+		mgr.Plug(name, dev)
 		l.lanes[name] = &lane{dev: dev}
 	}
 
@@ -161,13 +85,12 @@ func (l *EmulatedLanes) Plug(name string) {
 		l.mu.Unlock()
 		return
 	}
-	dev := nfc.NewMockDevice()
-	dev.DeviceConnection = name
+	dev := virtualnfc.NewDevice(name, virtualnfc.PollMode, "mock")
 	l.lanes[name] = &lane{dev: dev}
 	want := len(l.lanes)
 	l.mu.Unlock()
 
-	l.mgr.add(name, dev)
+	l.mgr.Plug(name, dev)
 	l.AwaitLanes(want)
 }
 
@@ -180,7 +103,7 @@ func (l *EmulatedLanes) Unplug(name string) {
 	want := len(l.lanes)
 	l.mu.Unlock()
 
-	l.mgr.remove(name)
+	l.mgr.Unplug(name)
 	l.AwaitLanes(want)
 }
 
@@ -192,13 +115,18 @@ func (l *EmulatedLanes) Present(laneName string, cards ...*EmulatedCard) {
 		ln.cards = append(ln.cards, cards...)
 	}
 	l.mu.Unlock()
-	l.sync(laneName)
+	if ln != nil {
+		for _, c := range cards {
+			ln.dev.Present(c.card)
+		}
+	}
 }
 
 // Remove takes the card with the given UID off a lane.
 func (l *EmulatedLanes) Remove(laneName, uid string) {
 	l.mu.Lock()
-	if ln := l.lanes[laneName]; ln != nil {
+	ln := l.lanes[laneName]
+	if ln != nil {
 		kept := ln.cards[:0]
 		for _, c := range ln.cards {
 			if c.uid != uid {
@@ -208,7 +136,9 @@ func (l *EmulatedLanes) Remove(laneName, uid string) {
 		ln.cards = kept
 	}
 	l.mu.Unlock()
-	l.sync(laneName)
+	if ln != nil {
+		ln.dev.Remove(uid)
+	}
 }
 
 // Write encodes a message onto the card on the named lane.
@@ -219,23 +149,6 @@ func (l *EmulatedLanes) Write(laneName string, msg *nfc.NDEFMessage, opts nfc.Wr
 // Capabilities reports what the card on the named lane supports.
 func (l *EmulatedLanes) Capabilities(laneName string) (*nfc.TagCapabilities, error) {
 	return l.Supervisor.Capabilities(context.Background(), laneName, "")
-}
-
-// sync pushes a lane's current card set to its device.
-func (l *EmulatedLanes) sync(laneName string) {
-	l.mu.Lock()
-	ln := l.lanes[laneName]
-	if ln == nil {
-		l.mu.Unlock()
-		return
-	}
-	tags := make([]nfc.Tag, len(ln.cards))
-	for i, c := range ln.cards {
-		tags[i] = c.tag
-	}
-	dev := ln.dev
-	l.mu.Unlock()
-	dev.SetTags(tags)
 }
 
 // AwaitLanes waits until the supervisor is operating exactly n readers, so a

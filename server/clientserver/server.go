@@ -26,6 +26,14 @@ import (
 // the read loop instead would hide the next disconnect.
 const clientRequestQueue = 8
 
+// clientSendQueue bounds how many broadcasts may be queued for one client before
+// the agent starts dropping them for that client. Broadcasts are enqueued rather
+// than written inline, so a client that stops reading its socket fills only its
+// own queue — it cannot block the producer goroutine or the delivery to every
+// other client. A client this far behind is not keeping up; newer scans
+// supersede the dropped ones.
+const clientSendQueue = 256
+
 // Server handles client connections for consuming NFC data.
 type Server struct {
 	config Config
@@ -124,6 +132,11 @@ type clientSession struct {
 	// cancel ends the operations this client asked for. Called when the
 	// connection drops and by Disconnect.
 	cancel context.CancelFunc
+
+	// send carries broadcasts to this client's own writer goroutine, so a slow
+	// client backs up only its own queue instead of the producer. A full queue is
+	// dropped rather than blocked on.
+	send chan protocol.WebSocketMessage
 }
 
 // ClientInfo describes a connected client for display.
@@ -251,6 +264,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Add to clients map
+	send := make(chan protocol.WebSocketMessage, clientSendQueue)
 	s.clientsMux.Lock()
 	s.clients[conn] = &clientSession{
 		id:          clientID,
@@ -259,9 +273,27 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		userAgent:   r.Header.Get("User-Agent"),
 		connectedAt: time.Now(),
 		cancel:      cancel,
+		send:        send,
 	}
 	s.clientsMux.Unlock()
 	s.notifyChange()
+
+	// One writer goroutine per client drains its broadcast queue to the socket.
+	// A stalled client blocks only this goroutine (and its own queue fills and
+	// drops); it never blocks the producer or the other clients. It exits when
+	// the connection is cancelled or the socket close unblocks a pending write.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-send:
+				if err := conn.WriteJSON(msg); err != nil {
+					return
+				}
+			}
+		}
+	}()
 
 	clientLog.Printf("Client connected: %s (total: %d)", clientID[:8], s.clientCount())
 
@@ -500,18 +532,33 @@ func (s *Server) BroadcastDeviceStatus(status nfc.DeviceStatus) {
 	s.broadcastDeviceStatus(status)
 }
 
-// broadcastTagData sends tag data to all connected clients.
+// broadcastTagData queues tag data for every connected client. The message is
+// built once and enqueued to each client's own writer goroutine, so a client
+// that has stopped reading backs up only its own queue and never stalls the
+// producer or the delivery to the others.
 func (s *Server) broadcastTagData(data nfc.NFCData) {
+	s.enqueueToAll(tagDataMessage(data))
+}
+
+// enqueueToAll offers msg to every client's send queue without blocking. A full
+// queue means that client is not keeping up; the message is dropped for it
+// rather than stalling everyone else.
+func (s *Server) enqueueToAll(msg protocol.WebSocketMessage) {
 	s.clientsMux.RLock()
 	defer s.clientsMux.RUnlock()
 
-	for conn := range s.clients {
-		s.sendTagDataToClient(conn, data)
+	for _, c := range s.clients {
+		select {
+		case c.send <- msg:
+		default:
+			// This client's queue is full; drop for it. Newer scans supersede it.
+		}
 	}
 }
 
-// sendTagDataToClient sends tag data to a specific client.
-func (s *Server) sendTagDataToClient(conn *wsconn.SafeConn, data nfc.NFCData) {
+// tagDataMessage builds the broadcast message for a scan. It does not depend on
+// which client receives it, so it is built once per broadcast.
+func tagDataMessage(data nfc.NFCData) protocol.WebSocketMessage {
 	var errStr *string
 	if data.Err != nil {
 		e := data.Err.Error()
@@ -568,31 +615,19 @@ func (s *Server) sendTagDataToClient(conn *wsconn.SafeConn, data nfc.NFCData) {
 		}
 	}
 
-	message := protocol.WebSocketMessage{
+	return protocol.WebSocketMessage{
 		Type:    server.WSMessageTypeTagData,
 		Payload: payload,
 	}
-
-	if err := conn.WriteJSON(message); err != nil {
-		clientFail.Printf("Failed to send tag data: %v", err)
-	}
 }
 
-// broadcastDeviceStatus sends device status to all connected clients.
+// broadcastDeviceStatus queues a device-status update for every connected
+// client, through the same per-client queues as tag data.
 func (s *Server) broadcastDeviceStatus(status nfc.DeviceStatus) {
-	s.clientsMux.RLock()
-	defer s.clientsMux.RUnlock()
-
-	message := protocol.WebSocketMessage{
+	s.enqueueToAll(protocol.WebSocketMessage{
 		Type:    server.WSMessageTypeDeviceStatus,
 		Payload: status,
-	}
-
-	for conn := range s.clients {
-		if err := conn.WriteJSON(message); err != nil {
-			clientFail.Printf("Failed to send device status: %v", err)
-		}
-	}
+	})
 }
 
 // sendErrorResponse sends an error response to a WebSocket client.

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `DAVI_NFC_APDU_TRACE=1` turns on a per-command trace of the driver's tag I/O,
+  each command decoded into what it does — "APDU 04A1B2…: SELECT — by file
+  identifier, the NDEF file [select] <- SW 9000". Off by default (a single NDEF
+  read is dozens of page reads), and it records the decoded summary and the
+  response status word, never the command bytes or the response data, so key
+  material and tag contents stay out of the log. Useful for seeing what the agent
+  actually sends a misbehaving reader
+- `nfctest`: every emulated card now drives the production driver through a strict
+  transport that rejects a **structurally malformed** APDU — one whose declared
+  length disagrees with its data — so a driver that miscomputes a length fails a
+  round-trip test on any tag type, not only against real hardware. It judges
+  framing, not meaning: an unrecognised command still reaches the emulator, and a
+  semantically wrong but well-formed one is for the emulator to refuse
+
 - The agent now **records every raw APDU exchange** in the client log, decoded
   into what it does — "Raw exchange on ACS ACR122U (tag 04A1B2C3): UPDATE BINARY
   — write 4 byte(s) to page/block 3; page 3 holds lock/OTP bytes …". A command
@@ -70,6 +84,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `canWrite: false`, and every existing client reads it through the same
   `tagData`. Recognizing and interpreting a non-NFC identifier is the consumer's
   job. See [the API reference](docs/api.md#non-nfc-scans-qr-and-barcodes)
+
+### Removed
+
+- `nfc`: the exported `UltralightReadAPDU` and `UltralightWriteAPDU` helpers. They
+  built the native Ultralight READ/WRITE commands wrapped in a direct-transmit
+  APDU, but no driver used them — the Ultralight driver reads and writes through
+  the PC/SC `READ BINARY`/`UPDATE BINARY` pseudo-APDUs instead — so they were an
+  unused, misleading alternative. `GetVersionAPDU` and `DirectTransmitAPDU`, which
+  the PC/SC tag detection does use, are unchanged
 
 ### Fixed
 

@@ -72,6 +72,14 @@ type DeviceManager struct {
 	devicePath string
 	hasDevice  bool
 
+	// assignedPath is the lane this reader was created to drive. Clearing the
+	// working devicePath after an unrecoverable error resets to this, not to
+	// empty: a reader that owns a specific reader must reconnect to that reader,
+	// never fall back to auto-discovering and adopt a different lane's device. It
+	// is empty only for a standalone reader created with no path, where clearing
+	// to empty is what enables auto-discovery.
+	assignedPath string
+
 	// Reconnection state
 	retryCount    int // Tracks retry attempts for timeout/closed errors
 	inCooldown    bool
@@ -111,6 +119,7 @@ func NewDeviceManager(manager Manager, devicePath string, clock Clock) *DeviceMa
 	return &DeviceManager{
 		manager:       manager,
 		devicePath:    devicePath,
+		assignedPath:  devicePath,
 		hasDevice:     false,
 		clock:         clock,
 		cooldownTimer: timer,
@@ -452,11 +461,14 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 		dm.clock.Sleep(PostErrorPauseTime)
 		if errReconnect := dm.ForceReconnect(stopChan); errReconnect != nil {
 			readerFail.Printf("Force reconnection failed after IO/Config error: %v", errReconnect)
-			// Clear device path to enable auto-discovery of new devices
+			// Reset to the assigned lane so reconnection targets this reader's own
+			// device. For a standalone reader (no assigned path) this is empty and
+			// enables auto-discovery; for one that owns a lane it must not adopt a
+			// different lane's device.
 			dm.mu.Lock()
-			dm.devicePath = ""
+			dm.devicePath = dm.assignedPath
 			dm.mu.Unlock()
-			readerLog.Println("Device path cleared, waiting for device connection...")
+			readerLog.Println("Device path reset to assigned lane, waiting for it to return...")
 		}
 		return false
 	}
@@ -504,8 +516,8 @@ func (dm *DeviceManager) HandleError(err error, stopChan <-chan struct{}) (needs
 			}
 			dm.device = nil
 			dm.hasDevice = false
-			dm.devicePath = "" // Clear device path to enable auto-discovery
-			dm.retryCount = 0  // Reset retry count when entering cooldown
+			dm.devicePath = dm.assignedPath // Reset to this reader's own lane, not a different one
+			dm.retryCount = 0               // Reset retry count when entering cooldown
 			if !dm.inCooldown {
 				dm.inCooldown = true
 				dm.cooldownTimer.Reset(MaxRetriesCooldownPeriod)

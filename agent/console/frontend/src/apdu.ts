@@ -341,7 +341,7 @@ function describeDesfire(e: ApduExplanation, f: Fields): void {
       e.cls = 'read'
       break
     case 0x5a:
-      e.summary = `DESFire SelectApplication — select AID ${toHex(f.data)}`
+      e.summary = `DESFire SelectApplication — select AID ${toHex(f.data, '')}`
       e.cls = 'select'
       break
     case 0xbd:

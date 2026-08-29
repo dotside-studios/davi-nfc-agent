@@ -1,0 +1,238 @@
+[
+  {
+    "hex": "FFCA00000000",
+    "raw": false,
+    "summary": "GET UID — read the card serial number",
+    "cls": "info",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FFB0000404",
+    "raw": false,
+    "summary": "READ BINARY — read 4 byte(s) from page/block 4",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FFD6000404DEADBEEF",
+    "raw": false,
+    "summary": "UPDATE BINARY — write 4 byte(s) to page/block 4",
+    "cls": "write",
+    "mutating": true,
+    "recognized": true,
+    "warnings": [
+      "writes to the tag; a write to a configuration or OTP page is not reversible"
+    ]
+  },
+  {
+    "hex": "FFD600030400000000",
+    "raw": false,
+    "summary": "UPDATE BINARY — write 4 byte(s) to page/block 3",
+    "cls": "write",
+    "mutating": true,
+    "recognized": true,
+    "warnings": [
+      "page 3 holds lock/OTP bytes on NTAG/Ultralight; a write here can set permanent lock bits",
+      "writes to the tag; a write to a configuration or OTP page is not reversible"
+    ]
+  },
+  {
+    "hex": "FF82000006FFFFFFFFFFFF",
+    "raw": false,
+    "summary": "LOAD KEY — store a key in reader slot 0",
+    "cls": "reader-control",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF860000050100046000",
+    "raw": false,
+    "summary": "GENERAL AUTHENTICATE — reader-side MIFARE authentication",
+    "cls": "auth",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF0040A00401010101",
+    "raw": false,
+    "summary": "reader LED/buzzer control (ACR122 escape)",
+    "cls": "reader-control",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF000000016000",
+    "raw": false,
+    "summary": "direct transmit → native GET_VERSION (NTAG/Ultralight), or MIFARE Classic AUTH key A — ambiguous without the tag type",
+    "cls": "info",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "00A4040007D276000085010100",
+    "raw": false,
+    "summary": "SELECT — by name/AID, the NDEF Type 4 application",
+    "cls": "select",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "00A4000C02E103",
+    "raw": false,
+    "summary": "SELECT — by file identifier, the Capability Container file",
+    "cls": "select",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "00B0000010",
+    "raw": false,
+    "summary": "READ BINARY — read 16 byte(s) at offset 0",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "00D6000504DEADBEEF",
+    "raw": false,
+    "summary": "UPDATE BINARY — write 4 byte(s) at offset 5",
+    "cls": "write",
+    "mutating": true,
+    "recognized": true,
+    "warnings": [
+      "writes to the tag; a write to a configuration or OTP page is not reversible"
+    ]
+  },
+  {
+    "hex": "9060000000",
+    "raw": false,
+    "summary": "DESFire GetVersion — read chip version (continues with 91 AF)",
+    "cls": "info",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "905A00000301020300",
+    "raw": false,
+    "summary": "DESFire SelectApplication — select AID 010203",
+    "cls": "select",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "906A000000",
+    "raw": false,
+    "summary": "DESFire GetApplicationIDs — list applications",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "00EE0000",
+    "raw": false,
+    "summary": "ISO 7816 command (INS EE)",
+    "cls": "unknown",
+    "mutating": true,
+    "recognized": false,
+    "warnings": [
+      "unrecognised command; the agent cannot tell whether it writes or locks"
+    ]
+  },
+  {
+    "hex": "00A4040005E10300",
+    "raw": false,
+    "summary": "SELECT — by name/AID (E10300)",
+    "cls": "select",
+    "mutating": false,
+    "recognized": true,
+    "warnings": [
+      "declared length Lc=5 does not match 3 byte(s) of data present"
+    ]
+  },
+  {
+    "hex": "3000",
+    "raw": true,
+    "summary": "native READ — Ultralight/NTAG page 0 (16 bytes), or MIFARE Classic block read",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "A20300000000",
+    "raw": true,
+    "summary": "native WRITE — Ultralight/NTAG page 3 (4 bytes)",
+    "cls": "write",
+    "mutating": true,
+    "recognized": true,
+    "warnings": [
+      "page 3 holds lock/OTP bytes on NTAG/Ultralight; a write here can set permanent lock bits",
+      "writes to the tag; a write to a configuration or OTP page is not reversible"
+    ]
+  },
+  {
+    "hex": "60",
+    "raw": true,
+    "summary": "native GET_VERSION (NTAG/Ultralight), or MIFARE Classic AUTH key A — ambiguous without the tag type",
+    "cls": "info",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "1BFFFFFFFF",
+    "raw": true,
+    "summary": "native PWD_AUTH — NTAG password authentication",
+    "cls": "auth",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF",
+    "raw": true,
+    "summary": "unrecognised framing command (opcode FF)",
+    "cls": "unknown",
+    "mutating": true,
+    "recognized": false,
+    "warnings": [
+      "unrecognised command; the agent cannot tell whether it writes or locks"
+    ]
+  },
+  {
+    "hex": "",
+    "raw": false,
+    "summary": "empty command",
+    "cls": "unknown",
+    "mutating": false,
+    "recognized": false,
+    "warnings": [
+      "no bytes to send"
+    ]
+  },
+  {
+    "hex": "FFCA",
+    "raw": false,
+    "summary": "truncated APDU (FF CA)",
+    "cls": "unknown",
+    "mutating": true,
+    "recognized": false,
+    "warnings": [
+      "an APDU has at least CLA INS P1 P2 (4 bytes)"
+    ]
+  }
+]

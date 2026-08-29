@@ -39,7 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decode live under the hex input — the command's meaning, its class, and a
   caution for a write, a lock/OTP-page write, a malformed length or an
   unrecognised command — so an operator sees what a raw command does before
-  sending it
+  sending it. The console decodes client-side, so its explainer is a TypeScript
+  mirror of `nfc.Explain`; a shared fixture generated from the Go decoder is
+  asserted by both sides (Go in `TestExplainContract`, the console under
+  `npm test`), so the two cannot drift without a failing test
 
 - A device may now report a non-hex UID, and the bridge carries it through
   verbatim instead of rejecting it. A hex NFC serial is still normalized to the

@@ -4,3 +4,7 @@ build/
 # Built agent binary
 /davi-nfc-agent
 /davi-nfc-agent.exe
+
+# Built virtual-reader tool binary
+/davi-virtual-reader
+/davi-virtual-reader.exe

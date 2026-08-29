@@ -209,10 +209,19 @@ agent — Supervisor, HTTP/WebSocket API, control center — treats it as just
 another reader. A tag source (an in-memory set, a config file, an admin API, a
 peer machine) drives `Present`/`Remove`; no `testing` import, no phone protocol.
 
+That composition ships in `virtualnfc` itself as `Reader`: a polled reader that
+embeds an `nfc.Supervisor` and presents route-backed `TagSpec`s, so read, write,
+lock and capability queries all work through the production pipeline with no
+silicon. `cmd/davi-virtual-reader` wraps it as a runnable tool (declare tags,
+print scans, tap/write/remove interactively). It is polled rather than event —
+that way the embedded Supervisor holds the tags and its operations work directly,
+where an event source would additionally have to reimplement the manager-side
+`TagHolder` operations, as `remotenfc` does.
+
 This is the "later foundation" the branch name points at: `virtualnfc` is the
 reusable middle, `nfctest` and `remotenfc` are two existing consumers of it, and
-a `cmd/virtualreader` (or a `MultiManager` backend) is a third that the
-extraction makes cheap.
+`virtualnfc.Reader` (exposed through `cmd/davi-virtual-reader`) is a third that
+the extraction made cheap.
 
 ## Migration plan (incremental, each step green)
 
@@ -227,8 +236,11 @@ extraction makes cheap.
 3. **Migrate `remotenfc` onto the core.** `Device`/`Tag`/registry re-expressed
    over `virtualnfc`; WS/session/correlation untouched. `remotenfc`'s contract,
    handshake, and capability tests are the gate.
-4. **Build the standalone virtual reader** as a `MultiManager` backend and/or a
-   small `cmd`, once 1–3 prove the core carries both existing consumers.
+4. **Build the standalone virtual reader.** Shipped as `virtualnfc.Reader` (a
+   polled reader over the core, with an in-process writable route) plus
+   `cmd/davi-virtual-reader`, rather than a separate package — the reader is a
+   thin composition over the core and needs nothing the core lacks. It slots into
+   `MultiManager` as another backend when wanted.
 
 Steps 2 and 3 are independent and can land in either order.
 

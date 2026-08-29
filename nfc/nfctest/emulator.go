@@ -920,10 +920,13 @@ type EmulatedCard struct {
 
 func newCard(kind nfc.DetectedTagType, uid string, transport nfc.CardTransport) *EmulatedCard {
 	return &EmulatedCard{
-		uid:       uid,
-		kind:      kind,
+		uid:  uid,
+		kind: kind,
+		// The struct keeps the bare emulator (helpers like setRemoveAfter reach
+		// it directly); the driver talks to it through the strict wrapper, so a
+		// malformed APDU the driver builds fails the operation here.
 		transport: transport,
-		card:      virtualnfc.NewDriverCard(transport, uid, kind),
+		card:      virtualnfc.NewDriverCard(strictTransport{transport}, uid, kind),
 	}
 }
 

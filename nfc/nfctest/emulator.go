@@ -21,6 +21,7 @@
 package nfctest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -709,6 +710,205 @@ func (e *desfireEmulator) fileRange(body []byte) (off, length int, ok bool) {
 	return off, length, true
 }
 
+// type4Emulator is an in-memory NFC Forum Type 4 tag: the NDEF application, its
+// Capability Container, and the NDEF file, addressed with standard ISO 7816-4
+// SELECT / READ BINARY / UPDATE BINARY.
+//
+// It enforces the Type 4 selection rules — an application is selected by DF name
+// (P1=0x04), an elementary file by identifier with no FCI returned (P1=0x00,
+// P2=0x0C) — so a driver that selects a file the wrong way is refused with 6A82
+// / 6A86, exactly as a compliant tag would. That is what makes it a regression
+// test for the SELECT the driver builds.
+type type4Emulator struct {
+	mu          sync.Mutex
+	present     bool
+	appSelected bool
+	selected    type4File
+	cc          []byte
+	ndef        []byte // NLEN (2 bytes) followed by the NDEF message
+	removalModel
+}
+
+type type4File int
+
+const (
+	type4None type4File = iota
+	type4CC
+	type4NDEF
+)
+
+// type4NDEFCapacity is the NDEF file's size, including its 2-byte NLEN prefix.
+const type4NDEFCapacity = 256
+
+// type4NDEFAppAID is the NFC Forum Type 4 NDEF application identifier, the DF
+// name a reader selects before touching the CC or NDEF files.
+var type4NDEFAppAID = []byte{0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01}
+
+func newType4Emulator() *type4Emulator {
+	maxSize := type4NDEFCapacity
+	return &type4Emulator{
+		present: true,
+		ndef:    make([]byte, type4NDEFCapacity),
+		// A minimal, valid Capability Container: CCLEN, mapping version 2.0, the
+		// max read/update lengths, and one NDEF File Control TLV naming file E104
+		// with read and write both granted (access byte 0x00).
+		cc: []byte{
+			0x00, 0x0F, // CCLEN = 15
+			0x20,       // mapping version 2.0
+			0x00, 0xFB, // MLe: max bytes returned by one READ BINARY
+			0x00, 0xF6, // MLc: max bytes accepted by one UPDATE BINARY
+			0x04, 0x06, // NDEF File Control TLV: tag 0x04, length 6
+			0xE1, 0x04, // NDEF file identifier
+			byte(maxSize >> 8), byte(maxSize), // max NDEF file size
+			0x00, // read access: granted
+			0x00, // write access: granted
+		},
+	}
+}
+
+func (e *type4Emulator) setRemoveAfter(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removeAfterOp = n
+}
+
+func (e *type4Emulator) IsCardPresent() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.present
+}
+
+// apduSW is a bare status-word response.
+func apduSW(sw uint16) []byte { return []byte{byte(sw >> 8), byte(sw)} }
+
+// apduData is a data response followed by a 90 00 success status word.
+func apduData(data []byte) []byte {
+	return append(append([]byte(nil), data...), 0x90, 0x00)
+}
+
+func (e *type4Emulator) Transceive(cmd []byte) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.shouldRemove() {
+		e.present = false
+		return nil, emuRemoved(e.removeAfterOp)
+	}
+
+	if len(cmd) < 4 {
+		return apduSW(0x6700), nil // wrong length
+	}
+	if cmd[0] != nfc.CLAStandard {
+		return apduSW(0x6E00), nil // class not supported
+	}
+	switch cmd[1] {
+	case nfc.INSSelectFile:
+		return e.selectFile(cmd), nil
+	case nfc.INSReadBinary:
+		return e.readBinary(cmd), nil
+	case nfc.INSUpdateBin:
+		return e.updateBinary(cmd), nil
+	}
+	return apduSW(0x6D00), nil // instruction not supported
+}
+
+func (e *type4Emulator) selectFile(cmd []byte) []byte {
+	if len(cmd) < 5 {
+		return apduSW(0x6700)
+	}
+	lc := int(cmd[4])
+	if len(cmd) < 5+lc {
+		return apduSW(0x6700)
+	}
+	p1, p2 := cmd[2], cmd[3]
+	data := cmd[5 : 5+lc]
+
+	switch p1 {
+	case 0x04: // select an application by DF name (AID)
+		if p2 == 0x00 && bytes.Equal(data, type4NDEFAppAID) {
+			e.appSelected = true
+			e.selected = type4None
+			return apduSW(0x9000)
+		}
+		return apduSW(0x6A82) // file or application not found
+	case 0x00: // select an elementary file by identifier
+		// A Type 4 tag selects the CC and NDEF files with P2=0x0C (return no
+		// FCI). A select that reaches here with any other P2 — or with the
+		// by-name P1 above for a 2-byte file identifier — is refused, which is
+		// what catches a driver building the wrong SELECT.
+		if p2 != 0x0C {
+			return apduSW(0x6A86) // incorrect parameters P1-P2
+		}
+		if !e.appSelected {
+			return apduSW(0x6985) // conditions of use not satisfied
+		}
+		switch {
+		case bytes.Equal(data, []byte{0xE1, 0x03}):
+			e.selected = type4CC
+			return apduSW(0x9000)
+		case bytes.Equal(data, []byte{0xE1, 0x04}):
+			e.selected = type4NDEF
+			return apduSW(0x9000)
+		}
+		return apduSW(0x6A82)
+	}
+	return apduSW(0x6A86)
+}
+
+func (e *type4Emulator) readBinary(cmd []byte) []byte {
+	if len(cmd) < 5 {
+		return apduSW(0x6700)
+	}
+	le := int(cmd[4])
+	if le == 0 {
+		le = 256
+	}
+	file, ok := e.currentFile()
+	if !ok {
+		return apduSW(0x6986) // no current EF selected
+	}
+	off := int(cmd[2]&0x7F)<<8 | int(cmd[3])
+	if off > len(file) {
+		return apduSW(0x6B00) // wrong P1-P2: offset outside the file
+	}
+	end := off + le
+	if end > len(file) {
+		end = len(file)
+	}
+	return apduData(file[off:end])
+}
+
+func (e *type4Emulator) updateBinary(cmd []byte) []byte {
+	if len(cmd) < 5 {
+		return apduSW(0x6700)
+	}
+	lc := int(cmd[4])
+	if len(cmd) < 5+lc {
+		return apduSW(0x6700)
+	}
+	if e.selected != type4NDEF {
+		return apduSW(0x6986) // only the NDEF file is writable
+	}
+	off := int(cmd[2]&0x7F)<<8 | int(cmd[3])
+	if off+lc > len(e.ndef) {
+		return apduSW(0x6A84) // not enough memory in the file
+	}
+	copy(e.ndef[off:], cmd[5:5+lc])
+	return apduSW(0x9000)
+}
+
+// currentFile returns the bytes of the currently selected elementary file.
+func (e *type4Emulator) currentFile() ([]byte, bool) {
+	switch e.selected {
+	case type4CC:
+		return e.cc, true
+	case type4NDEF:
+		return e.ndef, true
+	default:
+		return nil, false
+	}
+}
+
 // EmulatedCard is a tag of a given kind, optionally preloaded with NDEF content,
 // backed by an emulator running the production driver.
 type EmulatedCard struct {
@@ -749,6 +949,13 @@ func Classic1K(uid string) *EmulatedCard {
 }
 func DESFire(uid string) *EmulatedCard {
 	return newCard(nfc.DetectedDESFire, uid, newDESFireEmulator())
+}
+
+// Type4 constructs a blank NFC Forum Type 4 tag (ISO14443-4), driven through the
+// production pcscISO14443Tag driver. Chain WithText/WithURI/WithRecords/WithNDEF
+// to preload content.
+func Type4(uid string) *EmulatedCard {
+	return newCard(nfc.DetectedISO14443_4, uid, newType4Emulator())
 }
 
 // UID returns the card's UID.

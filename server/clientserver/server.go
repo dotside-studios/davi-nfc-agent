@@ -586,15 +586,6 @@ func tagDataMessage(data nfc.NFCData) protocol.WebSocketMessage {
 			}
 		}
 
-		// The optical symbology, when this scan came from a camera rather than
-		// an NFC field. Absent for an NFC tag, so a client can tell a scanned
-		// QR or barcode from a chip on the same feed.
-		if optical, ok := data.Card.GetUnderlyingTag().(interface{ Format() string }); ok {
-			if f := optical.Format(); f != "" {
-				payload["format"] = f
-			}
-		}
-
 		// Try to read and parse message from card
 		if msg, err := data.Card.ReadMessage(); err == nil {
 			var text string

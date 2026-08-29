@@ -314,14 +314,17 @@ func TestConvertTagData(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid UID format",
+			// A UID that is not a hex NFC serial is not rejected: it is a
+			// non-NFC identifier (a value a camera decoded from a QR or barcode)
+			// and is carried through verbatim for a consumer to key on.
+			name: "non-hex UID carried verbatim",
 			input: TagData{
 				DeviceID:   "device-123",
-				UID:        "invalid",
-				Technology: "ISO14443A",
-				Type:       "MIFARE Classic 1K",
+				UID:        "https://davi.social/c/QR-ABC123",
+				Technology: "qr",
+				Type:       "qr_card",
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 

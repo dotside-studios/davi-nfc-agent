@@ -52,7 +52,6 @@ type Tag struct {
 	uid          string
 	tagType      string
 	technology   string
-	format       string           // Optical symbology ("qr", "ean13", …); "" for an NFC tag
 	ndefData     []byte           // Encoded NDEF message
 	ndefMsg      *nfc.NDEFMessage // Parsed NDEF message
 	rawData      []byte           // Raw tag data from mobile app
@@ -79,20 +78,6 @@ func (t *Tag) NumericType() int {
 	return 0
 }
 
-// Format returns the optical symbology this tag was decoded from ("qr",
-// "ean13", …), or "" for an NFC tag. It is how a client tells a scanned code
-// from a chip on the same feed.
-func (t *Tag) Format() string {
-	return t.format
-}
-
-// isOptical reports whether this tag is an optical code (QR or barcode) rather
-// than an NFC tag. An optical code is paper: it cannot be written, locked, or
-// transceived, whatever the device that scanned it declared.
-func (t *Tag) isOptical() bool {
-	return t.format != ""
-}
-
 // Capabilities combines what the device declared for this tag with what the
 // manager can actually route.
 //
@@ -109,11 +94,7 @@ func (t *Tag) Capabilities() nfc.TagCapabilities {
 	}
 
 	if caps.TagFamily == "" {
-		if t.isOptical() {
-			_, caps.TagFamily = codeDisplay(t.format)
-		} else {
-			caps.TagFamily = t.tagType
-		}
+		caps.TagFamily = t.tagType
 	}
 	if caps.Technology == "" {
 		caps.Technology = t.technology
@@ -166,7 +147,7 @@ func (t *Tag) readOnly() bool {
 // tag that declared nothing defers to the device holding it, and a tag declared
 // read-only is refused however capable that device is.
 func (t *Tag) canWrite() bool {
-	if t.isOptical() || t.route == nil || t.readOnly() {
+	if t.route == nil || t.readOnly() {
 		return false
 	}
 	return t.declaredFor(
@@ -176,7 +157,7 @@ func (t *Tag) canWrite() bool {
 }
 
 func (t *Tag) canLock() bool {
-	if t.isOptical() || t.route == nil || t.readOnly() {
+	if t.route == nil || t.readOnly() {
 		return false
 	}
 	return t.declaredFor(
@@ -188,7 +169,7 @@ func (t *Tag) canLock() bool {
 // canTransceive reports whether a raw exchange would reach the tag. Callers
 // must hold at least a read lock.
 func (t *Tag) canTransceive() bool {
-	if t.isOptical() || t.route == nil {
+	if t.route == nil {
 		return false
 	}
 	return t.declaredFor(

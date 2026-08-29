@@ -274,6 +274,52 @@ values win over inference, except that operations the bridge cannot yet route
 (`canWrite`, `canTransceive`, `canLock`) are reported as false whatever the
 device claims.
 
+#### Optical codes (QR and barcodes)
+
+A camera is a device like any other: it decodes a QR or barcode itself and
+reports the payload, exactly as a phone decodes NDEF off an NFC tag and reports
+records rather than raw RF. **The agent never receives images or frames.**
+
+A scan carries a `format` field to mark it optical. Everything else is the same
+`tagScanned` frame, so an existing agent accepts it and existing clients read it
+through the same `tagData` they already handle:
+
+```json
+{
+  "type": "tagScanned",
+  "payload": {
+    "deviceID": "dev_cam01",
+    "format": "qr",
+    "ndefMessage": {
+      "records": [
+        { "recordType": "uri", "content": "https://davi.social/u/abc" }
+      ]
+    }
+  }
+}
+```
+
+Map the code's content to a record so clients read it with no change: a URL to a
+`uri` record, free text to a `text` record. The agent presents the result as a
+**read-only** tag.
+
+| Field | Optical behavior |
+|-------|------------------|
+| `format` | The symbology: `qr`, `datamatrix`, `aztec`, `pdf417`, `ean13`, `ean8`, `upca`, `upce`, `code128`, `code39`, `code93`, `codabar`, `itf`. Case and separators are normalized (`"QR-Code"` → `qr`). A symbology not on this list is still accepted and passed through |
+| `uid` | Optional. A code has no serial, so when omitted the agent derives a stable `code:<hash>` UID from the content — the same code always resolves to the same tag. Send your own to use a different identity (it is not required to be hex) |
+| `technology` | Optional; defaults to `optical` |
+| `type` | Optional; defaults to a display name for the `format` (e.g. `QR Code`) |
+| `capabilities` | `canWrite`, `canLock` and `canTransceive` are always reported false for an optical code whatever the device declares — paper cannot do them |
+
+Because a code's identity is its content, two cards bearing the same code are the
+same tag and a re-scan is identical. If your QR encodes a user or credential ID,
+the derived UID *is* that credential's identity, which is usually what you want.
+
+A device that only scans codes registers with `deviceType: "camera"` and
+`nfcType: "optical"`, `canWrite: false`. It may report both NFC tags and codes
+if it does both; `format` is per scan, not per device. Send `tagRemoved` when a
+code leaves the frame, as for any tag.
+
 #### Goodbye
 
 Send before disconnecting deliberately (v1). The agent acknowledges with a
@@ -542,9 +588,10 @@ When a card is detected and read:
 
 | Field | Description |
 |-------|-------------|
-| `uid` | Card unique identifier (hex string) |
-| `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental) |
-| `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.) |
+| `uid` | Card unique identifier (hex string). For an optical code, a `code:<hash>` identity derived from its content (or the value the camera supplied) |
+| `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental). For an optical code, a display name like `QR Code` |
+| `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.), or `optical` for a scanned code |
+| `format` | Present only for a scanned optical code: its symbology (`qr`, `ean13`, …). Absent for an NFC tag, so a client can tell a QR or barcode from a chip on the same feed. See [Optical codes](#optical-codes-qr-and-barcodes) |
 | `scannedAt` | ISO 8601 timestamp |
 | `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it. That is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
 | `capabilities` | What the tag supports. See [Tag Capabilities](#tag-capabilities) |

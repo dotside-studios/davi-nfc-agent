@@ -44,39 +44,72 @@ func convertTagData(data TagData, route tagRoute) (nfc.Tag, error) {
 	// cannot fix it.
 	const op = "ConvertTagData"
 
-	if data.UID == "" {
-		return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag UID is required")
-	}
-	if data.Technology == "" {
-		return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag technology is required")
-	}
+	format := normalizeFormat(data.Format)
+	optical := format != ""
 
-	// Normalize UID format
-	uid, err := ParseUID(data.UID)
-	if err != nil {
-		return nil, nfc.WrapError(nfc.ErrCodeInvalidData, op, "invalid UID format", err)
-	}
-
-	// Parse NDEF message if present
+	// Parse NDEF message if present. Done before the UID is settled because an
+	// optical code with no serial derives its identity from the content, which
+	// the encoded message is the canonical form of.
 	var ndefMsg *nfc.NDEFMessage
 	var ndefData []byte
 	if data.NDEFMessage != nil {
+		var err error
 		ndefMsg, err = ConvertNDEFInput(data.NDEFMessage)
 		if err != nil {
-			return nil, wrapTagDataError(op, uid, "failed to parse NDEF message", err)
+			return nil, wrapTagDataError(op, data.UID, "failed to parse NDEF message", err)
 		}
 		// Encode NDEF message to bytes
 		ndefData, err = ndefMsg.Encode()
 		if err != nil {
-			return nil, wrapTagDataError(op, uid, "failed to encode NDEF message", err)
+			return nil, wrapTagDataError(op, data.UID, "failed to encode NDEF message", err)
 		}
+	}
+
+	uid := data.UID
+	technology := data.Technology
+	tagType := data.Type
+
+	if optical {
+		// An optical code has no NFC serial. Take the UID the device chose, or
+		// derive a stable one from the content printed on the code so a
+		// re-scan resolves to the same tag.
+		if uid == "" {
+			seed := ndefData
+			if len(seed) == 0 {
+				seed = data.RawData
+			}
+			if len(seed) == 0 {
+				return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "optical scan carries no UID and no content")
+			}
+			uid = deriveCodeUID(seed)
+		}
+		if technology == "" {
+			technology = TechnologyOptical
+		}
+		if tagType == "" {
+			tagType, _ = codeDisplay(format)
+		}
+	} else {
+		if uid == "" {
+			return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag UID is required")
+		}
+		if technology == "" {
+			return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag technology is required")
+		}
+		// Normalize UID format
+		normalized, err := ParseUID(uid)
+		if err != nil {
+			return nil, nfc.WrapError(nfc.ErrCodeInvalidData, op, "invalid UID format", err)
+		}
+		uid = normalized
 	}
 
 	// Create Tag instance
 	tag := &Tag{
 		uid:          uid,
-		tagType:      data.Type,
-		technology:   data.Technology,
+		tagType:      tagType,
+		technology:   technology,
+		format:       format,
 		ndefData:     ndefData,
 		ndefMsg:      ndefMsg,
 		rawData:      data.RawData,

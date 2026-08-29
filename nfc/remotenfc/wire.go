@@ -84,11 +84,21 @@ type ServerInfo struct {
 
 // DeviceTagData is sent by a device when a tag is scanned.
 type DeviceTagData struct {
-	DeviceID    string                     `json:"deviceID"`    // Device that scanned the tag
-	UID         string                     `json:"uid"`         // Tag UID (hex format)
-	Technology  string                     `json:"technology"`  // "ISO14443A", "ISO14443B", etc.
-	Type        string                     `json:"type"`        // "MIFARE Classic 1K", "Type4", etc.
-	ATR         string                     `json:"atr"`         // Answer to Reset (if applicable)
+	DeviceID   string `json:"deviceID"`   // Device that scanned the tag
+	UID        string `json:"uid"`        // Tag UID (hex format)
+	Technology string `json:"technology"` // "ISO14443A", "ISO14443B", etc.
+	Type       string `json:"type"`       // "MIFARE Classic 1K", "Type4", etc.
+	ATR        string `json:"atr"`        // Answer to Reset (if applicable)
+
+	// Format names an optical code symbology ("qr", "datamatrix", "ean13",
+	// "code128", ...) when the scan came from a camera rather than an NFC field.
+	// Empty for NFC tags. Its presence marks the scan optical: the bridge
+	// presents the code as a read-only tag whose UID is derived from its
+	// content when the device sends none, and reports write, lock and
+	// transceive as unsupported however the device declared them, because paper
+	// cannot do them.
+	Format string `json:"format,omitempty"`
+
 	ScannedAt   time.Time                  `json:"scannedAt"`   // Timestamp of scan
 	NDEFMessage *protocol.NDEFMessageInput `json:"ndefMessage"` // Parsed NDEF data (if available)
 	RawData     []byte                     `json:"rawData"`     // Raw tag data (base64 encoded)

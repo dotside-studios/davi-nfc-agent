@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Optical code (QR and barcode) scans over the device protocol. A camera is a
+  device like any other: it decodes the code itself and reports the payload,
+  exactly as a phone reports NDEF records rather than raw RF, and the agent
+  never receives images. A `tagScanned` frame carrying a new `format` field
+  (`qr`, `ean13`, `code128`, …) is presented to clients as a **read-only** tag
+  through the same `tagData` they already handle, so an existing consumer reads
+  a scanned QR with no change. A code has no serial, so the agent derives a
+  stable `code:<hash>` UID from its content when the device sends none — the
+  same code always resolves to the same tag. `canWrite`, `canLock` and
+  `canTransceive` are reported false for a code whatever the device declares.
+  Clients that want to tell a code from a chip read the new top-level `format`
+  field on `tagData`. See [the API reference](docs/api.md#optical-codes-qr-and-barcodes)
+
 ## [1.2.0] - 2026-08-27
 
 ### Added

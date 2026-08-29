@@ -213,7 +213,7 @@ func (l *EmulatedLanes) Remove(laneName, uid string) {
 
 // Write encodes a message onto the card on the named lane.
 func (l *EmulatedLanes) Write(laneName string, msg *nfc.NDEFMessage, opts nfc.WriteOptions) (*nfc.WriteResult, error) {
-	return l.Supervisor.WriteMessage(context.Background(), laneName, msg, opts)
+	return l.WriteMessage(context.Background(), laneName, msg, opts)
 }
 
 // Capabilities reports what the card on the named lane supports.
@@ -245,12 +245,12 @@ func (l *EmulatedLanes) AwaitLanes(n int) {
 	l.tb.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(l.Supervisor.Devices()) == n {
+		if len(l.Devices()) == n {
 			// Let the newly opened readers establish their initial connection.
 			time.Sleep(50 * time.Millisecond)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	l.tb.Fatalf("nfctest: supervisor operating %d lanes, want %d", len(l.Supervisor.Devices()), n)
+	l.tb.Fatalf("nfctest: supervisor operating %d lanes, want %d", len(l.Devices()), n)
 }

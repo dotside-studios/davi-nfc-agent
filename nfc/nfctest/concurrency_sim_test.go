@@ -70,7 +70,7 @@ func TestConcurrencySim_StuckLaneDoesNotBlockOthers(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		_, _ = lanes.Supervisor.WriteMessage(ctx, "slow", textMessage("stuck"), overwrite)
+		_, _ = lanes.WriteMessage(ctx, "slow", textMessage("stuck"), overwrite)
 	}()
 	// Make sure the slow operation is in flight and already abandoned.
 	time.Sleep(120 * time.Millisecond)

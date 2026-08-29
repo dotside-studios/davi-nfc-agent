@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-29
+
+### Added
+
+- `nfctest.EmulatedCard` gains fault injection: `FailingWrites(n)`, `Corrupting()`,
+  and `RemovingAfter(n)` declare a card that NAKs writes, acknowledges writes it
+  never persists, or leaves the field mid-exchange — the ways a real tap goes
+  wrong. Previously reachable only from inside the `nfctest` package via
+  unexported emulator fields, these are now a chainable part of the card
+  builder, usable from any package
+- `nfctest.EmulatedCard.Slow(d)` sleeps every transceive with the card for `d`,
+  so a tag operation is still running when a context deadline or reader
+  timeout fires. The sleep is held as an atomic outside the emulator's lock,
+  so a slow card does not serialize the poll of another
+- `nfctest.EmulatedLanes` drives several emulated readers through one
+  production `nfc.Supervisor`, each lane with its own device and tags (unlike
+  `nfc.MockManager`, which shares one). Cards can be presented and removed per
+  lane, writes name the lane they are for, and lanes can be plugged and
+  unplugged at runtime
+
+### Fixed
+
+- `nfc`: a write to a locked NTAG/Ultralight tag was NAK'd with an opaque
+  status word that the write path treated as transient, burning its full
+  retry budget on a permanent condition; `IsWritable()` also reported a
+  locked tag as writable, checking only that page 4 was readable. `WriteData`
+  now reads the tag's lock bytes up front and returns a typed
+  `NewReadOnlyError` immediately without retrying, and `IsWritable()`
+  consults the same bytes
+- `nfc`: a tag operation starting as a reader was stopping could panic the
+  whole agent with a reused `sync.WaitGroup`. `withTagOperation` now
+  registers the operation under a mutex, refusing it once the drain has
+  begun, and `drainOperations` closes that gate under the same mutex before
+  waiting
+- `nfc`: a reader that hit an unrecoverable error on a multi-reader host
+  could auto-discover and reconnect to a *different* lane's device, since
+  recovery cleared its device path to `""` and let it adopt
+  `ListReaders()[0]`. `DeviceManager` now records the lane it was created
+  for and reconnects only to that lane
+- `nfc`: a scan send blocked forever on a stalled consumer (a hung client
+  WebSocket, a slow browser) even after the reader was told to stop, leaking
+  a goroutine for the life of the process. The three scan sends in the poll
+  path now select on `stopChan`
+- `clientserver`: one stalled client's blocking `WriteJSON` froze scan
+  delivery to every other client, and held the read lock long enough to
+  stall connects and disconnects too. Each client now has a bounded send
+  queue drained by its own writer goroutine; a broadcast never blocks, and a
+  client whose queue is full drops the message rather than stalling everyone
+- `remotenfc`: a response whose request ID happened to match another
+  device's pending request popped and discarded that victim's entry before
+  rejecting the mismatch, stranding the real answer until the full 20s
+  device-write timeout. An entry is now removed only when the responder is
+  the device that owns it
+- `remotenfc`: concurrent registrations resolving to the same device
+  identity could each miss the others' session install, leaving orphaned
+  connections no operation could reach and whose teardown never ran.
+  Registration is now serialized so each registration fully replaces the last
+
 ## [1.2.0] - 2026-08-27
 
 ### Added

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- A device may now report a non-hex UID, and the bridge carries it through
+  verbatim instead of rejecting it. A hex NFC serial is still normalized to the
+  canonical colon form; anything else — a value a camera decoded from a QR or
+  barcode, say — is passed through byte-for-byte so a consumer keys on the exact
+  bytes that were scanned. The agent models no optical formats and adds no wire
+  fields: a QR card is reported as an ordinary `tagScanned` (its URL as a `uri`
+  record, any stable non-empty `uid`), read-only because the camera declares
+  `canWrite: false`, and every existing client reads it through the same
+  `tagData`. Recognizing and interpreting a non-NFC identifier is the consumer's
+  job. See [the API reference](docs/api.md#non-nfc-scans-qr-and-barcodes)
+
 ## [1.3.0] - 2026-08-29
 
 ### Added

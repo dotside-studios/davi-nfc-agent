@@ -40,6 +40,14 @@ type Manager struct {
 	sessionConn map[*wsconn.SafeConn]string // reverse lookup
 	sessionsMu  sync.RWMutex
 
+	// registerMu serializes registration so the replace-old-then-install-new
+	// sequence is atomic. The session check and the session install are separate
+	// lock acquisitions; without this, two registrations for one identity can
+	// each miss the other and leave both connections live and mapped to the one
+	// device — orphaned sessions no operation can reach. Registration is not a hot
+	// path, so a single lock across it is cheap.
+	registerMu sync.Mutex
+
 	pending   map[string]pendingRequest // requestID -> waiter
 	pendingMu sync.Mutex
 

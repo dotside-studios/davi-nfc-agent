@@ -1,5 +1,7 @@
 package nfc
 
+import "fmt"
+
 // CardTransport is the hardware boundary every PC/SC tag talks through: it sends
 // an APDU and reports card presence. The PC/SC reader device satisfies it in
 // production (see package nfc/pcsc); an
@@ -57,4 +59,26 @@ func (t *pcscBaseTag) transceive(cmd []byte) ([]byte, error) {
 // Card removal detection is handled at the device layer via Transceive().
 func (t *pcscBaseTag) transmitRaw(cmd []byte) ([]byte, error) {
 	return t.device.Transceive(cmd)
+}
+
+// ndefAreaLocked reports whether page 4 — the first NDEF user page of a
+// page-oriented NTAG/Ultralight tag — is locked, by reading the static lock
+// bytes. A tag locked with MakeReadOnly sets these, so a write to it would be
+// NAK'd page by page with an opaque status word and burn the write path's whole
+// retry budget on a permanent condition. Reading the lock bytes lets the driver
+// recognise the locked tag up front and refuse the write with a typed read-only
+// error the caller can act on. A read error (e.g. the card was removed) is
+// returned to the caller rather than masked as "unlocked".
+func (t *pcscBaseTag) ndefAreaLocked() (bool, error) {
+	resp, err := t.transceive(ReadBinaryAPDU(2, 4))
+	if err != nil {
+		return false, err
+	}
+	if len(resp) < 3 {
+		return false, fmt.Errorf("short read of static lock bytes: got %d of 4", len(resp))
+	}
+	// Static lock byte 0 is byte 2 of page 2; its bit 4 locks page 4, the first
+	// NDEF page (NTAG21x / Ultralight datasheets, mirrored by the test emulator's
+	// lock model). A MakeReadOnly'd tag sets this byte to 0xFF.
+	return resp[2]&(1<<4) != 0, nil
 }

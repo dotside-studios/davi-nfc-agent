@@ -791,10 +791,19 @@ A tag answering with an error status word is still `success: true`, because the
 exchange happened, and interpreting SW1SW2 is the caller's job. `success` is
 false only when the exchange itself could not be performed.
 
-> **Refused in read-only mode.** The agent cannot tell a `SELECT` from a write
-> to a configuration page, so a raw exchange is treated as a write and refused
-> with `READ_ONLY`. A raw command can also burn OTP bits or lock a tag
-> permanently, and the agent can neither recognise nor undo that.
+> **Gated behind the raw APDU channel.** The channel that carries raw exchanges
+> is off by default and refuses one with `RAW_CHANNEL_DISABLED` until an operator
+> opens it — on the command line with `-allow-raw-apdu`, from the tray's *Allow
+> Raw APDU Channel* toggle, or in the Control Center. A raw command reaches the
+> tag unmodified and can burn OTP bits or lock a tag permanently, and the agent
+> can neither recognise nor undo that, so opening the channel is a deliberate
+> step.
+>
+> **Refused in read-only mode.** The channel being open is not enough: the agent
+> cannot tell a `SELECT` from a write to a configuration page, so a raw exchange
+> is treated as a write and also refused with `READ_ONLY` while the reader is
+> read-only. The mode is checked first, so its refusal is the one you see when
+> both apply.
 
 Accepts an optional `deviceID`. See [Naming the tag](#naming-the-tag).
 
@@ -1223,6 +1232,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
 | `TAG_NOT_CONNECTED` | yes | No tag connected |
 | `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
+| `RAW_CHANNEL_DISABLED` | no | The raw APDU channel is off; enable it to send raw exchanges |
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
 | `MULTIPLE_TAGS` | no | More than one tag in the field; separate them and try again |

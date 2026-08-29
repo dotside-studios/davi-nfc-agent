@@ -37,6 +37,12 @@ const (
 	// for one to be guessed.
 	ErrCodeTagNotNamed ErrorCode = "TAG_NOT_NAMED"
 
+	// ErrCodeRawChannelDisabled reports that the raw APDU channel is switched
+	// off. It is a policy decision, distinct from read-only mode: the operator
+	// has not opened the channel that carries raw exchanges, so no raw command
+	// reaches a tag until they do. Not retryable; the channel has to be enabled.
+	ErrCodeRawChannelDisabled ErrorCode = "RAW_CHANNEL_DISABLED"
+
 	ErrCodeTimeout      ErrorCode = "TIMEOUT"
 	ErrCodeDeviceGone   ErrorCode = "DEVICE_GONE"
 	ErrCodeInternal     ErrorCode = "INTERNAL_ERROR"

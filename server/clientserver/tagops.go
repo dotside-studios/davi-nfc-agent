@@ -27,6 +27,11 @@ type tagOps struct {
 	// allowed, which is the agent's mode rather than any one source's. Nil
 	// allows them, and the source enforces its own policy either way.
 	allowModification func() bool
+
+	// allowRawTransceive reports whether the raw APDU channel is open, gating
+	// raw exchanges on their own beyond the mode above. Nil leaves the mode as
+	// the only gate. See [Config.AllowRawTransceive].
+	allowRawTransceive func() bool
 }
 
 var _ server.TagOps = (*tagOps)(nil)
@@ -36,6 +41,14 @@ var _ server.TagOps = (*tagOps)(nil)
 // the mode is the agent's.
 func (s *tagOps) modificationAllowed() bool {
 	return s.allowModification == nil || s.allowModification()
+}
+
+// rawTransceiveAllowed reports whether the raw APDU channel is open. It is a
+// second gate on a raw exchange, on top of the mode: a writable agent still
+// refuses one until the operator opens the channel. Nil leaves the mode as the
+// only gate.
+func (s *tagOps) rawTransceiveAllowed() bool {
+	return s.allowRawTransceive == nil || s.allowRawTransceive()
 }
 
 // readOnlyModeMessage explains a mode refusal for the named operation.
@@ -107,6 +120,14 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 			"Reader is in read-only mode; raw exchanges are refused because they can write")
 	}
 
+	// The channel is gated on its own beyond the mode: a raw command reaches the
+	// tag unmodified and can lock or brick it in ways nothing here can undo, so a
+	// writable agent still refuses one until the operator opens the channel.
+	if !s.rawTransceiveAllowed() {
+		return nil, protocol.Errorf(protocol.ErrCodeRawChannelDisabled,
+			"Raw APDU channel is disabled; enable it to send raw exchanges")
+	}
+
 	rt, err := s.resolveRoute(req.TagUID, req.DeviceID, req.AllowUntargeted)
 	if err != nil {
 		return nil, err
@@ -152,5 +173,9 @@ func sourceFailure(err error, device, op string, failed protocol.ErrorCode) erro
 // newTagOps is what the server performs a client's operations with when it was
 // given tags rather than an operation layer of its own.
 func newTagOps(config Config) *tagOps {
-	return &tagOps{tags: config.Tags, allowModification: config.AllowTagModification}
+	return &tagOps{
+		tags:               config.Tags,
+		allowModification:  config.AllowTagModification,
+		allowRawTransceive: config.AllowRawTransceive,
+	}
 }

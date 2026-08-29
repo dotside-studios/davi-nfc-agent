@@ -27,6 +27,7 @@ func parseFlags() (opts *agent.Options, showVersion bool) {
 	flag.BoolVar(&opts.AutoTLS, "auto-tls", true, "Automatically generate and manage TLS certificates")
 	flag.BoolVar(&opts.RequirePairedDevice, "require-paired-devices", false, "Admit only devices that have paired, withdrawing the shared secret and any loopback bypass for device connections. Browser clients are unaffected")
 	flag.BoolVar(&opts.AllowLoopbackBypass, "allow-loopback-bypass", false, "Admit connections from this host with no API secret. Off by default: loopback names the host, so every account, local proxy and port forward on it is admitted too")
+	flag.BoolVar(&opts.AllowRawAPDU, "allow-raw-apdu", false, "Open the raw APDU channel, letting clients send raw exchanges to a tag. Off by default: a raw command reaches the tag unmodified and can lock or brick it in ways the agent cannot recognise or undo")
 	flag.BoolVar(&opts.InstallCA, "install-ca", false, "Install a local certificate authority into the system trust store so browsers trust this agent. Not needed for phones, readers, or an externally provisioned certificate")
 	flag.StringVar(&opts.ConfigDir, "config-dir", "", "Config directory (default: platform-specific)")
 	flag.StringVar(&opts.AllowedOrigins, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")

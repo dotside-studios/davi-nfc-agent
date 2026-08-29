@@ -65,6 +65,7 @@ func TestMenuLayout(t *testing.T) {
 		"----",
 		"Mode: Read/Write",
 		"Flash and Beep on Scan",
+		"Allow Raw APDU Channel",
 		"----",
 		"Card Type Filter",
 		"----",

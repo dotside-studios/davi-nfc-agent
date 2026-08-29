@@ -35,8 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   APDU expert or an AI in the loop: a round-trip test decodes the output of every
   builder in `nfc/apdu.go` and asserts the class, the meaning, and that every
   declared length matches its data, so a malformed or mislabelled command fails
-  the build. It also underpins a safety net for the raw APDU channel, where the
-  same decode names what a command does before it reaches a tag
+  the build. The Control Center's raw exchange (APDU) console shows the same
+  decode live under the hex input — the command's meaning, its class, and a
+  caution for a write, a lock/OTP-page write, a malformed length or an
+  unrecognised command — so an operator sees what a raw command does before
+  sending it
 
 - A device may now report a non-hex UID, and the bridge carries it through
   verbatim instead of rejecting it. A hex NFC serial is still normalized to the

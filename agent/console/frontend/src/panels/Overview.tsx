@@ -3,7 +3,7 @@ import type { ControlState, LogEntry, ScanRecord, TagData } from '../types'
 import { useAction } from '../useControl'
 import type { TagLink } from '../useTags'
 import { ActionLink, Copyable, Dot, Empty, KV, Notice, Panel, Row } from '../ui'
-import { CardFilterControl, DevicePicker, ModeControl, PortEditor } from './controls'
+import { CardFilterControl, DevicePicker, ModeControl, PortEditor, RawAPDUControl } from './controls'
 
 /**
  * The landing page. The left third holds state and the knobs that get turned;
@@ -33,6 +33,9 @@ export function Overview({
           <DevicePicker state={state} />
           <div style={{ marginTop: 6 }}>
             <ModeControl state={state} />
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <RawAPDUControl state={state} />
           </div>
         </Panel>
         <Panel title="Card type filter">

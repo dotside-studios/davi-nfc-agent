@@ -13,7 +13,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -72,9 +71,6 @@ type Config struct {
 	// ConfigDir is where the API secret and other state persist.
 	ConfigDir string
 
-	// Devices holds the paired devices and their per-device credentials.
-	Devices *DeviceRegistry
-
 	// PublicKeyPin identifies this agent to devices across certificate
 	// reissues, so they need no certificate authority to recognize it.
 	PublicKeyPin string
@@ -87,8 +83,15 @@ type Config struct {
 
 	Logs *logbuf.Ring
 
+	// AllowLoopbackBypass admits a connection from this host with no
+	// credential. Off by default: loopback identifies the host, so it also
+	// admits other accounts on it, local proxies, and port forwards into it.
+	// Settled at construction, unlike the requirement below: it widens what is
+	// admitted rather than narrowing it.
+	AllowLoopbackBypass bool
+
 	// RequirePairedDevice admits only devices holding a paired credential,
-	// withdrawing the shared secret and loopback bypass for device
+	// withdrawing the shared secret, and any loopback bypass, for device
 	// connections. Browser clients are unaffected. Changeable at runtime
 	// through SetRequirePairedDevice.
 	RequirePairedDevice bool
@@ -97,6 +100,13 @@ type Config struct {
 	// it reads and writes. Changeable at runtime through SetReaderFeedback,
 	// which also reaches the reader already running.
 	ReaderFeedback bool
+
+	// AllowRawAPDU opens the raw APDU channel, letting clients send raw
+	// exchanges to a tag. Off by default: a raw command reaches the tag
+	// unmodified and can lock or brick it in ways the agent cannot recognise or
+	// undo, so it stays gated behind this even in a writable mode. Changeable at
+	// runtime through SetRawAPDUEnabled.
+	AllowRawAPDU bool
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
 	// may carry, and DevicePath the reader to open, empty for auto-detect.
@@ -138,11 +148,12 @@ type Agent struct {
 	logger              *log.Logger
 	manager             nfc.Manager
 	configDir           string
-	devices             *DeviceRegistry
 	devicePort          int
 	publicKeyPin        string
 	requirePairedDevice bool
+	allowLoopbackBypass bool
 	readerFeedback      bool
+	allowRawAPDU        bool
 	logs                *logbuf.Ring
 	suppliedLogger      bool
 
@@ -218,13 +229,14 @@ func New(cfg Config) *Agent {
 		manager:             cfg.Manager,
 		apiSecret:           cfg.APISecret,
 		configDir:           cfg.ConfigDir,
-		devices:             cfg.Devices,
 		devicePort:          port,
 		publicKeyPin:        cfg.PublicKeyPin,
 		requirePairedDevice: cfg.RequirePairedDevice,
+		allowLoopbackBypass: cfg.AllowLoopbackBypass,
 		readerMode:          cfg.Mode,
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
+		allowRawAPDU:        cfg.AllowRawAPDU,
 		cardTypes:           newCardTypeFilter(cfg.CardTypes),
 		logs:                cfg.Logs,
 		suppliedLogger:      suppliedLogger,
@@ -232,7 +244,7 @@ func New(cfg Config) *Agent {
 		Plugins:             &PluginSet{},
 	}
 
-	a.watchStores()
+	a.publishEvents()
 	a.watchManager()
 
 	if err := a.Plugins.Add(cfg.Plugins...); err != nil {
@@ -294,9 +306,8 @@ func (a *Agent) Readers() []string {
 	}
 	return readers
 }
-func (a *Agent) Logger() *log.Logger      { return a.logger }
-func (a *Agent) ConfigDir() string        { return a.configDir }
-func (a *Agent) Devices() *DeviceRegistry { return a.devices }
+func (a *Agent) Logger() *log.Logger { return a.logger }
+func (a *Agent) ConfigDir() string   { return a.configDir }
 
 // APISecret is the secret non-loopback connections must present. Read on every
 // upgrade by whatever checks it, so it follows a rotation.
@@ -319,6 +330,11 @@ func (a *Agent) DevicePort() int {
 	return a.devicePort
 }
 func (a *Agent) PublicKeyPin() string { return a.publicKeyPin }
+
+// AllowLoopbackBypass reports whether a connection from this host is admitted
+// without a credential, read on every upgrade by whatever checks it.
+// [Agent.RequirePairedDevice] withdraws it for device connections regardless.
+func (a *Agent) AllowLoopbackBypass() bool { return a.allowLoopbackBypass }
 
 func (a *Agent) RequirePairedDevice() bool {
 	a.settingsMu.RLock()
@@ -512,43 +528,18 @@ func (a *Agent) CurrentDevicePath() string {
 // SetRequirePairedDevice changes the paired-device requirement. The device
 // endpoint's check reads it per connection, so this takes effect immediately.
 func (a *Agent) SetRequirePairedDevice(on bool) {
-	if a.RequirePairedDevice() == on {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.requirePairedDevice = on
-	a.settingsMu.Unlock()
-
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.RequirePairedDevice = on })
 }
 
 // SetReaderFeedback turns the reader's LED and buzzer feedback on or off, on a
 // running reader as well as on the next one the agent starts.
 func (a *Agent) SetReaderFeedback(on bool) {
-	if a.ReaderFeedback() == on {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.readerFeedback = on
-	a.settingsMu.Unlock()
-
-	if readers := a.supervisor.Load(); readers != nil {
-		readers.SetFeedback(on)
-	}
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.ReaderFeedback = on })
 }
 
-// TokenVerifier recognises the per-device credentials this agent issued at
-// pairing, for whatever admits a connection presenting one. Nil on an agent
-// built without a registry, which admits nobody on a credential.
-//
-// Take it from here rather than from Devices: a nil registry assigned to the
-// interface is not a nil interface, and the caller's nil check would miss it.
-func (a *Agent) TokenVerifier() server.TokenVerifier {
-	if a.devices == nil {
-		return nil
-	}
-	return a.devices
+// SetRawAPDUEnabled opens or closes the raw APDU channel. Whatever gates a raw
+// exchange reads it per request, so it takes effect immediately, on connections
+// already open as well as new ones.
+func (a *Agent) SetRawAPDUEnabled(on bool) {
+	a.ApplyPreferences(func(p *Preferences) { p.AllowRawAPDU = on })
 }

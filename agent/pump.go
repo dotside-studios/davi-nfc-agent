@@ -33,18 +33,35 @@ func (a *Agent) forwardScan(data nfc.NFCData) {
 		return
 	}
 
-	var text string
-	if msg, err := data.Card.ReadMessage(); err == nil {
-		if ndefMsg, ok := msg.(*nfc.NDEFMessage); ok {
-			text, _ = ndefMsg.GetText()
-			if text == "" {
-				text, _ = ndefMsg.GetURI()
-			}
-		} else if textMsg, ok := msg.(*nfc.TextMessage); ok {
-			text = textMsg.Text
-		}
+	// Reading the message here also caches it on the card, so a client asking
+	// for the same scan does not go back to the tag for it.
+	if text := decodedText(data.Card); text != "" {
+		a.logger.Printf("Scanned %s (%s): %s", data.Card.UID, data.Card.Type, text)
+	} else {
+		a.logger.Printf("Scanned %s (%s)", data.Card.UID, data.Card.Type)
 	}
-	fmt.Printf("UID: %s\nDecoded text: %s\n", data.Card.UID, text)
 
 	a.reportTag(data)
+}
+
+// decodedText is what a card says, for the line the agent logs about it. Empty
+// for a card carrying nothing readable, which is not an error: a tag can be
+// blank, and one holding a record this build does not decode still scans.
+func decodedText(card *nfc.Card) string {
+	msg, err := card.ReadMessage()
+	if err != nil {
+		return ""
+	}
+
+	switch m := msg.(type) {
+	case *nfc.NDEFMessage:
+		if text, err := m.GetText(); err == nil && text != "" {
+			return text
+		}
+		uri, _ := m.GetURI()
+		return uri
+	case *nfc.TextMessage:
+		return m.Text
+	}
+	return ""
 }

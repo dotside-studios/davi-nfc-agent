@@ -25,8 +25,7 @@ func servePinnedManager(t *testing.T, pin string) string {
 
 	m := NewManager(DeviceTimeout)
 	ts := httptest.NewServer(m.Handler(ServerOptions{
-		AllowUnauthenticated: true,
-		PublicKeyPin:         func() string { return pin },
+		PublicKeyPin: func() string { return pin },
 	}))
 
 	t.Cleanup(func() {
@@ -259,12 +258,14 @@ func TestMalformedTagScanIsNotRetryable(t *testing.T) {
 	url := newDeviceTestServer(t)
 	conn, deviceID := registerV1(t, url)
 
+	// A scan with no UID at all is malformed: unlike a non-hex UID (a value a
+	// camera decoded from a QR, carried through verbatim), there is nothing to
+	// identify the tag by, so it is refused rather than retried.
 	if err := conn.WriteJSON(protocol.WebSocketRequest{
 		ID:   "scan1",
 		Type: WSTypeTagScanned,
 		Payload: map[string]any{
 			"deviceID":   deviceID,
-			"uid":        "not a valid uid",
 			"technology": "ISO14443A",
 		},
 	}); err != nil {
@@ -274,7 +275,7 @@ func TestMalformedTagScanIsNotRetryable(t *testing.T) {
 	out, payload := readResponse(t, conn)
 
 	if out.Success {
-		t.Fatal("expected failure for an unparseable UID")
+		t.Fatal("expected failure for a scan with no UID")
 	}
 	if code, _ := payload["code"].(string); code != string(protocol.ErrCodeInvalidData) {
 		t.Errorf("code = %q, want INVALID_DATA", code)

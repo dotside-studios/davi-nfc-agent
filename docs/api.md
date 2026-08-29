@@ -70,12 +70,11 @@ Wrong PINs lock pairing after five attempts until the agent restarts.
 
 #### Requiring pairing
 
-By default a device may also present the shared API secret, and a device
-connecting over loopback needs no credential at all. Both remain so that
+By default a device may also present the shared API secret. It remains so that
 upgrading strands nothing.
 
 `-require-paired-devices` (or **Require pairing** in the tray, or
-`DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws both: only a credential issued at
+`DAVI_NFC_REQUIRE_PAIRED_DEVICES=1`) withdraws it: only a credential issued at
 pairing admits a device. Turn it on once the devices you care about have
 paired. With none paired, every device connection is refused.
 
@@ -274,6 +273,52 @@ the agent infers them from `type`, which is all a v0 device allows. Declared
 values win over inference, except that operations the bridge cannot yet route
 (`canWrite`, `canTransceive`, `canLock`) are reported as false whatever the
 device claims.
+
+#### Non-NFC scans (QR and barcodes)
+
+A camera is a device like any other: it decodes a QR or barcode itself and
+reports the value, exactly as a phone decodes NDEF off an NFC tag and reports
+records rather than raw RF. **The agent never receives images or frames.**
+
+The agent does not model optical codes; it carries the scan and stays out of the
+way. Two things make that work:
+
+- **A non-hex UID is carried verbatim.** The agent normalizes a hex NFC serial
+  to its canonical colon form, but a UID that is not hex is not an NFC serial,
+  so it is passed through byte-for-byte. A consumer keys on the exact value that
+  was scanned.
+- **Read-only falls out of the device's own capabilities.** A camera registers
+  `canWrite: false` (and no lock or transceive), so the agent already refuses
+  those operations. No special-casing is needed.
+
+Report the scan as an ordinary `tagScanned` frame. Put the decoded value where a
+consumer already looks: a card URL as a `uri` record (davi keys on the
+`/c/{identifier}` path), and any stable non-empty `uid`. Nothing new is needed
+on the wire:
+
+```json
+{
+  "type": "tagScanned",
+  "payload": {
+    "deviceID": "dev_cam01",
+    "uid": "https://davi.social/c/QR-ABC123",
+    "technology": "qr",
+    "type": "qr_card",
+    "ndefMessage": {
+      "records": [
+        { "recordType": "uri", "content": "https://davi.social/c/QR-ABC123" }
+      ]
+    }
+  }
+}
+```
+
+`uid` must be non-empty, but its exact value is the device's choice — a consumer
+that keys on the URL record uses `uid` only as a fallback. `technology` and
+`type` are free-form and reported straight back to clients; the agent branches on
+neither. A device that only scans codes registers with `deviceType: "camera"`,
+`canWrite: false`. Send `tagRemoved` when a code leaves the frame, as for any
+tag.
 
 #### Goodbye
 
@@ -476,6 +521,9 @@ const ws = new WebSocket('ws://localhost:9470/ws');
 const ws = new WebSocket('ws://localhost:9470/ws?secret=your-secret');
 ```
 
+A client on the agent's own host presents the secret like any other. See
+[The loopback bypass](#the-loopback-bypass) for the setting that exempts it.
+
 ### Session Behavior
 
 - First connection claims the session (automatic lock)
@@ -540,9 +588,9 @@ When a card is detected and read:
 
 | Field | Description |
 |-------|-------------|
-| `uid` | Card unique identifier (hex string) |
-| `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental) |
-| `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.) |
+| `uid` | Card unique identifier (hex string). For a non-NFC scan (a QR or barcode), the raw value the device reported, carried verbatim. See [Non-NFC scans](#non-nfc-scans-qr-and-barcodes) |
+| `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `ISO14443-4 Type 4A` (experimental). Free-form for a non-NFC scan (whatever the device reported) |
+| `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.), or whatever the device reported for a non-NFC scan |
 | `scannedAt` | ISO 8601 timestamp |
 | `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it. That is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
 | `capabilities` | What the tag supports. See [Tag Capabilities](#tag-capabilities) |
@@ -743,10 +791,19 @@ A tag answering with an error status word is still `success: true`, because the
 exchange happened, and interpreting SW1SW2 is the caller's job. `success` is
 false only when the exchange itself could not be performed.
 
-> **Refused in read-only mode.** The agent cannot tell a `SELECT` from a write
-> to a configuration page, so a raw exchange is treated as a write and refused
-> with `READ_ONLY`. A raw command can also burn OTP bits or lock a tag
-> permanently, and the agent can neither recognise nor undo that.
+> **Gated behind the raw APDU channel.** The channel that carries raw exchanges
+> is off by default and refuses one with `RAW_CHANNEL_DISABLED` until an operator
+> opens it — on the command line with `-allow-raw-apdu`, from the tray's *Allow
+> Raw APDU Channel* toggle, or in the Control Center. A raw command reaches the
+> tag unmodified and can burn OTP bits or lock a tag permanently, and the agent
+> can neither recognise nor undo that, so opening the channel is a deliberate
+> step.
+>
+> **Refused in read-only mode.** The channel being open is not enough: the agent
+> cannot tell a `SELECT` from a write to a configuration page, so a raw exchange
+> is treated as a write and also refused with `READ_ONLY` while the reader is
+> read-only. The mode is checked first, so its refusal is the one you see when
+> both apply.
 
 Accepts an optional `deviceID`. See [Naming the tag](#naming-the-tag).
 
@@ -1022,6 +1079,23 @@ socket.send(JSON.stringify({
 
 ---
 
+## The loopback bypass
+
+A connection from the agent's own host presents the shared API secret or a
+token issued at pairing, like any other connection. Loopback identifies the
+host, so admitting it without a credential also admits other accounts on that
+host, local proxies, and port forwards into it.
+
+`-allow-loopback-bypass` (or `DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1`) admits loopback
+with no credential, for a local client that cannot be given the secret. It
+covers the shared secret only: under [Requiring pairing](#requiring-pairing) a
+device connection still needs a paired credential. The console's control surface
+is unaffected either way, requiring loopback, its own origin and a session
+token.
+
+The shipped console reads the secret from its session and sends it, so it needs
+nothing here.
+
 ## REST API
 
 Base URL: `http://localhost:9470/api/v1`
@@ -1141,6 +1215,7 @@ Raised by the bridge itself, before reaching a tag.
 | `TIMEOUT` | yes | Operation timed out |
 | `DEVICE_GONE` | no | Target device disconnected |
 | `INTERNAL_ERROR` | yes | Unexpected agent-side failure |
+| `BUSY` | yes | Earlier work has not finished: a reader completing an operation its caller abandoned, or more requests outstanding than the connection queues |
 | `UNKNOWN_ERROR` | no | Unclassified: never advertised as retryable |
 
 ### NFC errors
@@ -1157,6 +1232,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
 | `TAG_NOT_CONNECTED` | yes | No tag connected |
 | `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
+| `RAW_CHANNEL_DISABLED` | no | The raw APDU channel is off; enable it to send raw exchanges |
 | `CAPACITY_EXCEEDED` | no | Data larger than the tag's usable NDEF capacity |
 | `INVALID_DATA` | no | Data was malformed |
 | `MULTIPLE_TAGS` | no | More than one tag in the field; separate them and try again |

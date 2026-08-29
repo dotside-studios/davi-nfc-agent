@@ -51,16 +51,22 @@ func convertTagData(data TagData, route tagRoute) (nfc.Tag, error) {
 		return nil, nfc.Errorf(nfc.ErrCodeInvalidData, op, "tag technology is required")
 	}
 
-	// Normalize UID format
-	uid, err := ParseUID(data.UID)
-	if err != nil {
-		return nil, nfc.WrapError(nfc.ErrCodeInvalidData, op, "invalid UID format", err)
+	// Normalize a hex NFC serial to the agent's canonical colon form. A UID that
+	// is not hex is not an NFC serial — a value a camera decoded from a QR or
+	// barcode, say — so it is carried through verbatim, letting a consumer key
+	// on the exact bytes that were scanned. The agent makes no claim about what
+	// a non-NFC identifier is; recognizing and interpreting it is the
+	// consumer's job, not the bridge's.
+	uid := data.UID
+	if normalized, err := ParseUID(data.UID); err == nil {
+		uid = normalized
 	}
 
 	// Parse NDEF message if present
 	var ndefMsg *nfc.NDEFMessage
 	var ndefData []byte
 	if data.NDEFMessage != nil {
+		var err error
 		ndefMsg, err = ConvertNDEFInput(data.NDEFMessage)
 		if err != nil {
 			return nil, wrapTagDataError(op, uid, "failed to parse NDEF message", err)

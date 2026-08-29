@@ -37,6 +37,12 @@ const (
 	// for one to be guessed.
 	ErrCodeTagNotNamed ErrorCode = "TAG_NOT_NAMED"
 
+	// ErrCodeRawChannelDisabled reports that the raw APDU channel is switched
+	// off. It is a policy decision, distinct from read-only mode: the operator
+	// has not opened the channel that carries raw exchanges, so no raw command
+	// reaches a tag until they do. Not retryable; the channel has to be enabled.
+	ErrCodeRawChannelDisabled ErrorCode = "RAW_CHANNEL_DISABLED"
+
 	ErrCodeTimeout      ErrorCode = "TIMEOUT"
 	ErrCodeDeviceGone   ErrorCode = "DEVICE_GONE"
 	ErrCodeInternal     ErrorCode = "INTERNAL_ERROR"
@@ -60,6 +66,12 @@ const (
 	// operation needs exactly one. Not retryable: the user has to separate
 	// them first.
 	ErrCodeMultipleTags ErrorCode = "MULTIPLE_TAGS"
+
+	// ErrCodeBusy reports that the agent could not start the operation because
+	// it is still working on an earlier one: a reader whose previous operation
+	// was abandoned but has not finished, or a connection with more requests
+	// outstanding than it can queue. Retryable once the earlier work drains.
+	ErrCodeBusy ErrorCode = "BUSY"
 )
 
 // ErrorPayload is the payload of an error response. `code` carries the same
@@ -87,6 +99,7 @@ var retryableCodes = map[ErrorCode]bool{
 	ErrCodeNoCard:           true,
 	ErrCodeTimeout:          true,
 	ErrCodeInternal:         true,
+	ErrCodeBusy:             true,
 }
 
 // Retryable reports whether repeating the request could plausibly succeed.

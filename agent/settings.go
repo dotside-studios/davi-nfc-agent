@@ -31,6 +31,11 @@ type Preferences struct {
 
 	RequirePairedDevice bool
 	ReaderFeedback      bool
+
+	// AllowRawAPDU opens the raw APDU channel. Off by default: a raw exchange
+	// reaches the tag unmodified and can lock or brick it, so it stays refused,
+	// even in a writable mode, until this is set.
+	AllowRawAPDU bool
 }
 
 // preferencesJSON is the wire shape. The mode travels as its name, so a client
@@ -44,6 +49,7 @@ type preferencesJSON struct {
 	Port                int      `json:"port"`
 	RequirePairedDevice bool     `json:"requirePairedDevice"`
 	ReaderFeedback      bool     `json:"readerFeedback"`
+	AllowRawAPDU        bool     `json:"allowRawApdu"`
 }
 
 func (p Preferences) MarshalJSON() ([]byte, error) {
@@ -54,6 +60,7 @@ func (p Preferences) MarshalJSON() ([]byte, error) {
 		Port:                p.Port,
 		RequirePairedDevice: p.RequirePairedDevice,
 		ReaderFeedback:      p.ReaderFeedback,
+		AllowRawAPDU:        p.AllowRawAPDU,
 	})
 }
 
@@ -73,6 +80,7 @@ func (p *Preferences) UnmarshalJSON(data []byte) error {
 		Port:                w.Port,
 		RequirePairedDevice: w.RequirePairedDevice,
 		ReaderFeedback:      w.ReaderFeedback,
+		AllowRawAPDU:        w.AllowRawAPDU,
 	}
 	return nil
 }
@@ -85,32 +93,104 @@ func (a *Agent) Preferences() Preferences {
 		return Preferences{}
 	}
 
-	return Preferences{
-		Mode:                a.CurrentReaderMode(),
-		CardTypes:           a.CardTypeFilter(),
-		DevicePath:          a.CurrentPinnedDevice(),
-		Port:                a.DevicePort(),
-		RequirePairedDevice: a.RequirePairedDevice(),
-		ReaderFeedback:      a.ReaderFeedback(),
+	readers := a.supervisor.Load()
+
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.preferencesLocked(readers)
+}
+
+// preferencesLocked reads the preferences with settingsMu already held, taking
+// the mode and the feedback flag from readers when there is one. The card-type
+// filter guards itself, so it is read here rather than passed in.
+func (a *Agent) preferencesLocked(readers *nfc.Supervisor) Preferences {
+	p := Preferences{
+		Mode:                a.readerMode,
+		CardTypes:           a.cardTypes.list(),
+		DevicePath:          a.pinnedDevice,
+		Port:                a.devicePort,
+		RequirePairedDevice: a.requirePairedDevice,
+		ReaderFeedback:      a.readerFeedback,
+		AllowRawAPDU:        a.allowRawAPDU,
 	}
+	if readers != nil {
+		p.Mode = readers.Mode()
+		p.ReaderFeedback = readers.FeedbackEnabled()
+	}
+	return p
+}
+
+// ApplyPreferences changes the preferences as one value and answers with what
+// the agent holds afterwards, which is not necessarily what was asked for: a
+// port of zero or less keeps the current one, and the card types are
+// normalized.
+//
+//	a.ApplyPreferences(func(p *agent.Preferences) { p.Mode = nfc.ModeReadOnly })
+//
+// Events().Preferences fires once, after every field is in place, so a
+// subscriber never sees a combination that was not asked for. Nothing fires
+// when the result matches what the agent already held.
+//
+// mutate runs before the settings lock is taken, so it may call back into the
+// agent. Two applies racing can therefore lose one of the two edits; the
+// console and the tray each apply from a single goroutine.
+//
+// Nothing is persisted: a change lasts as long as the agent runs.
+func (a *Agent) ApplyPreferences(mutate func(*Preferences)) Preferences {
+	if a == nil {
+		return Preferences{}
+	}
+
+	readers := a.supervisor.Load()
+
+	a.settingsMu.RLock()
+	before := a.preferencesLocked(readers)
+	a.settingsMu.RUnlock()
+
+	next := before
+	next.CardTypes = append([]string(nil), before.CardTypes...)
+	if mutate != nil {
+		mutate(&next)
+	}
+
+	next.CardTypes = normalizeCardTypes(next.CardTypes)
+	if next.Port <= 0 {
+		next.Port = before.Port
+	}
+
+	a.settingsMu.Lock()
+	a.readerMode = next.Mode
+	a.pinnedDevice = next.DevicePath
+	a.devicePort = next.Port
+	a.requirePairedDevice = next.RequirePairedDevice
+	a.readerFeedback = next.ReaderFeedback
+	a.allowRawAPDU = next.AllowRawAPDU
+	a.settingsMu.Unlock()
+
+	if !sameCardTypes(before.CardTypes, next.CardTypes) {
+		a.cardTypes.replace(next.CardTypes)
+	}
+	if readers != nil {
+		// Both walk every open reader, so they are called only on a change.
+		if before.Mode != next.Mode {
+			readers.SetMode(next.Mode)
+		}
+		if before.ReaderFeedback != next.ReaderFeedback {
+			readers.SetFeedback(next.ReaderFeedback)
+		}
+	}
+
+	if !samePreferences(before, next) {
+		a.firePreferencesChanged()
+	}
+	return next
 }
 
 // SetReaderMode changes the reader's access mode, on a running reader as well
 // as on the next one the agent starts. Accepted with no reader running, because
 // the mode is the agent's and Start hands it to the reader it builds.
 func (a *Agent) SetReaderMode(mode nfc.ReaderMode) {
-	if a.CurrentReaderMode() == mode {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.readerMode = mode
-	a.settingsMu.Unlock()
-
-	if readers := a.supervisor.Load(); readers != nil {
-		readers.SetMode(mode)
-	}
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.Mode = mode })
 }
 
 // CurrentReaderMode is the mode the reader is in, or the one the next reader
@@ -127,13 +207,7 @@ func (a *Agent) CurrentReaderMode() nfc.ReaderMode {
 // SetCardTypeFilter replaces the whole filter, as an operator picking types
 // does. An empty list is no filter at all.
 func (a *Agent) SetCardTypeFilter(cardTypes []string) {
-	next := normalizeCardTypes(cardTypes)
-	if sameCardTypes(a.CardTypeFilter(), next) {
-		return
-	}
-
-	a.cardTypes.replace(next)
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.CardTypes = cardTypes })
 }
 
 // CardTypeFilter lists the allowed card types, sorted. Nil when nothing is
@@ -144,15 +218,7 @@ func (a *Agent) CardTypeFilter() []string { return a.cardTypes.list() }
 // It filters what the agent reports rather than choosing what is opened: every
 // reader the manager offers stays open.
 func (a *Agent) SetPinnedDevice(devicePath string) {
-	if a.CurrentPinnedDevice() == devicePath {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.pinnedDevice = devicePath
-	a.settingsMu.Unlock()
-
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.DevicePath = devicePath })
 }
 
 // pinAdmits reports whether the pin lets this agent work with a source. It
@@ -185,15 +251,7 @@ func (a *Agent) CurrentPinnedDevice() string {
 // SetDevicePort records the port to serve on. A listener keeps the port it was
 // built with, so what is being served on is [ServerPlugin.Port].
 func (a *Agent) SetDevicePort(port int) {
-	if port <= 0 || port == a.DevicePort() {
-		return
-	}
-
-	a.settingsMu.Lock()
-	a.devicePort = port
-	a.settingsMu.Unlock()
-
-	a.firePreferencesChanged()
+	a.ApplyPreferences(func(p *Preferences) { p.Port = port })
 }
 
 // adoptReaderSettings hands the readers the preferences the agent holds. Start
@@ -237,6 +295,18 @@ func normalizeCardTypes(cardTypes []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// samePreferences compares two snapshots, both with normalized card types. It
+// is what decides whether an apply reports a change.
+func samePreferences(a, b Preferences) bool {
+	return a.Mode == b.Mode &&
+		a.DevicePath == b.DevicePath &&
+		a.Port == b.Port &&
+		a.RequirePairedDevice == b.RequirePairedDevice &&
+		a.ReaderFeedback == b.ReaderFeedback &&
+		a.AllowRawAPDU == b.AllowRawAPDU &&
+		sameCardTypes(a.CardTypes, b.CardTypes)
 }
 
 // sameCardTypes compares two normalized filters.

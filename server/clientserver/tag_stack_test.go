@@ -1,6 +1,7 @@
 package clientserver
 
 import (
+	"github.com/dotside-studios/davi-nfc-agent/server/deviceid"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -87,8 +88,24 @@ func deviceGate(cfg stackConfig) func(w http.ResponseWriter, r *http.Request) (s
 		if cfg.RequirePaired {
 			return server.CheckPairedDevice(w, r, cfg.TokenVerifier)
 		}
-		return server.CheckAuth(w, r, cfg.APISecret, cfg.TokenVerifier)
+		return server.CheckAuth(w, r, server.AuthOptions{
+			Secret:   cfg.APISecret,
+			Verifier: cfg.TokenVerifier,
+		})
 	}
+}
+
+// admit is the credential check standing in front of a device endpoint, the
+// way the paired-device manager mounts one: it names the device it admitted, and
+// the driver registers under that identity.
+func admit(check func(w http.ResponseWriter, r *http.Request) (string, bool), next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := check(w, r)
+		if !ok {
+			return
+		}
+		next.ServeHTTP(w, deviceid.With(r, id))
+	})
 }
 
 func newStack(t *testing.T, cfg stackConfig) *stack {
@@ -103,11 +120,10 @@ func newStack(t *testing.T, cfg stackConfig) *stack {
 	}))
 	if !cfg.NoDriver {
 		remote = remotenfc.NewManager(30 * time.Second)
-		endpoint = remote.Handler(remotenfc.ServerOptions{
-			Authenticate:         auth,
+		endpoint = admit(auth, remote.Handler(remotenfc.ServerOptions{
 			AllowTagModification: func() bool { return cfg.Mode != nfc.ModeReadOnly },
 			PublicKeyPin:         func() string { return cfg.PublicKeyPin },
-		})
+		}))
 	}
 
 	// One supervisor over every manager, which is how the agent composes them:

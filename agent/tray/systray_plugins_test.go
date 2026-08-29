@@ -1,10 +1,12 @@
 package tray
 
 import (
+	pairinglib "github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	"strings"
 	"testing"
 
 	nfcagent "github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -58,7 +60,7 @@ func indexOf(titles []string, want string) int {
 // section the tray hands the plugins rather than in its own URLs submenu.
 func TestPairingEntriesComeFromThePlugin(t *testing.T) {
 	a := newTestAgent()
-	pairing := nfcagent.NewPairingPlugin(a, 9498, nil)
+	pairing := pairingplugin.New(pairinglib.New(nil, pairinglib.Options{}), 9498)
 	if err := a.Plugins.Add(pairing); err != nil {
 		t.Fatalf("Plugins.Add: %v", err)
 	}

@@ -95,6 +95,7 @@ export default function App() {
   if (!state) return null
 
   const writable = state.settings.mode !== 'read'
+  const rawAllowed = state.settings.allowRawApdu
 
   return (
     <div className="app">
@@ -194,7 +195,7 @@ export default function App() {
             onOpenTag={() => setTab('tag')}
           />
         ) : null}
-        {tab === 'tag' ? <Tag tags={tags} writable={writable} /> : null}
+        {tab === 'tag' ? <Tag tags={tags} writable={writable} rawAllowed={rawAllowed} /> : null}
         {tab === 'activity' ? (
           <Activity
             events={tags.events}

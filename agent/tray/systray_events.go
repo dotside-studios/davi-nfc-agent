@@ -7,15 +7,21 @@ import (
 
 // subscribe follows the agent, which is what keeps the menu in step with a
 // change made anywhere else: the console, another plugin, or the reader itself.
+//
+// The state-carrying signals replay on connect, so this is also what fills the
+// menu in: it runs after setupUI has declared the entries, and each handler
+// draws what the agent is set to, which is not always the default.
 func (s *App) subscribe() {
 	events := s.agent.Events()
 
-	events.State.Connect(s.showState)
+	// Without the replay: the menu says "Starting..." until the agent settles,
+	// and the agent is stopped until autoStartAgent has run.
+	events.State.Signal.Connect(s.showState)
+
 	events.Preferences.Connect(s.SyncPreferencesToMenu)
 	events.Readers.Connect(s.applyReaders)
 	events.Tag.Connect(s.showCard)
 	events.Reader.Connect(s.showReaderStatus)
-	events.Devices.Connect(func([]agent.PairedDevice) { s.refreshDevicesMenu() })
 }
 
 // showState follows the agent's lifecycle, including a stop the tray did not

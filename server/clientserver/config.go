@@ -10,11 +10,16 @@ import (
 // and TLS are owned by the unified server, so this carries only what the client
 // handlers need.
 type Config struct {
-	// APISecret is the secret required from non-loopback connections, read on
-	// every one so a rotation takes effect without rebuilding the server. Nil,
-	// or one returning empty, requires no secret, which is the development
-	// default.
+	// APISecret is the secret required on every connection, read on each one
+	// so a rotation takes effect without rebuilding the server. Nil, or one
+	// returning empty, requires no secret, which is the development default.
 	APISecret func() string
+
+	// AllowLoopbackBypass reports whether a connection from this host may skip
+	// the secret, read per connection so the policy can change under a running
+	// server. Nil requires the secret from loopback too; see
+	// [server.AuthOptions.AllowLoopback].
+	AllowLoopbackBypass func() bool
 
 	// AllowedOrigins extends the default same-origin policy. Use ["*"]
 	// to disable origin checking entirely (NOT recommended).
@@ -38,6 +43,15 @@ type Config struct {
 	// allowed, which is the agent's mode rather than any one source's. Nil
 	// allows them, and the source enforces its own policy either way.
 	AllowTagModification func() bool
+
+	// AllowRawTransceive reports whether the raw APDU channel is open. It gates
+	// raw exchanges on their own, independently of AllowTagModification: a raw
+	// command reaches the tag unmodified and can brick it in ways the agent
+	// cannot recognise or undo, so it stays refused until the operator opens the
+	// channel even in a writable mode. Nil allows it, leaving the mode gate as
+	// the only one, which is what an embedder that has not opted into the extra
+	// gate gets.
+	AllowRawTransceive func() bool
 
 	// Ops replaces the operations the server would perform over Tags, for a
 	// build that has its own. Nil uses Tags; with neither, operations are

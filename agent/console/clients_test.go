@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -48,7 +49,7 @@ func freePort(t *testing.T) int {
 // httptest, so nothing races for a port.
 type served struct {
 	agent   *agent.Agent
-	servers *agent.ServerPlugin
+	servers *serverplugin.Plugin
 	console *Server
 	url     string
 }
@@ -65,12 +66,12 @@ func servedConsole(t *testing.T) served {
 		DevicePort: freePort(t),
 	})
 	// The client server is the build's to declare, as it is in cmd.
-	servers := &agent.ServerPlugin{}
+	servers := &serverplugin.Plugin{}
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            a.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        a.TokenVerifier(),
+			TokenVerifier:        nil,
 			Tags:                 a,
 			AllowTagModification: a.TagModificationAllowed,
 			Scans:                &a.Events().Tag,

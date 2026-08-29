@@ -1,6 +1,7 @@
 package multimanager
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -47,7 +48,7 @@ func (m *holdingManager) DevicesHoldingTags() []string {
 	return out
 }
 
-func (m *holdingManager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, key string) (*nfc.WriteResult, error) {
+func (m *holdingManager) WriteTag(_ context.Context, deviceID, tagUID string, msg *nfc.NDEFMessage, lock bool, key string) (*nfc.WriteResult, error) {
 	if _, ok := m.holding[deviceID]; !ok {
 		return nil, errors.New("device is not holding a tag")
 	}
@@ -55,7 +56,7 @@ func (m *holdingManager) WriteTag(deviceID, tagUID string, msg *nfc.NDEFMessage,
 	return &nfc.WriteResult{UID: tagUID, Locked: lock}, nil
 }
 
-func (m *holdingManager) LockTag(deviceID, tagUID, key string) (*nfc.LockResult, error) {
+func (m *holdingManager) LockTag(_ context.Context, deviceID, tagUID, key string) (*nfc.LockResult, error) {
 	if _, ok := m.holding[deviceID]; !ok {
 		return nil, errors.New("device is not holding a tag")
 	}
@@ -67,7 +68,7 @@ func (m *holdingManager) LockTag(deviceID, tagUID, key string) (*nfc.LockResult,
 // come from it is recognisable.
 const phoneTagFamily = "held-by-the-phone"
 
-func (m *holdingManager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapabilities, error) {
+func (m *holdingManager) TagCapabilities(_ context.Context, deviceID, tagUID string) (*nfc.TagCapabilities, error) {
 	uid, ok := m.holding[deviceID]
 	if !ok {
 		return nil, errors.New("device is not holding a tag")
@@ -77,12 +78,20 @@ func (m *holdingManager) TagCapabilities(deviceID, tagUID string) (*nfc.TagCapab
 	return &caps, nil
 }
 
-func (m *holdingManager) TransceiveTag(deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
+func (m *holdingManager) TransceiveTag(_ context.Context, deviceID, tagUID string, data []byte, raw bool) ([]byte, error) {
 	return data, nil
 }
 
 // The aggregate is what the agent asks, so a tag held by a child has to be
 // reachable through it.
+func TestImplementsTagHolder(t *testing.T) {
+	// nfc.TagsHeldBy asserts these at runtime, so a signature that drifts out
+	// of nfc.TagHolder degrades to "no device holds tags" instead of failing to
+	// build.
+	var _ nfc.TagHolder = (*MultiManager)(nil)
+	var _ nfc.TagHolder = (*holdingManager)(nil)
+}
+
 func TestMultiManagerAnswersForTagsItsChildrenHold(t *testing.T) {
 	phones := newHoldingManager("smartphone", map[string]string{"phone-1": "04A1B2C3"})
 	mm := NewMultiManager(
@@ -103,21 +112,21 @@ func TestMultiManagerAnswersForTagsItsChildrenHold(t *testing.T) {
 		t.Errorf("DevicesHoldingTags = %v, want [phone-1]", got)
 	}
 
-	if _, err := mm.WriteTag("phone-1", "04A1B2C3", nfc.NewNDEFMessage(), false, "key-1"); err != nil {
+	if _, err := mm.WriteTag(context.Background(), "phone-1", "04A1B2C3", nfc.NewNDEFMessage(), false, "key-1"); err != nil {
 		t.Fatalf("WriteTag: %v", err)
 	}
 	if !phones.wrote["phone-1"] {
 		t.Error("the write did not reach the manager holding the tag")
 	}
 
-	if _, err := mm.LockTag("phone-1", "04A1B2C3", "key-2"); err != nil {
+	if _, err := mm.LockTag(context.Background(), "phone-1", "04A1B2C3", "key-2"); err != nil {
 		t.Fatalf("LockTag: %v", err)
 	}
 	if !phones.locked["phone-1"] {
 		t.Error("the lock did not reach the manager holding the tag")
 	}
 
-	caps, err := mm.TagCapabilities("phone-1", "04A1B2C3")
+	caps, err := mm.TagCapabilities(context.Background(), "phone-1", "04A1B2C3")
 	if err != nil {
 		t.Fatalf("TagCapabilities: %v", err)
 	}
@@ -137,7 +146,7 @@ func TestMultiManagerHoldsNothingWithoutAHoldingChild(t *testing.T) {
 	if got := mm.DevicesHoldingTags(); len(got) != 0 {
 		t.Errorf("DevicesHoldingTags = %v, want none", got)
 	}
-	if _, err := mm.WriteTag("phone-1", "04A1B2C3", nil, false, "key-1"); err == nil {
+	if _, err := mm.WriteTag(context.Background(), "phone-1", "04A1B2C3", nil, false, "key-1"); err == nil {
 		t.Error("a write with no manager holding tags was accepted")
 	}
 }

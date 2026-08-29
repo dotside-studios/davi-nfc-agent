@@ -14,18 +14,24 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
+	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
 
-// apiSecret is the shared secret every agent here runs with. Loopback bypasses
-// it, so it proves nothing on its own; it is set because a deployment has one.
+// apiSecret is the shared secret every agent here runs with, and every
+// connection below presents: the loopback bypass is off unless an agent is
+// built with it.
 const apiSecret = "e2e-shared-secret"
 
 // timeout bounds every wait. Generous on purpose: these tests bind real
@@ -47,10 +53,12 @@ type harness struct {
 
 	// Devices is the phone driver the test built and handed over, Servers what
 	// the agent is served from, and Pairing the pairing plugin, when the test
-	// asked for one.
-	Devices *remotenfc.Manager
-	Servers *agent.ServerPlugin
-	Pairing *agent.PairingPlugin
+	// asked for one. Credentials is the gate that issues and checks them, held
+	// whether or not the plugin was built.
+	Devices     *remotenfc.Manager
+	Servers     *serverplugin.Plugin
+	Pairing     *pairingplugin.Plugin
+	Credentials *pairing.Gate
 
 	// Hardware is the reader the agent opened, for presenting and removing tags.
 	Hardware *nfc.MockDevice
@@ -86,13 +94,37 @@ func start(t *testing.T, opts options) *harness {
 	hardware := nfc.NewMockManager()
 	hardware.MockDevice.SetTags(opts.Tags)
 
-	rt, err := agent.Setup(o, multimanager.NewMultiManager(
+	// The certificate the listener serves, provisioned before Setup as a
+	// program does: the agent neither serves it nor hands out its authority.
+	certs, err := tlspkg.Provision(o.ConfigDir, false)
+	if err != nil {
+		t.Fatalf("tls.Provision: %v", err)
+	}
+	o.CertFile, o.KeyFile, o.PublicKeyPin = certs.CertFile, certs.KeyFile, certs.PublicKeyPin
+
+	backends := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: hardware},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
-	))
+	)
+
+	// The paired-device manager over them: the credential store, the pairing
+	// machinery and the check that admits a device. It is what the agent holds,
+	// so this build cannot have the readers without the policy guarding them.
+	paired := pairing.New(backends, pairing.Options{
+		ConfigDir:    o.ConfigDir,
+		CA:           certs.Manager,
+		PublicKeyPin: func() string { return certs.PublicKeyPin },
+	})
+
+	rt, err := agent.Setup(o, backends)
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
+
+	paired.UseSecret(rt.Agent.APISecret)
+	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.AllowLoopback(rt.Agent.AllowLoopbackBypass)
+	paired.UsePort(rt.Agent.DevicePort)
 
 	// The listener is a plugin, as it is in docs/custom-builds.md. With none
 	// registered the agent drives the reader and serves nothing. Pairing is a
@@ -100,44 +132,45 @@ func start(t *testing.T, opts options) *harness {
 	// entries go to a menu that draws nothing. The certificate the listener
 	// serves and the authority pairing hands out are the trust plugin's, not
 	// the agent's.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
-	servers := &agent.ServerPlugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
+	servers := &serverplugin.Plugin{
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(o.AllowedOrigins),
 	}
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
-		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         servers.Authenticate(),
+		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
-			Revocations:          rt.Agent.Devices(),
-		}),
+		})),
 	}
 
 	// Pairing is served from the agent's listener, which already serves the
-	// certificate the key pin covers. The bootstrap listener is cleartext and
-	// hands out the CA, so no credential is issued over it. The endpoint is
-	// registered before the server plugin activates, which is when the routes
-	// are mounted.
-	var pairing *agent.PairingPlugin
+	// certificate the key pin covers, and belongs to the paired-device manager,
+	// so it is mounted whether or not the plugin below is built. The endpoint
+	// is registered before the server plugin activates, which is when the
+	// routes are mounted.
+	servers.Add(serverplugin.Endpoint{
+		Name:    "pairing",
+		Pattern: "/pair",
+		Handler: paired.PairHandler(),
+	})
+
+	// The bootstrap listener is cleartext and hands out the CA, so no credential
+	// is issued over it. Only a test wanting that listener asks for the plugin.
+	var pairing *pairingplugin.Plugin
 	if opts.Pairing {
-		pairing = agent.NewPairingPlugin(rt.Agent, freePort(t), rt.Certificates)
-		servers.Add(agent.Endpoint{
-			Name:    "pairing",
-			Pattern: "/pair",
-			Handler: pairing.Server.Server().PairHandler(),
-		})
+		pairing = pairingplugin.New(paired, freePort(t))
 	}
 
 	if err := rt.Agent.Plugins.Add(servers, trust); err != nil {
@@ -151,19 +184,21 @@ func start(t *testing.T, opts options) *harness {
 	}
 
 	h := &harness{
-		Agent:    rt.Agent,
-		Runtime:  rt,
-		Devices:  devices,
-		Servers:  servers,
-		Hardware: hardware.MockDevice,
-		Pairing:  pairing,
-		Origin:   "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
-		scans:    make(chan nfc.NFCData, 32),
+		Agent:       rt.Agent,
+		Runtime:     rt,
+		Devices:     devices,
+		Servers:     servers,
+		Hardware:    hardware.MockDevice,
+		Pairing:     pairing,
+		Credentials: paired,
+		Origin:      "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.Agent.DevicePort())),
+		scans:       make(chan nfc.NFCData, 32),
 	}
+	// Pairing is on the agent's listener, so it is reachable whatever the build
+	// did about the cleartext one. Bootstrap is that cleartext listener, and
+	// exists only where a test asked for it.
+	h.Pair = h.Origin
 	if pairing != nil {
-		// Pairing is on the agent's listener; Bootstrap is the cleartext
-		// listener that hands out the CA.
-		h.Pair = h.Origin
 		h.Bootstrap = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(pairing.Port()))
 	}
 
@@ -179,8 +214,8 @@ func start(t *testing.T, opts options) *harness {
 	}
 	t.Cleanup(rt.Agent.Shutdown)
 
-	if h.Pair != "" {
-		// The pairing server serves on a goroutine and does not bind before
+	if h.Bootstrap != "" {
+		// The bootstrap listener serves on a goroutine and does not bind before
 		// Start returns, so a request sent immediately can beat it there.
 		waitForListener(t, h.Bootstrap[len("http://"):])
 	}
@@ -285,8 +320,10 @@ func (h *harness) dial(t *testing.T, path string, subprotocols []string) (*webso
 func (h *harness) client(t *testing.T) *websocket.Conn {
 	t.Helper()
 
+	// Signal.Connect rather than Connect: the property would replay the
+	// current count before the dial, and the wait below would pass on it.
 	registered := make(chan struct{}, 1)
-	sub := h.Servers.OnClientsChange(func(int) {
+	sub := h.Servers.Events().Clients.Signal.Connect(func(int) {
 		select {
 		case registered <- struct{}{}:
 		default:

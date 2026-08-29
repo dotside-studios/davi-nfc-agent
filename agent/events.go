@@ -14,7 +14,6 @@ const (
 	ChangeState Change = iota
 	ChangePreferences
 	ChangeServers
-	ChangeDevices
 )
 
 func (c Change) String() string {
@@ -25,8 +24,6 @@ func (c Change) String() string {
 		return "preferences"
 	case ChangeServers:
 		return "servers"
-	case ChangeDevices:
-		return "devices"
 	}
 	return "change(" + strconv.Itoa(int(c)) + ")"
 }
@@ -41,16 +38,20 @@ func (c Change) String() string {
 // connected, and the typed signal fires before Any. A handler must not block:
 // hand slow work to a goroutine of your own. Connecting and disconnecting is
 // safe at any time, including from inside a handler and while the agent runs.
+//
+// The signals carrying state are [event.Property]: connecting calls the handler
+// with the current value, so a subscriber draws its first frame without reading
+// the agent separately. Tag, Reader and Any carry traffic and do not.
 type Events struct {
 	// State carries every settled lifecycle transition.
-	State event.Signal[State]
+	State event.Property[State]
 
 	// Preferences carries the preferences after each change, whoever made it.
-	Preferences event.Signal[Preferences]
+	Preferences event.Property[Preferences]
 
 	// Servers carries the agent's configured port, after a listener has bound
 	// again. Emitted when a reissued certificate rebinds one.
-	Servers event.Signal[int]
+	Servers event.Property[int]
 
 	// Reader carries the reader's status: whether it is connected, and whether
 	// a card is on it. Emitted while the agent runs, which is when there is a
@@ -61,12 +62,9 @@ type Events struct {
 	Reader event.Signal[nfc.DeviceStatus]
 
 	// Readers carries the readers that can be picked, whenever the set
-	// changes. Silent on a manager that does not report device changes.
-	Readers event.Signal[[]string]
-
-	// Devices carries the paired devices after each pairing and revocation.
-	// Silent on an agent built without a registry.
-	Devices event.Signal[[]PairedDevice]
+	// changes. Emitted on a manager that reports device changes; the current
+	// value is [Agent.Readers] either way.
+	Readers event.Property[[]string]
 
 	// Tag carries every scan the agent broadcasts, so a program embedding the
 	// agent acts on cards without connecting to its own WebSocket endpoint.
@@ -85,13 +83,14 @@ type Events struct {
 // restart.
 func (a *Agent) Events() *Events { return &a.events }
 
-// watchStores republishes the device store through the agent, so a subscriber
-// follows one surface rather than two. Called from New, before the
-// agent is handed out.
-func (a *Agent) watchStores() {
-	if a.devices != nil {
-		a.devices.changed.Connect(a.fireDevicesChanged)
-	}
+// publishEvents points the state-carrying signals at what they report on, so
+// connecting to one answers with the current value. Called from New, before the
+// agent is handed out; the functions run on the subscriber's goroutine.
+func (a *Agent) publishEvents() {
+	a.events.State.Current = a.State
+	a.events.Preferences.Current = a.Preferences
+	a.events.Servers.Current = a.DevicePort
+	a.events.Readers.Current = a.Readers
 }
 
 // watchManager republishes the manager's device changes as Events().Readers. It
@@ -129,14 +128,14 @@ func (a *Agent) firePreferencesChanged() {
 	a.events.Any.Emit(ChangePreferences)
 }
 
+// ServerRebound reports that a listener bound again, raising Events().Servers
+// with the agent's configured port. Called by whatever serves the agent, which
+// is a plugin rather than the agent itself, so the agent cannot raise it.
+func (a *Agent) ServerRebound() { a.fireServerRestart() }
+
 func (a *Agent) fireServerRestart() {
 	a.events.Servers.Emit(a.DevicePort())
 	a.events.Any.Emit(ChangeServers)
-}
-
-func (a *Agent) fireDevicesChanged(devices []PairedDevice) {
-	a.events.Devices.Emit(devices)
-	a.events.Any.Emit(ChangeDevices)
 }
 
 func (a *Agent) fireReaderStatus(status nfc.DeviceStatus) {

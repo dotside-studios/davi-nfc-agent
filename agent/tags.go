@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -100,7 +101,7 @@ func (a *Agent) operateOn(device string) (string, error) {
 
 // WriteTag encodes msg onto the tag the named device is holding, locking it
 // afterwards when lock is set.
-func (a *Agent) WriteTag(device, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
+func (a *Agent) WriteTag(ctx context.Context, device, tagUID string, msg *nfc.NDEFMessage, lock bool, idempotencyKey string) (*nfc.WriteResult, error) {
 	readers := a.supervisor.Load()
 	if readers == nil {
 		return nil, errNotServing
@@ -109,11 +110,11 @@ func (a *Agent) WriteTag(device, tagUID string, msg *nfc.NDEFMessage, lock bool,
 	if err != nil {
 		return nil, err
 	}
-	return readers.WriteTag(device, tagUID, msg, lock, idempotencyKey)
+	return readers.WriteTag(ctx, device, tagUID, msg, lock, idempotencyKey)
 }
 
 // LockTag makes the tag the named device is holding permanently read-only.
-func (a *Agent) LockTag(device, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
+func (a *Agent) LockTag(ctx context.Context, device, tagUID, idempotencyKey string) (*nfc.LockResult, error) {
 	readers := a.supervisor.Load()
 	if readers == nil {
 		return nil, errNotServing
@@ -122,11 +123,11 @@ func (a *Agent) LockTag(device, tagUID, idempotencyKey string) (*nfc.LockResult,
 	if err != nil {
 		return nil, err
 	}
-	return readers.LockTag(device, tagUID, idempotencyKey)
+	return readers.LockTag(ctx, device, tagUID, idempotencyKey)
 }
 
 // TransceiveTag exchanges raw bytes with the tag the named device is holding.
-func (a *Agent) TransceiveTag(device, tagUID string, data []byte, raw bool) ([]byte, error) {
+func (a *Agent) TransceiveTag(ctx context.Context, device, tagUID string, data []byte, raw bool) ([]byte, error) {
 	readers := a.supervisor.Load()
 	if readers == nil {
 		return nil, errNotServing
@@ -135,11 +136,11 @@ func (a *Agent) TransceiveTag(device, tagUID string, data []byte, raw bool) ([]b
 	if err != nil {
 		return nil, err
 	}
-	return readers.TransceiveTag(device, tagUID, data, raw)
+	return readers.TransceiveTag(ctx, device, tagUID, data, raw)
 }
 
 // TagCapabilities reports what the tag the named device is holding supports.
-func (a *Agent) TagCapabilities(device, tagUID string) (*nfc.TagCapabilities, error) {
+func (a *Agent) TagCapabilities(ctx context.Context, device, tagUID string) (*nfc.TagCapabilities, error) {
 	readers := a.supervisor.Load()
 	if readers == nil {
 		return nil, errNotServing
@@ -148,5 +149,5 @@ func (a *Agent) TagCapabilities(device, tagUID string) (*nfc.TagCapabilities, er
 	if err != nil {
 		return nil, err
 	}
-	return readers.TagCapabilities(device, tagUID)
+	return readers.TagCapabilities(ctx, device, tagUID)
 }

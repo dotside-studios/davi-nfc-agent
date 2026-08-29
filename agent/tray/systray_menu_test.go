@@ -31,7 +31,11 @@ func newTestTray(t *testing.T, a *nfcagent.Agent) (*App, *traymenu.Fake) {
 	fake := traymenu.NewFake()
 	app := newApp(&nfcagent.Runtime{Agent: a}, fake)
 	t.Cleanup(app.menu.Close)
+
+	// As onReady does it: setupUI declares the entries, subscribe draws what
+	// the agent is set to into them.
 	app.setupUI()
+	app.subscribe()
 	return app, fake
 }
 
@@ -61,10 +65,9 @@ func TestMenuLayout(t *testing.T) {
 		"----",
 		"Mode: Read/Write",
 		"Flash and Beep on Scan",
+		"Allow Raw APDU Channel",
 		"----",
 		"Card Type Filter",
-		"----",
-		"Paired Devices",
 		"----",
 		"Start Agent",
 		"Stop Agent",
@@ -249,70 +252,6 @@ func TestReaderFeedbackToggleReachesTheAgent(t *testing.T) {
 	app.mReaderFeedback.Click()
 	if app.mReaderFeedback.Checked() || agent.ReaderFeedback() {
 		t.Error("clicking again did not turn the feedback back off")
-	}
-}
-
-func TestPairedDevicesMenuCountsAndRevokes(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-
-	app, _ := newTestTray(t, agent)
-
-	if app.mDevicesMenu.Title() != "Paired Devices (none)" {
-		t.Errorf("title = %q, want %q", app.mDevicesMenu.Title(), "Paired Devices (none)")
-	}
-	if app.mRevokeAllDevices.Visible() {
-		t.Error("Revoke all devices is offered with nothing paired")
-	}
-
-	if _, _, err := registry.Pair("Pixel", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-	app.refreshDevicesMenu()
-
-	if app.mDevicesMenu.Title() != "Paired Devices (1)" {
-		t.Errorf("title = %q, want %q", app.mDevicesMenu.Title(), "Paired Devices (1)")
-	}
-	rows := app.pairedDevices.Rows()
-	if len(rows) != 1 || rows[0].Title != "Pixel (android)" {
-		t.Fatalf("rows = %v, want one row labelled %q", rows, "Pixel (android)")
-	}
-
-	app.pairedDevices.Items()[0].Click()
-
-	if registry.Count() != 0 {
-		t.Fatal("the device was not revoked")
-	}
-	if app.pairedDevices.Len() != 0 {
-		t.Fatal("the revoked device is still on the menu")
-	}
-}
-
-func TestRequirePairingRefusesToLockEveryoneOut(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-
-	app, _ := newTestTray(t, agent)
-
-	// Nothing is paired, so requiring pairing would refuse every device.
-	app.mRequirePaired.Click()
-	if app.mRequirePaired.Checked() || agent.RequirePairedDevice() {
-		t.Fatal("pairing was required with no paired device to admit")
-	}
-
-	if _, _, err := registry.Pair("Pixel", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-	app.mRequirePaired.Click()
-
-	if !app.mRequirePaired.Checked() || !agent.RequirePairedDevice() {
-		t.Fatal("pairing was not required once a device had paired")
 	}
 }
 

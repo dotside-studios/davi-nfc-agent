@@ -7,8 +7,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/tls"
 )
 
 // Default ports. The agent serves devices and clients from one listener.
@@ -41,18 +39,31 @@ type Options struct {
 
 	APISecret string
 
-	// CertFile and KeyFile are a certificate provisioned outside this agent,
-	// which turns AutoTLS off. Setup does not read them either: what serves a
-	// certificate is the program's decision, so it passes them to whatever
-	// does, as [listener.Config] on a [ServerPlugin].
+	// CertFile and KeyFile are the certificate a listener should serve. Setup
+	// does not read them: what serves a certificate is the program's decision,
+	// so it passes them to whatever does, as listener.Config on the server
+	// plugin.
 	CertFile string
 	KeyFile  string
 
+	// PublicKeyPin identifies this agent to devices across certificate
+	// reissues. It reaches the agent as it is; [tls.Provision] reports one for
+	// a certificate the program had it manage.
+	PublicKeyPin string
+
+	// AutoTLS and InstallCA are what the launcher asked for. Setup reads
+	// neither: provisioning a certificate is the program's, through
+	// [tls.Provision].
 	AutoTLS             bool
 	ConfigDir           string
 	AllowedOrigins      string
 	InstallCA           bool
 	RequirePairedDevice bool
+
+	// AllowLoopbackBypass admits connections from this host with no
+	// credential; see [Config.AllowLoopbackBypass]. Off by default. Setup also
+	// reads DAVI_NFC_ALLOW_LOOPBACK_BYPASS=1.
+	AllowLoopbackBypass bool
 
 	// Mode is the access mode the reader runs in, CardTypes the types a scan
 	// may carry, and ReaderFeedback has the reader announce what it does. They
@@ -61,6 +72,12 @@ type Options struct {
 	Mode           nfc.ReaderMode
 	CardTypes      []string
 	ReaderFeedback bool
+
+	// AllowRawAPDU opens the raw APDU channel at startup; see
+	// [Config.AllowRawAPDU]. Off by default, so a launcher that says nothing
+	// starts with raw exchanges refused. Setup also reads
+	// DAVI_NFC_ALLOW_RAW_APDU=1.
+	AllowRawAPDU bool
 
 	// Info is what this build calls itself; see agent.Config.Info. It decides
 	// the default config directory, so a program with its own identity should
@@ -97,23 +114,10 @@ type Runtime struct {
 	// selects the first reader, and waits if none is attached yet.
 	DevicePath string
 
-	// Certificates is the certificate the agent manages for itself, nil for a
-	// build serving one provisioned elsewhere. Wrap it in a [TrustPlugin] for
-	// the tray entry that installs the authority behind it, and hand it to
-	// [NewPairingPlugin] as the authority a pairing device is given.
-	Certificates *tls.Manager
-
-	// CertFile and KeyFile are the certificate a listener should serve: the one
-	// named by Options, or the one Certificates manages, or empty for a build
-	// serving plain HTTP. Resolved here so every build does not repeat the
-	// fallback; put them on [ServerPlugin.Config].
-	CertFile string
-	KeyFile  string
-
-	// AllowedOrigins is what Options named, parsed. Put it on
-	// [ServerPlugin.AllowedOrigins]: the allowlist belongs to what serves the
-	// connections it admits.
-	AllowedOrigins []string
+	// ConfigDir is where the agent persists its state, as Options named it or
+	// as DefaultConfigDir resolved it. A program provisioning a certificate
+	// under the same directory resolves it the same way, before Setup.
+	ConfigDir string
 }
 
 // Setup builds a configured agent from opts, reading and writing the config
@@ -127,31 +131,12 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	info := opts.Info.OrDefault()
 	agentLog.Printf("Starting %s %s", info.Name, info.FullVersion())
 
-	// Resolve the config directory once, for both the TLS manager and the
-	// persistent API secret.
+	// Resolve the config directory once, for both the credential store and the
+	// persistent API secret. A program assembling components that hold state
+	// there sets opts.ConfigDir itself, so both land on the same directory.
 	configDir := opts.ConfigDir
 	if configDir == "" {
 		configDir = DefaultConfigDir(info.DirName)
-	}
-
-	// The certificate this agent manages for itself, unless one was
-	// provisioned outside it. Setup builds it because it is config-directory
-	// state; what serves it, hands out its authority and offers to install it
-	// is the program's business.
-	var tlsMgr *tls.Manager
-	var agentPublicKeyPin string
-	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
-		tlsMgr = tls.NewManager(configDir)
-		tlsMgr.UseCA(opts.InstallCA)
-		if _, _, err := tlsMgr.EnsureCertificates(); err != nil {
-			agentWarn.Printf("Auto-TLS failed: %v (running without TLS)", err)
-			tlsMgr = nil
-		} else if pin, err := tlsMgr.PublicKeyPin(); err == nil {
-			// Native devices authenticate the agent by this value rather than
-			// by a trust store, so log it where a first run will show it.
-			agentLog.Printf("Agent public key pin: %s", pin)
-			agentPublicKeyPin = pin
-		}
 	}
 
 	// Resolve the API secret. Explicit -api-secret takes precedence;
@@ -171,18 +156,17 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		}
 	}
 
-	// Load the paired-device registry. Each device gets its own credential, so
-	// one can be revoked without logging out the rest.
-	devices, err := NewDeviceRegistry(configDir)
-	if err != nil {
-		agentWarn.Printf("failed to load paired devices: %v", err)
-		devices, _ = NewDeviceRegistry("")
-	}
-
 	// Asked for on the command line or in the environment, as opposed to
 	// remembered from a previous run. The distinction matters below: a stored
 	// preference may raise the requirement but not withdraw one set here.
 	askedForPairing := opts.RequirePairedDevice || os.Getenv("DAVI_NFC_REQUIRE_PAIRED_DEVICES") == "1"
+
+	// Same distinction for the loopback bypass: off unless this run asks for
+	// it, and nothing stored turns it on.
+	askedForLoopbackBypass := opts.AllowLoopbackBypass || os.Getenv("DAVI_NFC_ALLOW_LOOPBACK_BYPASS") == "1"
+
+	// And for the raw APDU channel: off unless this run opens it.
+	askedForRawAPDU := opts.AllowRawAPDU || os.Getenv("DAVI_NFC_ALLOW_RAW_APDU") == "1"
 
 	devicePort := opts.DevicePort
 	if devicePort == 0 {
@@ -191,11 +175,16 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		devicePort = DefaultDevicePort
 	}
 
+	if askedForLoopbackBypass {
+		agentWarn.Printf("Loopback bypass enabled: anything on this host reaches the agent without the API secret")
+	}
+
 	if askedForPairing {
-		agentLog.Printf("Paired devices required: the shared secret and loopback bypass no longer admit a device")
-		if devices.Count() == 0 {
-			agentWarn.Printf("no devices are paired yet, so every device connection will be refused until one pairs")
-		}
+		agentLog.Printf("Paired devices required: the shared secret no longer admits a device")
+	}
+
+	if askedForRawAPDU {
+		agentWarn.Printf("Raw APDU channel enabled: clients can send raw exchanges that reach a tag unmodified")
 	}
 
 	// Everything the agent runs on is settled by this point, which is why it
@@ -203,39 +192,28 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	//
 	// Not the listener: that is a plugin the caller registers, which is what
 	// lets a build decide what it serves. See [ServerPlugin].
-	// The pair a listener serves: the one Options named, or the one the manager
-	// keeps. As a pair, since half a certificate is not something to complete
-	// from somewhere else.
-	certFile, keyFile := opts.CertFile, opts.KeyFile
-	if certFile == "" && keyFile == "" && tlsMgr != nil {
-		certFile, keyFile = tlsMgr.GetCertFile(), tlsMgr.GetKeyFile()
-	}
-
 	a := New(Config{
 		Manager:             manager,
 		Info:                info,
 		DevicePort:          devicePort,
 		APISecret:           apiSecret,
 		ConfigDir:           configDir,
-		Devices:             devices,
-		PublicKeyPin:        agentPublicKeyPin,
+		PublicKeyPin:        opts.PublicKeyPin,
 		Logs:                opts.Logs,
 		RequirePairedDevice: askedForPairing,
+		AllowLoopbackBypass: askedForLoopbackBypass,
 		ReaderFeedback:      opts.ReaderFeedback,
+		AllowRawAPDU:        askedForRawAPDU,
 		Mode:                opts.Mode,
 		CardTypes:           opts.CardTypes,
 		DevicePath:          opts.DevicePath,
 	})
 
 	return &Runtime{
-		Agent:        a,
-		Logs:         opts.Logs,
-		DevicePath:   opts.DevicePath,
-		Certificates: tlsMgr,
-		CertFile:     certFile,
-		KeyFile:      keyFile,
-
-		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
+		Agent:      a,
+		Logs:       opts.Logs,
+		DevicePath: opts.DevicePath,
+		ConfigDir:  configDir,
 	}, nil
 }
 

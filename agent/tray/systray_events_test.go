@@ -12,7 +12,6 @@ import (
 func TestAPreferenceChangedElsewhereRedrawsTheMenu(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	agent.SetReaderMode(nfc.ModeWriteOnly)
 
@@ -21,33 +20,11 @@ func TestAPreferenceChangedElsewhereRedrawsTheMenu(t *testing.T) {
 	}
 }
 
-// A device paired from the console or over the pairing server shows up without
-// the operator reopening the menu.
-func TestADevicePairedElsewhereRedrawsTheMenu(t *testing.T) {
-	registry, err := nfcagent.NewDeviceRegistry(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDeviceRegistry: %v", err)
-	}
-	agent := newTestAgentWith(nfcagent.Config{Devices: registry})
-	app, _ := newTestTray(t, agent)
-	app.subscribe()
-
-	if _, _, err := registry.Pair("phone", "android"); err != nil {
-		t.Fatalf("Pair: %v", err)
-	}
-
-	rows := app.pairedDevices.Rows()
-	if len(rows) != 1 || rows[0].Title != "phone (android)" {
-		t.Errorf("the menu shows %v, want the paired device", rows)
-	}
-}
-
 // The card lines follow the scans and the reader's status, which is what
 // replaced polling the last card twice a second.
 func TestTheCardLinesFollowTheReader(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	agent.Events().Tag.Emit(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04A1B2C3"))})
 	if got := app.mCardUID.Title(); got != "Card UID: 04A1B2C3" {
@@ -64,7 +41,6 @@ func TestTheCardLinesFollowTheReader(t *testing.T) {
 func TestAStopElsewhereReachesTheControls(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 
 	agent.Events().State.Emit(nfcagent.StateRunning)
 	if app.mStatus.Title() != "Running" {
@@ -88,7 +64,6 @@ func TestAStopElsewhereReachesTheControls(t *testing.T) {
 func TestAReaderPickedElsewhereMovesTheTick(t *testing.T) {
 	agent := newTestAgent()
 	app, _ := newTestTray(t, agent)
-	app.subscribe()
 	app.applyReaders([]string{"mock:usb:001", "ACS ACR122U 00"})
 
 	if err := agent.Start("ACS ACR122U 00"); err != nil {

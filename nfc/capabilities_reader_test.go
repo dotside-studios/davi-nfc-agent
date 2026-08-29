@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -21,7 +22,7 @@ func TestGetCapabilities_Success(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	caps, err := reader.GetCapabilities()
+	caps, err := reader.GetCapabilities(context.Background())
 	if err != nil {
 		t.Fatalf("GetCapabilities() failed: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestGetCapabilities_MultipleCards(t *testing.T) {
 	t.Cleanup(reader.Close)
 	time.Sleep(100 * time.Millisecond)
 
-	if _, err := reader.GetCapabilities(); err == nil {
+	if _, err := reader.GetCapabilities(context.Background()); err == nil {
 		t.Fatal("expected error when multiple cards are present")
 	}
 }

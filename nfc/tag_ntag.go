@@ -108,6 +108,15 @@ func (t *pcscNtagTag) ReadData() ([]byte, error) {
 }
 
 func (t *pcscNtagTag) WriteData(data []byte) error {
+	// Refuse a write to a locked tag up front. Without this, each page write
+	// NAKs with an opaque status word and the write path retries a permanent
+	// condition to exhaustion; a typed read-only error aborts it immediately and
+	// tells the caller why. A read error here (e.g. the card was removed) is left
+	// to the page writes below to surface as usual.
+	if locked, err := t.ndefAreaLocked(); err == nil && locked {
+		return NewReadOnlyError("WriteData (NTAG)", t.UID(), nil)
+	}
+
 	// Build TLV payload
 	tlvPayload := TLVEncode(data, TLVNDEF)
 
@@ -138,9 +147,19 @@ func (t *pcscNtagTag) WriteData(data []byte) error {
 }
 
 func (t *pcscNtagTag) IsWritable() (bool, error) {
-	// Try to read page 4
-	_, err := t.readPage(4)
-	return err == nil, nil
+	// The tag must be reachable at all: an unreadable page 4 means a removed or
+	// dead tag, not a writable one.
+	if _, err := t.readPage(4); err != nil {
+		return false, nil
+	}
+	// A readable page can still be locked. Consult the lock bytes so a locked tag
+	// reports itself read-only rather than writable — locked pages stay readable,
+	// so a readability check alone would lie.
+	locked, err := t.ndefAreaLocked()
+	if err != nil {
+		return false, err
+	}
+	return !locked, nil
 }
 
 func (t *pcscNtagTag) CanMakeReadOnly() (bool, error) {

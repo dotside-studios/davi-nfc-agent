@@ -8,6 +8,25 @@
  * Connects to the agent's device endpoint (/ws?mode=device) on the shared agent
  * port (default 9470); web clients use NFCClient (plain /ws) on the same port.
  *
+ * Pair before connecting. The agent's QR, read off the kiosk screen, carries
+ * the address, its public key pin and the PIN:
+ *
+ *   davi-pair://<host>:9470/?spki=sha256%2F...&code=123456&name=Davi%20NFC%20Agent
+ *
+ * Pin the TLS connection to spki, POST {"deviceName","platform"} to
+ * https://<host>:9470/pair?pin=<code>, and store the deviceToken from the
+ * response; it is returned once. Pairing is served from the agent's port, not
+ * the cleartext bootstrap listener, and is refused with 426 Upgrade Required
+ * over cleartext from anything but loopback.
+ *
+ * Present the token, or the shared API secret, as ?secret= on the server URL
+ * or as an Authorization: Bearer header. Loopback needs one too, unless the
+ * agent runs with -allow-loopback-bypass.
+ *
+ * The device endpoint caps an inbound frame at 256 KB and drops the session of
+ * a device that exceeds it. Revoking a device's credential closes its session
+ * with a policy-violation close (1008). Both arrive here as 'disconnected'.
+ *
  * @example Browser
  * const client = new NFCDeviceClient('ws://localhost:9470', {
  *   deviceName: 'My NFC Device',

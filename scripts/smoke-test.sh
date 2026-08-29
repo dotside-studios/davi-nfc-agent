@@ -42,6 +42,12 @@ if [ "$GOOS" = "linux" ] && [ "$GOARCH" = "arm64" ] && [ "$HOST_ARCH" != "arm64"
         exit 1
     fi
     RUNNER=(qemu-aarch64-static)
+    # The linux binary is dynamically linked (goscard loads libpcsclite at
+    # runtime through purego), so qemu must resolve the arm64 loader and libc.
+    # Point it at the cross-compiled libc tree when one is installed.
+    if [ -e /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 ]; then
+        RUNNER=(qemu-aarch64-static -L /usr/aarch64-linux-gnu)
+    fi
 fi
 
 echo "Host: ${HOST_OS}/${HOST_ARCH}"

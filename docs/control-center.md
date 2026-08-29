@@ -69,8 +69,11 @@ in the console only; the agent does not persist it.
 - A **raw exchange (APDU)** console: hex in, hex and ASCII out, with ISO 7816
   status words decoded, per-exchange timing, presets built from the commands
   `nfc/apdu.go` already constructs, and a toggle between APDU-level and
-  framing-level exchange. Refused in read-only mode, since the agent cannot
-  tell a `SELECT` from a write to a configuration page.
+  framing-level exchange. Gated behind the **raw APDU channel**, a toggle under
+  the reader controls that is off by default: a raw command reaches the tag
+  unmodified and can lock or brick it, so the channel that carries one stays
+  closed until an operator opens it. Also refused in read-only mode, since the
+  agent cannot tell a `SELECT` from a write to a configuration page.
 
 The console writes over the ordinary client endpoint, exactly as an application
 would, so there is one implementation of the write path.
@@ -246,7 +249,7 @@ Everything in `agent/console/` carries `//go:build !nowebui` except
 the stubs under the opposite tag.
 
 The agent itself needs no tag either way, and does not know the console at all.
-`Endpoints` returns `[]agent.Endpoint`, which the program hands to the server
+`Endpoints` returns `[]serverplugin.Endpoint`, which the program hands to the server
 plugin like any other route, so the dependency runs one way: `agent/console`
 imports `agent`, never the reverse, and `main` is the only place that wires the
 two together. Under `nowebui` that call returns nothing and the rest of the

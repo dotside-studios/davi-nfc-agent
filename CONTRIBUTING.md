@@ -114,7 +114,9 @@ davi-nfc-agent/
 │   ├── agent.go         # Core agent logic
 │   ├── setup.go         # Options and Setup, what the flags resolve to
 │   ├── plugin.go        # Plugin, AgentContext, activation
-│   ├── serverplugin.go  # The listener and everything served from it
+│   ├── serverplugin/    # The listener and everything served from it
+│   ├── pairingplugin/   # The pairing listener and its tray entries
+│   ├── trustplugin/     # Installing the local certificate authority
 │   ├── console/         # Control center: API, frontend, agent adapter
 │   │                    #   (-tags nowebui drops it)
 │   └── tray/            # System tray UI (the only fyne.io/systray dependency)
@@ -132,11 +134,13 @@ davi-nfc-agent/
 │   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
 │   ├── clientserver/    # Client connections, and the tag operations they ask
 │   │                    #   for, resolved against whatever holds the tag
+│   ├── netinfo/         # The addresses this machine serves on
 │   └── wsconn/          # Write-safe WebSocket wrapper shared by the above
 ├── traymenu/            # Declarative tray menus, with no toolkit behind them
 │   └── fynetray/        # The real tray, on fyne.io/systray
 ├── clipboard/           # Copying text to the system clipboard
-├── tls/                 # Auto-TLS certificate management
+├── secure/              # Restricting a file or directory to the current user
+│   └── tls/             # Auto-TLS certificates, the local CA, and pairing
 ├── protocol/            # Protocol definitions
 ├── client/              # TypeScript client library (src/), plus its built dist/
 ├── scripts/             # Build scripts
@@ -157,7 +161,7 @@ davi-nfc-agent/
   - **listener**: the listener itself, and the mux of what was mounted on it.
     It knows nothing about NFC
   - **clientserver**: fans a scan out to every connected client, serves their
-    requests, and resolves the tag each one names. `agent.ServerPlugin` runs
+    requests, and resolves the tag each one names. `serverplugin.Plugin` runs
     one and mounts the routes it is reached on
 - A client request is a call rather than a message on a channel: there is no
   bridge between the two halves
@@ -171,10 +175,11 @@ davi-nfc-agent/
 - Depends on nothing else in this repository
 - See [traymenu/README.md](traymenu/README.md) for the pattern
 
-**TLS Layer** (`tls/`)
-- Automatic certificate generation
-- Network change detection
-- CA bootstrap server for device setup
+**Security** (`secure/`)
+- `secure` restricts a file or directory to the current user, which is what
+  guards the certificate, the API secret and the device credentials on disk
+- `secure/tls` manages the certificate: generation, the local authority,
+  network change detection, and the CA bootstrap server a device pairs through
 
 ## Code Style
 

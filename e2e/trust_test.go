@@ -70,8 +70,8 @@ func TestPairingIssuesTheCredentialThatAdmitsADevice(t *testing.T) {
 		t.Errorf("pairing pointed the device at port %d, want %d", paired.AgentPort, h.Agent.DevicePort())
 	}
 
-	// Withdraw the shared secret and the loopback bypass, which is what the
-	// tray toggle and -require-paired-devices do.
+	// Withdraw the shared secret, which is what the tray toggle and
+	// -require-paired-devices do.
 	h.Agent.SetRequirePairedDevice(true)
 
 	if _, _, err := h.dial(t, "/ws?mode=device&secret="+apiSecret, nil); err == nil {
@@ -112,7 +112,7 @@ func pairDevice(t *testing.T, h *harness) pairedDevice {
 	// Pairing is pinned to the key the device learned out of band, which is the
 	// point: the credential and the pin are issued over a channel that value
 	// already authenticates.
-	resp, err := h.httpClient(t).Post(h.Pair+"/pair?pin="+h.Pairing.PIN(), "application/json", bytes.NewReader(body))
+	resp, err := h.httpClient(t).Post(h.Pair+"/pair?pin="+h.Credentials.PairingServer().PIN(), "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST /pair: %v", err)
 	}
@@ -132,7 +132,7 @@ func pairDevice(t *testing.T, h *harness) pairedDevice {
 func TestARevokedDeviceIsRefused(t *testing.T) {
 	h := start(t, options{Pairing: true})
 
-	pin := h.Pairing.PIN()
+	pin := h.Credentials.PairingServer().PIN()
 	resp, err := h.httpClient(t).Post(h.Pair+"/pair?pin="+pin, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST /pair: %v", err)
@@ -148,7 +148,7 @@ func TestARevokedDeviceIsRefused(t *testing.T) {
 	}
 
 	h.Agent.SetRequirePairedDevice(true)
-	if err := h.Agent.Devices().Revoke(paired.DeviceID); err != nil {
+	if err := h.Credentials.PairedDevices().Revoke(paired.DeviceID); err != nil {
 		t.Fatalf("revoke the device: %v", err)
 	}
 
@@ -220,5 +220,30 @@ func TestAPairedDeviceReconnectsAsItself(t *testing.T) {
 	})
 	if data := h.observed(t); data.Card == nil || data.Card.UID != "04:FE:ED:FA:CE" {
 		t.Errorf("the agent saw %+v, want the scan from the device that reconnected", data)
+	}
+}
+
+// The cleartext bootstrap listener and the endpoint that issues a credential are
+// separate things. A build that binds no bootstrap listener still pairs devices
+// over /pair, which is what the paired-device manager holds; only the CA
+// download and the tray entries go with the listener.
+//
+// The two used to be wired together, so a zero bootstrap port left an agent with
+// a working credential store that nothing could reach.
+func TestPairingWorksWithNoBootstrapListener(t *testing.T) {
+	h := start(t, options{})
+
+	if h.Pairing != nil {
+		t.Fatal("a bootstrap listener was built for a test that asked for none")
+	}
+
+	device := pairDevice(t, h)
+	if device.DeviceToken == "" {
+		t.Fatal("pairing issued no credential")
+	}
+
+	// The credential admits, which is what pairing is for.
+	if _, deviceID, _ := h.phone(t, device.DeviceToken, phoneCapabilities()); deviceID != device.DeviceID {
+		t.Errorf("the paired device registered as %q, want %q", deviceID, device.DeviceID)
 	}
 }

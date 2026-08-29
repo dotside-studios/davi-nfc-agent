@@ -35,11 +35,18 @@ type Manager struct {
 	// Policy supplied by the agent through Handler.
 	publicKeyPin         func() string
 	allowTagModification func() bool
-	revocations          *event.Connection // Ends the session of a revoked device
 
 	sessions    map[string]*wsconn.SafeConn // deviceID -> connection
 	sessionConn map[*wsconn.SafeConn]string // reverse lookup
 	sessionsMu  sync.RWMutex
+
+	// registerMu serializes registration so the replace-old-then-install-new
+	// sequence is atomic. The session check and the session install are separate
+	// lock acquisitions; without this, two registrations for one identity can
+	// each miss the other and leave both connections live and mapped to the one
+	// device — orphaned sessions no operation can reach. Registration is not a hot
+	// path, so a single lock across it is cheap.
+	registerMu sync.Mutex
 
 	pending   map[string]pendingRequest // requestID -> waiter
 	pendingMu sync.Mutex
@@ -358,12 +365,7 @@ func (m *Manager) Close() {
 		return
 	}
 	m.closed = true
-	// Nothing left to revoke a session from.
-	revocations := m.revocations
-	m.revocations = nil
 	m.mu.Unlock()
-
-	revocations.Disconnect()
 
 	// Stop cleanup routine
 	if m.cleanupTicker != nil {

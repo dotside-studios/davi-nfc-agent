@@ -16,8 +16,9 @@ func serveManager(t *testing.T, timeout time.Duration) (*Manager, string) {
 	t.Helper()
 
 	m := NewManager(timeout)
-	// Exercising the protocol, not the credential.
-	return m, newDeviceServer(t, m, ServerOptions{AllowUnauthenticated: true})
+	// Exercising the protocol, not the credential: a bare endpoint admits
+	// every device and mints an identity for each.
+	return m, newDeviceServer(t, m, ServerOptions{})
 }
 
 // newDeviceServer mounts a manager's device endpoint and returns the URL a

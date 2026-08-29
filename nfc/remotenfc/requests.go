@@ -1,6 +1,7 @@
 package remotenfc
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -226,7 +227,7 @@ func (m *Manager) SendToDevice(deviceID string, message any) error {
 
 // request sends a message to a device and waits for the matching response.
 // Writes and transceives share this path.
-func (m *Manager) request(deviceID, requestID, msgType string, payload any, timeout time.Duration) (map[string]any, error) {
+func (m *Manager) request(ctx context.Context, deviceID, requestID, msgType string, payload any, timeout time.Duration) (map[string]any, error) {
 	respCh := make(chan pendingResult, 1)
 
 	m.pendingMu.Lock()
@@ -250,6 +251,8 @@ func (m *Manager) request(deviceID, requestID, msgType string, payload any, time
 	select {
 	case result := <-respCh:
 		return result.payload, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("device %s did not respond within %s", deviceID, timeout)
 	}
@@ -257,10 +260,10 @@ func (m *Manager) request(deviceID, requestID, msgType string, payload any, time
 
 // WriteToDevice asks a device to write the tag it holds and waits for the
 // outcome. A request with Lock set and no message is a lock.
-func (m *Manager) WriteToDevice(deviceID string, req DeviceWriteRequest) (DeviceWriteResponse, error) {
+func (m *Manager) WriteToDevice(ctx context.Context, deviceID string, req DeviceWriteRequest) (DeviceWriteResponse, error) {
 	req.DeviceID = deviceID
 
-	payload, err := m.request(deviceID, req.RequestID, WSTypeDeviceWriteRequest, req, DeviceWriteTimeout)
+	payload, err := m.request(ctx, deviceID, req.RequestID, WSTypeDeviceWriteRequest, req, DeviceWriteTimeout)
 	if err != nil {
 		return DeviceWriteResponse{}, err
 	}
@@ -273,7 +276,7 @@ func (m *Manager) WriteToDevice(deviceID string, req DeviceWriteRequest) (Device
 }
 
 // TransceiveWithDevice sends a raw exchange to the tag a device is holding.
-func (m *Manager) TransceiveWithDevice(deviceID string, req DeviceTransceiveRequest) (DeviceTransceiveResponse, error) {
+func (m *Manager) TransceiveWithDevice(ctx context.Context, deviceID string, req DeviceTransceiveRequest) (DeviceTransceiveResponse, error) {
 	req.DeviceID = deviceID
 	if req.TimeoutMS == 0 {
 		req.TimeoutMS = int(DeviceTransceiveTimeout / time.Millisecond)
@@ -283,7 +286,7 @@ func (m *Manager) TransceiveWithDevice(deviceID string, req DeviceTransceiveRequ
 	// honouring its own deadline reports a real error rather than racing ours.
 	timeout := time.Duration(req.TimeoutMS)*time.Millisecond + time.Second
 
-	payload, err := m.request(deviceID, req.RequestID, WSTypeDeviceTransceiveRequest, req, timeout)
+	payload, err := m.request(ctx, deviceID, req.RequestID, WSTypeDeviceTransceiveRequest, req, timeout)
 	if err != nil {
 		return DeviceTransceiveResponse{}, err
 	}
@@ -302,9 +305,13 @@ func (m *Manager) handleDeviceResponse(deviceID string, req protocol.WebSocketRe
 		requestID = req.ID
 	}
 
+	// A device may only answer for its own requests, so the entry is removed only
+	// when the responder owns it. Deleting first and checking after let one device
+	// cancel another's in-flight request by echoing its ID, stranding the real
+	// waiter until its timeout.
 	m.pendingMu.Lock()
 	pending, ok := m.pending[requestID]
-	if ok {
+	if ok && pending.deviceID == deviceID {
 		delete(m.pending, requestID)
 	}
 	m.pendingMu.Unlock()
@@ -314,8 +321,8 @@ func (m *Manager) handleDeviceResponse(deviceID string, req protocol.WebSocketRe
 		return nil
 	}
 
-	// A device may only answer for its own requests.
 	if pending.deviceID != deviceID {
+		deviceWarn.Printf("Ignoring %s from %s for a request owned by %s", req.Type, deviceID, pending.deviceID)
 		return fmt.Errorf("response for %s came from %s", pending.deviceID, deviceID)
 	}
 
@@ -344,13 +351,17 @@ func (m *Manager) failPendingRequests(deviceID string) {
 	}
 }
 
+// The three below implement the nfc.Tag operations, which carry no context:
+// they are reached through nfc.Tag, not through nfc.TagHolder. They use the
+// device timeout alone.
+
 // writeTag writes an encoded NDEF message through the device holding the tag.
 func (m *Manager) writeTag(deviceID, tagUID string, ndef []byte, opts nfc.WriteOptions) error {
 	if !m.tagModificationAllowed() {
 		return readOnlyModeError("WriteData", tagUID)
 	}
 
-	resp, err := m.WriteToDevice(deviceID, DeviceWriteRequest{
+	resp, err := m.WriteToDevice(context.Background(), deviceID, DeviceWriteRequest{
 		RequestID: uuid.NewString(),
 		TagUID:    tagUID,
 		NDEFBytes: ndef,
@@ -375,7 +386,7 @@ func (m *Manager) lockTag(deviceID, tagUID string) error {
 		return readOnlyModeError("MakeReadOnly", tagUID)
 	}
 
-	resp, err := m.WriteToDevice(deviceID, DeviceWriteRequest{
+	resp, err := m.WriteToDevice(context.Background(), deviceID, DeviceWriteRequest{
 		RequestID:      uuid.NewString(),
 		TagUID:         tagUID,
 		Lock:           true,
@@ -397,7 +408,7 @@ func (m *Manager) transceiveTag(deviceID, tagUID string, data []byte, raw bool) 
 		return nil, readOnlyModeError("Transceive", tagUID)
 	}
 
-	resp, err := m.TransceiveWithDevice(deviceID, DeviceTransceiveRequest{
+	resp, err := m.TransceiveWithDevice(context.Background(), deviceID, DeviceTransceiveRequest{
 		RequestID: uuid.NewString(),
 		TagUID:    tagUID,
 		Data:      data,

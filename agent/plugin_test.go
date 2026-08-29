@@ -235,9 +235,6 @@ func TestPluginName(t *testing.T) {
 	if got := PluginName(&recorder{name: "backups", log: &order}); got != "backups" {
 		t.Errorf("PluginName() = %q, want backups", got)
 	}
-	if got := PluginName(&ServerPlugin{}); got != "server" {
-		t.Errorf("PluginName() = %q, want server", got)
-	}
 	if got := PluginName(&unnamed{}); got != "unnamed" {
 		t.Errorf("PluginName() = %q, want the type name", got)
 	}

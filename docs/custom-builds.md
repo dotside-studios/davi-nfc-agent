@@ -27,6 +27,9 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
+	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -36,6 +39,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
+	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 )
 
 func main() {
@@ -54,54 +58,86 @@ func main() {
 
 	// Hardware readers and phones behind one manager, which the agent opens
 	// its reader from.
-	manager := multimanager.NewMultiManager(
+	backends := multimanager.NewMultiManager(
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
 		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
 	)
 
-	rt, err := agent.Setup(opts, manager)
+	// The certificate this agent manages for itself, under the config
+	// directory the agent resolves. Provisioning it is the program's: the
+	// agent neither serves it nor hands out its authority.
+	if opts.ConfigDir == "" {
+		opts.ConfigDir = agent.DefaultConfigDir(opts.Info.OrDefault().DirName)
+	}
+	certs, err := tlspkg.Provision(opts.ConfigDir, opts.InstallCA)
+	if err != nil {
+		log.Fatal(err)
+	}
+	opts.CertFile, opts.KeyFile, opts.PublicKeyPin = certs.CertFile, certs.KeyFile, certs.PublicKeyPin
+
+	// The paired-device manager over the backends: the credential store, the
+	// pairing machinery, and the check that admits a device. It is what the
+	// agent holds, so this build cannot have the readers without the policy
+	// deciding who reaches them. Leave it out and every device is admitted.
+	paired := pairing.New(backends, pairing.Options{
+		ConfigDir:    opts.ConfigDir,
+		CA:           certs.Manager,
+		AppName:      opts.Info.OrDefault().DisplayName,
+		PublicKeyPin: func() string { return certs.PublicKeyPin },
+	})
+
+	rt, err := agent.Setup(opts, backends)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// What it admits on, and what a pairing device is told to connect to, now
+	// that the agent holds them. All read per use.
+	paired.UseSecret(rt.Agent.APISecret)
+	paired.Require(rt.Agent.RequirePairedDevice)
+	paired.UsePort(rt.Agent.DevicePort)
+
 	// The tray entry that installs the local authority, so browsers on this
 	// machine accept the agent.
-	trust := &agent.TrustPlugin{Manager: rt.Certificates}
+	trust := &trustplugin.Plugin{Manager: certs.Manager}
 
 	// The listener and everything on it. Setup builds no listener; the program
 	// decides what this agent serves. Setup resolved which certificate to
 	// serve; Certificates is what rebinds the listener when it is reissued.
-	servers := &agent.ServerPlugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+	servers := &serverplugin.Plugin{
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}
 
-	// The two halves of /ws, both declared here. The agent decides who is
-	// admitted and what is allowed; each protocol decides what its own side
-	// may say.
+	// The two halves of /ws, both declared here. The paired-device manager
+	// decides who is admitted and the agent what is allowed; each protocol
+	// decides what its own side may say.
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,
 			ReaderStatus:         &rt.Agent.Events().Reader,
 		}),
-		server.ModeDevice: devices.Handler(remotenfc.ServerOptions{
-			Authenticate:         servers.Authenticate(),
+		// The driver serves the protocol; Admit decides who gets that far, and
+		// names the device it admitted so the driver registers it under the
+		// identity it paired with. Mount the driver bare and every device is
+		// admitted under an identity of the driver's own minting.
+		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			PublicKeyPin:         rt.Agent.PublicKeyPin,
-		}),
+		})),
 	}
 
 	// Pairing: a listener of its own, and the tray entries that hand out its
-	// address and PIN. The agent holds no pairing server, so it is built here
-	// and passed to the console. It hands the authority to a device that pairs.
-	pairing := agent.NewPairingPlugin(rt.Agent, opts.BootstrapPort, rt.Certificates)
+	// address and PIN. The machinery belongs to the paired-device manager; this
+	// plugin runs its listener and shows its PIN.
+	pairing := pairingplugin.New(paired, opts.BootstrapPort)
 
 	app := tray.New(rt)
 
@@ -109,12 +145,13 @@ func main() {
 	// other addresses. A -tags nowebui build has none, and Endpoints is empty,
 	// so this program needs no build tag of its own.
 	c := console.New(console.Config{
-		Agent:   rt.Agent,
-		Logs:    rt.Logs,
-		Servers: servers,
-		Pairing: pairing,
-		Trust:   trust,
-		Quit:    app.Quit,
+		Agent:         rt.Agent,
+		Logs:          rt.Logs,
+		Servers:       servers,
+		Pairing:       paired,
+		BootstrapPort: opts.BootstrapPort,
+		Certificates:  certs.Manager,
+		Quit:          app.Quit,
 	})
 	servers.Add(c.Endpoints()...)
 
@@ -140,27 +177,51 @@ registers, not part of `Setup`. An agent with none of them drives the reader and
 serves no HTTP, which is a valid build. Binding happens at start, so routes can
 be declared before the port exists. See [Plugins](#plugins).
 
-The certificate is the `*tls.Manager` that `Setup` returns as
-`rt.Certificates`, alongside `rt.CertFile` and `rt.KeyFile`, the pair a listener
-should serve. Each plugin takes the narrow part it needs: `ServerPlugin.Config`
-the files and `ServerPlugin.Certificates` the reissue signal, `NewPairingPlugin`
-the authority a pairing device is given. A build serving a certificate
-provisioned elsewhere passes that pair and leaves `Certificates` nil, there
-being nothing to reissue.
+The certificate is `tls.Provision`'s, called before `Setup` with the config
+directory the agent will use. It reports the `*tls.Manager`, the pair a listener
+serves, and the public key pin, which goes on `Options.PublicKeyPin` so the
+agent hands it to devices. `Setup` provisions nothing: what serves a
+certificate, hands out its authority and offers to install it is the program's.
 
-`agent.TrustPlugin` wraps the same manager for the one job the others do not do:
+Each plugin takes the narrow part it needs: `serverplugin.Plugin.Config` the
+files and `serverplugin.Plugin.Certificates` the reissue signal,
+`pairingplugin.New` the authority a pairing device is given. A build serving a
+certificate provisioned elsewhere names the pair on `Options` and leaves
+`Certificates` nil, there being nothing to reissue.
+
+`trustplugin.Plugin` wraps the same manager for the one job the others do not do:
 the tray entry that installs the local authority, hidden once there is nothing
-left to install. `console.Config.Trust` takes it so the same install can be
-started from a page. Leave `Manager` nil and the plugin is inert.
+left to install. Leave `Manager` nil and the plugin is inert.
 
-Pairing is `agent.PairingPlugin`, which runs the pairing server and owns the
-menu entries that hand out its address and PIN.
-`agent.NewPairingPlugin(a, port, trust)` takes the device registry, the key pin
-and the name from the agent, so nothing already given to `Setup` is repeated.
-Omit the plugin and the build pairs no devices: the console is handed `nil` and
-reports pairing as disabled. For the listener without the menu entries, register
-the component directly with `agent.PairingFor(a, port, ca)` and `ctx.Use` or an
-`agent.Endpoint`.
+The console takes the manager and the gate themselves, not these two plugins:
+both exist before it does, and what it needs from them is the certificate and
+the credentials rather than the tray entries. It follows the server plugin
+instead, which builds its listener when it activates.
+
+Pairing is `pairing.Gate`: the credential store, the endpoint that issues into
+it, the check that admits on it, and the revocation that ends a session when one
+is withdrawn. It is not a manager and is not in the manager tree. What it needs
+of a backend is `pairing.Sessions`, one method, so a revocation can reach a
+session already open; pass the manager tree, or nil for backends holding none.
+
+`pairingplugin.Plugin` runs the gate's cleartext listener and owns pairing's
+tray entries: the address, the PIN, and the paired devices to list and revoke.
+`pairingplugin.New(paired, port)`. Mount `/pair` from the gate, not the plugin:
+`paired.PairHandler()` exists whatever the build does about the cleartext
+listener, so omitting the plugin leaves devices pairing over `/pair` with no CA
+download and no menu entries, and the console handed `nil`. For the listener
+without the menu entries, register
+`pairingplugin.NewServer(paired.PairingServer(), port)` with `ctx.Use` or a
+`serverplugin.Endpoint`.
+
+The agent holds none of this. It neither stores credentials nor reports them, so
+`agent` links no third-party package at all.
+
+Omit the **paired-device manager** and the build pairs nobody and admits
+everyone: hand `backends` to `Setup` and mount the device endpoint bare. That is
+what a build reached only over a trusted transport, and every test, wants. A
+bare `remotenfc` endpoint mints an identity per connection, so devices still
+register, just under no credential.
 
 The NFC backend is `Setup`'s second argument, which is why every package beneath
 `cmd` builds without one. A manager reports what its devices scan through
@@ -266,27 +327,27 @@ none leaves an agent that drives the reader and serves nothing.
 
 | Plugin | Owns |
 |---|---|
-| `agent.ServerPlugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
-| `agent.PairingPlugin` | The pairing server on a port of its own, and the entries showing its address and PIN |
-| `agent.TrustPlugin` | The entry that installs the local certificate authority |
+| `serverplugin.Plugin` | The listener, everything mounted on it, the origin allowlist, and the tray's **Server URLs** and **Allowed Origins** submenus |
+| `pairingplugin.Plugin` | The pairing server's own cleartext listener, and the entries showing its address and PIN |
+| `trustplugin.Plugin` | The entry that installs the local certificate authority |
 
 ```go
-trust := &agent.TrustPlugin{Manager: rt.Certificates}
-servers := &agent.ServerPlugin{
-	Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-	Certificates:   rt.Certificates,
-	AllowedOrigins: rt.AllowedOrigins,
+trust := &trustplugin.Plugin{Manager: certs.Manager}
+servers := &serverplugin.Plugin{
+	Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+	Certificates:   certs.Manager,
+	AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 }
-pairing := agent.NewPairingPlugin(rt.Agent, 9472, rt.Certificates)
+pairing := pairingplugin.New(paired, 9472)
 
 // Pairing issues a durable credential and the key pin a device recognises this
 // agent by, so it is served from the listener that already serves the
 // certificate that pin covers. Port 9472 stays cleartext: it hands out the
 // certificate authority to a device that does not trust that certificate yet.
-servers.Add(agent.Endpoint{
+servers.Add(serverplugin.Endpoint{
 	Name:    "pairing",
 	Pattern: "/pair",
-	Handler: pairing.Server.Server().PairHandler(),
+	Handler: paired.PairHandler(),
 })
 
 rt.Agent.Plugins.Add(servers, pairing, trust)
@@ -296,12 +357,12 @@ The server plugin goes on first. It publishes the listener with `ctx.Serve`,
 which is what backs `ctx.Mount` for every plugin registered after it, and an
 `agent.Mounter` is one method wide so the agent never names a server type.
 
-What goes on that listener is an `agent.Endpoint`: a route, something with a
+What goes on that listener is an `serverplugin.Endpoint`: a route, something with a
 lifetime, a menu entry, or any combination.
 
 ```go
-servers.Add(agent.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
-servers.Add(agent.Endpoint{Name: "queue drain", Component: drain})
+servers.Add(serverplugin.Endpoint{Name: "webhooks", Pattern: "/hooks/", Handler: hooks})
+servers.Add(serverplugin.Endpoint{Name: "queue drain", Component: drain})
 ```
 
 The plugin mounts what the agent is reached on first and reserves it: `/ws`,
@@ -333,20 +394,22 @@ same for anything taking a `server.OriginPolicy`. Both resolve per request, so
 they can be handed over before the plugin has a store and follow an origin
 allowed while the agent runs.
 
-The credential check for a device endpoint is the plugin's too.
-`servers.Authenticate()` is what a build passes as
-`remotenfc.ServerOptions.Authenticate`. It reads `RequirePairedDevice()`,
-`APISecret()` and `TokenVerifier()` off the agent per request, so rotating the
-secret or requiring pairing needs nothing rebuilt, and it can be handed over
-before the plugin activates. One taken from a plugin that never activates
-admits nobody.
+The credential check for a device endpoint is not the plugin's. It belongs to
+whatever owns the credentials, which is `pairing.Gate`: wrap the endpoint
+in `paired.Admit(...)` at the mount. Its policy comes from `UseSecret`,
+`Require` and `AllowLoopback`, each read per request, so rotating the secret,
+withdrawing the paired-device requirement or changing the bypass needs nothing
+rebuilt. See [The loopback bypass](api.md#the-loopback-bypass) for what
+`AllowLoopback` admits.
 
 The clients connected right now are reported through the plugin:
 `servers.ClientCount()`, `servers.Clients()` and `servers.DisconnectClient(id)`
 answer from whatever is under `server.ModeClient`, when it is a
 `*clientserver.Server`, and report nothing when it is not.
-`servers.OnClientsChange(fn)` follows the count and takes a subscriber before
-the plugin activates, which is when a console is built.
+`servers.Events().Clients` follows the count and takes a subscriber before the
+plugin activates, which is when a console is built. `servers.Events().Origins`
+does the same for the allowlist, carrying the allowed and refused origins and
+the session-wide bypass.
 
 A build that registers no server plugin serves no HTTP and runs no client
 server, which is what a program driving the readers directly wants. It still
@@ -357,10 +420,10 @@ the agent is serving and goes down before it. Give it `Certificates` and a
 reissued certificate rebinds it on its own; leave it nil for one that never
 changes underneath.
 
-`PairingPlugin` and `TrustPlugin` tolerate being nil, so a build that registers
+`pairingplugin.Plugin` and `trustplugin.Plugin` tolerate being nil, so a build that registers
 neither hands `nil` to the console and it reports both as unavailable. The
-per-field details are on the types themselves: `go doc agent.ServerPlugin`,
-`agent.Endpoint`, `agent.NewPairingPlugin`, `agent.TrustPlugin`.
+per-field details are on the types themselves: `go doc serverplugin.Plugin`,
+`serverplugin.Endpoint`, `pairingplugin.New`, `trustplugin.Plugin`.
 
 The pairing entries follow the server, so rotating the PIN from the menu or from
 the console relabels both. The trust entry is shown only while there is
@@ -375,12 +438,13 @@ agent's port and listed with the other addresses:
 
 ```go
 c := console.New(console.Config{
-	Agent:   rt.Agent,
-	Logs:    rt.Logs,
-	Servers: servers,
-	Pairing: pairing,
-	Trust:   trust,
-	Quit:    app.Quit,
+	Agent:         rt.Agent,
+	Logs:          rt.Logs,
+	Servers:       servers,
+	Pairing:       paired,
+	BootstrapPort: 9472,
+	Certificates:  certs.Manager,
+	Quit:          app.Quit,
 })
 servers.Add(c.Endpoints()...)
 ```
@@ -471,6 +535,7 @@ import (
 	"syscall"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -492,16 +557,16 @@ func main() {
 	// The listener, serving browser clients on /ws and the health checks beside
 	// it. Leave it out for a service that reads cards and serves no HTTP. Setup
 	// resolved the certificate; blank leaves the listener serving plain HTTP.
-	servers := &agent.ServerPlugin{
-		Config:         listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-		Certificates:   rt.Certificates,
-		AllowedOrigins: rt.AllowedOrigins,
+	servers := &serverplugin.Plugin{
+		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+		Certificates:   certs.Manager,
+		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
 	}
 	servers.ServeMode = map[string]http.Handler{
 		server.ModeClient: clientserver.New(clientserver.Config{
 			APISecret:            rt.Agent.APISecret,
 			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        rt.Agent.TokenVerifier(),
+			TokenVerifier:        paired.TokenVerifier(),
 			Tags:                 rt.Agent,
 			AllowTagModification: rt.Agent.TagModificationAllowed,
 			Scans:                &rt.Agent.Events().Tag,
@@ -546,9 +611,9 @@ rt, err := agent.Setup(agent.DefaultOptions(), manager)
 if err != nil {
 	log.Fatal(err)
 }
-rt.Agent.Plugins.Add(&agent.ServerPlugin{
-	Config:       listener.Config{CertFile: rt.CertFile, KeyFile: rt.KeyFile},
-	Certificates: rt.Certificates,
+rt.Agent.Plugins.Add(&serverplugin.Plugin{
+	Config:       listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
+	Certificates: certs.Manager,
 })
 ```
 
@@ -575,6 +640,14 @@ it runs on every emission; the connection it returns removes it again.
 | `Devices` | The paired devices, after a pairing or a revocation |
 | `Tag` | Every scan the agent broadcasts |
 | `Any` | The kind of every change above, except scans and reader status |
+
+`State`, `Preferences`, `Servers`, `Readers` and `Devices` are
+`event.Property`: connecting calls the handler with the current value before
+returning, so a subscriber draws its first frame without reading the agent
+separately and cannot miss a change in between. `Signal.Connect` on the same
+field connects without that first call, for a subscriber that wants the next
+value rather than this one. `Tag`, `Reader` and `Any` carry traffic and have no
+current value to report.
 
 ```go
 conn := rt.Agent.Events().Preferences.Connect(func(p agent.Preferences) {

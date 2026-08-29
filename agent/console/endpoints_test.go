@@ -5,15 +5,15 @@ package console
 import (
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/server/netinfo"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -31,7 +31,7 @@ func quietAgent(t *testing.T) *agent.Agent {
 func TestTheEndpointsServeTheConsoleAndListIt(t *testing.T) {
 	a := quietAgent(t)
 
-	servers := &agent.ServerPlugin{}
+	servers := &serverplugin.Plugin{}
 	c := New(Config{Agent: a, Servers: servers})
 	servers.Add(c.Endpoints()...)
 	if err := a.Plugins.Add(servers); err != nil {
@@ -46,13 +46,7 @@ func TestTheEndpointsServeTheConsoleAndListIt(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	hostPort := ""
-	if ips := agent.LocalIPs(); len(ips) > 0 {
-		hostPort = ips[0]
-	} else {
-		hostPort = "localhost"
-	}
-	hostPort = net.JoinHostPort(hostPort, strconv.Itoa(servers.Listener().Port()))
+	hostPort := netinfo.ServiceAddress(servers.Listener().Port())
 
 	handler := servers.Listener().Handler()
 

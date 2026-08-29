@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestLockCard_Success(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.LockCard()
+	result, err := reader.LockCard(context.Background())
 	if err != nil {
 		t.Fatalf("LockCard() failed: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestLockCard_NotSupported(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.LockCard()
+	result, err := reader.LockCard(context.Background())
 	if err == nil {
 		t.Fatal("expected LockCard() to fail for unsupported tag")
 	}
@@ -57,7 +58,7 @@ func TestWriteMessageWithResult_WithLock(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.WriteMessageWithResult(textMessage("lock me"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("lock me"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 		Lock:      true,
@@ -85,7 +86,7 @@ func TestWriteMessageWithResult_LockFailurePropagates(t *testing.T) {
 
 	reader := newWriteTestReader(t, mockTag)
 
-	result, err := reader.WriteMessageWithResult(textMessage("lock fails"), WriteOptions{
+	result, err := reader.WriteMessageWithResult(context.Background(), textMessage("lock fails"), WriteOptions{
 		Overwrite: true,
 		Index:     -1,
 		Lock:      true,

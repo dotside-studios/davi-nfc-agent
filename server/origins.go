@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/dotside-studios/davi-nfc-agent/event"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/tls"
+	"github.com/dotside-studios/davi-nfc-agent/secure"
 )
 
 // originsFileName holds the persisted origin allowlist, beside the API secret.
@@ -238,7 +238,7 @@ func (s *OriginStore) saveLocked() error {
 	if err := os.MkdirAll(s.configDir, 0700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	_ = tlspkg.SecureDir(s.configDir)
+	_ = secure.Dir(s.configDir)
 
 	origins := make([]string, 0, len(s.persisted))
 	for origin := range s.persisted {
@@ -255,7 +255,7 @@ func (s *OriginStore) saveLocked() error {
 	if err := os.WriteFile(path, append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("write origins file: %w", err)
 	}
-	_ = tlspkg.SecureFile(path)
+	_ = secure.File(path)
 	return nil
 }
 

@@ -21,11 +21,14 @@
 package nfctest
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/virtualnfc"
 )
 
 // TB is the subset of *testing.T the façade needs, so this non-test package
@@ -80,6 +83,13 @@ type memEmulator struct {
 
 	failWrites int  // NAK the next N writes (retry testing)
 	corrupt    bool // store inverted bytes (verification testing)
+
+	// delay, in nanoseconds, is how long each transceive sleeps before touching
+	// state, modelling a slow field or a reader that takes its time. Held as an
+	// atomic and read outside e.mu so a slow exchange does not serialize on the
+	// emulator's own lock: an operation in flight blocks on the field, not on the
+	// poll, which is what real hardware does. See EmulatedCard.Slow.
+	delay atomic.Int64
 }
 
 // setRemoveAfter makes the card leave the field after n transceive operations.
@@ -125,6 +135,10 @@ func (e *memEmulator) IsCardPresent() bool {
 }
 
 func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
+	if d := e.delay.Load(); d > 0 {
+		time.Sleep(time.Duration(d))
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -701,7 +715,7 @@ type EmulatedCard struct {
 	uid       string
 	kind      nfc.DetectedTagType
 	transport nfc.CardTransport
-	tag       nfc.Tag
+	card      *virtualnfc.Card
 }
 
 func newCard(kind nfc.DetectedTagType, uid string, transport nfc.CardTransport) *EmulatedCard {
@@ -709,7 +723,7 @@ func newCard(kind nfc.DetectedTagType, uid string, transport nfc.CardTransport) 
 		uid:       uid,
 		kind:      kind,
 		transport: transport,
-		tag:       nfc.NewEmulatedTag(transport, uid, kind),
+		card:      virtualnfc.NewDriverCard(transport, uid, kind),
 	}
 }
 
@@ -741,7 +755,7 @@ func DESFire(uid string) *EmulatedCard {
 func (c *EmulatedCard) UID() string { return c.uid }
 
 // Tag returns the underlying driver-backed tag (escape hatch for low-level use).
-func (c *EmulatedCard) Tag() nfc.Tag { return c.tag }
+func (c *EmulatedCard) Tag() nfc.Tag { return c.card.Tag() }
 
 // WithRecords preloads the card with an NDEF message built from the records,
 // written through the real driver into the emulator. Panics on failure (the
@@ -760,7 +774,7 @@ func (c *EmulatedCard) WithNDEF(msg *nfc.NDEFMessage) *EmulatedCard {
 	if err != nil {
 		panic(fmt.Sprintf("nfctest: encode NDEF for %s: %v", c.uid, err))
 	}
-	if err := c.tag.WriteData(data); err != nil {
+	if err := c.card.Tag().WriteData(data); err != nil {
 		panic(fmt.Sprintf("nfctest: preload %s: %v", c.uid, err))
 	}
 	return c
@@ -779,7 +793,7 @@ func (c *EmulatedCard) WithURI(uri string) *EmulatedCard {
 // Locked makes the card read-only (where the tag kind supports it). Panics if
 // locking fails.
 func (c *EmulatedCard) Locked() *EmulatedCard {
-	if err := c.tag.MakeReadOnly(); err != nil {
+	if err := c.card.Tag().MakeReadOnly(); err != nil {
 		panic(fmt.Sprintf("nfctest: lock %s: %v", c.uid, err))
 	}
 	return c
@@ -789,21 +803,26 @@ func (c *EmulatedCard) Locked() *EmulatedCard {
 // be presented and removed as if tapped on a real reader.
 type EmulatedReader struct {
 	*nfc.Supervisor
-	dev   *nfc.MockDevice
+	dev   *virtualnfc.Device
 	mu    sync.Mutex
 	cards []*EmulatedCard
 }
+
+// readerPath names the single device the reader polls.
+const readerPath = "mock:usb:001"
 
 // NewEmulatedReader builds a reader with the given cards already in the field.
 // The reader is closed automatically when the test ends.
 func NewEmulatedReader(tb TB, cards ...*EmulatedCard) *EmulatedReader {
 	tb.Helper()
-	mgr := nfc.NewMockManager()
-	dev := nfc.NewMockDevice()
-	mgr.MockDevice = dev
+	mgr := virtualnfc.NewManager()
+	dev := virtualnfc.NewDevice(readerPath, virtualnfc.PollMode, "mock")
+	mgr.Plug(readerPath, dev)
 
 	r := &EmulatedReader{dev: dev, cards: append([]*EmulatedCard(nil), cards...)}
-	r.sync()
+	for _, c := range r.cards {
+		dev.Present(c.card)
+	}
 
 	readers, err := nfc.NewSupervisor(mgr, 5*time.Second)
 	if err != nil {
@@ -823,7 +842,7 @@ func NewEmulatedReader(tb TB, cards ...*EmulatedCard) *EmulatedReader {
 // WriteMessage encodes a message onto the card on the reader. The emulator has
 // one, so nothing has to name it.
 func (r *EmulatedReader) WriteMessage(msg *nfc.NDEFMessage, opts nfc.WriteOptions) (*nfc.WriteResult, error) {
-	return r.Supervisor.WriteMessage("", msg, opts)
+	return r.Supervisor.WriteMessage(context.Background(), "", msg, opts)
 }
 
 // Erase writes an empty message over whatever the card holds.
@@ -835,7 +854,7 @@ func (r *EmulatedReader) Erase() (*nfc.WriteResult, error) {
 
 // Capabilities reports what the card on the reader supports.
 func (r *EmulatedReader) Capabilities() (*nfc.TagCapabilities, error) {
-	return r.Supervisor.Capabilities("", "")
+	return r.Supervisor.Capabilities(context.Background(), "", "")
 }
 
 // Present taps additional cards onto the reader.
@@ -843,7 +862,9 @@ func (r *EmulatedReader) Present(cards ...*EmulatedCard) {
 	r.mu.Lock()
 	r.cards = append(r.cards, cards...)
 	r.mu.Unlock()
-	r.sync()
+	for _, c := range cards {
+		r.dev.Present(c.card)
+	}
 }
 
 // Remove takes the card with the given UID off the reader.
@@ -857,15 +878,5 @@ func (r *EmulatedReader) Remove(uid string) {
 	}
 	r.cards = kept
 	r.mu.Unlock()
-	r.sync()
-}
-
-func (r *EmulatedReader) sync() {
-	r.mu.Lock()
-	tags := make([]nfc.Tag, len(r.cards))
-	for i, c := range r.cards {
-		tags[i] = c.tag
-	}
-	r.mu.Unlock()
-	r.dev.SetTags(tags)
+	r.dev.Remove(uid)
 }

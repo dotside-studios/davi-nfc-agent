@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dotside-studios/davi-nfc-agent/agent"
+	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
@@ -78,7 +78,7 @@ func TestAnOpenPageIsWokenByAPreferenceChangedElsewhere(t *testing.T) {
 // running still has to reach an open page.
 func TestAnOpenPageIsWokenByTheAllowlist(t *testing.T) {
 	a := quietAgent(t)
-	servers := &agent.ServerPlugin{}
+	servers := &serverplugin.Plugin{}
 	c := New(Config{Agent: a, Servers: servers})
 
 	if err := a.Plugins.Add(servers); err != nil {

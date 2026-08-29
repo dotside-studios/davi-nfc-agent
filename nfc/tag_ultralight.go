@@ -126,6 +126,13 @@ func (t *pcscUltralightTag) ReadData() ([]byte, error) {
 }
 
 func (t *pcscUltralightTag) WriteData(data []byte) error {
+	// Refuse a write to a locked tag up front, so a permanent read-only condition
+	// surfaces as a typed error immediately rather than as a page-by-page NAK the
+	// write path retries to exhaustion. See pcscBaseTag.ndefAreaLocked.
+	if locked, err := t.ndefAreaLocked(); err == nil && locked {
+		return NewReadOnlyError("WriteData (Ultralight)", t.UID(), nil)
+	}
+
 	// Build TLV payload
 	tlvPayload := TLVEncode(data, TLVNDEF)
 
@@ -155,9 +162,17 @@ func (t *pcscUltralightTag) WriteData(data []byte) error {
 }
 
 func (t *pcscUltralightTag) IsWritable() (bool, error) {
-	// Try to read page 4
-	_, err := t.readPage(4)
-	return err == nil, nil
+	// An unreadable page 4 means a removed or dead tag, not a writable one.
+	if _, err := t.readPage(4); err != nil {
+		return false, nil
+	}
+	// A readable page can still be locked, and locked pages stay readable, so
+	// consult the lock bytes rather than trusting readability alone.
+	locked, err := t.ndefAreaLocked()
+	if err != nil {
+		return false, err
+	}
+	return !locked, nil
 }
 
 func (t *pcscUltralightTag) CanMakeReadOnly() (bool, error) {

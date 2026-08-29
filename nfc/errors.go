@@ -21,6 +21,7 @@ const (
 	ErrCodeCapacityExceeded
 	ErrCodeInvalidData
 	ErrCodeMultipleTags
+	ErrCodeBusy
 )
 
 // NFCError provides structured error information for programmatic handling.
@@ -54,6 +55,18 @@ func (e *NFCError) Is(target error) bool {
 		return e.Code == t.Code
 	}
 	return false
+}
+
+// NewBusyError reports that the reader could not start the operation because an
+// earlier one is still running after its caller gave up. Retryable once that
+// one finishes.
+func NewBusyError(op string, cause error) *NFCError {
+	return &NFCError{
+		Code:    ErrCodeBusy,
+		Op:      op,
+		Message: "the reader is still finishing an earlier operation",
+		Cause:   cause,
+	}
 }
 
 // NewMultipleTagsError reports more than one tag in the field where the

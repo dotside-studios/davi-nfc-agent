@@ -155,7 +155,7 @@ func (r *Reader) Devices() []string {
 // Write encodes a message onto the tag on a device, through the production write
 // pipeline. It overwrites whatever the tag held.
 func (r *Reader) Write(device string, msg *nfc.NDEFMessage) (*nfc.WriteResult, error) {
-	return r.Supervisor.WriteMessage(context.Background(), device, msg, nfc.WriteOptions{Overwrite: true, Index: -1})
+	return r.WriteMessage(context.Background(), device, msg, nfc.WriteOptions{Overwrite: true, Index: -1})
 }
 
 // Capabilities reports what the tag on a device supports.
@@ -164,7 +164,7 @@ func (r *Reader) Capabilities(device string) (*nfc.TagCapabilities, error) {
 }
 
 // Close stops the reader.
-func (r *Reader) Close() { r.Supervisor.Stop() }
+func (r *Reader) Close() { r.Stop() }
 
 func (r *Reader) makeCard(spec TagSpec) (*Card, error) {
 	var snapshot []byte

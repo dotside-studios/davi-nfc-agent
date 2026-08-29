@@ -256,6 +256,9 @@ func (m *Manager) registerSession(conn *wsconn.SafeConn, reqID string, regReq De
 		return nil, DeviceRegistrationResponse{}, fmt.Errorf("device name is required")
 	}
 
+	// Held across replacing the old session and installing the new one, so two
+	// registrations for the same identity cannot interleave and orphan a session.
+	m.registerMu.Lock()
 	device, err := m.registerDevice(admitted, DeviceRegistrationRequest{
 		DeviceName:      regReq.DeviceName,
 		Platform:        regReq.Platform,
@@ -265,11 +268,13 @@ func (m *Manager) registerSession(conn *wsconn.SafeConn, reqID string, regReq De
 		Metadata:        regReq.Metadata,
 	})
 	if err != nil {
+		m.registerMu.Unlock()
 		m.sendError(conn, reqID, protocol.ErrCodeRegistrationFailed, err.Error())
 		return nil, DeviceRegistrationResponse{}, fmt.Errorf("failed to register device: %w", err)
 	}
 
 	m.addSession(device.DeviceID(), conn)
+	m.registerMu.Unlock()
 
 	m.mu.RLock()
 	publicKeyPin := m.publicKeyPin

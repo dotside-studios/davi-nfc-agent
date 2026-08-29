@@ -448,10 +448,15 @@ func (r *deviceReader) handleDeviceErrors(err error) bool {
 		return true
 	}
 
-	// For unhandled errors, send to data channel
+	// For unhandled errors, send to data channel. Selected on stopChan so a
+	// stalled consumer cannot pin this goroutine past shutdown.
 	if !recognized {
 		readerFail.Printf("Unhandled error from getTags: %v. Sending to dataChan.", err)
-		r.dataChan <- NFCData{Device: r.DevicePath(), Card: nil, Err: fmt.Errorf("get tags error: %v", err)}
+		select {
+		case r.dataChan <- NFCData{Device: r.DevicePath(), Card: nil, Err: fmt.Errorf("get tags error: %v", err)}:
+		case <-r.stopChan:
+			return true
+		}
 		r.clock.Sleep(UnhandledErrorRetryInterval)
 	}
 
@@ -498,14 +503,24 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 				return
 			}
 			readerFail.Printf("Error reading data for card UID %s (Type: %s): %v", uid, card.Type, err)
-			// Send card with error
-			r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: err}
+			// Send card with error. Selected on stopChan so a stalled consumer
+			// (a full dataChan nobody is draining) cannot pin this goroutine past
+			// shutdown; a stopping reader abandons the send rather than leaking.
+			select {
+			case r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: err}:
+			case <-r.stopChan:
+				return
+			}
 			continue
 		}
 
 		if r.cache.HasChanged(uid) {
 			readerLog.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
-			r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: nil}
+			select {
+			case r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: nil}:
+			case <-r.stopChan:
+				return
+			}
 			r.signal(SignalSuccess)
 		}
 

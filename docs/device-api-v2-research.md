@@ -60,7 +60,7 @@ capability field is `omitempty`. Three things were genuinely narrowed.
 `NDEFBytes` / `IdempotencyKey` / `TagUID` (`nfc/remotenfc/wire.go:115`), and the
 call sites hard-code the rest: `nfc/remotenfc/tag.go:207` and `:227` pass
 `{Overwrite: true, Index: -1}`, and `writeTag` forwards only `opts.Lock`
-(`nfc/remotenfc/requests.go:357`). Append-at-index, force-initialising a
+(`nfc/remotenfc/requests.go:368`). Append-at-index, force-initialising a
 Classic card, and retry/verify policy are now unreachable over the bridge.
 
 The honest qualifier: v0 never implemented the write path at all, and the
@@ -90,7 +90,7 @@ test, and it refused the bundled client's own `"node"` example.
 
 The CA install path is a different story than the docs suggest: Phase 4.0
 landed (self-signed by default, CA opt-in behind `-install-ca`,
-`tls/manager.go`), and `docs/api.md` dropped the install instructions. What has
+`secure/tls/manager.go`), and `docs/api.md` dropped the install instructions. What has
 no replacement is the browser case — a browser cannot pair and cannot pin, so
 it is still CA-or-hosted-cert, gated only by the origin allowlist.
 
@@ -107,7 +107,7 @@ two remain open:
    over the channel it exists to protect. **Fixed in `#46`**: `/pair` mounts on
    the agent's own TLS listener, `handlePair` refuses a cleartext connection
    from anything but loopback, and the startup QR encodes a
-   `davi-pair://host:port/?spki=…&code=…` URI (`tls/pairinguri.go:13`), so the
+   `davi-pair://host:port/?spki=…&code=…` URI (`secure/tls/pairinguri.go:13`), so the
    key hash reaches the device off the network. The bootstrap listener keeps
    its port and stays cleartext for the CA-install page alone.
 2. **The credential is a bearer token, not a key.** Nothing binds it to a
@@ -121,8 +121,8 @@ two remain open:
 4. **Revocation was not immediate.** Auth is checked once at upgrade, so
    revoking a device did nothing to the session it already held and a
    heartbeating device kept working indefinitely. **Fixed in `#46`**: the
-   registry reports revoked credentials, the driver subscribes through
-   `ServerOptions.Revocations` (`nfc/remotenfc/server.go:61`), and the matching
+   registry reports revoked credentials, the pairing gate subscribes through
+   `registry.OnRevoke` (`secure/pairing/manager.go:147`), and the matching
    session closes with a policy-violation reason, so the device can tell being
    turned away from losing its radio.
 5. **Headless devices cannot pair** without an operator relaying a PIN. See
@@ -303,11 +303,16 @@ loudly instead of applying somewhere else.
 ### 6.2 A UID as an application identifier
 
 Distinct from addressing, and worth writing down because applications do this —
-writing `example.com/c/$uid` onto a card is a real use case here. Three
-hazards:
+writing `example.com/c/$uid` onto a card is a real use case here. Master's
+`#58` leans into exactly this: davi already treats the `/c/{identifier}`
+segment of a card's URL as the authoritative identity (`ManagedCard` matches it
+exactly), with the UID only a fallback, and a QR card is that URL printed on
+paper rather than written to a chip — a camera reports it as an ordinary
+`tagScanned` and every existing client reads it unchanged. Three hazards remain
+when the UID itself is the identifier:
 
 - **Spelling.** Our canonical form is colon-separated uppercase
-  (`ParseUID`, `nfc/remotenfc/convert.go:12` → `04:A2:24:52:9F:5C:80`), Android
+  (`ParseUID`, `nfc/remotenfc/convert.go:8` → `04:A2:24:52:9F:5C:80`), Android
   hands out a `byte[]`, ESPHome prints `74-10-37-94`, PC/SC gives raw bytes. A
   mismatch between whoever writes the value and whoever looks it up is silent
   and surfaces much later as "not found". Pick one canonical spelling for
@@ -485,10 +490,18 @@ class:
 
 Cutting across all four: **the credential is not necessarily a UID.** It has a
 declared kind — `uid` | `wiegand(bits)` | `opaque` — where UID is one case
-rather than the assumed one. Today the wire rejects a device that cannot supply
-both `uid` and `technology` (`nfc/remotenfc/protocol.go:51`), which a Wiegand
-bridge or a Home Assistant tag source (an opaque `tag_id` and nothing else)
-can never do honestly.
+rather than the assumed one.
+
+Master has since taken the first, untyped step (`#58`): a UID that is not hex
+is no longer rejected, it is carried through verbatim, so a QR or barcode
+payload rides an ordinary `tagScanned` and a consumer keys on the exact bytes
+(`nfc/remotenfc/protocol.go:54`). A hex serial is still normalised to the
+canonical colon form. What is *not* there is the typing — the wire still
+requires a non-empty `uid` and `technology` (`:48`, `:50`) and says nothing
+about what kind of thing the value is, so a Wiegand bridge or a Home Assistant
+`tag_id` source can now supply an opaque value but cannot declare it as one.
+The v2 step is to make the kind explicit rather than leaving every consumer to
+guess from the bytes.
 
 ## 10. Design rules
 
@@ -818,7 +831,7 @@ secret) or to an install window a remote operator can open — OSDP's install
 mode (§7.4) is the model, with its caveats intact.
 
 **This must reach the code, not only this document.** A TODO at `handlePair`
-(`tls/pairing.go`) — the function that decides how a device proves it may pair
+(`secure/tls/pairing.go`) — the function that decides how a device proves it may pair
 — naming this section, so that whoever next changes the pairing path sees that
 the attended assumption was a choice rather than an oversight.
 

@@ -27,5 +27,6 @@
       "@davi/nfc-agent-client": ["../../../client/src/index.ts"]
     }
   },
-  "include": ["src", "../../../client/src"]
+  "include": ["src", "../../../client/src"],
+  "exclude": ["src/**/*.test.ts"]
 }

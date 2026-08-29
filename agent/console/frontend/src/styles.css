@@ -546,6 +546,29 @@ table.grid th.mono {
   background: var(--err);
 }
 
+/* Decoded meaning of the command in the APDU console, shown before sending. */
+.apdu-explain {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-inset);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.apdu-class {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 1.5;
+  flex: none;
+}
+
 /* ---- log / event views ---- */
 
 .logview.short {

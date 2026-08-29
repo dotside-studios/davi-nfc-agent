@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { APDU_PRESETS, parseHex, readStatusWord, toAscii, toHex } from '../apdu'
+import type { ApduClass, ApduExplanation } from '../apdu'
+import { APDU_PRESETS, explain, parseHex, readStatusWord, toAscii, toHex } from '../apdu'
 import { fmtTime } from '../format'
 import type { Exchange } from '../types'
 import type { Tags } from '../useTags'
@@ -25,6 +26,7 @@ export function Apdu({
   const view = useRef<HTMLDivElement>(null)
 
   const parsed = parseHex(command)
+  const explanation = parsed ? explain(parsed, raw) : null
   const canSend = parsed !== null && !busy && writable && rawAllowed
 
   useEffect(() => {
@@ -143,6 +145,8 @@ export function Apdu({
         </span>
       </div>
 
+      {explanation ? <Explanation ex={explanation} /> : null}
+
       <div className="row" style={{ marginTop: 4 }}>
         <span className="dim nowrap">Presets</span>
         {APDU_PRESETS.map((p) => (
@@ -176,6 +180,40 @@ export function Apdu({
       </div>
     </Panel>
   )
+}
+
+/** The decoded meaning of the command, shown before it is sent. */
+function Explanation({ ex }: { ex: ApduExplanation }) {
+  return (
+    <div className="apdu-explain">
+      <div className="row tight">
+        <span className={`apdu-class ${classTone(ex.cls)}`}>{ex.cls}</span>
+        <span className={ex.recognized ? '' : 'dim'}>{ex.summary}</span>
+      </div>
+      {ex.warnings.map((w, i) => (
+        <div key={i} className={ex.mutating ? 'err' : 'warn'} style={{ fontSize: '0.9em' }}>
+          ⚠ {w}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Maps a command class to a colour: danger for the mutating ones, ok for the
+ *  harmless reads, neutral for the rest. */
+function classTone(cls: ApduClass): 'ok' | 'warn' | 'err' | 'dim' {
+  switch (cls) {
+    case 'write':
+    case 'lock':
+      return 'err'
+    case 'unknown':
+      return 'warn'
+    case 'read':
+    case 'info':
+      return 'ok'
+    default:
+      return 'dim'
+  }
 }
 
 function ExchangeRow({ exchange }: { exchange: Exchange }) {

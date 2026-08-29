@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -81,6 +82,13 @@ type memEmulator struct {
 
 	failWrites int  // NAK the next N writes (retry testing)
 	corrupt    bool // store inverted bytes (verification testing)
+
+	// delay, in nanoseconds, is how long each transceive sleeps before touching
+	// state, modelling a slow field or a reader that takes its time. Held as an
+	// atomic and read outside e.mu so a slow exchange does not serialize on the
+	// emulator's own lock: an operation in flight blocks on the field, not on the
+	// poll, which is what real hardware does. See EmulatedCard.Slow.
+	delay atomic.Int64
 }
 
 // setRemoveAfter makes the card leave the field after n transceive operations.
@@ -126,6 +134,10 @@ func (e *memEmulator) IsCardPresent() bool {
 }
 
 func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
+	if d := e.delay.Load(); d > 0 {
+		time.Sleep(time.Duration(d))
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

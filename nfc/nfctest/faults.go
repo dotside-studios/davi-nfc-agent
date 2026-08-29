@@ -1,6 +1,9 @@
 package nfctest
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Fault injection on an EmulatedCard.
 //
@@ -61,6 +64,22 @@ func (c *EmulatedCard) Corrupting() *EmulatedCard {
 		panic(fmt.Sprintf("nfctest: Corrupting is only modelled for the NTAG/Ultralight family, not %T", c.transport))
 	}
 	mem.setCorrupt(true)
+	return c
+}
+
+// Slow makes every transceive with the card sleep for d before it proceeds,
+// modelling a slow field or a reader that takes its time — the condition under
+// which an operation is still in flight when its caller gives up. A write touches
+// the tag several times, so a per-transceive delay of d makes one write take well
+// over d; size it against the operation timeout or context deadline the test is
+// probing. The sleep is outside the emulator's lock, so a slow exchange on one
+// card never blocks another. Returns the card so it can be chained.
+func (c *EmulatedCard) Slow(d time.Duration) *EmulatedCard {
+	mem, ok := c.transport.(*memEmulator)
+	if !ok {
+		panic(fmt.Sprintf("nfctest: Slow is only modelled for the NTAG/Ultralight family, not %T", c.transport))
+	}
+	mem.delay.Store(int64(d))
 	return c
 }
 

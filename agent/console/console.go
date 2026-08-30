@@ -48,6 +48,15 @@ type Config struct {
 	// control. Nil stops the agent and leaves the program running, which is
 	// what a service with no way out of its own wants.
 	Quit func()
+
+	// AllowSecretExchange lets a caller obtain a control session by presenting
+	// the agent's API secret at POST /control/exchange, for a build with no
+	// tray to mint the handoff token — a headless service, an appliance. Off by
+	// default: the desktop build mints its session through the tray and never
+	// exposes the exchange. The secret is read live from the agent, so a
+	// rotation takes effect at once, and an empty secret is refused rather than
+	// admitting anyone who can reach loopback.
+	AllowSecretExchange bool
 }
 
 // New builds the console from cfg, and follows what changes it: an origin
@@ -66,11 +75,13 @@ func New(cfg Config) *Server {
 	}
 	info := a.Info()
 	s := newServer(serverConfig{
-		Host:    h,
-		Logs:    cfg.Logs,
-		Name:    info.Name,
-		Version: info.FullVersion(),
-		Dev:     info.IsDev(),
+		Host:                h,
+		Logs:                cfg.Logs,
+		Name:                info.Name,
+		Version:             info.FullVersion(),
+		Dev:                 info.IsDev(),
+		AllowSecretExchange: cfg.AllowSecretExchange,
+		Secret:              a.APISecret,
 	})
 
 	// Every change the agent reports, whatever made it: an open page shows

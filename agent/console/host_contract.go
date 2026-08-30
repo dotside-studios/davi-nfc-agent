@@ -97,4 +97,13 @@ type serverConfig struct {
 	Name    string
 	Version string
 	Dev     bool
+
+	// AllowSecretExchange mounts the POST /control/exchange route, which mints
+	// a session against the agent's API secret. Off by default; a build with a
+	// tray mints its session through the handoff instead.
+	AllowSecretExchange bool
+
+	// Secret reads the agent's API secret, live, for the exchange above. Nil is
+	// treated as an empty secret, which the exchange refuses.
+	Secret func() string
 }

@@ -23,13 +23,14 @@ type Server struct{}
 
 // Config is what a console would report on; this build has none.
 type Config struct {
-	Agent         *agent.Agent
-	Logs          *logbuf.Ring
-	Servers       *serverplugin.Plugin
-	Pairing       *pairing.Gate
-	BootstrapPort int
-	Certificates  *tlspkg.Manager
-	Quit          func()
+	Agent               *agent.Agent
+	Logs                *logbuf.Ring
+	Servers             *serverplugin.Plugin
+	Pairing             *pairing.Gate
+	BootstrapPort       int
+	Certificates        *tlspkg.Manager
+	Quit                func()
+	AllowSecretExchange bool
 }
 
 // New reports that there is no console in this build.

@@ -300,9 +300,16 @@ func (m *Manager) sendRegistration(conn *wsconn.SafeConn, device *Device, resp p
 	deviceID := device.DeviceID()
 
 	if err := conn.WriteJSON(resp); err != nil {
-		m.removeSession(deviceID)
-		if unregErr := m.UnregisterDevice(deviceID); unregErr != nil {
-			deviceFail.Printf("Failed to unregister %s after registration send error: %v", deviceID, unregErr)
+		// Tear down only if this connection still owns the session. A concurrent
+		// registration for the same identity may have already replaced and
+		// closed it — which is itself what failed this write — and removing by
+		// name here would take the live owner's session and device with it. The
+		// guard is endSession's: drop this connection's own reverse entry, and
+		// unregister only when it was still the installed session.
+		if m.removeSessionFor(conn, deviceID) {
+			if unregErr := m.UnregisterDevice(deviceID); unregErr != nil {
+				deviceFail.Printf("Failed to unregister %s after registration send error: %v", deviceID, unregErr)
+			}
 		}
 		return fmt.Errorf("failed to send registration response: %w", err)
 	}

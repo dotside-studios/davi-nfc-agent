@@ -30,6 +30,7 @@ type Config struct {
 	BootstrapPort       int
 	Certificates        *tlspkg.Manager
 	Quit                func()
+	BasePath            string
 	AllowSecretExchange bool
 }
 

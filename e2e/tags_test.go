@@ -247,7 +247,7 @@ func TestAClientWriteRoutesToThePhoneHoldingTheTag(t *testing.T) {
 
 // A raw exchange with a tag a phone is holding, base64 in both directions.
 func TestAClientTransceiveRoutesToThePhone(t *testing.T) {
-	h := start(t, options{})
+	h := start(t, options{RawAPDU: true})
 	client := h.client(t)
 	device, deviceID, _ := h.phone(t, apiSecret, phoneCapabilities())
 

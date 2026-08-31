@@ -24,7 +24,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 	"github.com/gorilla/websocket"
 )
@@ -44,6 +43,10 @@ type options struct {
 
 	// Pairing runs the pairing server, so a test can obtain a device credential.
 	Pairing bool
+
+	// RawAPDU opens the raw exchange channel, as an operator running with
+	// -allow-raw-apdu does; without it a transceive is refused.
+	RawAPDU bool
 }
 
 // harness is a running agent and the handles a test drives it by.
@@ -80,6 +83,7 @@ func start(t *testing.T, opts options) *harness {
 	o := agent.DefaultOptions()
 	o.ConfigDir = t.TempDir()
 	o.APISecret = apiSecret
+	o.AllowRawAPDU = opts.RawAPDU
 
 	// Not the default port, so these tests can run beside an agent already
 	// running on this machine.
@@ -137,17 +141,12 @@ func start(t *testing.T, opts options) *harness {
 		Config:         listener.Config{CertFile: certs.CertFile, KeyFile: certs.KeyFile},
 		Certificates:   certs.Manager,
 		AllowedOrigins: server.ParseAllowedOrigins(o.AllowedOrigins),
+		TokenVerifier:  paired.TokenVerifier(),
 	}
+	// The plugin builds the client half from the agent, so this suite exercises
+	// the same client server the shipped binary serves; only the device driver's
+	// endpoint is named here.
 	servers.ServeMode = map[string]http.Handler{
-		server.ModeClient: clientserver.New(clientserver.Config{
-			APISecret:            rt.Agent.APISecret,
-			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        paired.TokenVerifier(),
-			Tags:                 rt.Agent,
-			AllowTagModification: rt.Agent.TagModificationAllowed,
-			Scans:                &rt.Agent.Events().Tag,
-			ReaderStatus:         &rt.Agent.Events().Reader,
-		}),
 		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,

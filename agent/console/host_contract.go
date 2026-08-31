@@ -98,6 +98,10 @@ type serverConfig struct {
 	Version string
 	Dev     bool
 
+	// BasePath is the prefix the control routes mount under; empty selects
+	// DefaultBasePath. See [Config.BasePath].
+	BasePath string
+
 	// AllowSecretExchange mounts the POST /control/exchange route, which mints
 	// a session against the agent's API secret. Off by default; a build with a
 	// tray mints its session through the handoff instead.

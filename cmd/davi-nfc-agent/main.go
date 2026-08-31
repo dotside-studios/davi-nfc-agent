@@ -1,43 +1,24 @@
 // Package main wires the agent together and runs it behind a system tray.
 //
-// It is the only place that knows about the agent, the console and the tray at
-// once, the one that picks an NFC backend, and the one that touches the flag
-// set and the standard logger. See docs/custom-builds.md.
+// The default stack — readers and phones behind one manager, auto-TLS, pairing,
+// the listener and its protocols — is assembled by agent/standard; this program
+// picks the NFC backend, adds the console and the tray, and owns the flag set
+// and the standard logger. See docs/custom-builds.md.
 package main
 
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/dotside-studios/davi-nfc-agent/agent"
 	"github.com/dotside-studios/davi-nfc-agent/agent/console"
-	"github.com/dotside-studios/davi-nfc-agent/agent/pairingplugin"
-	"github.com/dotside-studios/davi-nfc-agent/agent/serverplugin"
+	"github.com/dotside-studios/davi-nfc-agent/agent/standard"
 	"github.com/dotside-studios/davi-nfc-agent/agent/tray"
-	"github.com/dotside-studios/davi-nfc-agent/agent/trustplugin"
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
-	"github.com/dotside-studios/davi-nfc-agent/nfc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
-	"github.com/dotside-studios/davi-nfc-agent/nfc/remotenfc"
-	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
-	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
-	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
-	"github.com/dotside-studios/davi-nfc-agent/server/listener"
-)
-
-// What this program reports while it assembles the agent. On the agent's
-// channel because that is where an operator looked for these lines before
-// provisioning moved out of Setup, and the console filters the log by source.
-var (
-	startupLog  = logbuf.Channel("agent", logbuf.LevelInfo)
-	startupWarn = logbuf.Channel("agent", logbuf.LevelWarn)
 )
 
 func main() {
@@ -51,151 +32,37 @@ func main() {
 	}
 
 	// Before anything else logs: started from a desktop launcher there is no
-	// stderr to read, and the console reads this ring.
-	//
-	// Install names it to the packages reporting on their own channels, and
-	// Options hands the same ring to the agent for its own log and its
-	// plugins'. The standard logger keeps stderr alone: a line that reached the
-	// ring both ways would be shown twice, at two levels.
+	// stderr to read, and the console reads this ring. Install names it to the
+	// packages reporting on their own channels, and Options hands the same ring
+	// to the agent for its own log and its plugins'. The standard logger keeps
+	// stderr alone: a line that reached the ring both ways would be shown twice.
 	opts.Logs = logbuf.New(logbuf.DefaultCapacity)
 	logbuf.Install(opts.Logs)
 
-	// The driver serving phones. It decides nothing about who may connect: its
-	// endpoint is mounted behind the paired-device manager below, and what that
-	// admits is what registers.
-	devices := remotenfc.NewManager(remotenfc.DeviceTimeout)
-
-	// Hardware readers and phones behind one manager.
-	backends := multimanager.NewMultiManager(
-		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
-		multimanager.ManagerEntry{Name: nfc.ManagerTypeSmartphone, Manager: devices},
-	)
-
-	// The certificate this agent manages for itself, under the same config
-	// directory the agent resolves. Provisioning it is the program's: the
-	// agent neither serves it nor hands out its authority.
-	if opts.ConfigDir == "" {
-		opts.ConfigDir = agent.DefaultConfigDir(opts.Info.OrDefault().DirName)
-	}
-	var certs tlspkg.Provisioned
-	if opts.AutoTLS && opts.CertFile == "" && opts.KeyFile == "" {
-		provisioned, err := tlspkg.Provision(opts.ConfigDir, opts.InstallCA)
-		if err != nil {
-			startupWarn.Printf("Auto-TLS failed: %v (running without TLS)", err)
-		} else {
-			certs = provisioned
-			opts.CertFile, opts.KeyFile = certs.CertFile, certs.KeyFile
-			opts.PublicKeyPin = certs.PublicKeyPin
-			// Native devices authenticate the agent by this value rather than
-			// by a trust store, so log it where a first run will show it.
-			startupLog.Printf("Agent public key pin: %s", certs.PublicKeyPin)
-		}
-	}
-
-	// The paired-device manager over the backends above: the credential store,
-	// the pairing machinery, and the check that admits a device. It is the
-	// manager the agent holds. Hand backends to Setup instead, and mount the
-	// device endpoint bare, and the build pairs nobody and admits everyone.
-	paired := pairing.New(backends, pairing.Options{
-		ConfigDir:    opts.ConfigDir,
-		CA:           certs.Manager,
-		AppName:      opts.Info.OrDefault().DisplayName,
-		PublicKeyPin: func() string { return certs.PublicKeyPin },
-	})
-
-	// The agent reports and revokes through the same store the manager admits
-	// on, rather than loading a second one.
-	rt, err := agent.Setup(opts, backends)
+	// The default stack, opening its reader from nfc/pcsc: hardware readers and
+	// phones behind one manager, auto-TLS, pairing, and the listener serving the
+	// client and device protocols with /pair on it.
+	stack, err := standard.New(opts, pcsc.NewManager())
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
 
-	// What it admits on, and what a pairing device is told to connect to, now
-	// that the agent holds them. All read per use, so rotating the secret,
-	// withdrawing the requirement or changing the port needs nothing rebuilt.
-	paired.UseSecret(rt.Agent.APISecret)
-	paired.Require(rt.Agent.RequirePairedDevice)
-	paired.AllowLoopback(rt.Agent.AllowLoopbackBypass)
-	paired.UsePort(rt.Agent.DevicePort)
-
-	// The entry that makes browsers accept the certificate above.
-	trust := &trustplugin.Plugin{Manager: certs.Manager}
-
-	// The listener and everything on it. Registering no server plugin leaves
-	// an agent that serves nothing.
-	servers := &serverplugin.Plugin{
-		Config:         listener.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
-		Certificates:   certs.Manager,
-		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
-	}
-
-	// The two halves of /ws, both built here. The agent decides who is admitted
-	// and what is allowed; each protocol decides what its own side may say.
-	servers.ServeMode = map[string]http.Handler{
-		server.ModeClient: clientserver.New(clientserver.Config{
-			APISecret:            rt.Agent.APISecret,
-			AllowLoopbackBypass:  rt.Agent.AllowLoopbackBypass,
-			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        paired.TokenVerifier(),
-			Tags:                 rt.Agent,
-			AllowTagModification: rt.Agent.TagModificationAllowed,
-			AllowRawTransceive:   rt.Agent.RawAPDUAllowed,
-			Scans:                &rt.Agent.Events().Tag,
-			ReaderStatus:         &rt.Agent.Events().Reader,
-		}),
-		// The driver serves the protocol; Admit decides who gets that far, and
-		// names the device it admitted so the driver registers it under the
-		// identity it paired with.
-		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
-			CheckOrigin:          servers.CheckOrigin(),
-			AllowTagModification: rt.Agent.TagModificationAllowed,
-			PublicKeyPin:         rt.Agent.PublicKeyPin,
-		})),
-	}
-
-	// Pairing issues a durable credential and the key pin a device recognises
-	// this agent by, so it is served from the listener already serving the
-	// certificate that pin covers. It belongs to the paired-device manager, so
-	// it is mounted whatever the build does about the listener below.
-	servers.Add(serverplugin.Endpoint{
-		Name:    "pairing",
-		Pattern: "/pair",
-		Handler: paired.PairHandler(),
-	})
-
-	// The cleartext listener that hands the certificate authority to a device
-	// that does not trust the agent's certificate yet, and the menu entries
-	// giving out its address and PIN. A zero bootstrap port leaves both out;
-	// devices still pair over /pair above.
-	var pairing *pairingplugin.Plugin
-	if opts.BootstrapPort > 0 {
-		pairing = pairingplugin.New(paired, opts.BootstrapPort)
-	}
-
-	app := tray.New(rt)
+	app := tray.New(stack.Runtime)
 
 	// The control center, served from the same listener. Nil in a -tags nowebui
 	// build, where Endpoints is empty.
 	controlCenter := console.New(console.Config{
-		Agent:         rt.Agent,
-		Logs:          rt.Logs,
-		Servers:       servers,
-		Pairing:       paired,
+		Agent:         stack.Runtime.Agent,
+		Logs:          stack.Runtime.Logs,
+		Servers:       stack.Servers,
+		Pairing:       stack.Pairing,
 		BootstrapPort: opts.BootstrapPort,
-		Certificates:  certs.Manager,
+		Certificates:  stack.Certs.Manager,
 		Quit:          app.Quit,
 	})
-	servers.Add(controlCenter.Endpoints()...)
+	stack.Servers.Add(controlCenter.Endpoints()...)
 
-	// The server goes on first: it publishes the listener the rest mount on,
-	// and activation order is the order their entries appear in the tray.
-	plugins := []agent.Plugin{servers}
-	if pairing != nil {
-		plugins = append(plugins, pairing)
-	}
-	plugins = append(plugins, trust)
-
-	if err := rt.Agent.Plugins.Add(plugins...); err != nil {
+	if err := stack.Runtime.Agent.Plugins.Add(stack.Plugins()...); err != nil {
 		log.Fatalf("Failed to register a plugin: %v", err)
 	}
 

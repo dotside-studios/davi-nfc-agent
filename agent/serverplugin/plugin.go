@@ -128,22 +128,20 @@ type Plugin struct {
 	// it was told on the command line. Ignored when Origins is set.
 	AllowedOrigins []string
 
-	// ClientServer is what browser clients connect to, mounted on /ws under
-	// server.ModeClient. Nil builds one from the agent at activation, which is
-	// what a build with nothing to say about it wants.
-	//
-	// It is what ClientCount, Clients and DisconnectClient report on, and lives
-	// as long as the plugin: a client stays connected across a stop and start of
-	// the agent, and receives again once it runs.
-	ClientServer *clientserver.Server
+	// TokenVerifier recognises the per-device credentials a paired build issues,
+	// for the client server this plugin builds under server.ModeClient. Nil
+	// admits on the shared secret alone, which is what an unpaired build wants.
+	TokenVerifier server.TokenVerifier
 
-	// ServeMode names the handler serving each connection mode on /ws. A
-	// connection declaring none is a client, and takes the entry under
-	// server.ModeClient; server.ModeDevice is the device driver's endpoint.
+	// ServeMode overrides the handler for a connection mode on /ws. A connection
+	// declaring none is a client and takes server.ModeClient, which the plugin
+	// builds from the agent unless an entry here replaces it; a device declares
+	// server.ModeDevice, mounted only when the build's driver names its endpoint
+	// here. An entry replaces what would be mounted for that mode.
 	//
-	// Both are mounted for you: the client server the plugin runs for the agent
-	// under the first, and whatever built the device endpoint under the second.
-	// An entry here replaces what would have been mounted.
+	// The client server, whether built here or replaced, is what ClientCount,
+	// Clients and DisconnectClient report on, and it lives as long as the
+	// plugin: a client stays connected across a stop and start of the agent.
 	ServeMode map[string]http.Handler
 
 	// The entries whose labels follow what is being served.
@@ -256,6 +254,7 @@ func (p *Plugin) Activate(ctx agent.AgentContext) error {
 	p.failures = ctx.LoggerAt(logbuf.LevelError)
 	p.agent = ctx.Agent
 	p.loadOrigins(ctx)
+	p.ensureClientServer()
 	p.serveModes()
 
 	if p.Server == nil {
@@ -575,6 +574,32 @@ func (p *Plugin) menuTitle() string {
 		return p.MenuTitle
 	}
 	return "Server URLs"
+}
+
+// ensureClientServer mounts the client server the agent serves from, unless the
+// build named its own under server.ModeClient. It reads what a client
+// connection is judged by from the agent and this plugin's own origin policy;
+// a paired build injects the credential verifier through TokenVerifier. Building
+// it here is what keeps the field list in one place rather than in every build.
+func (p *Plugin) ensureClientServer() {
+	if p.ServeMode == nil {
+		p.ServeMode = map[string]http.Handler{}
+	}
+	if p.ServeMode[server.ModeClient] != nil {
+		return
+	}
+	a := p.agent
+	p.ServeMode[server.ModeClient] = clientserver.New(clientserver.Config{
+		APISecret:            a.APISecret,
+		AllowLoopbackBypass:  a.AllowLoopbackBypass,
+		OriginPolicy:         p.OriginPolicy(),
+		TokenVerifier:        p.TokenVerifier,
+		Tags:                 a,
+		AllowTagModification: a.TagModificationAllowed,
+		AllowRawTransceive:   a.RawAPDUAllowed,
+		Scans:                &a.Events().Tag,
+		ReaderStatus:         &a.Events().Reader,
+	})
 }
 
 // serving is the client server mounted under server.ModeClient, nil before

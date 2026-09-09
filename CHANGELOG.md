@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Golden fixtures for the client protocol, in `server/clientserver/testdata`.
+  Every message a browser client can receive is marshalled and compared byte for
+  byte, `tagData` with a card, with an NDEF message, with a raw message and on
+  removal included. Most of these payloads are built as map literals with no Go
+  type behind them, so nothing else stated what their field names were, and a
+  rename was invisible until a client went quiet. `go test ./server/clientserver
+  -update` rewrites them, so a wire change reaches review as the diff a client
+  sees. The health body's key set is pinned the same way in `agent/serverplugin`
 - **`nfc/ntag424` speaks the NTAG 424 DNA's authenticated channel.** SDM
   verification reads a tag; changing one needs a session, and this is that
   session. `NewAuthenticator` drives `Cmd.AuthenticateEV2First` or
@@ -36,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent still holds no AES key: whoever holds one builds the command and sends it
   over a channel of their choosing, the raw APDU channel included. `ChangeKey`
   cannot be undone, and a wrong one leaves a tag nobody can authenticate to
-
 - **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
   configured for Secure Dynamic Messaging rewrites its own URL on every read,
   mirroring its UID and a read counter (encrypted or in the clear) and appending
@@ -75,8 +82,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers, and `nfctest.NTAG424` is an emulated card for it, modelling the
   three-frame version chain on top of the Type 4 emulator
 
+### Changed
+
+- The client library's view of the wire is generated from the Go that serves
+  it. `cmd/sdkgen` reads package `protocol` and writes
+  `client/src/session/wire.generated.ts`: the error codes, the message types
+  and an interface per payload, carrying each Go doc comment across. The same
+  contract used to be written twice, once in Go and once by hand, with nothing
+  keeping the two in step; `RAW_CHANNEL_DISABLED` was added to both by hand,
+  and nothing would have failed had it not been. `make types` rebuilds it and
+  CI fails on a stale tree. Only the wire is generated: what the library adds
+  over it stays hand-written in `client/src/session/types.ts`
+- The client protocol is typed Go structs rather than `map[string]any`
+  literals. `tagData`, `writeResponse`, `transceiveResponse` and the health body
+  were assembled key by key, so nothing declared their field names and the
+  package named `protocol` described none of them. `protocol` now holds
+  `TagDataPayload`, `TagRemovedPayload`, `TagMessagePayload`,
+  `WriteResponsePayload`, `TransceiveResponsePayload`, `TagTarget`,
+  `TransceiveRequestPayload` and `HealthPayload`, and the servers marshal
+  those. A tag leaving the field is its own type: that branch sends three keys,
+  not the full shape emptied out. The JSON is unchanged, which the golden
+  fixtures show
+- The eleven client message types live in `protocol` beside the envelope that
+  carries them, with the `server.WSMessageType*` names kept as aliases.
+  `protocol.WSType*` had five of them
+
 ### Fixed
 
+- `HealthCheckResponse` in the client library carries `type` and `clients`.
+  `/api/v1/health` has sent four keys and the type declared two, so a caller
+  reading the client count off it got `undefined` with no type error.
+  `docs/api.md` showed the same two-key body
 - `nfc.ParseGetVersionResponse` classified an NTAG 424 DNA as an NTAG215. Both
   report storage size `0x11`, so the protocol byte is now read first: `0x05` is
   the ISO 14443-4 card, `0x03` the page-addressed NTAG21x. The old reading would

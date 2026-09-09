@@ -1,0 +1,8 @@
+{
+  "id": "req-write",
+  "payload": {
+    "message": "Write operation completed successfully"
+  },
+  "success": true,
+  "type": "writeResponse"
+}

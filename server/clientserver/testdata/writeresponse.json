@@ -1,0 +1,14 @@
+{
+  "id": "req-write",
+  "payload": {
+    "attempts": 1,
+    "bytesWritten": 42,
+    "locked": false,
+    "message": "Write operation completed successfully",
+    "tagType": "NTAG215",
+    "uid": "04A1B2C3",
+    "verified": true
+  },
+  "success": true,
+  "type": "writeResponse"
+}

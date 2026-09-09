@@ -1113,9 +1113,13 @@ Response:
 ```json
 {
   "status": "ok",
-  "type": "agent"
+  "type": "agent",
+  "timestamp": "2026-03-14T09:26:53Z",
+  "clients": 2
 }
 ```
+
+`clients` is how many are connected right now.
 
 Both `/health` and `/api/v1/health` are served on the agent server port and
 report `"type": "agent"`. They are the agent's own routes, mounted on whatever

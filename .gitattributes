@@ -1,9 +1,13 @@
 # Built and committed so `go build .` works without Node. Collapsed in diffs
 # and excluded from language stats — rebuild with `make webui`.
-webui/frontend/dist/** linguist-generated=true -diff
-webui/frontend/package-lock.json linguist-generated=true -diff
+agent/console/frontend/dist/** linguist-generated=true -diff
+agent/console/frontend/package-lock.json linguist-generated=true -diff
 
 # Generated from client/src with `npm run build` in client/. Collapsed in diffs
 # and excluded from language stats, like the console's build output.
 client/dist/** linguist-generated=true -diff
 client/package-lock.json linguist-generated=true -diff
+
+# Generated from package protocol with `make types`. Not collapsed: this one is
+# the wire contract, and a change to it is the thing a reviewer wants to read.
+client/src/session/wire.generated.ts linguist-generated=true

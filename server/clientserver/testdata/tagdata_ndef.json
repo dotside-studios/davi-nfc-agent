@@ -1,0 +1,31 @@
+{
+  "payload": {
+    "capabilities": {
+      "canLock": false,
+      "canRead": true,
+      "canTransceive": false,
+      "canWrite": false,
+      "supportsNdef": true,
+      "tagFamily": "Unknown"
+    },
+    "err": null,
+    "message": {
+      "records": [
+        {
+          "content": "hello",
+          "language": "en",
+          "payload": "AmVuaGVsbG8=",
+          "tnf": 1,
+          "type": "text"
+        }
+      ],
+      "type": "ndef"
+    },
+    "scannedAt": "2026-03-14T09:26:53Z",
+    "technology": "Unknown",
+    "text": "hello",
+    "type": "Mock Tag",
+    "uid": "04A1B2C3"
+  },
+  "type": "tagData"
+}

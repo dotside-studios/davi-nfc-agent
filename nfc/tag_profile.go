@@ -140,11 +140,9 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 		supportsAuthentication: true,
 	},
 
-	// The NTAG 424 DNA is driven as a Type 4 card, and differs from the generic
-	// profile above in what is known rather than in what is done: a fixed
-	// layout, so a capacity the write path can check, and AES keys behind the
-	// files, so authentication is advertised even though nothing here performs
-	// it yet.
+	// The NTAG 424 DNA is driven as a Type 4 card. It differs from the generic
+	// profile below only in what is known about it: a fixed layout, so the
+	// write path has a capacity to check, and AES keys behind the files.
 	DetectedNTAG424: {
 		name:        CardTypeNtag424,
 		numericType: 0x20, // ISO14443-4, as every Type 4 card reports
@@ -160,8 +158,8 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 		// file settings under AES, neither of which is implemented.
 		canLock:       false,
 		canTransceive: true,
-		// AES-128 across five keys. Nothing here authenticates yet, so this
-		// says what the card supports, not what the driver does.
+		// AES-128 across five keys. This is what the card supports; no driver
+		// here authenticates yet.
 		supportsCrypto:         true,
 		supportsAuthentication: true,
 	},

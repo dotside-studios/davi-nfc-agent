@@ -21,15 +21,12 @@ func newPCSCISO14443Tag(dev CardTransport, uid string) *pcscISO14443Tag {
 	}
 }
 
-// profile is what this tag reports itself as: the profile for the kind it was
-// built as, rather than a fixed one. A card driven through this same Type 4
-// exchange but known more precisely — an NTAG 424 DNA — then answers with its
-// own name and capacity without reimplementing any of the exchange. See
-// newPCSCNTAG424Tag.
+// profile follows the kind the tag was built as, so a card driven through the
+// same Type 4 exchange but known more precisely reports its own name and
+// capacity without reimplementing the exchange. See newPCSCNTAG424Tag.
 //
 // A kind with no profile falls back to the generic Type 4 one, which is what
-// such a card is being driven as anyway; reporting an empty name would be worse
-// than reporting the honest, less specific one.
+// such a card is being driven as.
 func (t *pcscISO14443Tag) profile() tagProfile {
 	if p, ok := profileFor(t.detectedType); ok {
 		return p

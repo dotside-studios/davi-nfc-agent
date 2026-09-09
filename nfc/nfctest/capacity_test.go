@@ -22,9 +22,9 @@ func TestCapacity_FitsAcceptedOversizedRejected(t *testing.T) {
 		{"Ultralight", func() *EmulatedCard { return Ultralight("04A1B2C3D4E5F6") }},
 		{"UltralightC", func() *EmulatedCard { return UltralightC("04A1B2C3D4E5F6") }},
 		{"Classic1K", func() *EmulatedCard { return Classic1K("04112233") }},
-		// A Type 4 card with a known layout: the check is family-aware here
-		// because the NDEF file is fixed at 256 bytes, where a generic Type 4
-		// tag reports no capacity at all and is not pre-flighted.
+		// A Type 4 card with a known layout. A generic Type 4 tag reports no
+		// capacity and is skipped above; this one's NDEF file is fixed at 256
+		// bytes, so the pre-flight check applies.
 		{"NTAG424", func() *EmulatedCard { return NTAG424("04A1B2C3D4E5F6") }},
 	}
 	for _, fc := range cards {

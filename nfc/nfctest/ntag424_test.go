@@ -8,9 +8,9 @@ import (
 
 const ntag424UID = "04A1B2C3D4E5F6"
 
-// An NTAG 424 DNA reads and writes NDEF through the Type 4 driver, unchanged.
-// The card adds no NDEF behaviour of its own, so the point of the round trip is
-// that naming the card did not cost the driver it rides on.
+// An NTAG 424 DNA reads and writes NDEF through the Type 4 driver. The card
+// adds no NDEF behaviour of its own, so this checks that naming it did not cost
+// the driver it rides on.
 func TestNTAG424WriteReadRoundTrip(t *testing.T) {
 	tag := NTAG424(ntag424UID).Tag()
 
@@ -46,10 +46,9 @@ func TestNTAG424WriteReadRoundTrip(t *testing.T) {
 	}
 }
 
-// The card names itself, and reports the memory and NDEF ceiling of an NTAG 424
-// DNA rather than the unknowns a generic Type 4 tag reports. The capacity is the
-// part that matters beyond cosmetics: it is what lets an oversized write be
-// refused before it reaches the card.
+// The card reports its own name, memory and NDEF ceiling, where a generic
+// Type 4 tag reports none of them. The capacity is what lets an oversized write
+// be refused before it reaches the card.
 func TestNTAG424ReportsItsOwnIdentity(t *testing.T) {
 	tag := NTAG424(ntag424UID).Tag()
 
@@ -74,24 +73,21 @@ func TestNTAG424ReportsItsOwnIdentity(t *testing.T) {
 		t.Error("SupportsAuthentication is false, but the card carries AES keys")
 	}
 
-	// A generic Type 4 tag stays generic: naming one card must not rename the
-	// rest.
+	// Naming one card must not rename the rest.
 	if got := Type4(ntag424UID).Tag().Type(); got != nfc.CardTypeType4 {
 		t.Errorf("Type4 tag Type() = %q, want %q", got, nfc.CardTypeType4)
 	}
 }
 
-// Capabilities and behaviour agree: what the card says it can do is what its
-// methods actually do.
+// What the card says it can do matches what its methods do.
 func TestNTAG424CapabilitiesAreHonest(t *testing.T) {
 	if err := nfc.AssertCapabilitiesConsistent(NTAG424(ntag424UID).Tag()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// The emulator answers the wrapped GET_VERSION as the card does, and a plain
-// Type 4 tag refuses it. Detection reads exactly this difference, so pinning it
-// keeps the emulator honest about what it is standing in for.
+// The emulator answers the wrapped GET_VERSION and a plain Type 4 tag refuses
+// it. Detection reads that difference, so it is pinned here.
 func TestNTAG424EmulatorAnswersWrappedGetVersion(t *testing.T) {
 	e := newNTAG424Emulator(ntag424UID)
 
@@ -107,7 +103,6 @@ func TestNTAG424EmulatorAnswersWrappedGetVersion(t *testing.T) {
 		t.Errorf("first frame SW = %04X, want 91AF (more frames follow)", sw)
 	}
 
-	// The remaining frames follow, the last one ending the chain.
 	if sw := swOf(e.Transceive(nfc.DESFireWrapAPDU(nfc.DFCmdAdditionalFrame, nil))); sw != 0x91AF {
 		t.Errorf("second frame SW = %04X, want 91AF", sw)
 	}

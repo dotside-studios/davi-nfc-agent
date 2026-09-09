@@ -95,10 +95,10 @@ func TestParseGetVersionResponse_Invalid(t *testing.T) {
 	}
 }
 
-// The NTAG family spans two incompatible protocols, and the storage size does
-// not separate them: an NTAG 424 DNA reports the same 0x11 as an NTAG215. The
-// protocol byte is what decides, and getting it wrong drives a file-based card
-// with the page-addressed NTAG driver, which fails on the first read.
+// The storage size does not separate the two NTAG protocols: an NTAG 424 DNA
+// reports the same 0x11 as an NTAG215. The protocol byte decides. Getting it
+// wrong drives a file-based card with the page-addressed NTAG driver, which
+// fails on the first read.
 func TestParseGetVersionResponse_ProtocolSeparatesTheNTAGFamilies(t *testing.T) {
 	// resp: [header, vendor, product, subtype, major, minor, storage, protocol]
 	mk := func(major, storage, protocol byte) []byte {
@@ -112,12 +112,11 @@ func TestParseGetVersionResponse_ProtocolSeparatesTheNTAGFamilies(t *testing.T) 
 	}{
 		{"NTAG215 keeps its 0x11 under ISO 14443-3", mk(0x01, 0x11, 0x03), DetectedNTAG215},
 		{"NTAG 424 DNA is the same 0x11 under ISO 14443-4", mk(0x30, 0x11, 0x05), DetectedNTAG424},
-		// An unrecognised size under the page-addressed protocol still reads as
-		// an NTAG21x, which is the existing conservative default.
+		// An unrecognised size under the page-addressed protocol keeps the
+		// existing NTAG21x default.
 		{"unknown size, ISO 14443-3", mk(0x01, 0x77, 0x03), DetectedNTAG215},
-		// Under ISO 14443-4 there is no such default to fall back on: nothing
-		// here knows the layout, so the caller is left to drive it as a plain
-		// Type 4 card rather than by page.
+		// Under ISO 14443-4 there is no such default: the layout is unknown, so
+		// the caller drives it as a plain Type 4 card instead.
 		{"unknown size, ISO 14443-4", mk(0x30, 0x77, 0x05), DetectedUnknown},
 	}
 	for _, tt := range tests {
@@ -130,8 +129,8 @@ func TestParseGetVersionResponse_ProtocolSeparatesTheNTAGFamilies(t *testing.T) 
 }
 
 // The wrapped form omits the header byte the native one carries and reports its
-// status in SW2, so it is parsed separately. Reading it with the native parser's
-// offsets would shift every field by one.
+// status in SW2, so it is parsed separately. The native parser's offsets would
+// shift every field by one.
 func TestParseWrappedGetVersionResponse(t *testing.T) {
 	// frame: [vendor, product, subtype, major, minor, storage, protocol]
 	ntag424 := []byte{0x04, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}

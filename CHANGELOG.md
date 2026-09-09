@@ -11,24 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **NTAG 424 DNA support**, at the NDEF level. The card is now detected, named
   `NTAG424`, and driven through the existing Type 4 path, with the 416-byte
-  layout and 254-byte NDEF ceiling its three standard files give it — so an
+  layout and 254-byte NDEF ceiling its three standard files give it, so an
   oversized message is refused by the write path's pre-flight check instead of
-  by the card, partway through the write. Detection is what was actually
-  missing: the card presents the short ISO 14443-4 ATR, which carries no
-  card-type byte, and neither ATR check in this package accepts it, so a 424 was
-  reported as an unsupported tag rather than reaching the Type 4 driver at all.
-  It is now identified by one command — the ISO-wrapped `GET_VERSION` — sent
-  during command-based detection, before any application or file is selected.
-  A card that does not implement it answers with an error status word and is
-  left to the detection that follows, so nothing else pays for this beyond a
-  single APDU. The card's AES-protected side (authentication, file settings,
-  SDM) remains unimplemented; `supportsAuthentication` describes the card, not
-  the driver. Reach those commands through the raw APDU channel
+  by the card partway through the write. Detection was what was missing: the
+  card presents the short ISO 14443-4 ATR, which carries no card-type byte, and
+  neither ATR check in this package accepts it, so a 424 was reported as an
+  unsupported tag rather than reaching the Type 4 driver at all. It is now
+  identified by one command, the ISO-wrapped `GET_VERSION`, sent during
+  command-based detection before any application or file is selected. A card
+  that does not implement it answers with an error status word and is left to
+  the detection that follows, so nothing else pays more than a single APDU. The
+  card's AES commands (authentication, file settings, SDM) remain
+  unimplemented; `supportsAuthentication` describes the card, not the driver.
+  Reach those commands through the raw APDU channel
 - `nfc.ParseWrappedGetVersionResponse` reads a `GET_VERSION` answered over
-  ISO 14443-4, where the frame carries no header byte and the status rides in
-  SW2 under `SW1=0x91`, and `nfc.NTAG424GetVersionAPDU` builds the wrapped
-  command it answers. `nfctest.NTAG424` is an emulated card for it, modelling
-  the three-frame version chain on top of the Type 4 emulator
+  ISO 14443-4, where the frame carries no header byte and the status is in SW2
+  under `SW1=0x91`. `nfc.NTAG424GetVersionAPDU` builds the wrapped command it
+  answers, and `nfctest.NTAG424` is an emulated card for it, modelling the
+  three-frame version chain on top of the Type 4 emulator
 - A **gated raw APDU channel**. The raw exchange path (`transceiveRequest` /
   `tags.transceive`) is now behind a dedicated opt-in that is off by default and
   independent of the reader's read/write mode: a raw command reaches the tag
@@ -88,14 +88,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   application, its Capability Container and NDEF file with the real Type 4
   selection rules, so a driver that builds either SELECT wrongly fails a
   round-trip test rather than only a real tag
-- `nfc.ParseGetVersionResponse` classified an NTAG 424 DNA as an NTAG215. The
-  NTAG product type spans two incompatible families and the storage size does
-  not separate them — both report `0x11` — so the protocol byte is now read
-  first: `0x05` is the ISO 14443-4 card, `0x03` the page-addressed NTAG21x. The
-  old reading would have driven a file-based card with the page-addressed
-  driver. It was unreachable in practice, because a Type 4 card resolves from
-  its ATR before this parser is consulted, but the NTAG 424 detection added
-  above makes the distinction load-bearing
+- `nfc.ParseGetVersionResponse` classified an NTAG 424 DNA as an NTAG215. Both
+  report storage size `0x11`, so the protocol byte is now read first: `0x05` is
+  the ISO 14443-4 card, `0x03` the page-addressed NTAG21x. The old reading would
+  have driven a file-based card with the page-addressed driver. Nothing reached
+  it before, since the parser is only consulted for cards the ATR did not name,
+  but the NTAG 424 detection added above makes the distinction load-bearing
 
 ## [1.3.0] - 2026-08-29
 

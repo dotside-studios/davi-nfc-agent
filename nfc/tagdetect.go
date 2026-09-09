@@ -24,10 +24,9 @@ const (
 	DetectedDESFireEV1
 	DetectedDESFireEV2
 	DetectedISO14443_4
-	// DetectedNTAG424 is an NTAG 424 DNA: a Type 4 card whose NDEF file is
-	// reached with the same ISO 7816 commands as any other, but whose layout
-	// and AES-protected files are its own. Named separately so its capacity is
-	// known rather than unbounded.
+	// DetectedNTAG424 is an NTAG 424 DNA, a Type 4 card with a fixed file
+	// layout. Named separately from DetectedISO14443_4 so its capacity is
+	// known.
 	DetectedNTAG424
 	DetectedPlus2K
 	DetectedPlus4K
@@ -190,35 +189,30 @@ func containsISO14443_4Indicator(atr []byte) bool {
 	return false
 }
 
-// Version bytes shared by the two GET_VERSION encodings below. NXP publishes
-// these in the product data sheets; they are the only fields either parser
-// needs to name a card.
+// Version fields the two GET_VERSION parsers below read, as published in the
+// NXP product data sheets.
 const (
-	// versionVendorNXP is the vendor ID every card here carries.
 	versionVendorNXP = 0x04
 
 	// Product types, byte 2 of a version response.
 	versionProductUltralight = 0x03
 	versionProductNTAG       = 0x04
 
-	// Storage sizes, byte 6. The value encodes the user memory, so it separates
-	// the members of a family — except across families, where the same size can
-	// mean two different cards and the protocol byte has to decide.
+	// Storage sizes, byte 6. The same value can mean two different cards across
+	// families, so it does not identify one on its own.
 	versionStorage128B = 0x0E // MF0UL21
 	versionStorage144B = 0x0F // NTAG213
 	versionStorage504B = 0x11 // NTAG215, and the NTAG 424 DNA
 	versionStorage888B = 0x13 // NTAG216
 
-	// Protocol types, byte 7. The page-addressed NTAG21x speak ISO 14443-3
-	// only; the NTAG 424 DNA is ISO 14443-4, which is what makes it a Type 4
-	// card driven by SELECT and READ BINARY rather than by page.
+	// Protocol types, byte 7. NTAG21x are ISO 14443-3 and addressed by page;
+	// the NTAG 424 DNA is ISO 14443-4 and addressed by file.
 	versionProtocol14443_3 = 0x03
 	versionProtocol14443_4 = 0x05
 
-	// versionMajorNTAG424 is the NTAG 424 DNA's major version. Identifying a
-	// card is a claim about its capacity, so the generation is pinned: a later
-	// ISO 14443-4 NTAG reads as a plain Type 4 tag, which still works, rather
-	// than borrowing this one's memory layout.
+	// versionMajorNTAG424 is the NTAG 424 DNA's major version. Pinned so a
+	// later ISO 14443-4 NTAG is not given this card's memory layout; it stays a
+	// generic Type 4 tag instead.
 	versionMajorNTAG424 = 0x30
 )
 
@@ -229,9 +223,8 @@ const (
 // Ultralight product type identifies an Ultralight EV1 rather than either of
 // those.
 //
-// This is the native encoding, as an ISO 14443-3 card answers it. A card driven
-// over ISO 14443-4 answers the wrapped form instead, which omits the header
-// byte and carries its status in SW2; see ParseWrappedGetVersionResponse.
+// This is the native encoding. For the ISO 14443-4 form, see
+// ParseWrappedGetVersionResponse.
 //
 // Response format for NTAG/Ultralight EV1:
 // Byte 0: Fixed header 0x00
@@ -267,18 +260,16 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 		}
 
 	case versionProductNTAG:
-		// The NTAG product type spans two incompatible families. The protocol
-		// byte separates them, and it has to be read before the storage size:
-		// an NTAG 424 DNA reports the same 0x11 as an NTAG215, so keying on
-		// size alone would drive a file-based card with a page-addressed
-		// driver, which fails on the first read.
+		// The protocol byte is read before the storage size, because an
+		// NTAG 424 DNA reports the same 0x11 as an NTAG215. Keying on size
+		// alone would drive a file-based card with the page-addressed driver
+		// below, which fails on the first read.
 		if protocolType == versionProtocol14443_4 {
 			if storageSize == versionStorage504B {
 				return DetectedNTAG424
 			}
-			// Another ISO 14443-4 NTAG. Nothing here knows its layout, and
-			// guessing a page-addressed one would be wrong; the caller falls
-			// back to the generic Type 4 driver.
+			// Some other ISO 14443-4 NTAG, whose layout is unknown here. The
+			// caller falls back to the generic Type 4 driver.
 			return DetectedUnknown
 		}
 
@@ -299,26 +290,23 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 
 // ParseWrappedGetVersionResponse identifies a card from the first frame of a
 // GET_VERSION answered over ISO 14443-4, as an NTAG 424 DNA or a DESFire
-// answers the ISO-wrapped command 90 60 00 00 00.
+// answers the wrapped command 90 60 00 00 00.
 //
-// Two things differ from the native encoding. The frame carries no leading
-// header byte, so every field sits one earlier; and the card reports its status
-// in SW2 under SW1=0x91, answering 0xAF — more frames follow — for the first of
-// the three frames a full version spans. Only the first frame is read here,
-// because it holds everything that names the card.
+// The encoding differs from the native one in two ways: the frame carries no
+// leading header byte, so every field sits one earlier, and the status is in
+// SW2 under SW1=0x91, where 0xAF means more frames follow. A full version spans
+// three frames; only the first is read, since it holds the identifying fields.
 //
-// The second result is false for anything this cannot name, including a card
-// that does not implement the command at all: a Type 4 tag that answers "class
-// not supported" is simply one whose kind stays generic.
+// The second result is false for a response this cannot name, including one
+// from a card that does not implement the command.
 func ParseWrappedGetVersionResponse(raw []byte) (DetectedTagType, bool) {
 	parsed, err := ParseAPDUResponse(raw)
 	if err != nil {
 		return DetectedUnknown, false
 	}
 
-	// 91 AF is the expected answer, with 91 00 accepted for a card that fits
-	// its version in one frame and 90 00 for a reader that unwraps the status
-	// itself.
+	// 91 AF is the expected answer. 91 00 covers a card that fits its version
+	// in one frame, 90 00 a reader that unwraps the status itself.
 	wrapped := parsed.SW1 == 0x91 && (parsed.SW2 == dfStatusAdditionalFrame || parsed.SW2 == dfStatusOK)
 	if !wrapped && !parsed.IsSuccess() {
 		return DetectedUnknown, false

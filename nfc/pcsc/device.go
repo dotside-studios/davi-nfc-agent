@@ -402,9 +402,8 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	return nil, nil
 }
 
-// refineType4 names the Type 4 card in front of the reader, when this package
-// knows a more precise kind for it than "some ISO14443-4 tag". Any other kind
-// passes through untouched, so the cards the ATR already named cost nothing.
+// refineType4 replaces a generic ISO14443-4 detection with a more precise kind
+// when the card names itself. Any other kind passes through unprobed.
 func (d *device) refineType4(kind nfc.DetectedTagType) nfc.DetectedTagType {
 	if kind != nfc.DetectedISO14443_4 {
 		return kind
@@ -415,19 +414,17 @@ func (d *device) refineType4(kind nfc.DetectedTagType) nfc.DetectedTagType {
 	return kind
 }
 
-// probeWrappedVersion asks the card for its version over ISO 14443-4 and
-// returns the kind that names it, or DetectedUnknown for a card this package
-// cannot name — including one that does not implement the command at all, which
-// answers with an error status word rather than failing.
+// probeWrappedVersion asks the card for its version over ISO 14443-4, and
+// returns the kind that names it or DetectedUnknown. A card that does not
+// implement the command answers with an error status word, which reads as
+// unknown.
 //
-// This is the only route to an NTAG 424 DNA on most readers. Its ATR is the
-// short ISO 14443-4 form, which carries no card-type byte, so nothing before
-// this point can tell it from any other ISO-4 card; the ATR alone does not even
-// establish that much. One command does.
+// This is the only route to an NTAG 424 DNA on most readers: it presents the
+// short ISO 14443-4 ATR, which carries no card-type byte, so neither
+// DetectTagTypeFromATR nor isISO14443_4Compatible recognises it.
 //
-// It is safe to send to a card that is not expecting it: no application or file
-// is selected yet, so there is no selection state for an unrecognised command to
-// disturb, and the command reads rather than writes.
+// It is safe to send unprompted: it reads rather than writes, and runs before
+// any application or file is selected.
 func (d *device) probeWrappedVersion() nfc.DetectedTagType {
 	resp, err := d.card.Transmit(nfc.NTAG424GetVersionAPDU())
 	if err != nil {
@@ -450,9 +447,8 @@ func (d *device) detectTagWithCommands() nfc.Tag {
 		}
 	}
 
-	// Ask over ISO 14443-4, for a card whose ATR named nothing. A card that
-	// does not speak it answers with an error status word, so this costs one
-	// command and misidentifies nothing.
+	// Ask over ISO 14443-4, for a card the ATR did not name. One command, and a
+	// card that does not answer it is left to the probe below.
 	if kind := d.probeWrappedVersion(); kind != nfc.DetectedUnknown {
 		if tag := nfc.NewTagForType(kind, d, d.uid); tag != nil {
 			return tag

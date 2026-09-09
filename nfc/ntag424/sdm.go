@@ -3,12 +3,15 @@
 //
 // A tag configured for SDM rewrites its own NDEF message on every read: it
 // mirrors its UID and a read counter into the URL, optionally encrypted, and
-// appends a CMAC over the result. A backend that holds the tag's keys can then
-// tell a genuine tap from a copied URL, and see the counter go up once per tap.
+// appends a CMAC over the result. A backend holding the tag's keys can tell a
+// genuine tap from a copied URL, and see the counter rise once per tap.
 //
-// Nothing here touches a reader. These are pure functions over the values a URL
-// carries, so a server that never sees an NFC device can verify a tap, and the
-// agent does not have to hold the keys that verify one.
+// These are pure functions over the values a URL carries. Nothing here touches a
+// reader, so a server that never sees an NFC device can verify a tap.
+//
+// Changing a tag, rather than reading one, needs an authenticated session. See
+// Authenticator and Session, which establish and carry one; the transport stays
+// the caller's there too.
 //
 // The algorithms are NXP's AN12196, "NTAG 424 DNA and NTAG 424 DNA TagTamper
 // features and hints", and the tests pin every step to the worked examples in
@@ -35,10 +38,9 @@ const MACSize = 8
 // PICCDataSize is the length of the encrypted PICCData block a tag mirrors.
 const PICCDataSize = 16
 
-// Errors reported here. They are distinguishable because a caller answers a
-// tap differently depending on which one it is: a bad MAC is a forgery or the
-// wrong key, while a malformed parameter is a request that never came from a
-// tag.
+// Errors reported here, kept distinct because a caller answers them differently:
+// a bad MAC is a forgery or the wrong key, a malformed parameter is a request
+// that never came from a tag.
 var (
 	// ErrMACMismatch reports that the MAC did not match the data. The tap is
 	// not genuine, or the key is not this tag's.
@@ -70,14 +72,13 @@ type PICCData struct {
 	// UID is the tag's 7-byte serial number.
 	UID []byte
 
-	// ReadCounter counts reads of the NDEF file. It increases by one per tap
-	// and never wraps backwards, so a counter at or below one already seen is
-	// a replayed URL.
+	// ReadCounter counts reads of the NDEF file, rising by one per tap. A
+	// counter at or below one already seen is a replayed URL.
 	ReadCounter uint32
 
-	// UIDMirrored and CounterMirrored report which fields the tag actually
-	// mirrored. A field that was not mirrored is absent here rather than zero,
-	// and is not part of the session keys.
+	// UIDMirrored and CounterMirrored report which fields the tag mirrored. An
+	// unmirrored field is absent rather than zero, and is not part of the
+	// session keys.
 	UIDMirrored     bool
 	CounterMirrored bool
 }
@@ -100,10 +101,9 @@ const counterLength = 3
 // DecryptPICCData recovers the UID and read counter from the encrypted
 // PICCData a tag mirrored, using the SDM meta read key.
 //
-// The block is AES-128-CBC with a zero IV, which for one block is a single
-// decryption. The result is rejected unless its leading tag byte describes the
-// structure that follows, which is the only integrity this step has on its own:
-// the MAC is what actually authenticates a tap.
+// The block is AES-128-CBC with a zero IV. The result is rejected unless its
+// leading tag byte describes the structure that follows, which is all this step
+// can check on its own; the MAC is what authenticates a tap.
 func DecryptPICCData(metaReadKey, encrypted []byte) (*PICCData, error) {
 	block, err := newCipher(metaReadKey)
 	if err != nil {
@@ -127,9 +127,8 @@ func parsePICCData(plain []byte) (*PICCData, error) {
 		CounterMirrored: tag&piccTagCounterMirrored != 0,
 	}
 
-	// A block that decrypts under the wrong key is random bytes, and this is
-	// where that shows: the length field has to agree with the one length an
-	// NTAG 424 DNA has.
+	// A block decrypted under the wrong key is random bytes, and shows up here:
+	// the length field must be the one length an NTAG 424 DNA has.
 	length := int(tag & piccTagUIDLengthMask)
 	if data.UIDMirrored && length != uidLength {
 		return nil, fmt.Errorf("%w: PICCDataTag %#02x claims a %d-byte UID", ErrPICCData, tag, length)
@@ -171,9 +170,8 @@ var (
 // SessionKeys derives this tap's encryption and MAC keys from the file read
 // key, the UID and the read counter.
 //
-// Only the fields the tag mirrored go into the vectors, so a tag that mirrors
-// the counter but not the UID derives different keys from one that mirrors
-// both. Passing a PICCData recovered from the tap keeps that in step.
+// Only the mirrored fields go into the vectors, so a tag that mirrors the
+// counter but not the UID derives different keys from one that mirrors both.
 func SessionKeys(fileReadKey []byte, data *PICCData) (encKey, macKey []byte, err error) {
 	block, err := newCipher(fileReadKey)
 	if err != nil {
@@ -201,8 +199,8 @@ func sessionVector(prefix []byte, data *PICCData) []byte {
 // MAC returns the SDMMAC over input for this tap: the CMAC under the tap's
 // session MAC key, truncated as the tag truncates it.
 //
-// input is the mirrored file data the tag covered, which is empty when the tag
-// mirrors nothing but PICCData.
+// input is the mirrored file data the tag covered, empty when the tag mirrors
+// nothing but PICCData.
 func MAC(fileReadKey []byte, data *PICCData, input []byte) ([]byte, error) {
 	_, macKey, err := SessionKeys(fileReadKey, data)
 	if err != nil {
@@ -226,8 +224,8 @@ func truncateMAC(full []byte) []byte {
 }
 
 // VerifyMAC reports whether mac is the tag's MAC over input for this tap. The
-// comparison is constant time, so a caller can verify an attacker-supplied MAC
-// without leaking how much of it was right.
+// comparison is constant time, so verifying an attacker-supplied MAC does not
+// leak how much of it was right.
 func VerifyMAC(fileReadKey []byte, data *PICCData, input, mac []byte) error {
 	want, err := MAC(fileReadKey, data, input)
 	if err != nil {
@@ -242,8 +240,8 @@ func VerifyMAC(fileReadKey []byte, data *PICCData, input, mac []byte) error {
 // DecryptFileData recovers the file data a tag mirrored encrypted, for a tag
 // configured to mirror some of its NDEF file that way.
 //
-// The IV is the tap's own: the read counter encrypted under the session
-// encryption key, so two taps never encrypt the same file data alike.
+// The IV is the read counter encrypted under the session encryption key, so two
+// taps never encrypt the same file data alike.
 func DecryptFileData(fileReadKey []byte, data *PICCData, encrypted []byte) ([]byte, error) {
 	encKey, _, err := SessionKeys(fileReadKey, data)
 	if err != nil {

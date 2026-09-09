@@ -10,20 +10,18 @@ import (
 
 // Verifying the URL a tag serves.
 //
-// A tag mirrors its data into query parameters, and what the MAC covers is the
-// URL text itself: the characters from the start of the encrypted file data up
-// to the start of the MAC. So the raw query has to be read, not just its
-// decoded values, and the parameters have to keep the order the tag wrote them
-// in.
+// The MAC covers the URL text itself, from the start of the encrypted file data
+// to the start of the MAC, so the raw query has to be read rather than just its
+// decoded values.
 
-// ErrNotSDM reports a URL that carries no SDM parameters, or too few of them to
-// verify. It is separate from a MAC mismatch: this URL never came from a tag,
-// rather than came from one and failed.
+// ErrNotSDM reports a URL carrying no SDM parameters, or too few to verify. It
+// is separate from a MAC mismatch, which is a URL that came from a tag and
+// failed.
 var ErrNotSDM = errors.New("ntag424: URL carries no SDM data")
 
-// Parameter names tags are configured with. The application note's own examples
-// use two different sets, and deployments pick their own, so the common spellings
-// are all recognised. A tag using something else is read with ParseURLWith.
+// Parameter names tags are configured with. AN12196's own examples use two
+// different sets and deployments pick their own, so the common spellings are all
+// recognised; anything else is read with ParseURLWith.
 var (
 	defaultNames = Names{
 		PICCData:    []string{"picc_data", "e", "picc"},
@@ -87,10 +85,9 @@ type Tap struct {
 	// UID is the tag's serial number.
 	UID []byte
 
-	// ReadCounter is this read's number. It rises by one per tap, so a counter
-	// at or below one already recorded for this UID is a replay of an earlier
-	// URL, which no MAC can detect. Keeping the last counter per tag is the
-	// caller's job.
+	// ReadCounter is this read's number, rising by one per tap. A counter at or
+	// below one already recorded for this UID is a replay, which no MAC can
+	// detect; keeping the last counter per tag is the caller's job.
 	ReadCounter uint32
 
 	// FileData is the mirrored file data, decrypted, or nil when the tag
@@ -106,10 +103,10 @@ func (t *Tap) UIDString() string {
 
 // VerifyURL checks a tapped URL against a tag's keys and reports what it says.
 //
-// A nil error means this URL was produced by a tag holding these keys, and was
-// not edited afterwards. It does not mean the tap is fresh: a URL captured once
-// verifies forever, so compare Tap.ReadCounter against the highest counter
-// already seen for this UID and refuse one that does not advance.
+// A nil error means a tag holding these keys produced this URL and nothing
+// edited it since. It does not mean the tap is fresh: a captured URL verifies
+// forever, so compare Tap.ReadCounter against the highest already seen for this
+// UID and refuse one that does not advance.
 func VerifyURL(rawURL string, keys Keys) (*Tap, error) {
 	return VerifyURLWith(rawURL, keys, defaultNames)
 }
@@ -139,8 +136,8 @@ func Verify(data *URLData, keys Keys) (*Tap, error) {
 
 	tap := &Tap{UID: picc.UID, ReadCounter: picc.ReadCounter}
 	if len(data.EncFileData) > 0 {
-		// Only now, with the MAC checked, is it worth decrypting: file data
-		// from an unverified URL is whatever the sender chose.
+		// Decrypted only now the MAC has been checked: file data from an
+		// unverified URL is whatever the sender chose.
 		tap.FileData, err = DecryptFileData(keys.FileRead, picc, data.EncFileData)
 		if err != nil {
 			return nil, err
@@ -209,10 +206,10 @@ func ParseURLWith(rawURL string, names Names) (*URLData, error) {
 	return data, nil
 }
 
-// macInput is the URL text the MAC covers: from the first character of the
-// encrypted file data's value to the character before the MAC's value. It spans
-// the separator and the MAC parameter's own name, which is why it cannot be
-// rebuilt from the decoded values.
+// macInput is the URL text the MAC covers, from the first character of the
+// encrypted file data's value to the character before the MAC's. It spans the
+// separator and the MAC parameter's own name, so it cannot be rebuilt from
+// decoded values.
 func macInput(rawQuery string, names Names) ([]byte, error) {
 	start, ok := valueOffset(rawQuery, names.EncFileData)
 	if !ok {
@@ -233,8 +230,8 @@ func valueOffset(rawQuery string, names []string) (int, bool) {
 	for _, name := range names {
 		for _, prefix := range []string{name + "=", "&" + name + "="} {
 			if i := strings.Index(rawQuery, prefix); i >= 0 {
-				// A bare name must start the query or follow a separator, so a
-				// parameter named "c" does not match inside "picc_data".
+				// A bare name must start the query or follow a separator, so "c"
+				// does not match inside "picc_data".
 				if prefix[0] != '&' && i != 0 {
 					continue
 				}
@@ -267,9 +264,9 @@ func hexParam(query url.Values, names []string, size int) ([]byte, error) {
 
 // plainMirrors reads a UID and counter mirrored in the clear.
 //
-// The counter's text is most significant digit first, which is not the order of
-// the counter's bytes inside PICCData. A tag that mirrors it the other way needs
-// its counter read by the caller and passed to Verify.
+// The counter's text is most significant digit first, unlike the counter's bytes
+// inside PICCData. A tag that mirrors it the other way needs its counter read by
+// the caller and passed to Verify.
 func plainMirrors(query url.Values, names Names) (uid []byte, counter uint32, ok bool, err error) {
 	uid, err = hexParam(query, names.UID, uidLength)
 	if err != nil {

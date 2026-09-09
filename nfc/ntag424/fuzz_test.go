@@ -70,3 +70,34 @@ func TestVerifyURLHandlesAnOverlongParameter(t *testing.T) {
 		t.Error("a 4096-byte MAC was accepted")
 	}
 }
+
+// A session reads whatever the card, or whatever is impersonating one, sends
+// back. It must answer any of it without panicking, and must never report data
+// it did not verify.
+func FuzzSessionResponse(f *testing.F) {
+	f.Add([]byte{0x00, 0x40, 0xEE, 0xEE, 0x2A, 0x47, 0x42, 0x82, 0xE7, 0xA4, 0x79, 0x86, 0x91, 0x00}, 1)
+	f.Add([]byte{0x91, 0x00}, 0)
+	f.Add([]byte{}, 2)
+
+	f.Fuzz(func(t *testing.T, response []byte, mode int) {
+		s, err := newSession(make([]byte, tiSize), zeroKey, zeroKey)
+		if err != nil {
+			t.Fatalf("newSession: %v", err)
+		}
+
+		commMode := CommMode(((mode % 3) + 3) % 3)
+		data, err := s.Response(response, commMode)
+		if err != nil {
+			if data != nil {
+				t.Errorf("a refused response returned %X", data)
+			}
+			if s.Counter() != 0 {
+				t.Errorf("a refused response advanced the counter to %d", s.Counter())
+			}
+			return
+		}
+		if s.Counter() != 1 {
+			t.Errorf("an accepted response left the counter at %d, want 1", s.Counter())
+		}
+	})
+}

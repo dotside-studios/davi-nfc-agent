@@ -10,6 +10,10 @@
 // carries, so a server that never sees an NFC device can verify a tap, and the
 // agent does not have to hold the keys that verify one.
 //
+// Changing a tag, rather than reading one, needs an authenticated session. See
+// Authenticator and Session, which establish and carry one; the transport stays
+// the caller's there too.
+//
 // The algorithms are NXP's AN12196, "NTAG 424 DNA and NTAG 424 DNA TagTamper
 // features and hints", and the tests pin every step to the worked examples in
 // that document. LRP-mode tags are not supported; only the AES cipher suite is.

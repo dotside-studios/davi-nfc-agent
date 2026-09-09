@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`nfc/ntag424` speaks the NTAG 424 DNA's authenticated channel.** SDM
+  verification reads a tag; changing one needs a session, and this is that
+  session. `NewAuthenticator` drives `Cmd.AuthenticateEV2First` or
+  `AuthenticateEV2NonFirst` as two round trips, proving both sides hold the same
+  AES key without either sending it, and returns a `Session` carrying the
+  transaction identifier the card assigned, a command counter, and the two
+  session keys. `Session.Command` and `Session.Response` then wrap and verify
+  commands in `CommPlain`, `CommMAC` or `CommFull`, with the counter and
+  identifier in every MAC, so a captured command cannot be replayed into another
+  session or twice into the same one. The counter advances only on a response
+  that verifies, which keeps both sides in step when a command does not arrive.
+  The transport stays the caller's: each step returns the APDU to send and
+  consumes the card's answer, so the same code drives a PC/SC reader, a phone
+  over the device protocol, or a test. Pinned to AN12196's worked examples: both
+  authentication transcripts reproduce byte for byte, and the `CommMode.MAC` and
+  `CommMode.Full` examples reproduce their published APDUs, IV and MACs. No
+  command that changes a tag is built yet; that is the next step, and `ChangeKey`
+  in particular is not reversible on a real card
+
 - **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
   configured for Secure Dynamic Messaging rewrites its own URL on every read,
   mirroring its UID and a read counter (encrypted or in the clear) and appending

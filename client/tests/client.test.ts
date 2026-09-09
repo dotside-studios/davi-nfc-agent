@@ -222,15 +222,13 @@ describe("NFCClient request/response", () => {
 
   it("healthCheck() returns the parsed JSON body verbatim", async () => {
     vi.useRealTimers();
+    const body = { status: "ok", type: "agent", timestamp: "t", clients: 2 };
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ status: "ok", timestamp: "t" }), { status: 200 }),
+      new Response(JSON.stringify(body), { status: 200 }),
     );
 
     const client = new NFCClient("http://localhost:18080");
-    await expect(client.healthCheck()).resolves.toEqual({
-      status: "ok",
-      timestamp: "t",
-    });
+    await expect(client.healthCheck()).resolves.toEqual(body);
 
     fetchSpy.mockRestore();
   });

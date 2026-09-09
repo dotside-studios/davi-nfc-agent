@@ -249,7 +249,8 @@ if (client.isConnected()) {
 
 #### `healthCheck()`
 
-Perform REST API health check.
+Perform REST API health check. Returns the body of `/api/v1/health` verbatim:
+`status`, `type`, `timestamp` and `clients`.
 
 ```javascript
 const health = await client.healthCheck();

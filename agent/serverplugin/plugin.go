@@ -15,6 +15,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/clipboard"
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
 	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
@@ -705,11 +706,11 @@ func (p *Plugin) healthHandler() http.Handler {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":    "ok",
-			"type":      "agent",
-			"timestamp": time.Now().Format("2006-01-02T15:04:05Z07:00"),
-			"clients":   p.ClientCount(),
+		_ = json.NewEncoder(w).Encode(protocol.HealthPayload{
+			Status:    "ok",
+			Type:      "agent",
+			Timestamp: time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			Clients:   p.ClientCount(),
 		})
 	})
 }

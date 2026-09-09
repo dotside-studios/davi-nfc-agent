@@ -136,9 +136,9 @@ jobs:
           done
 
   web:
-    # The client library and the console that consumes it. Both build outputs
-    # are committed, so this also checks the tree holds what the source
-    # produces.
+    # The client library and the console that consumes it. The wire types, both
+    # build outputs and the lockfiles are committed, so this also checks the
+    # tree holds what the source produces.
     runs-on: ubuntu-latest
 
     steps:
@@ -147,6 +147,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Wire types
+        run: make types
 
       - name: Client library
         working-directory: client
@@ -164,11 +171,12 @@ jobs:
           npm test
           npm run build
 
-      - name: Committed build output is current
+      - name: Committed generated output is current
         run: |
-          if ! git diff --quiet -- client/dist agent/console/frontend/dist; then
-            echo "::error::client/dist or agent/console/frontend/dist is stale."
-            echo "Run 'make client' and 'make webui', then commit the result."
-            git --no-pager diff --stat -- client/dist agent/console/frontend/dist
+          generated="client/src/session/wire.generated.ts client/dist agent/console/frontend/dist"
+          if ! git diff --quiet -- $generated; then
+            echo "::error::Generated output is stale."
+            echo "Run 'make types', 'make client' and 'make webui', then commit the result."
+            git --no-pager diff --stat -- $generated
             exit 1
           fi

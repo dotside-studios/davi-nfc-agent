@@ -1,0 +1,10 @@
+{
+  "error": "Unknown message type: somethingElse",
+  "id": "req-unknown",
+  "payload": {
+    "code": "UNKNOWN_TYPE",
+    "retryable": false
+  },
+  "success": false,
+  "type": "error"
+}

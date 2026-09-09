@@ -1,0 +1,13 @@
+{
+  "id": "req-caps",
+  "payload": {
+    "canLock": false,
+    "canRead": true,
+    "canTransceive": false,
+    "canWrite": false,
+    "supportsNdef": true,
+    "tagFamily": "Unknown"
+  },
+  "success": true,
+  "type": "capabilitiesResponse"
+}

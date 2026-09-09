@@ -8,73 +8,12 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
-// WriteRecord represents a single NDEF record in a write request. The Type
-// field selects how the remaining fields are interpreted.
-type WriteRecord struct {
-	// Type selects the record kind. Supported values:
-	//   "text"                              - Content (+ optional Language)
-	//   "uri" / "url"                       - Content
-	//   "mailto"/"email", "tel", "sms", "geo" - Content (scheme prepended if absent)
-	//   "smartposter"                       - Content (URI) + optional Title/Language
-	//   "mime"                              - MimeType + Payload (or Content)
-	//   "vcard"                             - Content or Payload (vCard data)
-	//   "external"                          - Content (domain:type) + optional Payload
-	//   "aar"                               - Content (Android package name)
-	//   "raw"                               - TNF + TypeBytes + optional ID + Payload
-	// Empty Type defaults to "text".
-	Type string `json:"type"`
+// WriteRecord and WriteRequest are the writeRequest payload, defined in
+// protocol beside the rest of the wire. These names are what the server and its
+// callers have always used.
+type WriteRecord = protocol.WriteRecord
 
-	// Content carries the primary value: text, URI, domain, package name, etc.
-	Content string `json:"content,omitempty"`
-
-	// Language is the ISO language code for text records (default: "en").
-	Language string `json:"language,omitempty"`
-
-	// MimeType is the media type for "mime" records.
-	MimeType string `json:"mimeType,omitempty"`
-
-	// Title is the optional display title for "smartposter" records.
-	Title string `json:"title,omitempty"`
-
-	// Payload holds raw bytes for "mime", "vcard", "external", and "raw"
-	// records (base64-encoded in JSON).
-	Payload []byte `json:"payload,omitempty"`
-
-	// TNF, TypeBytes, and ID are used only for "raw" records.
-	TNF       *uint8 `json:"tnf,omitempty"`
-	TypeBytes []byte `json:"typeBytes,omitempty"`
-	ID        []byte `json:"id,omitempty"`
-}
-
-// WriteRequest represents a request to write data to an NFC card.
-// This API follows the "overwrite" approach - clients send the complete
-// NDEF message to write. To append, clients should read current data,
-// modify it, and send back the complete message.
-type WriteRequest struct {
-	// Records is an array of NDEF records to write
-	Records []WriteRecord `json:"records"`
-
-	// Lock, when true, makes the tag permanently read-only after a successful
-	// write. Only tags that support locking honor this. WARNING: irreversible.
-	Lock bool `json:"lock,omitempty"`
-
-	// DeviceID names the remote device holding the tag to write. Empty means
-	// the tag is found by UID instead. Clients learn the value from the
-	// deviceID on a tagData broadcast.
-	DeviceID string `json:"deviceID,omitempty"`
-
-	// UID names the tag to write, from the tagData this write responds to. The
-	// write is refused unless the tag about to be encoded carries it.
-	UID string `json:"uid,omitempty"`
-
-	// AllowUntargeted guesses which tag the write means when neither UID nor
-	// DeviceID is given, instead of refusing it.
-	AllowUntargeted bool `json:"allowUntargeted,omitempty"`
-
-	// IdempotencyKey identifies the logical write. A client that retries after
-	// a lost response should reuse it, so the write is not applied twice.
-	IdempotencyKey string `json:"idempotencyKey,omitempty"`
-}
+type WriteRequest = protocol.WriteRequestPayload
 
 // BuildNDEFMessage builds an NDEF message from the request.
 // This always creates a complete NDEF message that will overwrite the card.

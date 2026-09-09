@@ -1,5 +1,7 @@
 package protocol
 
+import "github.com/dotside-studios/davi-nfc-agent/nfc"
+
 // NDEFMessageInput represents an NDEF message for input.
 type NDEFMessageInput struct {
 	Records []NDEFRecordInput `json:"records"`
@@ -21,19 +23,9 @@ type NDEFRecordInput struct {
 	Payload []byte `json:"payload,omitempty"` // Raw payload bytes (base64 in JSON)
 }
 
-// NDEFRecordPayload is the JSON-friendly representation of an NDEF record.
-// Used in WebSocket broadcasts and API responses.
-type NDEFRecordPayload struct {
-	Type     string `json:"type"`              // "text", "uri", etc.
-	Content  string `json:"content,omitempty"` // Decoded content
-	Language string `json:"language,omitempty"`
-	TNF      uint8  `json:"tnf"`
-	ID       string `json:"id,omitempty"`
-	Payload  []byte `json:"payload"`
-}
+// NDEFRecordPayload and NDEFMessagePayload are the JSON-friendly form of an
+// NDEF message, carried inside a tagData broadcast. Defined in the nfc package
+// beside the message they are made from.
+type NDEFRecordPayload = nfc.NDEFRecordPayload
 
-// NDEFMessagePayload is the JSON-friendly representation of an NDEF message.
-type NDEFMessagePayload struct {
-	Type    string              `json:"type"` // "ndef"
-	Records []NDEFRecordPayload `json:"records"`
-}
+type NDEFMessagePayload = nfc.NDEFMessagePayload

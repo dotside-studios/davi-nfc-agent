@@ -59,6 +59,29 @@ func TestHealthReportsTheAgent(t *testing.T) {
 	}
 }
 
+// The body is a map literal with no Go type behind it, so this is the only
+// statement of which keys it carries. A client library declares the same set;
+// dropping one here is invisible until something reading it goes undefined.
+func TestHealthCarriesExactlyTheDocumentedKeys(t *testing.T) {
+	rec := httptest.NewRecorder()
+	served(t).ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	want := []string{"status", "type", "timestamp", "clients"}
+	for _, key := range want {
+		if _, ok := body[key]; !ok {
+			t.Errorf("health body has no %q: %v", key, body)
+		}
+	}
+	if len(body) != len(want) {
+		t.Errorf("health body has %d keys, want %d: %v", len(body), len(want), body)
+	}
+}
+
 // Health answers before the agent starts, so a client polling for the agent to
 // come up gets an answer rather than a refused connection.
 func TestHealthAnswersWhileStopped(t *testing.T) {

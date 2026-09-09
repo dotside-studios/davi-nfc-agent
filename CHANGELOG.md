@@ -27,7 +27,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error, which is indistinguishable from a successful read of an empty tag. The
   shared tag contract in `nfctest` requires `CanRead` only of a tag that carries
   NDEF
-
+- Golden fixtures for the client protocol, in `server/clientserver/testdata`.
+  Every message a browser client can receive is marshalled and compared byte for
+  byte, `tagData` with a card, with an NDEF message, with a raw message and on
+  removal included. Most of these payloads are built as map literals with no Go
+  type behind them, so nothing else stated what their field names were, and a
+  rename was invisible until a client went quiet. `go test ./server/clientserver
+  -update` rewrites them, so a wire change reaches review as the diff a client
+  sees. The health body's key set is pinned the same way in `agent/serverplugin`
+- **`nfc/ntag424` speaks the NTAG 424 DNA's authenticated channel.** SDM
+  verification reads a tag; changing one needs a session, and this is that
+  session. `NewAuthenticator` drives `Cmd.AuthenticateEV2First` or
+  `AuthenticateEV2NonFirst` as two round trips, proving both sides hold the same
+  AES key without either sending it, and returns a `Session` carrying the
+  transaction identifier the card assigned, a command counter, and the two
+  session keys. `Session.Command` and `Session.Response` then wrap and verify
+  commands in `CommPlain`, `CommMAC` or `CommFull`, with the counter and
+  identifier in every MAC, so a captured command cannot be replayed into another
+  session or twice into the same one. The counter advances only on a response
+  that verifies, which keeps both sides in step when a command does not arrive.
+  The transport stays the caller's: each step returns the APDU to send and
+  consumes the card's answer, so the same code drives a PC/SC reader, a phone
+  over the device protocol, or a test. Pinned to AN12196's worked examples: both
+  authentication transcripts reproduce byte for byte, and the `CommMode.MAC` and
+  `CommMode.Full` examples reproduce their published APDUs, IV and MACs
+- **The commands that change a tag**, as builders for that session:
+  `ChangeFileSettings` (with a `FileSettings` encoder, which is how SDM is turned
+  on and where its mirrors go), `ChangeKey` in both of its forms, `GetCardUID`
+  and `GetFileSettings`. Each is pinned to its worked example: Tables 18, 25, 26
+  and 28 reproduce their published APDUs byte for byte, including the card's own
+  flavour of CRC-32, which differs from the usual one by its final inversion.
+  These build APDUs and read answers; nothing in the agent calls them. There is
+  no tag operation, no client verb, no console entry and no key store, so the
+  agent still holds no AES key: whoever holds one builds the command and sends it
+  over a channel of their choosing, the raw APDU channel included. `ChangeKey`
+  cannot be undone, and a wrong one leaves a tag nobody can authenticate to
+- **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
+  configured for Secure Dynamic Messaging rewrites its own URL on every read,
+  mirroring its UID and a read counter (encrypted or in the clear) and appending
+  a CMAC over the result. `ntag424.VerifyURL(url, keys)` checks that CMAC and
+  reports the UID, the read counter, and any mirrored file data; the steps are
+  also exported on their own (`DecryptPICCData`, `SessionKeys`, `MAC`,
+  `VerifyMAC`, `DecryptFileData`) for a tag whose layout needs them driven by
+  hand. The package touches no reader and imports nothing outside the standard
+  library, so a backend that never sees an NFC device can verify a tap and the
+  agent does not have to hold the keys that verify one. AES-CMAC is implemented
+  here, since the standard library has none, and is pinned to RFC 4493's
+  vectors. Every SDM step is pinned to the worked examples in NXP's AN12196, and
+  the published end-to-end SUN URLs verify as whole taps. Two fuzz targets cover
+  the URL and the primitives, which read whatever a caller was handed. A
+  verified MAC proves the tap came from the tag, not that it is fresh: a
+  captured URL verifies forever, so compare the read counter against the highest
+  already seen for that UID. LRP-mode tags are not supported
 - **NTAG 424 DNA support**, at the NDEF level. The card is now detected, named
   `NTAG424`, and driven through the existing Type 4 path, with the 416-byte
   layout and 254-byte NDEF ceiling its three standard files give it, so an
@@ -49,6 +100,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers, and `nfctest.NTAG424` is an emulated card for it, modelling the
   three-frame version chain on top of the Type 4 emulator
 
+### Changed
+
+- The client library's view of the wire is generated from the Go that serves
+  it. `cmd/sdkgen` reads package `protocol` and writes
+  `client/src/session/wire.generated.ts`: the error codes, the message types
+  and an interface per payload, carrying each Go doc comment across. The same
+  contract used to be written twice, once in Go and once by hand, with nothing
+  keeping the two in step; `RAW_CHANNEL_DISABLED` was added to both by hand,
+  and nothing would have failed had it not been. `make types` rebuilds it and
+  CI fails on a stale tree. Only the wire is generated: what the library adds
+  over it stays hand-written in `client/src/session/types.ts`
+- The client protocol is typed Go structs rather than `map[string]any`
+  literals. `tagData`, `writeResponse`, `transceiveResponse` and the health body
+  were assembled key by key, so nothing declared their field names and the
+  package named `protocol` described none of them. `protocol` now holds
+  `TagDataPayload`, `TagRemovedPayload`, `TagMessagePayload`,
+  `WriteResponsePayload`, `TransceiveResponsePayload`, `TagTarget`,
+  `TransceiveRequestPayload` and `HealthPayload`, and the servers marshal
+  those. A tag leaving the field is its own type: that branch sends three keys,
+  not the full shape emptied out. The JSON is unchanged, which the golden
+  fixtures show
+- The eleven client message types live in `protocol` beside the envelope that
+  carries them, with the `server.WSMessageType*` names kept as aliases.
+  `protocol.WSType*` had five of them
+
 ### Fixed
 
 - A tag whose read fails permanently is now reported once per card rather than
@@ -57,6 +133,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `nfc.Card` caches the fact that a tag holds no message, so the consumers that
   each ask a scan for its contents do not each go back to the tag to be told so
   again. A tag declaring `SupportsNDEF: false` is not read at all
+- `HealthCheckResponse` in the client library carries `type` and `clients`.
+  `/api/v1/health` has sent four keys and the type declared two, so a caller
+  reading the client count off it got `undefined` with no type error.
+  `docs/api.md` showed the same two-key body
 - `nfc.ParseGetVersionResponse` classified an NTAG 424 DNA as an NTAG215. Both
   report storage size `0x11`, so the protocol byte is now read first: `0x05` is
   the ISO 14443-4 card, `0x03` the page-addressed NTAG21x. The old reading would

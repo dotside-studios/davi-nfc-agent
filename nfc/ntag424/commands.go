@@ -10,12 +10,6 @@ import (
 // These build APDUs and read answers. Nothing here sends anything, and nothing
 // in the agent calls them: the tag operations, the client protocol and the
 // console have no route to a keyed command, and this package holds no keys.
-// Whoever holds a key builds the command, sends it over a channel of their
-// choosing, and lives with the result.
-//
-// That matters most for ChangeKey. A key change cannot be undone, and a wrong
-// one leaves a tag nobody can authenticate to. There is no recovery, on any
-// key, at any time.
 
 // Instruction bytes for the commands below.
 const (
@@ -40,11 +34,10 @@ const NDEFFileNo = 0x02
 //
 // oldKey is ignored, and may be nil, when the key being changed is the
 // session's own. version is the new key's version byte, which the card reports
-// afterwards and which is the only way to tell one key generation from another.
+// afterwards.
 //
-// This cannot be undone. A card whose key is changed to a value nobody holds is
-// finished: there is no recovery path, no reset, and no way back to the factory
-// key.
+// A key change cannot be undone: a card whose key becomes a value nobody holds
+// cannot be authenticated to again, and has no reset.
 func ChangeKey(s *Session, keyNo, authKeyNo byte, oldKey, newKey []byte, version byte) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: ChangeKey needs an authenticated session")
@@ -75,11 +68,9 @@ func ChangeKey(s *Session, keyNo, authKeyNo byte, oldKey, newKey []byte, version
 	return s.Command(insChangeKey, []byte{keyNo}, data, CommFull)
 }
 
-// keyCRC is the checksum a key change carries, least significant byte first.
-//
-// It is CRC-32 as the card computes it: the same polynomial as the usual one,
-// but without the final inversion, which is the convention this family of cards
-// uses.
+// keyCRC is the checksum a key change carries, least significant byte first. It
+// is CRC-32 with the usual polynomial but without the final inversion, which is
+// this card family's convention.
 func keyCRC(key []byte) []byte {
 	sum := ^crc32.ChecksumIEEE(key)
 	return []byte{byte(sum), byte(sum >> 8), byte(sum >> 16), byte(sum >> 24)}

@@ -5,13 +5,9 @@ import (
 	"fmt"
 )
 
-// File settings, which is where SDM is turned on.
-//
-// A tag mirrors nothing until its NDEF file says to. These settings say which
-// fields it mirrors, which keys protect them, and where in the file each one is
-// written, as byte offsets into the NDEF message. Getting an offset wrong
-// produces a tag that serves a URL with data in the wrong place, which no
-// verifier will read.
+// File settings, which is where SDM is turned on: which fields the tag mirrors,
+// which keys protect them, and where each one is written as a byte offset into
+// the NDEF message. A wrong offset puts the data somewhere no verifier reads.
 
 // FileSettings is a file's configuration, as ChangeFileSettings writes it.
 type FileSettings struct {
@@ -81,11 +77,9 @@ const (
 	sdmOptionASCIIEncoding = 0x01
 )
 
-// Encode renders the settings as the card stores them.
-//
-// The layout is positional and conditional: each offset is present only when
-// the flag that uses it is set, so the same bytes mean different things under
-// different flags. That is the card's format, not a choice made here.
+// Encode renders the settings as the card stores them. The layout is positional
+// and conditional: an offset is present only when the flag that uses it is set,
+// so the same bytes mean different things under different flags.
 func (f FileSettings) Encode() ([]byte, error) {
 	comm, err := commModeBits(f.CommMode)
 	if err != nil {
@@ -134,8 +128,7 @@ func (f FileSettings) Encode() ([]byte, error) {
 	}
 	out = append(out, sdmRights...)
 
-	// The offsets the card reads, in the order it reads them, each present only
-	// under the flag that gives it meaning.
+	// The offsets, in the order the card reads them.
 	if f.MirrorUID && f.SDMMetaRead == AccessFree {
 		out = append(out, offset24(f.UIDOffset)...)
 	}

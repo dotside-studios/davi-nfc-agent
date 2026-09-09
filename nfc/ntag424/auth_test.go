@@ -8,17 +8,15 @@ import (
 )
 
 // fixedRandom replays a known random number, so a published exchange can be
-// reproduced exactly. Authentication is only sound because this number is
-// unpredictable, which is why nothing outside a test may set it.
+// reproduced exactly.
 type fixedRandom struct{ b []byte }
 
 func (r *fixedRandom) Read(p []byte) (int, error) {
 	return copy(p, r.b), nil
 }
 
-// AN12196 Table 14: a complete AuthenticateEV2First with key 0, every
-// intermediate value published. Driving it with the note's own RndA reproduces
-// the exchange byte for byte, including the two session keys.
+// AN12196 Table 14: AuthenticateEV2First with key 0. Driven with the note's own
+// RndA, the exchange reproduces byte for byte, session keys included.
 func TestAuthenticateFirstAN12196Table14(t *testing.T) {
 	auth, err := NewAuthenticator(AuthFirst, 0x00, zeroKey, nil)
 	if err != nil {
@@ -59,9 +57,8 @@ func TestAuthenticateFirstAN12196Table14(t *testing.T) {
 	}
 }
 
-// AN12196 Table 23: AuthenticateEV2NonFirst, which sends a shorter command and
-// is answered with our random number alone, no transaction identifier. The one
-// from the first authentication carries over.
+// AN12196 Table 23: AuthenticateEV2NonFirst. It sends a shorter command and is
+// answered without a transaction identifier, so the earlier one carries over.
 func TestAuthenticateNonFirstAN12196Table23(t *testing.T) {
 	ti := mustHex(t, "9D00C4DF")
 	auth, err := NewAuthenticator(AuthNonFirst, 0x00, zeroKey, ti)
@@ -100,9 +97,8 @@ func TestAuthenticateNonFirstAN12196Table23(t *testing.T) {
 	}
 }
 
-// A card that cannot return our random number does not hold the key. This is
-// the whole point of the exchange, so it is checked rather than assumed: the
-// card's last answer is corrupted and must be refused.
+// A card that cannot return our random number does not hold the key, and is
+// refused.
 func TestAuthenticateRefusesAWrongAnswer(t *testing.T) {
 	newExchange := func(t *testing.T) *Authenticator {
 		t.Helper()
@@ -141,8 +137,7 @@ func TestAuthenticateRefusesAWrongAnswer(t *testing.T) {
 	})
 }
 
-// The steps have an order, and taking them out of it is an error rather than a
-// silently wrong session.
+// Taking the steps out of order is an error rather than a wrong session.
 func TestAuthenticateRefusesStepsOutOfOrder(t *testing.T) {
 	auth, err := NewAuthenticator(AuthFirst, 0x00, zeroKey, nil)
 	if err != nil {
@@ -164,8 +159,8 @@ func TestNewAuthenticatorRefusesBadArguments(t *testing.T) {
 	}
 }
 
-// By default the random number comes from crypto/rand, so two exchanges with
-// the same key never repeat. A fixed one is a test's doing and nothing else's.
+// By default the random number comes from crypto/rand, so two exchanges with the
+// same key never repeat.
 func TestAuthenticatorUsesRealRandomnessByDefault(t *testing.T) {
 	first, second := "", ""
 	for _, out := range []*string{&first, &second} {

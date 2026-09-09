@@ -18,9 +18,9 @@ func tableSession(t *testing.T, ti, encKey, macKey string) *Session {
 	return s
 }
 
-// AN12196 Table 7: GetFileSettings in CommMode.MAC, command and response. The
-// MAC binds the instruction, the counter and the transaction, so reproducing
-// the published APDU proves all three go in in the right order and encoding.
+// AN12196 Table 7: GetFileSettings in CommMode.MAC. The MAC binds the
+// instruction, the counter and the transaction, so reproducing the published
+// APDU pins all three orders and encodings.
 func TestSessionCommModeMACAN12196Table7(t *testing.T) {
 	s := tableSession(t,
 		"7A21085E",
@@ -53,9 +53,8 @@ func TestSessionCommModeMACAN12196Table7(t *testing.T) {
 	}
 }
 
-// AN12196 Table 17: WriteData in CommMode.Full. The command's IV is derived
-// from its place in the session, which is the value published at step 9 and the
-// one thing that cannot be got right by accident.
+// AN12196 Table 17: WriteData in CommMode.Full. The command's IV is derived from
+// its place in the session, and is published at step 9.
 func TestSessionCommModeFullAN12196Table17(t *testing.T) {
 	s := tableSession(t,
 		"9D00C4DF",
@@ -67,9 +66,8 @@ func TestSessionCommModeFullAN12196Table17(t *testing.T) {
 		t.Fatalf("IVc = %X, want %X", got, want)
 	}
 
-	// The published ciphertext decrypts to the NDEF message the note writes,
-	// which is what shows the mode and the IV are both right: the plaintext is
-	// readable and is the URL from the document.
+	// The published ciphertext decrypts to the URL the note writes, which is the
+	// check on the mode and the IV that does not come from this code.
 	ciphertext := mustHex(t, "421C73A27D827658AF481FDFF20A5025B559D0E3AA21E58D347F343CFFC768BF"+
 		"E596C706BC00F2176781D4B0242642A0FF5A42C461AAF894D9A1284B8C76BCFA"+
 		"658ACD40555D362E08DB15CF421B51283F9064BCBE20E96CAE545B407C9D651A"+
@@ -104,9 +102,8 @@ func TestSessionCommModeFullAN12196Table17(t *testing.T) {
 	}
 }
 
-// A response whose MAC does not match is refused, and the session does not
-// advance: the two sides stay in step so the next command is still the one the
-// card expects.
+// A response whose MAC does not match is refused, and the counter does not
+// advance, so the next command is still the one the card expects.
 func TestSessionRefusesAnUnverifiedResponse(t *testing.T) {
 	s := tableSession(t, "7A21085E", zeroHex, "8248134A386E86EB7FAF54A52E536CB6")
 
@@ -139,8 +136,8 @@ func TestSessionReportsAnErrorStatus(t *testing.T) {
 	}
 }
 
-// The counter goes into every MAC, so the same command sent twice in a session
-// is two different APDUs. That is what stops one being captured and replayed.
+// The counter goes into every MAC, so the same command twice is two different
+// APDUs, and a captured one cannot be replayed.
 func TestSessionCounterMakesEachCommandDistinct(t *testing.T) {
 	s := tableSession(t, "7A21085E", zeroHex, "8248134A386E86EB7FAF54A52E536CB6")
 
@@ -186,8 +183,8 @@ func TestSessionPlainModeStillCounts(t *testing.T) {
 	}
 }
 
-// Padding is removable in every case, including data that already fills a
-// block: without the extra block, the last byte of real data would be eaten.
+// Padding is removable in every case. Data that already fills a block still
+// gains one, or its last byte would be eaten on the way back.
 func TestPaddingRoundTrips(t *testing.T) {
 	for _, size := range []int{0, 1, 15, 16, 17, 31, 32} {
 		data := bytes.Repeat([]byte{0xAB}, size)

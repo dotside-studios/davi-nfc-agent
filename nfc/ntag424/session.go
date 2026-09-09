@@ -8,21 +8,17 @@ import (
 	"fmt"
 )
 
-// A session is what authentication leaves behind: two keys, a transaction
-// identifier the card assigned, and a counter that advances with every command.
-//
-// The counter and the identifier are what make a command usable once. Both go
-// into every MAC, so a command captured from one session cannot be replayed
-// into another, or into the same session twice.
+// The session authentication leaves behind: two keys, a transaction identifier
+// the card assigned, and a counter that advances with every command. Both the
+// counter and the identifier go into every MAC, so a captured command cannot be
+// replayed into another session or twice into the same one.
 
-// CommMode is how much protection a command carries. Which one a command needs
-// is fixed by the card's file settings, not chosen freely: sending a command in
-// the wrong mode is refused by the card.
+// CommMode is how much protection a command carries. The card's file settings
+// fix which one each command needs, and refuse the wrong one.
 type CommMode int
 
 const (
-	// CommPlain sends the command as it is. Still bound to the session, since
-	// the card counts it.
+	// CommPlain sends the command as it is. The card still counts it.
 	CommPlain CommMode = iota
 
 	// CommMAC appends a MAC over the command, and checks one on the response.
@@ -33,11 +29,9 @@ const (
 	CommFull
 )
 
-// Session carries an authenticated transaction.
-//
-// It is not safe for concurrent use: every command advances the counter, and
-// two goroutines sharing one session would send two commands with the same
-// counter, which the card refuses.
+// Session carries an authenticated transaction. It is not safe for concurrent
+// use: two goroutines sharing one would send two commands with the same counter,
+// which the card refuses.
 type Session struct {
 	ti       []byte
 	encKey   []byte
@@ -90,10 +84,9 @@ func (s *Session) Keys() (encKey, macKey []byte) {
 
 // Command builds the APDU for one command in this session.
 //
-// header is the part of the command the card reads in the clear even under
-// CommFull, such as the file number; data is the part CommFull encrypts. The
-// session's counter is not advanced here, because the command has not been
-// answered yet: Response advances it once the card's answer is verified.
+// header is the part the card reads in the clear even under CommFull, such as a
+// file number; data is the part CommFull encrypts. The counter advances in
+// Response, not here, since the command has not been answered yet.
 func (s *Session) Command(ins byte, header, data []byte, mode CommMode) ([]byte, error) {
 	payload := append([]byte(nil), header...)
 
@@ -123,10 +116,8 @@ func (s *Session) Command(ins byte, header, data []byte, mode CommMode) ([]byte,
 }
 
 // Response verifies the card's answer to the command just sent and returns its
-// data, decrypted under CommFull.
-//
-// The counter advances only on an answer that verifies, which keeps the two
-// sides in step: a command the card never saw leaves the session unchanged.
+// data, decrypted under CommFull. The counter advances only on an answer that
+// verifies, so a command the card never saw leaves the session unchanged.
 func (s *Session) Response(response []byte, mode CommMode) ([]byte, error) {
 	if len(response) < 2 {
 		return nil, fmt.Errorf("ntag424: response is %d bytes, too short for a status word", len(response))
@@ -186,7 +177,7 @@ func (s *Session) responseMAC(status byte, body []byte) []byte {
 }
 
 // encrypt enciphers command data under an IV built from this command's place in
-// the session, so the same data sent twice never enciphers alike.
+// the session, so the same data twice never enciphers alike.
 func (s *Session) encrypt(data []byte) ([]byte, error) {
 	return s.encryptWithIV(s.iv(0xA5, 0x5A, s.counter), data), nil
 }

@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// AN12196 Table 18: ChangeFileSettings that turns SDM on for the NDEF file,
-// sent as the second command of the session Table 14 established. It exercises
-// the counter as well, since its IV and MAC are the ones for command number 1.
+// AN12196 Table 18: ChangeFileSettings turning SDM on for the NDEF file, sent as
+// the second command of Table 14's session, so its IV and MAC are the ones for
+// command number 1.
 func TestChangeFileSettingsAN12196Table18(t *testing.T) {
 	s := tableSession(t, "9D00C4DF",
 		"1309C877509E5A215007FF0ED19CA564",
@@ -31,9 +31,8 @@ func TestChangeFileSettingsAN12196Table18(t *testing.T) {
 	}
 }
 
-// The settings block Table 18 sends is what FileSettings must produce: SDM on,
-// UID and counter mirrored as text, PICCData encrypted under key 2, the MAC
-// under key 1.
+// FileSettings must produce the settings block Table 18 sends: SDM on, UID and
+// counter mirrored as text, PICCData encrypted under key 2, the MAC under key 1.
 func TestFileSettingsEncodeAN12196Table18(t *testing.T) {
 	got, err := FileSettings{
 		SDMEnabled:        true,
@@ -60,9 +59,8 @@ func TestFileSettingsEncodeAN12196Table18(t *testing.T) {
 	}
 }
 
-// AN12196 Table 25: changing a key that is not the session's. The card is sent
-// the difference from the old key plus a checksum over the new one, which is
-// how it confirms the caller knew the old key.
+// AN12196 Table 25: changing a key that is not the session's, sent as the
+// difference from the old key plus a checksum over the new one.
 func TestChangeKeyOtherThanSessionsAN12196Table25(t *testing.T) {
 	s := tableSession(t, "7614281A",
 		"4CF3CB41A22583A61E89B158D252FC53",
@@ -85,9 +83,8 @@ func TestChangeKeyOtherThanSessionsAN12196Table25(t *testing.T) {
 	}
 }
 
-// The checksum in that command is the card's flavour of CRC-32, which differs
-// from the usual one by its final inversion. Pinned on its own, because a
-// wrong checksum is refused by the card with nothing to say why.
+// That checksum is CRC-32 without the final inversion. Pinned on its own,
+// because the card refuses a wrong one without saying why.
 func TestKeyCRCAN12196Table25(t *testing.T) {
 	got := keyCRC(mustHex(t, "F3847D627727ED3BC9C4CC050489B966"))
 	if want := mustHex(t, "789DFADC"); !bytes.Equal(got, want) {
@@ -114,9 +111,8 @@ func TestChangeKeyOwnAN12196Table26(t *testing.T) {
 	}
 }
 
-// AN12196 Table 28: GetCardUID, which carries no header and no data, so its MAC
-// covers the instruction, the counter and the transaction alone. The card's
-// answer is encrypted, and decrypts to the UID.
+// AN12196 Table 28: GetCardUID carries no header and no data, so its MAC covers
+// the instruction, the counter and the transaction alone.
 func TestGetCardUIDAN12196Table28(t *testing.T) {
 	s := tableSession(t, "DF055522",
 		"2B4D963C014DC36F24F69A50A394F875",
@@ -141,8 +137,7 @@ func TestGetCardUIDAN12196Table28(t *testing.T) {
 }
 
 // A key change that cannot be built is refused rather than sent wrong. The old
-// key is what proves the caller may change a key the session did not
-// authenticate with, so its absence is an error, not a default.
+// key has no default: without it the card cannot check the change.
 func TestChangeKeyRefusesWhatItCannotBuild(t *testing.T) {
 	s := tableSession(t, "7614281A", zeroHex, zeroHex)
 
@@ -165,9 +160,8 @@ func TestChangeKeyRefusesWhatItCannotBuild(t *testing.T) {
 	})
 }
 
-// The two key-change forms are genuinely different commands. If the wrong one
-// were built, the card would refuse it, and a caller would have no way to tell
-// that from a wrong key.
+// The two key-change forms are different commands. The card refuses the wrong
+// one, which a caller cannot tell from a wrong key.
 func TestChangeKeyFormDependsOnTheSessionsKey(t *testing.T) {
 	newKey := mustHex(t, "5004BF991F408672B1EF00F08F9E8647")
 
@@ -186,16 +180,14 @@ func TestChangeKeyFormDependsOnTheSessionsKey(t *testing.T) {
 	if bytes.Equal(sameKey, otherKey) {
 		t.Error("both forms produced the same command")
 	}
-	// Both encrypt to the same length, since 17 bytes and 21 bytes pad to two
-	// blocks alike. Only the contents differ, which is why the wrong form
-	// cannot be spotted by its size on the wire.
+	// Both encrypt to the same length: 17 and 21 bytes pad to two blocks alike,
+	// so the wrong form cannot be spotted by its size.
 	if len(sameKey) != len(otherKey) {
 		t.Errorf("the two forms are %d and %d bytes; the test's premise has changed", len(sameKey), len(otherKey))
 	}
 }
 
-// Settings that cannot be encoded are refused rather than written wrong: a key
-// number that is not one is the mistake most likely to be made by hand.
+// Settings that cannot be encoded are refused rather than written wrong.
 func TestFileSettingsRefusesImpossibleRights(t *testing.T) {
 	_, err := FileSettings{SDMEnabled: true, Read: 0x40}.Encode()
 	if err == nil {

@@ -10,17 +10,13 @@ import (
 	"io"
 )
 
-// Authentication, and the secure messaging it establishes.
+// Authentication, which a command that changes a tag needs and SDM verification
+// does not. It proves both sides hold the same AES key without either sending
+// it, and leaves a session: two keys, a transaction identifier and a command
+// counter.
 //
-// SDM verification needs no authentication: a tag mirrors its data for anyone
-// who reads it. Changing a tag does need one. AuthenticateEV2First proves both
-// sides hold the same AES key, without either sending it, and leaves them with
-// a pair of session keys, a transaction identifier and a command counter that
-// bind every later command to that one exchange.
-//
-// The transport is the caller's. Each step here returns the APDU to send and
-// consumes the card's answer, so the same code drives a PC/SC reader, a phone
-// over the device protocol, or a test.
+// The transport is the caller's. Each step returns the APDU to send and consumes
+// the card's answer.
 
 // AuthMode selects which authentication a session starts with.
 type AuthMode int
@@ -52,20 +48,16 @@ const (
 
 // Errors from an authentication exchange.
 var (
-	// ErrAuthFailed reports that the card's answer did not prove it holds the
-	// key: the random number it returned was not the one sent. The key is
-	// wrong, or the exchange was tampered with.
+	// ErrAuthFailed reports that the card returned the wrong random number,
+	// meaning the key is wrong or the exchange was tampered with.
 	ErrAuthFailed = errors.New("ntag424: authentication failed")
 
 	// ErrAuthState reports the steps being taken out of order.
 	ErrAuthState = errors.New("ntag424: authentication step out of order")
 )
 
-// Authenticator drives one authentication exchange.
-//
-// Two round trips: Command is sent and its answer given to Challenge, whose
-// APDU is sent in turn and its answer given to Finish. A card that fails to
-// prove the key is refused at Finish with ErrAuthFailed.
+// Authenticator drives one authentication exchange, in two round trips: Command
+// then Challenge, each answer handed to the next step, ending at Finish.
 type Authenticator struct {
 	mode   AuthMode
 	keyNo  byte
@@ -100,10 +92,9 @@ func NewAuthenticator(mode AuthMode, keyNo byte, key, ti []byte) (*Authenticator
 	}, nil
 }
 
-// SetRandom replaces the source of this side's random number. It exists for
-// tests, which reproduce a published exchange and therefore need its RndA;
-// leave it alone anywhere else, because the security of the exchange rests on
-// that number being unpredictable.
+// SetRandom replaces the source of this side's random number, so a test can
+// reproduce a published exchange. The exchange is only sound while that number
+// is unpredictable, so nothing outside a test should call this.
 func (a *Authenticator) SetRandom(r io.Reader) {
 	a.random = r
 }
@@ -118,10 +109,8 @@ func (a *Authenticator) Command() []byte {
 }
 
 // Challenge consumes the card's answer to Command and returns the second APDU.
-//
-// The card sent its own random number encrypted under the key. This decrypts
-// it, generates ours, and returns both for the card to check, with the card's
-// rotated so that a replayed answer cannot pass.
+// It decrypts the card's random number, generates ours, and sends both back with
+// the card's rotated, so a replayed answer cannot pass.
 func (a *Authenticator) Challenge(response []byte) ([]byte, error) {
 	if a.stage != 0 {
 		return nil, ErrAuthState
@@ -150,11 +139,9 @@ func (a *Authenticator) Challenge(response []byte) ([]byte, error) {
 	return wrapAPDU(insAdditionalFrame, encrypted), nil
 }
 
-// Finish consumes the card's answer to Challenge and returns the session it
-// establishes.
-//
-// The card returns our own random number, rotated. Only a card holding the key
-// could produce it, so this is where authentication succeeds or fails.
+// Finish consumes the card's answer to Challenge and returns the session. The
+// card returns our own random number, rotated, which only a card holding the key
+// could produce.
 func (a *Authenticator) Finish(response []byte) (*Session, error) {
 	if a.stage != 1 {
 		return nil, ErrAuthState
@@ -191,18 +178,15 @@ func (a *Authenticator) Finish(response []byte) (*Session, error) {
 	return newSession(ti, encKey, macKey)
 }
 
-// Session vector prefixes for secure messaging. They mirror the SDM ones and
-// are not interchangeable with them: these derive keys for an authenticated
-// transaction, those for a tap anyone can read.
+// Session vector prefixes for secure messaging. Not interchangeable with the SDM
+// ones above, which derive keys for a tap rather than a transaction.
 var (
 	ssmSV1Prefix = []byte{0xA5, 0x5A, 0x00, 0x01, 0x00, 0x80}
 	ssmSV2Prefix = []byte{0x5A, 0xA5, 0x00, 0x01, 0x00, 0x80}
 )
 
 // sessionVectorSSM builds the 32-byte input the session keys are derived from.
-// Both random numbers are folded in, so neither side alone decides the keys:
-// the first two bytes of ours, six bytes of ours XORed with six of theirs, the
-// rest of theirs, then the rest of ours.
+// Both random numbers are folded in, so neither side alone decides the keys.
 func sessionVectorSSM(prefix, rndA, rndB []byte) []byte {
 	sv := make([]byte, 0, 32)
 	sv = append(sv, prefix...)
@@ -215,8 +199,8 @@ func sessionVectorSSM(prefix, rndA, rndB []byte) []byte {
 	return sv
 }
 
-// rotateLeft returns b with its first byte moved to the end, which is how each
-// side proves it decrypted the other's number rather than replaying it.
+// rotateLeft returns b with its first byte moved to the end. Rotating the other
+// side's number is what proves it was decrypted rather than replayed.
 func rotateLeft(b []byte) []byte {
 	return append(append([]byte(nil), b[1:]...), b[0])
 }

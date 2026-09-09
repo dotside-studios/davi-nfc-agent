@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
+  configured for Secure Dynamic Messaging rewrites its own URL on every read,
+  mirroring its UID and a read counter (encrypted or in the clear) and appending
+  a CMAC over the result. `ntag424.VerifyURL(url, keys)` checks that CMAC and
+  reports the UID, the read counter, and any mirrored file data; the steps are
+  also exported on their own (`DecryptPICCData`, `SessionKeys`, `MAC`,
+  `VerifyMAC`, `DecryptFileData`) for a tag whose layout needs them driven by
+  hand. The package touches no reader and imports nothing outside the standard
+  library, so a backend that never sees an NFC device can verify a tap and the
+  agent does not have to hold the keys that verify one. AES-CMAC is implemented
+  here, since the standard library has none, and is pinned to RFC 4493's
+  vectors. Every SDM step is pinned to the worked examples in NXP's AN12196, and
+  the published end-to-end SUN URLs verify as whole taps. Two fuzz targets cover
+  the URL and the primitives, which read whatever a caller was handed. A
+  verified MAC proves the tap came from the tag, not that it is fresh: a
+  captured URL verifies forever, so compare the read counter against the highest
+  already seen for that UID. LRP-mode tags are not supported
 - **NTAG 424 DNA support**, at the NDEF level. The card is now detected, named
   `NTAG424`, and driven through the existing Type 4 path, with the 416-byte
   layout and 254-byte NDEF ceiling its three standard files give it, so an

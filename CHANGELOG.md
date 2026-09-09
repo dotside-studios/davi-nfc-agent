@@ -24,9 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consumes the card's answer, so the same code drives a PC/SC reader, a phone
   over the device protocol, or a test. Pinned to AN12196's worked examples: both
   authentication transcripts reproduce byte for byte, and the `CommMode.MAC` and
-  `CommMode.Full` examples reproduce their published APDUs, IV and MACs. No
-  command that changes a tag is built yet; that is the next step, and `ChangeKey`
-  in particular is not reversible on a real card
+  `CommMode.Full` examples reproduce their published APDUs, IV and MACs
+- **The commands that change a tag**, as builders for that session:
+  `ChangeFileSettings` (with a `FileSettings` encoder, which is how SDM is turned
+  on and where its mirrors go), `ChangeKey` in both of its forms, `GetCardUID`
+  and `GetFileSettings`. Each is pinned to its worked example: Tables 18, 25, 26
+  and 28 reproduce their published APDUs byte for byte, including the card's own
+  flavour of CRC-32, which differs from the usual one by its final inversion.
+  These build APDUs and read answers; nothing in the agent calls them. There is
+  no tag operation, no client verb, no console entry and no key store, so the
+  agent still holds no AES key: whoever holds one builds the command and sends it
+  over a channel of their choosing, the raw APDU channel included. `ChangeKey`
+  cannot be undone, and a wrong one leaves a tag nobody can authenticate to
 
 - **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
   configured for Secure Dynamic Messaging rewrites its own URL on every read,

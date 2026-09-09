@@ -237,7 +237,11 @@ export interface TransceiveRequest extends TagTarget {
 
 export interface HealthCheckResponse {
   status: string;
+  /** Always "agent". Distinguishes the agent from anything else on the port. */
+  type: string;
   timestamp: string;
+  /** Clients connected to the agent right now. */
+  clients: number;
 }
 
 export type NFCEventName =

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Golden fixtures for the client protocol, in `server/clientserver/testdata`.
+  Every message a browser client can receive is marshalled and compared byte for
+  byte, `tagData` with a card, with an NDEF message, with a raw message and on
+  removal included. Most of these payloads are built as map literals with no Go
+  type behind them, so nothing else stated what their field names were, and a
+  rename was invisible until a client went quiet. `go test ./server/clientserver
+  -update` rewrites them, so a wire change reaches review as the diff a client
+  sees. The health body's key set is pinned the same way in `agent/serverplugin`
+
+### Fixed
+
+- `HealthCheckResponse` in the client library carries `type` and `clients`.
+  `/api/v1/health` has sent four keys and the type declared two, so a caller
+  reading the client count off it got `undefined` with no type error.
+  `docs/api.md` showed the same two-key body
+
 ## [1.4.0] - 2026-08-29
 
 ### Added

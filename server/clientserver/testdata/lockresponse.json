@@ -1,0 +1,10 @@
+{
+  "id": "req-lock",
+  "payload": {
+    "locked": true,
+    "tagType": "NTAG215",
+    "uid": "04A1B2C3"
+  },
+  "success": true,
+  "type": "lockResponse"
+}

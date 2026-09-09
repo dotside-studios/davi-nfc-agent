@@ -77,6 +77,11 @@ type WriteAcknowledgement struct {
 	Message string `json:"message"`
 }
 
+// LockResponsePayload answers a lockRequest that landed. It carries no message:
+// a lock reports the tag it reached and that it is now read-only, and nothing
+// else. Defined in nfc beside the operation that produces it.
+type LockResponsePayload = nfc.LockResult
+
 // TransceiveResponsePayload answers a transceiveRequest with the tag's reply,
 // base64 as raw bytes are in both directions.
 type TransceiveResponsePayload struct {

@@ -8,3 +8,7 @@ build/
 # Built virtual-reader tool binary
 /davi-virtual-reader
 /davi-virtual-reader.exe
+
+# Built wire-type generator binary
+/davi-wiregen
+/davi-wiregen.exe

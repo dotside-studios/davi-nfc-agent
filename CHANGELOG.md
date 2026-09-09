@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The client library's view of the wire is generated from the Go that serves
+  it. `cmd/davi-wiregen` reads package `protocol` and writes
+  `client/src/session/wire.generated.ts`: the error codes, the message types
+  and an interface per payload, carrying each Go doc comment across. The same
+  contract used to be written twice, once in Go and once by hand, with nothing
+  keeping the two in step; `RAW_CHANNEL_DISABLED` was added to both by hand,
+  and nothing would have failed had it not been. `make types` rebuilds it and
+  CI fails on a stale tree. Only the wire is generated: what the library adds
+  over it stays hand-written in `client/src/session/types.ts`
 - The client protocol is typed Go structs rather than `map[string]any`
   literals. `tagData`, `writeResponse`, `transceiveResponse` and the health body
   were assembled key by key, so nothing declared their field names and the

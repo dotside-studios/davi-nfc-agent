@@ -1,4 +1,4 @@
-.PHONY: all build build-nowebui webui webui-dev webui-install client client-install client-test test test-nowebui lint clean
+.PHONY: all build build-nowebui webui webui-dev webui-install client client-install client-test types test test-nowebui lint clean
 
 # The agent binary. agent/console/frontend/dist is committed, so this needs no Node.
 all: build
@@ -33,6 +33,12 @@ webui: webui-install
 
 webui-install:
 	cd agent/console/frontend && npm install --no-audit --no-fund
+
+# Rebuild the client library's TypeScript view of the wire from package
+# protocol. Run this after changing anything in protocol/ and commit the result
+# — it is the contract the client library compiles against. Needs no Node.
+types:
+	go run ./cmd/davi-wiregen
 
 # Rebuild the client library's dist. Run this after changing client/src and
 # commit the result — it is what a <script> tag consumes.

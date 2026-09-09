@@ -85,6 +85,28 @@ Binaries are created in the current directory:
 - `davi-nfc-agent-darwin-arm64`
 - `davi-nfc-agent-windows-amd64.exe`
 
+### Generated files
+
+Three things in the tree are generated and committed, so that building the
+agent needs no Node and consuming the client library needs no build step. CI
+regenerates all three and fails if the tree does not match, naming the command
+to run.
+
+| Path | Rebuild with | From |
+|------|--------------|------|
+| `client/src/session/wire.generated.ts` | `make types` | package `protocol` |
+| `client/dist/` | `make client` | `client/src/` |
+| `agent/console/frontend/dist/` | `make webui` | the console's `src/` |
+
+`make types` is the one to run after changing anything in `protocol/`. It is
+how the client library's view of the wire stays in step with the agent's:
+the error codes, the message types and the payload shapes are declared once in
+Go and written out as TypeScript by `cmd/davi-wiregen`. Do not edit the
+generated file. What the client library adds over the wire is hand-written in
+`client/src/session/types.ts` and is not generated.
+
+`make types` needs only Go. The other two need Node.
+
 ### CI/CD
 
 The GitHub Actions workflow (`.github/workflows/build.yml`) automatically:

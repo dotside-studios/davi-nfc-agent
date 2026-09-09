@@ -1,3 +1,7 @@
+import type { NFCErrorCode } from "./wire.generated";
+
+export type { NFCErrorCode };
+
 export interface NFCClientOptions {
   /**
    * Sent as `?secret=` on the upgrade. Required from loopback too, unless the
@@ -128,54 +132,6 @@ export interface DeviceStatus {
    */
   cardPresent?: boolean;
 }
-
-/**
- * The error codes the agent sends, as of this release. Whether a retry can
- * work is `retryable` on the error, not a property of the code here.
- */
-export type NFCErrorCode =
-  | "PARSE_ERROR"
-  | "INVALID_PAYLOAD"
-  | "INVALID_REQUEST"
-  | "INVALID_MESSAGE_TYPE"
-  | "UNKNOWN_TYPE"
-  | "INVALID_DEVICE"
-  | "REGISTRATION_FAILED"
-  | "TAG_SEND_FAILED"
-  | "READ_ERROR"
-  | "LOCK_FAILED"
-  | "CAPABILITIES_FAILED"
-  | "SESSION_LOCKED"
-  | "NO_CARD"
-  | "TAG_MISMATCH"
-  | "TAG_NOT_NAMED"
-  | "TIMEOUT"
-  | "DEVICE_GONE"
-  | "INTERNAL_ERROR"
-  | "UNKNOWN_ERROR"
-  | "NOT_SUPPORTED"
-  | "TAG_REMOVED"
-  | "AUTH_FAILED"
-  | "READ_FAILED"
-  | "WRITE_FAILED"
-  | "TRANSCEIVE_FAILED"
-  | "TAG_NOT_CONNECTED"
-  | "READ_ONLY"
-  /**
-   * The raw APDU channel is off. Distinct from `READ_ONLY`: the mode may allow
-   * writes, but raw exchanges stay refused until the operator opens the channel.
-   * Not retryable; the channel has to be enabled on the agent.
-   */
-  | "RAW_CHANNEL_DISABLED"
-  | "CAPACITY_EXCEEDED"
-  | "INVALID_DATA"
-  /** More than one tag in the field. Separate them and try again. */
-  | "MULTIPLE_TAGS"
-  /**
-   * Earlier work has not finished: a reader completing an operation its caller
-   * abandoned, or more requests outstanding than the connection queues.
-   */
-  | "BUSY";
 
 /**
  * What `code` is declared as: a known code, or any string, so a code added by a

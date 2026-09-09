@@ -726,6 +726,13 @@ type type4Emulator struct {
 	selected    type4File
 	cc          []byte
 	ndef        []byte // NLEN (2 bytes) followed by the NDEF message
+
+	// version is the card's answer to the ISO-wrapped GET_VERSION, frame by
+	// frame. Nil for a plain Type 4 tag, which refuses the command as an
+	// unsupported class.
+	version [][]byte
+	frame   int // index of the next version frame to send
+
 	removalModel
 }
 
@@ -798,6 +805,9 @@ func (e *type4Emulator) Transceive(cmd []byte) ([]byte, error) {
 	if len(cmd) < 4 {
 		return apduSW(0x6700), nil // wrong length
 	}
+	if cmd[0] == nfc.CLADESFire {
+		return e.wrappedCommand(cmd), nil
+	}
 	if cmd[0] != nfc.CLAStandard {
 		return apduSW(0x6E00), nil // class not supported
 	}
@@ -810,6 +820,40 @@ func (e *type4Emulator) Transceive(cmd []byte) ([]byte, error) {
 		return e.updateBinary(cmd), nil
 	}
 	return apduSW(0x6D00), nil // instruction not supported
+}
+
+// wrappedCommand answers an ISO-wrapped native command (CLA 0x90). Only
+// GET_VERSION and its continuation are modelled, since that is all detection
+// sends. A card with no version configured refuses the class, as a plain Type 4
+// tag does.
+//
+// The status is in SW2 under SW1=0x91, where 0xAF means another frame follows.
+func (e *type4Emulator) wrappedCommand(cmd []byte) []byte {
+	if e.version == nil {
+		return apduSW(0x6E00) // class not supported
+	}
+	switch cmd[1] {
+	case nfc.DFCmdGetVersion:
+		e.frame = 0
+	case nfc.DFCmdAdditionalFrame:
+		if e.frame == 0 {
+			return apduSW(0x911C) // illegal command sequence
+		}
+	default:
+		return apduSW(0x911C)
+	}
+
+	if e.frame >= len(e.version) {
+		return apduSW(0x911C)
+	}
+	frame := e.version[e.frame]
+	e.frame++
+
+	status := byte(dfStatusAdditionalFrame)
+	if e.frame == len(e.version) {
+		status = 0x00 // operation OK: the last frame
+	}
+	return append(append([]byte(nil), frame...), 0x91, status)
 }
 
 func (e *type4Emulator) selectFile(cmd []byte) []byte {
@@ -959,6 +1003,35 @@ func DESFire(uid string) *EmulatedCard {
 // to preload content.
 func Type4(uid string) *EmulatedCard {
 	return newCard(nfc.DetectedISO14443_4, uid, newType4Emulator())
+}
+
+// NTAG424 constructs a blank NTAG 424 DNA. Its NDEF layer is the Type 4 one,
+// with the ISO-wrapped GET_VERSION added that detection reads to tell this card
+// from any other Type 4 tag. The card's AES side is not modelled, since no
+// driver here speaks it.
+func NTAG424(uid string) *EmulatedCard {
+	return newCard(nfc.DetectedNTAG424, uid, newNTAG424Emulator(uid))
+}
+
+// newNTAG424Emulator is a Type 4 emulator that answers GET_VERSION as an
+// NTAG 424 DNA: NXP vendor, NTAG product type, major 0x30, the 504-byte storage
+// code and the ISO 14443-4 protocol byte, across three frames.
+func newNTAG424Emulator(uid string) *type4Emulator {
+	e := newType4Emulator()
+	hardware := []byte{0x04, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}
+	software := []byte{0x04, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}
+
+	// The third frame is production data, opening with the card's 7-byte UID.
+	production := make([]byte, 0, 14)
+	if raw, err := nfc.HexToBytes(uid); err == nil && len(raw) == 7 {
+		production = append(production, raw...)
+	} else {
+		production = append(production, 0x04, 0, 0, 0, 0, 0, 0)
+	}
+	production = append(production, 0x04, 0x91, 0x3A, 0x2D, 0x00, 0x00, 0x1A)
+
+	e.version = [][]byte{hardware, software, production}
+	return e
 }
 
 // UID returns the card's UID.

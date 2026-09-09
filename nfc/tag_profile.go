@@ -140,6 +140,30 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 		supportsAuthentication: true,
 	},
 
+	// The NTAG 424 DNA is driven as a Type 4 card. It differs from the generic
+	// profile below only in what is known about it: a fixed layout, so the
+	// write path has a capacity to check, and AES keys behind the files.
+	DetectedNTAG424: {
+		name:        CardTypeNtag424,
+		numericType: 0x20, // ISO14443-4, as every Type 4 card reports
+		family:      "NTAG",
+		technology:  "ISO14443A",
+		// 416 bytes across the three standard files: 32 for the Capability
+		// Container, 256 for NDEF, 128 proprietary.
+		memorySize: 416,
+		// The NDEF file is 256 bytes, of which the first two hold NLEN.
+		maxNDEFSize: 254,
+		canWrite:    true,
+		// Locking means rewriting the CC file's WriteAccess byte or changing
+		// file settings under AES, neither of which is implemented.
+		canLock:       false,
+		canTransceive: true,
+		// AES-128 across five keys. This is what the card supports; no driver
+		// here authenticates yet.
+		supportsCrypto:         true,
+		supportsAuthentication: true,
+	},
+
 	DetectedISO14443_4: {
 		name:        CardTypeType4,
 		numericType: 0x20,

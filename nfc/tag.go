@@ -153,6 +153,8 @@ func NewTagForType(tagType DetectedTagType, transport CardTransport, uid string)
 		return newPCSCNtagTag(transport, uid, tagType)
 	case DetectedDESFire:
 		return newPCSCDESFireTag(transport, uid)
+	case DetectedNTAG424:
+		return newPCSCNTAG424Tag(transport, uid)
 	case DetectedISO14443_4:
 		return newPCSCISO14443Tag(transport, uid)
 	default:

@@ -14,6 +14,7 @@ const (
 	CardTypeNtag213          = "NTAG213"
 	CardTypeNtag215          = "NTAG215"
 	CardTypeNtag216          = "NTAG216"
+	CardTypeNtag424          = "NTAG424"
 	CardTypeDesfire          = "DESFire"
 	CardTypeType4            = "Type4"
 )
@@ -45,6 +46,7 @@ func GetAllCardTypes() []string {
 		CardTypeNtag213,
 		CardTypeNtag215,
 		CardTypeNtag216,
+		CardTypeNtag424,
 		CardTypeDesfire,
 		CardTypeType4,
 	}

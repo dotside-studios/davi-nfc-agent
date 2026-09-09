@@ -88,6 +88,11 @@ type deviceReader struct {
 	feedbackOn       atomic.Bool    // Whether the reader flashes and beeps at what it does
 	signalling       atomic.Bool    // Held while a signal plays, so only one does
 	lastSignalErr    string         // Last signal failure logged (guarded by statusMux)
+
+	// faulted names the card whose read failed, so a card that keeps failing is
+	// reported once rather than on every poll. Guarded by statusMux.
+	faulted    bool
+	faultedUID string
 }
 
 // classicKeyConfigurable is implemented by tags that accept additional
@@ -493,7 +498,9 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 		// Create Card wrapper
 		r.applyClassicKeys(tag)
 		card := NewCard(tag)
-		if _, err := card.ReadMessage(); err != nil {
+		// A tag holding no NDEF message is not a failure: it was reached and it
+		// answered. It is published as a scan carrying its identity alone.
+		if _, err := card.ReadMessage(); err != nil && !IsNoPayloadError(err) {
 			// Check if this is a card removal error - if so, close the device
 			if IsCardRemovedError(err) {
 				readerLog.Println("Card was removed during read, closing device for reconnection")
@@ -501,6 +508,11 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 				r.setCardPresent(false)
 				r.broadcastDeviceStatus("Card removed, waiting for new card")
 				return
+			}
+			// The same card is polled ten times a second, so a permanent fault
+			// is reported once per card rather than once per poll.
+			if r.faultReported(uid) {
+				continue
 			}
 			readerFail.Printf("Error reading data for card UID %s (Type: %s): %v", uid, card.Type, err)
 			// Send card with error. Selected on stopChan so a stalled consumer
@@ -515,6 +527,7 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 		}
 
 		if r.cache.HasChanged(uid) {
+			r.clearFault()
 			readerLog.Printf("Card data changed or new card: UID %s (Type: %s)", uid, card.Type)
 			select {
 			case r.dataChan <- NFCData{Device: r.DevicePath(), Card: card, Err: nil}:
@@ -705,10 +718,30 @@ func (r *deviceReader) setCardPresent(present bool) {
 	} else {
 		message = "Card removed"
 		r.cache.Clear() // Clear cache when card is definitively removed
+		r.clearFault()
 	}
 
 	// Broadcast status with custom message
 	r.broadcastDeviceStatus(message)
+}
+
+// faultReported records a failed read of uid and reports whether the same card
+// was already reported as failing. The record is cleared when the card leaves or
+// when a later read of it succeeds.
+func (r *deviceReader) faultReported(uid string) bool {
+	r.statusMux.Lock()
+	defer r.statusMux.Unlock()
+	if r.faulted && r.faultedUID == uid {
+		return true
+	}
+	r.faulted, r.faultedUID = true, uid
+	return false
+}
+
+func (r *deviceReader) clearFault() {
+	r.statusMux.Lock()
+	r.faulted, r.faultedUID = false, ""
+	r.statusMux.Unlock()
 }
 
 // WriteOptions controls how data is written to NFC cards at the reader level.

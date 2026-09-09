@@ -107,7 +107,7 @@ func (t *pcscISO14443Tag) ReadData() ([]byte, error) {
 
 	nlen := int(nlenData[0])<<8 | int(nlenData[1])
 	if nlen == 0 {
-		return nil, fmt.Errorf("empty NDEF message")
+		return nil, NewNoPayloadError("ReadData (Type 4)", t.uid, nil)
 	}
 
 	// Read NDEF message in chunks

@@ -26,6 +26,10 @@ type tagProfile struct {
 	canLock       bool
 	canTransceive bool
 
+	// supportsNDEF says the driver reads and writes NDEF on this kind. A kind
+	// that carries no NDEF is scanned for its identity alone.
+	supportsNDEF bool
+
 	supportsCrypto         bool
 	supportsAuthentication bool
 	supportsPassword       bool
@@ -37,7 +41,7 @@ type tagProfile struct {
 func (p tagProfile) capabilities() TagCapabilities {
 	return TagCapabilities{
 		CanRead:                true, // every driver here can read
-		SupportsNDEF:           true,
+		SupportsNDEF:           p.supportsNDEF,
 		CanWrite:               p.canWrite,
 		CanLock:                p.canLock,
 		CanTransceive:          p.canTransceive,
@@ -65,6 +69,7 @@ func ultralightProfile(name string, kind DetectedTagType, memorySize, maxNDEFSiz
 		maxNDEFSize:            maxNDEFSize,
 		canWrite:               true,
 		canLock:                layout.lockable,
+		supportsNDEF:           true,
 		canTransceive:          false, // the driver refuses raw exchange
 		supportsCrypto:         crypto,
 		supportsAuthentication: crypto,
@@ -73,13 +78,14 @@ func ultralightProfile(name string, kind DetectedTagType, memorySize, maxNDEFSiz
 
 func classicProfile(name string, memorySize, maxNDEFSize int) tagProfile {
 	return tagProfile{
-		name:        name,
-		numericType: 0x08,
-		family:      "MIFARE Classic",
-		technology:  "ISO14443A",
-		memorySize:  memorySize,
-		maxNDEFSize: maxNDEFSize,
-		canWrite:    true,
+		name:         name,
+		numericType:  0x08,
+		family:       "MIFARE Classic",
+		technology:   "ISO14443A",
+		memorySize:   memorySize,
+		maxNDEFSize:  maxNDEFSize,
+		canWrite:     true,
+		supportsNDEF: true,
 		// Writing access bits into the sector trailers is not implemented.
 		canLock:                false,
 		canTransceive:          false,
@@ -98,6 +104,7 @@ func ntagProfile(name string, memorySize, maxNDEFSize int) tagProfile {
 		maxNDEFSize:      maxNDEFSize,
 		canWrite:         true,
 		canLock:          true,
+		supportsNDEF:     true,
 		canTransceive:    false, // the driver refuses raw exchange
 		supportsPassword: true,  // NTAG21x carry PWD/PACK/AUTH0
 	}
@@ -124,12 +131,13 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 	DetectedNTAG216: ntagProfile(CardTypeNtag216, 924, 888),
 
 	DetectedDESFire: {
-		name:        CardTypeDesfire,
-		numericType: 0x20,
-		family:      "DESFire",
-		technology:  "ISO14443A",
-		memorySize:  8192, // varies by model; the driver does not bound writes
-		canWrite:    true,
+		name:         CardTypeDesfire,
+		numericType:  0x20,
+		family:       "DESFire",
+		technology:   "ISO14443A",
+		memorySize:   8192, // varies by model; the driver does not bound writes
+		canWrite:     true,
+		supportsNDEF: true,
 		// Locking a DESFire file means changing its access rights, which is
 		// not implemented.
 		canLock: false,
@@ -152,8 +160,9 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 		// Container, 256 for NDEF, 128 proprietary.
 		memorySize: 416,
 		// The NDEF file is 256 bytes, of which the first two hold NLEN.
-		maxNDEFSize: 254,
-		canWrite:    true,
+		maxNDEFSize:  254,
+		canWrite:     true,
+		supportsNDEF: true,
 		// Locking means rewriting the CC file's WriteAccess byte or changing
 		// file settings under AES, neither of which is implemented.
 		canLock:       false,
@@ -165,11 +174,12 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 	},
 
 	DetectedISO14443_4: {
-		name:        CardTypeType4,
-		numericType: 0x20,
-		family:      "Type 4",
-		technology:  "ISO14443A/B", // a Type 4 tag may be either
-		canWrite:    true,
+		name:         CardTypeType4,
+		numericType:  0x20,
+		family:       "Type 4",
+		technology:   "ISO14443A/B", // a Type 4 tag may be either
+		canWrite:     true,
+		supportsNDEF: true,
 		// Rewriting the CC file's WriteAccess byte is not implemented.
 		canLock:       false,
 		canTransceive: true,

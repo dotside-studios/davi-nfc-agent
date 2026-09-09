@@ -42,6 +42,11 @@ type Card struct {
 
 	// Internal state for io.Writer
 	writeBuffer []byte // Buffer for data to be written
+
+	// noPayload records that this card holds no NDEF message, so the consumers
+	// that each ask for it once do not each go back to the tag to be told so
+	// again.
+	noPayload bool
 }
 
 // NewCard creates an Card from a Tag.
@@ -182,6 +187,7 @@ func (c *Card) Reset() {
 	c.hasRead = false
 	c.readBuffer = nil
 	c.readOffset = 0
+	c.noPayload = false
 }
 
 // String returns a string representation of the card metadata.
@@ -208,9 +214,20 @@ func (c *Card) ReadMessage() (Message, error) {
 		return c.MessageData, nil
 	}
 
+	if c.noPayload {
+		return nil, NewNoPayloadError("ReadMessage", c.UID, nil)
+	}
+	if !c.Capabilities().SupportsNDEF {
+		c.noPayload = true
+		return nil, NewNoPayloadError("ReadMessage", c.UID, nil)
+	}
+
 	// Read raw data from card
 	data, err := io.ReadAll(c)
 	if err != nil {
+		if IsNoPayloadError(err) {
+			c.noPayload = true
+		}
 		return nil, err
 	}
 

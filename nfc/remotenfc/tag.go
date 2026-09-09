@@ -182,11 +182,14 @@ func (t *Tag) ReadData() ([]byte, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	if t.ndefData != nil {
+	if len(t.ndefData) > 0 {
 		return t.ndefData, nil
 	}
+	if len(t.rawData) > 0 {
+		return t.rawData, nil
+	}
 
-	return t.rawData, nil
+	return nil, nfc.NewNoPayloadError("ReadData", t.uid, nil)
 }
 
 // GetNDEFMessage returns the parsed NDEF message if available.

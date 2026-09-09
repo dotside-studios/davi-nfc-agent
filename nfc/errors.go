@@ -22,6 +22,7 @@ const (
 	ErrCodeInvalidData
 	ErrCodeMultipleTags
 	ErrCodeBusy
+	ErrCodeNoPayload
 )
 
 // NFCError provides structured error information for programmatic handling.
@@ -77,6 +78,20 @@ func NewMultipleTagsError(op string, count int) *NFCError {
 		Code:    ErrCodeMultipleTags,
 		Op:      op,
 		Message: fmt.Sprintf("multiple cards detected (%d tags), please present only one card", count),
+	}
+}
+
+// NewNoPayloadError reports that the tag was reached but holds no NDEF message
+// to return: no NDEF application, no NDEF TLV, a zero-length message, or no key
+// that opens the memory holding one. The tag is intact, so repeating the read
+// yields the same answer.
+func NewNoPayloadError(op, tagUID string, cause error) *NFCError {
+	return &NFCError{
+		Code:    ErrCodeNoPayload,
+		Op:      op,
+		TagUID:  tagUID,
+		Message: "tag holds no NDEF message",
+		Cause:   cause,
 	}
 }
 
@@ -194,6 +209,18 @@ func IsAuthError(err error) bool {
 	var nfcErr *NFCError
 	if errors.As(err, &nfcErr) {
 		return nfcErr.Code == ErrCodeAuthFailed
+	}
+	return false
+}
+
+// IsNoPayloadError checks if an error indicates the tag holds no NDEF message.
+func IsNoPayloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nfcErr *NFCError
+	if errors.As(err, &nfcErr) {
+		return nfcErr.Code == ErrCodeNoPayload
 	}
 	return false
 }

@@ -72,6 +72,11 @@ const (
 	// was abandoned but has not finished, or a connection with more requests
 	// outstanding than it can queue. Retryable once the earlier work drains.
 	ErrCodeBusy ErrorCode = "BUSY"
+
+	// ErrCodeNoPayload reports that the tag was reached but holds no NDEF
+	// message. Not retryable: the tag is intact and the next read returns the
+	// same answer.
+	ErrCodeNoPayload ErrorCode = "NO_PAYLOAD"
 )
 
 // ErrorPayload is the payload of an error response. `code` carries the same

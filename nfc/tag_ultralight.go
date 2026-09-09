@@ -119,7 +119,7 @@ func (t *pcscUltralightTag) ReadData() ([]byte, error) {
 	// Parse TLV to find NDEF message
 	ndefData, found := TLVFindNDEF(allData)
 	if !found {
-		return nil, fmt.Errorf("no NDEF message found")
+		return nil, NewNoPayloadError("ReadData (Ultralight)", t.uid, nil)
 	}
 
 	return ndefData, nil

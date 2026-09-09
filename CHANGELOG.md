@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Identity-only scans.** A tag that is reached, answers, and holds no NDEF
+  message now scans like any other: it reaches clients once, carrying its UID,
+  type, technology and capabilities, with `err` null and no message. This is a
+  DESFire whose NDEF file sits behind keys the agent does not have, a MIFARE
+  Classic that does not use default keys, a transit card, an access badge. Read
+  `capabilities.supportsNdef` to tell such a scan from one whose read failed.
+  Previously every one of them was an error, and because the error path skipped
+  the per-UID dedupe the success path uses, a card sitting on a reader produced
+  one error-flagged scan per poll, ten a second, each logged at error level
+- `nfc.NewNoPayloadError` and `nfc.IsNoPayloadError` name that outcome, carried
+  on the wire as `NO_PAYLOAD`. The Classic, NTAG, Ultralight, DESFire, Type 4,
+  routed and remote drivers all raise it where they previously returned an
+  untyped "no NDEF message found" or, worse, no bytes and no error
+- `nfc.AssertCapabilitiesConsistent` checks one more pairing: a tag reporting
+  `SupportsNDEF: false` must decline the read rather than return nothing and no
+  error, which is indistinguishable from a successful read of an empty tag. The
+  shared tag contract in `nfctest` requires `CanRead` only of a tag that carries
+  NDEF
+
 - **NTAG 424 DNA support**, at the NDEF level. The card is now detected, named
   `NTAG424`, and driven through the existing Type 4 path, with the 416-byte
   layout and 254-byte NDEF ceiling its three standard files give it, so an
@@ -32,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A tag whose read fails permanently is now reported once per card rather than
+  once per poll. The reader polls ten times a second, so an unreadable card
+  filled the client log for as long as it sat there
+- `nfc.Card` caches the fact that a tag holds no message, so the consumers that
+  each ask a scan for its contents do not each go back to the tag to be told so
+  again. A tag declaring `SupportsNDEF: false` is not read at all
 - `nfc.ParseGetVersionResponse` classified an NTAG 424 DNA as an NTAG215. Both
   report storage size `0x11`, so the protocol byte is now read first: `0x05` is
   the ISO 14443-4 card, `0x03` the page-addressed NTAG21x. The old reading would

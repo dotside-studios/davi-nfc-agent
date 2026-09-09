@@ -101,7 +101,7 @@ func (t *pcscNtagTag) ReadData() ([]byte, error) {
 	// Parse TLV to find NDEF message
 	ndefData, found := TLVFindNDEF(allData)
 	if !found {
-		return nil, fmt.Errorf("no NDEF message found")
+		return nil, NewNoPayloadError("ReadData (NTAG)", t.uid, nil)
 	}
 
 	return ndefData, nil

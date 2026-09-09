@@ -82,6 +82,7 @@ func builderCases() []builderCase {
 		{name: "DESFireWriteDataAPDU", cmd: DESFireWriteDataAPDU(1, 0, four), class: ClassWrite, mutates: true, summarySub: "WriteData"},
 		{name: "DESFireAuthAPDU", cmd: DESFireAuthAPDU(0, DFCmdAuthenticateAES), class: ClassAuth, summarySub: "Authenticate"},
 		{name: "DESFireAdditionalFrameAPDU", cmd: DESFireAdditionalFrameAPDU(four), class: ClassRead, summarySub: "AdditionalFrame"},
+		{name: "NTAG424GetVersionAPDU", cmd: NTAG424GetVersionAPDU(), class: ClassInfo, summarySub: "GetVersion"},
 	}
 }
 

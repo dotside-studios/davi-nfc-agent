@@ -94,3 +94,78 @@ func TestParseGetVersionResponse_Invalid(t *testing.T) {
 		})
 	}
 }
+
+// The storage size does not separate the two NTAG protocols: an NTAG 424 DNA
+// reports the same 0x11 as an NTAG215. The protocol byte decides. Getting it
+// wrong drives a file-based card with the page-addressed NTAG driver, which
+// fails on the first read.
+func TestParseGetVersionResponse_ProtocolSeparatesTheNTAGFamilies(t *testing.T) {
+	// resp: [header, vendor, product, subtype, major, minor, storage, protocol]
+	mk := func(major, storage, protocol byte) []byte {
+		return []byte{0x00, 0x04, 0x04, 0x02, major, 0x00, storage, protocol}
+	}
+
+	tests := []struct {
+		name string
+		resp []byte
+		want DetectedTagType
+	}{
+		{"NTAG215 keeps its 0x11 under ISO 14443-3", mk(0x01, 0x11, 0x03), DetectedNTAG215},
+		{"NTAG 424 DNA is the same 0x11 under ISO 14443-4", mk(0x30, 0x11, 0x05), DetectedNTAG424},
+		// An unrecognised size under the page-addressed protocol keeps the
+		// existing NTAG21x default.
+		{"unknown size, ISO 14443-3", mk(0x01, 0x77, 0x03), DetectedNTAG215},
+		// Under ISO 14443-4 there is no such default: the layout is unknown, so
+		// the caller drives it as a plain Type 4 card instead.
+		{"unknown size, ISO 14443-4", mk(0x30, 0x77, 0x05), DetectedUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ParseGetVersionResponse(tt.resp); got != tt.want {
+				t.Errorf("ParseGetVersionResponse = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The wrapped form omits the header byte the native one carries and reports its
+// status in SW2, so it is parsed separately. The native parser's offsets would
+// shift every field by one.
+func TestParseWrappedGetVersionResponse(t *testing.T) {
+	// frame: [vendor, product, subtype, major, minor, storage, protocol]
+	ntag424 := []byte{0x04, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}
+	withSW := func(frame []byte, sw1, sw2 byte) []byte {
+		return append(append([]byte(nil), frame...), sw1, sw2)
+	}
+
+	t.Run("first frame of the chain", func(t *testing.T) {
+		kind, ok := ParseWrappedGetVersionResponse(withSW(ntag424, 0x91, 0xAF))
+		if !ok || kind != DetectedNTAG424 {
+			t.Errorf("got (%v, %v), want (DetectedNTAG424, true)", kind, ok)
+		}
+	})
+
+	t.Run("a reader that unwraps the status", func(t *testing.T) {
+		kind, ok := ParseWrappedGetVersionResponse(withSW(ntag424, 0x90, 0x00))
+		if !ok || kind != DetectedNTAG424 {
+			t.Errorf("got (%v, %v), want (DetectedNTAG424, true)", kind, ok)
+		}
+	})
+
+	rejected := map[string][]byte{
+		"class not supported (a plain Type 4 tag)": {0x6E, 0x00},
+		"too short to be a version":                withSW([]byte{0x04, 0x04}, 0x91, 0xAF),
+		"non-NXP vendor":                           withSW([]byte{0x05, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}, 0x91, 0xAF),
+		"page-addressed protocol":                  withSW([]byte{0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03}, 0x91, 0xAF),
+		"a later generation this cannot size":      withSW([]byte{0x04, 0x04, 0x02, 0x40, 0x00, 0x11, 0x05}, 0x91, 0xAF),
+		"DESFire":                                  withSW([]byte{0x04, 0x01, 0x01, 0x12, 0x00, 0x18, 0x05}, 0x91, 0xAF),
+		"an error status":                          withSW(ntag424, 0x91, 0x1C),
+	}
+	for name, resp := range rejected {
+		t.Run(name, func(t *testing.T) {
+			if kind, ok := ParseWrappedGetVersionResponse(resp); ok {
+				t.Errorf("identified %v from %s; it should not be named", kind, name)
+			}
+		})
+	}
+}

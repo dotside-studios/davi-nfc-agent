@@ -21,16 +21,29 @@ func newPCSCISO14443Tag(dev CardTransport, uid string) *pcscISO14443Tag {
 	}
 }
 
+// profile follows the kind the tag was built as, so a card driven through the
+// same Type 4 exchange but known more precisely reports its own name and
+// capacity without reimplementing the exchange. See newPCSCNTAG424Tag.
+//
+// A kind with no profile falls back to the generic Type 4 one, which is what
+// such a card is being driven as.
+func (t *pcscISO14443Tag) profile() tagProfile {
+	if p, ok := profileFor(t.detectedType); ok {
+		return p
+	}
+	return tagProfiles[DetectedISO14443_4]
+}
+
 func (t *pcscISO14443Tag) Type() string {
-	return tagProfiles[DetectedISO14443_4].name
+	return t.profile().name
 }
 
 func (t *pcscISO14443Tag) NumericType() int {
-	return tagProfiles[DetectedISO14443_4].numericType
+	return t.profile().numericType
 }
 
 func (t *pcscISO14443Tag) Capabilities() TagCapabilities {
-	return tagProfiles[DetectedISO14443_4].capabilities()
+	return t.profile().capabilities()
 }
 
 func (t *pcscISO14443Tag) Transceive(data []byte) ([]byte, error) {

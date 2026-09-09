@@ -375,7 +375,7 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	}
 
 	// Create appropriate tag wrapper based on detected type
-	tag := nfc.NewTagForType(tagType, d, d.uid)
+	tag := nfc.NewTagForType(d.refineType4(tagType), d, d.uid)
 	if tag == nil {
 		// Try to detect more precisely using commands
 		tag = d.detectTagWithCommands()
@@ -383,7 +383,7 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	if tag == nil {
 		// Fall back to ISO14443-4 for unknown tags with SAK indicating ISO compliance
 		if isISO14443_4Compatible(d.atr) {
-			tag = nfc.NewTagForType(nfc.DetectedISO14443_4, d, d.uid)
+			tag = nfc.NewTagForType(d.refineType4(nfc.DetectedISO14443_4), d, d.uid)
 		} else {
 			// Return error only once per card session to avoid log spam
 			if !d.unsupportedReported {
@@ -402,12 +402,55 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	return nil, nil
 }
 
+// refineType4 replaces a generic ISO14443-4 detection with a more precise kind
+// when the card names itself. Any other kind passes through unprobed.
+func (d *device) refineType4(kind nfc.DetectedTagType) nfc.DetectedTagType {
+	if kind != nfc.DetectedISO14443_4 {
+		return kind
+	}
+	if refined := d.probeWrappedVersion(); refined != nfc.DetectedUnknown {
+		return refined
+	}
+	return kind
+}
+
+// probeWrappedVersion asks the card for its version over ISO 14443-4, and
+// returns the kind that names it or DetectedUnknown. A card that does not
+// implement the command answers with an error status word, which reads as
+// unknown.
+//
+// This is the only route to an NTAG 424 DNA on most readers: it presents the
+// short ISO 14443-4 ATR, which carries no card-type byte, so neither
+// DetectTagTypeFromATR nor isISO14443_4Compatible recognises it.
+//
+// It is safe to send unprompted: it reads rather than writes, and runs before
+// any application or file is selected.
+func (d *device) probeWrappedVersion() nfc.DetectedTagType {
+	resp, err := d.card.Transmit(nfc.NTAG424GetVersionAPDU())
+	if err != nil {
+		return nfc.DetectedUnknown
+	}
+	kind, ok := nfc.ParseWrappedGetVersionResponse(resp)
+	if !ok {
+		return nfc.DetectedUnknown
+	}
+	return kind
+}
+
 // detectTagWithCommands attempts to detect tag type using NFC commands
 func (d *device) detectTagWithCommands() nfc.Tag {
 	// Try GET_VERSION for NTAG/Ultralight EV1
 	version, err := d.tryGetVersion()
 	if err == nil && len(version) >= 8 {
 		if tag := nfc.NewTagForType(nfc.ParseGetVersionResponse(version), d, d.uid); tag != nil {
+			return tag
+		}
+	}
+
+	// Ask over ISO 14443-4, for a card the ATR did not name. One command, and a
+	// card that does not answer it is left to the probe below.
+	if kind := d.probeWrappedVersion(); kind != nfc.DetectedUnknown {
+		if tag := nfc.NewTagForType(kind, d, d.uid); tag != nil {
 			return tag
 		}
 	}

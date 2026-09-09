@@ -17,6 +17,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rename was invisible until a client went quiet. `go test ./server/clientserver
   -update` rewrites them, so a wire change reaches review as the diff a client
   sees. The health body's key set is pinned the same way in `agent/serverplugin`
+- **`nfc/ntag424` speaks the NTAG 424 DNA's authenticated channel.** SDM
+  verification reads a tag; changing one needs a session, and this is that
+  session. `NewAuthenticator` drives `Cmd.AuthenticateEV2First` or
+  `AuthenticateEV2NonFirst` as two round trips, proving both sides hold the same
+  AES key without either sending it, and returns a `Session` carrying the
+  transaction identifier the card assigned, a command counter, and the two
+  session keys. `Session.Command` and `Session.Response` then wrap and verify
+  commands in `CommPlain`, `CommMAC` or `CommFull`, with the counter and
+  identifier in every MAC, so a captured command cannot be replayed into another
+  session or twice into the same one. The counter advances only on a response
+  that verifies, which keeps both sides in step when a command does not arrive.
+  The transport stays the caller's: each step returns the APDU to send and
+  consumes the card's answer, so the same code drives a PC/SC reader, a phone
+  over the device protocol, or a test. Pinned to AN12196's worked examples: both
+  authentication transcripts reproduce byte for byte, and the `CommMode.MAC` and
+  `CommMode.Full` examples reproduce their published APDUs, IV and MACs
+- **The commands that change a tag**, as builders for that session:
+  `ChangeFileSettings` (with a `FileSettings` encoder, which is how SDM is turned
+  on and where its mirrors go), `ChangeKey` in both of its forms, `GetCardUID`
+  and `GetFileSettings`. Each is pinned to its worked example: Tables 18, 25, 26
+  and 28 reproduce their published APDUs byte for byte, including the card's own
+  flavour of CRC-32, which differs from the usual one by its final inversion.
+  These build APDUs and read answers; nothing in the agent calls them. There is
+  no tag operation, no client verb, no console entry and no key store, so the
+  agent still holds no AES key: whoever holds one builds the command and sends it
+  over a channel of their choosing, the raw APDU channel included. `ChangeKey`
+  cannot be undone, and a wrong one leaves a tag nobody can authenticate to
 - **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
   configured for Secure Dynamic Messaging rewrites its own URL on every read,
   mirroring its UID and a read counter (encrypted or in the clear) and appending

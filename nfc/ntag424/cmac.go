@@ -5,10 +5,9 @@ import (
 	"crypto/cipher"
 )
 
-// AES-CMAC (NIST SP 800-38B, RFC 4493), which is the only primitive SDM needs
-// beyond the AES block cipher itself. The standard library has no CMAC and the
+// AES-CMAC (NIST SP 800-38B, RFC 4493). The standard library has none and the
 // agent core carries no third-party dependencies, so it is implemented here and
-// pinned to the RFC's test vectors.
+// pinned to the RFC's vectors.
 
 // blockSize is the AES block size, and the size of a CMAC.
 const blockSize = aes.BlockSize
@@ -17,9 +16,8 @@ const blockSize = aes.BlockSize
 // block, applied when a left shift overflows.
 const cmacSubkeyConstant = 0x87
 
-// cmac returns the AES-CMAC of msg under key. The message may be empty, which
-// SDM relies on: a tag that mirrors nothing but PICCData MACs a zero-length
-// input.
+// cmac returns the AES-CMAC of msg under key. The message may be empty, which a
+// tag mirroring nothing but PICCData relies on.
 func cmac(block cipher.Block, msg []byte) []byte {
 	k1, k2 := cmacSubkeys(block)
 

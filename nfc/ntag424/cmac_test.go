@@ -77,9 +77,8 @@ func TestCMACAgainstRFC4493(t *testing.T) {
 	}
 }
 
-// The message must not be modified in place. SDM MACs a slice of a URL the
-// caller still holds, and padding the final block is the step that would
-// otherwise write into it.
+// The message must not be modified in place: SDM MACs a slice of a URL the
+// caller still holds, and padding the final block would write into it.
 func TestCMACDoesNotModifyItsInput(t *testing.T) {
 	block, err := aes.NewCipher(make([]byte, 16))
 	if err != nil {

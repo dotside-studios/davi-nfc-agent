@@ -1,9 +1,9 @@
 {
-  "type": "deviceStatus",
   "payload": {
-    "device": "mock:usb:001",
+    "cardPresent": false,
     "connected": true,
-    "message": "Reader ready",
-    "cardPresent": false
-  }
+    "device": "mock:usb:001",
+    "message": "Reader ready"
+  },
+  "type": "deviceStatus"
 }

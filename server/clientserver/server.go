@@ -404,14 +404,19 @@ func (s *Server) handleWriteRequest(ctx context.Context, conn *wsconn.SafeConn, 
 
 	// Surface the verified write outcome so clients can confirm the data
 	// actually landed, how many attempts it took, and the size.
-	payload := map[string]any{"message": "Write operation completed successfully"}
+	const landed = "Write operation completed successfully"
+
+	var payload any = protocol.WriteAcknowledgement{Message: landed}
 	if result != nil {
-		payload["uid"] = result.UID
-		payload["tagType"] = result.TagType
-		payload["bytesWritten"] = result.BytesWritten
-		payload["verified"] = result.Verified
-		payload["attempts"] = result.Attempts
-		payload["locked"] = result.Locked
+		payload = protocol.WriteResponsePayload{
+			Message:      landed,
+			UID:          result.UID,
+			TagType:      result.TagType,
+			BytesWritten: result.BytesWritten,
+			Verified:     result.Verified,
+			Attempts:     result.Attempts,
+			Locked:       result.Locked,
+		}
 	}
 
 	s.reply(conn, req.ID, server.WSMessageTypeWriteResponse, payload)
@@ -435,13 +440,7 @@ func (s *Server) handleLockRequest(ctx context.Context, conn *wsconn.SafeConn, c
 
 // handleTransceiveRequest exchanges raw bytes with the named tag.
 func (s *Server) handleTransceiveRequest(ctx context.Context, conn *wsconn.SafeConn, clientID string, req protocol.WebSocketRequest) {
-	var payload struct {
-		Data            string `json:"data"`
-		Raw             bool   `json:"raw"`
-		DeviceID        string `json:"deviceID"`
-		UID             string `json:"uid"`
-		AllowUntargeted bool   `json:"allowUntargeted"`
-	}
+	var payload protocol.TransceiveRequestPayload
 	if !decodePayload(req.Payload, &payload) {
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid transceive request")
 		return
@@ -467,8 +466,8 @@ func (s *Server) handleTransceiveRequest(ctx context.Context, conn *wsconn.SafeC
 		return
 	}
 
-	s.reply(conn, req.ID, server.WSMessageTypeTransceiveResponse, map[string]any{
-		"data": base64.StdEncoding.EncodeToString(resp),
+	s.reply(conn, req.ID, server.WSMessageTypeTransceiveResponse, protocol.TransceiveResponsePayload{
+		Data: base64.StdEncoding.EncodeToString(resp),
 	})
 }
 
@@ -487,19 +486,11 @@ func (s *Server) handleCapabilitiesRequest(ctx context.Context, conn *wsconn.Saf
 	s.reply(conn, req.ID, server.WSMessageTypeCapabilitiesResponse, caps)
 }
 
-// requestTarget is what a request that acts on a tag may carry alongside its
-// own fields. A tagData broadcast reports deviceID, so a client watching two
-// phones can name the one it means.
-type requestTarget struct {
-	DeviceID        string `json:"deviceID"`
-	UID             string `json:"uid"`
-	AllowUntargeted bool   `json:"allowUntargeted"`
-	IdempotencyKey  string `json:"idempotencyKey"`
-}
-
 // tagTarget reads the target out of a request payload, tolerating its absence.
-func tagTarget(payload map[string]any) requestTarget {
-	var target requestTarget
+// A tagData broadcast reports deviceID, so a client watching two phones can
+// name the one it means.
+func tagTarget(payload map[string]any) protocol.TagTarget {
+	var target protocol.TagTarget
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -565,60 +556,57 @@ func tagDataMessage(data nfc.NFCData) protocol.WebSocketMessage {
 		errStr = &e
 	}
 
-	var payload map[string]interface{}
-
-	if data.Card != nil {
-		payload = map[string]interface{}{
-			"uid":          data.Card.UID,
-			"type":         data.Card.Type,
-			"technology":   data.Card.Technology,
-			"scannedAt":    data.Card.ScannedAt.Format("2006-01-02T15:04:05Z07:00"),
-			"capabilities": data.Card.Capabilities(),
-			"err":          errStr,
+	if data.Card == nil {
+		return protocol.WebSocketMessage{
+			Type:    server.WSMessageTypeTagData,
+			Payload: protocol.TagRemovedPayload{Err: errStr},
 		}
+	}
 
-		// Which reader this came from. Absent means the agent's own hardware,
-		// which is the only source deviceStatus describes, so a client showing
-		// a tag can tell whether that status has anything to say about it.
-		if source, ok := data.Card.GetUnderlyingTag().(interface{ SourceDevice() string }); ok {
-			if id := source.SourceDevice(); id != "" {
-				payload["deviceID"] = id
-			}
-		}
+	payload := protocol.TagDataPayload{
+		UID:          data.Card.UID,
+		Type:         data.Card.Type,
+		Technology:   data.Card.Technology,
+		ScannedAt:    data.Card.ScannedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Capabilities: data.Card.Capabilities(),
+		Err:          errStr,
+	}
 
-		// Try to read and parse message from card
-		if msg, err := data.Card.ReadMessage(); err == nil {
-			var text string
-			var messageInfo map[string]interface{}
+	// Which reader this came from. Absent means the agent's own hardware,
+	// which is the only source deviceStatus describes, so a client showing
+	// a tag can tell whether that status has anything to say about it.
+	if source, ok := data.Card.GetUnderlyingTag().(interface{ SourceDevice() string }); ok {
+		payload.DeviceID = source.SourceDevice()
+	}
 
-			if ndefMsg, ok := msg.(*nfc.NDEFMessage); ok {
-				text, _ = ndefMsg.GetText()
-				messageInfo = ndefMsg.ToJSONMap()
-			} else if textMsg, ok := msg.(*nfc.TextMessage); ok {
-				text = textMsg.Text
-				messageInfo = map[string]interface{}{
-					"type": "raw",
-					"data": textMsg.Bytes(),
-				}
-			}
-
-			payload["message"] = messageInfo
-			payload["text"] = text
-		} else {
-			payload["text"] = ""
-		}
-	} else {
-		payload = map[string]interface{}{
-			"uid":  "",
-			"text": "",
-			"err":  errStr,
-		}
+	// A tag whose message cannot be read still reaches clients; what it holds
+	// is simply absent.
+	if msg, err := data.Card.ReadMessage(); err == nil {
+		payload.Message, payload.Text = tagMessage(msg)
 	}
 
 	return protocol.WebSocketMessage{
 		Type:    server.WSMessageTypeTagData,
 		Payload: payload,
 	}
+}
+
+// tagMessage renders what was read off a tag, with the text a client can use
+// without decoding anything.
+func tagMessage(msg nfc.Message) (*protocol.TagMessagePayload, string) {
+	switch m := msg.(type) {
+	case *nfc.NDEFMessage:
+		text, _ := m.GetText()
+		payload := m.ToPayload()
+		if payload == nil {
+			return nil, text
+		}
+		return &protocol.TagMessagePayload{Type: payload.Type, Records: payload.Records}, text
+
+	case *nfc.TextMessage:
+		return &protocol.TagMessagePayload{Type: "raw", Data: m.Bytes()}, m.Text
+	}
+	return nil, ""
 }
 
 // broadcastDeviceStatus queues a device-status update for every connected

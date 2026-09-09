@@ -1,23 +1,22 @@
 {
-  "type": "tagData",
   "payload": {
     "capabilities": {
-      "canRead": true,
-      "canWrite": false,
-      "canTransceive": false,
       "canLock": false,
-      "tagFamily": "Unknown",
-      "supportsNdef": true
+      "canRead": true,
+      "canTransceive": false,
+      "canWrite": false,
+      "supportsNdef": true,
+      "tagFamily": "Unknown"
     },
     "err": null,
     "message": {
       "records": [
         {
-          "type": "text",
           "content": "hello",
           "language": "en",
+          "payload": "AmVuaGVsbG8=",
           "tnf": 1,
-          "payload": "AmVuaGVsbG8="
+          "type": "text"
         }
       ],
       "type": "ndef"
@@ -27,5 +26,6 @@
     "text": "hello",
     "type": "Mock Tag",
     "uid": "04A1B2C3"
-  }
+  },
+  "type": "tagData"
 }

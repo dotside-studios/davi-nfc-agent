@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   -update` rewrites them, so a wire change reaches review as the diff a client
   sees. The health body's key set is pinned the same way in `agent/serverplugin`
 
+### Changed
+
+- The client protocol is typed Go structs rather than `map[string]any`
+  literals. `tagData`, `writeResponse`, `transceiveResponse` and the health body
+  were assembled key by key, so nothing declared their field names and the
+  package named `protocol` described none of them. `protocol` now holds
+  `TagDataPayload`, `TagRemovedPayload`, `TagMessagePayload`,
+  `WriteResponsePayload`, `TransceiveResponsePayload`, `TagTarget`,
+  `TransceiveRequestPayload` and `HealthPayload`, and the servers marshal
+  those. A tag leaving the field is its own type: that branch sends three keys,
+  not the full shape emptied out. The JSON is unchanged, which the golden
+  fixtures show
+- The eleven client message types live in `protocol` beside the envelope that
+  carries them, with the `server.WSMessageType*` names kept as aliases.
+  `protocol.WSType*` had five of them
+
 ### Fixed
 
 - `HealthCheckResponse` in the client library carries `type` and `clients`.

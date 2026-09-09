@@ -9,14 +9,10 @@
       "tagFamily": "Unknown"
     },
     "err": null,
-    "message": {
-      "data": "AQID",
-      "type": "raw"
-    },
     "scannedAt": "2026-03-14T09:26:53Z",
     "technology": "Unknown",
-    "text": "\u0001\u0002\u0003",
-    "type": "Mock Tag",
+    "text": "",
+    "type": "",
     "uid": "04A1B2C3"
   },
   "type": "tagData"

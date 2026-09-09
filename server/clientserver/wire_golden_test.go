@@ -1,6 +1,7 @@
 package clientserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -33,14 +34,19 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden wire fixtures"
 var scannedAt = time.Date(2026, 3, 14, 9, 26, 53, 0, time.UTC)
 
 // golden compares one message against testdata/<name>.json.
+//
+// The comparison is on what the JSON means, not on its bytes: the message is
+// marshalled, decoded and marshalled again, so every fixture comes out with
+// sorted keys. A map and a struct with the same fields serialise in different
+// orders, and without this a refactor from one to the other churns every
+// fixture on the ordering and buries whatever really changed.
 func golden(t *testing.T, name string, msg any) {
 	t.Helper()
 
-	got, err := json.MarshalIndent(msg, "", "  ")
+	got, err := normalizeJSON(msg)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	got = append(got, '\n')
 
 	path := filepath.Join("testdata", name+".json")
 	if *updateGolden {
@@ -61,6 +67,30 @@ func golden(t *testing.T, name string, msg any) {
 		t.Errorf("%s changed.\n got: %s\nwant: %s\n\nIf this is a deliberate wire change, rerun with -update and commit the fixture.",
 			path, got, want)
 	}
+}
+
+// normalizeJSON renders a message with its keys sorted. UseNumber keeps an
+// integer an integer through the round trip; absent and null stay distinct,
+// since a missing key decodes to no key at all.
+func normalizeJSON(msg any) ([]byte, error) {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+
+	var round any
+	if err := dec.Decode(&round); err != nil {
+		return nil, err
+	}
+
+	out, err := json.MarshalIndent(round, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, '\n'), nil
 }
 
 // scannedCard builds a card with a fixed timestamp, so what varies between
@@ -103,11 +133,27 @@ func (fixedOps) Capabilities(context.Context, server.CapabilitiesOp) (*nfc.TagCa
 	return &caps, nil
 }
 
+// nilResultOps reports a successful write with no result. The response is a
+// different shape from a write that reports one, and a build supplying its own
+// Ops can produce it, so it is part of the contract.
+type nilResultOps struct {
+	stoppedOps
+}
+
+func (nilResultOps) Write(context.Context, server.WriteOp) (*nfc.WriteResult, error) {
+	return nil, nil
+}
+
 // respondTo sends one request and returns the reply as the client sees it.
 func respondTo(t *testing.T, request map[string]any) map[string]any {
 	t.Helper()
+	return respondWith(t, fixedOps{}, request)
+}
 
-	s := New(Config{AllowedOrigins: []string{"*"}, Ops: fixedOps{}})
+func respondWith(t *testing.T, ops server.TagOps, request map[string]any) map[string]any {
+	t.Helper()
+
+	s := New(Config{AllowedOrigins: []string{"*"}, Ops: ops})
 	conn := dial(t, s, "https://app.example.com")
 
 	if err := conn.WriteJSON(request); err != nil {
@@ -138,6 +184,17 @@ func TestGoldenTagDataWithARawMessage(t *testing.T) {
 	golden(t, "tagdata_raw", tagDataMessage(nfc.NFCData{Card: card}))
 }
 
+// A tag whose driver names no type still carries the keys, empty. They are not
+// dropped, which is what an omitempty on them would do.
+func TestGoldenTagDataWithAnUnnamedType(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	tag.TagType = ""
+	card := nfc.NewCard(tag)
+	card.ScannedAt = scannedAt
+
+	golden(t, "tagdata_untyped", tagDataMessage(nfc.NFCData{Card: card}))
+}
+
 // A scan with no card is how the agent reports the tag leaving the field. It is
 // a different shape from the one above, not the same shape with empty values.
 func TestGoldenTagDataOnRemoval(t *testing.T) {
@@ -158,6 +215,18 @@ func TestGoldenDeviceStatus(t *testing.T) {
 
 func TestGoldenWriteResponse(t *testing.T) {
 	golden(t, "writeresponse", respondTo(t, map[string]any{
+		"id":   "req-write",
+		"type": "writeRequest",
+		"payload": map[string]any{
+			"uid":     "04A1B2C3",
+			"records": []any{map[string]any{"type": "text", "content": "hello"}},
+		},
+	}))
+}
+
+// A write that lands but reports nothing carries the acknowledgement alone.
+func TestGoldenWriteResponseWithNoResult(t *testing.T) {
+	golden(t, "writeresponse_noresult", respondWith(t, nilResultOps{}, map[string]any{
 		"id":   "req-write",
 		"type": "writeRequest",
 		"payload": map[string]any{

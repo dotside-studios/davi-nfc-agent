@@ -1,13 +1,12 @@
 {
-  "type": "tagData",
   "payload": {
     "capabilities": {
-      "canRead": true,
-      "canWrite": false,
-      "canTransceive": false,
       "canLock": false,
-      "tagFamily": "Unknown",
-      "supportsNdef": true
+      "canRead": true,
+      "canTransceive": false,
+      "canWrite": false,
+      "supportsNdef": true,
+      "tagFamily": "Unknown"
     },
     "err": null,
     "scannedAt": "2026-03-14T09:26:53Z",
@@ -15,5 +14,6 @@
     "text": "",
     "type": "Mock Tag",
     "uid": "04A1B2C3"
-  }
+  },
+  "type": "tagData"
 }

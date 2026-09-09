@@ -39,6 +39,9 @@ func (t *pcscBaseTag) Disconnect() error {
 // Card removal detection is handled at the device layer via Transceive().
 func (t *pcscBaseTag) transceive(cmd []byte) ([]byte, error) {
 	resp, err := t.device.Transceive(cmd)
+	if apduTrace {
+		traceAPDU(t.uid, cmd, resp, err)
+	}
 	if err != nil {
 		return nil, err // Device layer already wraps card removal errors
 	}
@@ -58,7 +61,11 @@ func (t *pcscBaseTag) transceive(cmd []byte) ([]byte, error) {
 // transmitRaw sends an APDU and returns the raw response (with SW bytes).
 // Card removal detection is handled at the device layer via Transceive().
 func (t *pcscBaseTag) transmitRaw(cmd []byte) ([]byte, error) {
-	return t.device.Transceive(cmd)
+	resp, err := t.device.Transceive(cmd)
+	if apduTrace {
+		traceAPDU(t.uid, cmd, resp, err)
+	}
+	return resp, err
 }
 
 // ndefAreaLocked reports whether page 4 — the first NDEF user page of a

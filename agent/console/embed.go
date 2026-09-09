@@ -37,7 +37,8 @@ type spaHandler struct {
 
 func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Mounted separately; a stray request here must not get the shell and a 200.
-	if strings.HasPrefix(r.URL.Path, "/control/") {
+	// The page rides DefaultBasePath, which is the only base it is served at.
+	if strings.HasPrefix(r.URL.Path, DefaultBasePath) {
 		http.NotFound(w, r)
 		return
 	}

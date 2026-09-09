@@ -75,8 +75,6 @@ func builderCases() []builderCase {
 		{name: "SelectFileAPDU", cmd: SelectFileAPDU([]byte{0xE1, 0x03}), class: ClassSelect, summarySub: "SELECT"},
 		{name: "SelectFileByAIDAPDU", cmd: SelectFileByAIDAPDU(aid), class: ClassSelect, summarySub: "NDEF Type 4 application"},
 		{name: "GetVersionAPDU", cmd: GetVersionAPDU(), class: ClassInfo, summarySub: "GET_VERSION"},
-		{name: "UltralightReadAPDU", cmd: UltralightReadAPDU(4), class: ClassRead, summarySub: "READ"},
-		{name: "UltralightWriteAPDU", cmd: UltralightWriteAPDU(4, four), class: ClassWrite, mutates: true, summarySub: "WRITE"},
 		{name: "DESFireSelectAppAPDU", cmd: DESFireSelectAppAPDU(dfAID), class: ClassSelect, summarySub: "SelectApplication"},
 		{name: "DESFireGetAppIDsAPDU", cmd: DESFireGetAppIDsAPDU(), class: ClassRead, summarySub: "GetApplicationIDs"},
 		{name: "DESFireGetFileIDsAPDU", cmd: DESFireGetFileIDsAPDU(), class: ClassRead, summarySub: "GetFileIDs"},

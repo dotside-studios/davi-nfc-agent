@@ -183,24 +183,6 @@ func GetVersionAPDU() []byte {
 	return DirectTransmitAPDU([]byte{0x60})
 }
 
-// UltralightReadAPDU returns the native Ultralight READ command (wrapped)
-// Reads 4 pages (16 bytes) starting from the specified page
-func UltralightReadAPDU(page byte) []byte {
-	// Ultralight READ command: 0x30 [page]
-	return DirectTransmitAPDU([]byte{0x30, page})
-}
-
-// UltralightWriteAPDU returns the native Ultralight WRITE command (wrapped)
-// Writes 4 bytes to the specified page
-func UltralightWriteAPDU(page byte, data []byte) []byte {
-	if len(data) != 4 {
-		return nil
-	}
-	// Ultralight WRITE command: 0xA2 [page] [4 bytes]
-	cmd := append([]byte{0xA2, page}, data...)
-	return DirectTransmitAPDU(cmd)
-}
-
 // NTAG424GetVersionAPDU returns the ISO-wrapped GET_VERSION an NTAG 424 DNA
 // answers. GetVersionAPDU builds the native ISO 14443-3 form, which this card
 // does not implement. Read the reply with ParseWrappedGetVersionResponse.

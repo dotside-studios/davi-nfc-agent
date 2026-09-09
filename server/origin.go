@@ -75,30 +75,38 @@ func checkOrigin(allowed func(host string) bool, onReject func(origin string)) f
 			// Browser-initiated WebSockets always send Origin.
 			return true
 		}
+		return grantOrigin(origin, r.Host, allowed, onReject)
+	}
+}
 
-		u, err := url.Parse(origin)
-		if err != nil {
-			if onReject != nil {
-				onReject(origin)
-			}
-			return false
-		}
-
-		// Same-host: the Origin's host:port matches the Host the
-		// request was made to. Covers kiosk frontend hitting itself.
-		if hostsEqual(u.Host, r.Host) {
-			return true
-		}
-
-		if allowed(u.Host) {
-			return true
-		}
-
+// grantOrigin is the shared same-host + policy decision for a non-empty browser
+// Origin against the Host it was sent to, used by both the WebSocket origin
+// check and the HTTP CORS middleware so the two never diverge. It reports
+// whether the origin is granted; allowed may be nil (only same-host is granted
+// then), and a malformed or refused origin is reported to onReject when set.
+func grantOrigin(origin, host string, allowed func(host string) bool, onReject func(origin string)) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
 		if onReject != nil {
-			onReject(u.Host)
+			onReject(origin)
 		}
 		return false
 	}
+
+	// Same-host: the Origin's host:port matches the Host the request was made
+	// to. Covers a kiosk frontend hitting itself.
+	if hostsEqual(u.Host, host) {
+		return true
+	}
+
+	if allowed != nil && allowed(u.Host) {
+		return true
+	}
+
+	if onReject != nil {
+		onReject(u.Host)
+	}
+	return false
 }
 
 // hostsEqual compares two host:port strings, case-folding the

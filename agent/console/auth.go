@@ -96,6 +96,35 @@ func (a *Auth) RedeemHandoff(token string) (string, bool) {
 	return session, true
 }
 
+// ExchangeSecret mints a session for a caller that presents the agent's API
+// secret, for a build with no tray to mint a handoff token. provided is what
+// the caller sent; current is the secret the agent holds now, read live so a
+// rotation takes effect at once.
+//
+// It fails closed on an empty current secret: an agent running without a secret
+// must not hand a control session to anyone who can reach loopback. The compare
+// is constant-time, as [Auth.RedeemHandoff] and [Auth.ValidSession] are, so a
+// 256-bit secret is what makes an online guess hopeless.
+func (a *Auth) ExchangeSecret(provided, current string) (string, bool) {
+	if current == "" || provided == "" {
+		return "", false
+	}
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(current)) != 1 {
+		return "", false
+	}
+
+	session, err := randomToken()
+	if err != nil {
+		return "", false
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.expireLocked()
+	a.sessions[session] = time.Now().Add(sessionTTL)
+	return session, true
+}
+
 // ValidSession reports whether a session token is current.
 func (a *Auth) ValidSession(token string) bool {
 	if token == "" {
@@ -158,6 +187,19 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+// bearerSecret reads a secret from an Authorization: Bearer header, and only
+// from there. The query string the client endpoint also accepts is refused
+// here: a secret in a URL lands in server logs and browser history, which the
+// privileged surface must not do.
+func bearerSecret(r *http.Request) string {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+		return h[len(prefix):]
+	}
+	return ""
 }
 
 // isLoopbackRequest reports whether the request arrived over loopback. It reads

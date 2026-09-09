@@ -28,7 +28,6 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/secure/pairing"
 	tlspkg "github.com/dotside-studios/davi-nfc-agent/secure/tls"
 	"github.com/dotside-studios/davi-nfc-agent/server"
-	"github.com/dotside-studios/davi-nfc-agent/server/clientserver"
 	"github.com/dotside-studios/davi-nfc-agent/server/listener"
 )
 
@@ -127,25 +126,14 @@ func main() {
 		Config:         listener.Config{CertFile: opts.CertFile, KeyFile: opts.KeyFile},
 		Certificates:   certs.Manager,
 		AllowedOrigins: server.ParseAllowedOrigins(opts.AllowedOrigins),
+		TokenVerifier:  paired.TokenVerifier(),
 	}
 
-	// The two halves of /ws, both built here. The agent decides who is admitted
-	// and what is allowed; each protocol decides what its own side may say.
+	// The plugin builds the client half of /ws from the agent; only the device
+	// driver's own endpoint is named here. The driver serves the protocol; Admit
+	// decides who gets that far, and names the device it admitted so the driver
+	// registers it under the identity it paired with.
 	servers.ServeMode = map[string]http.Handler{
-		server.ModeClient: clientserver.New(clientserver.Config{
-			APISecret:            rt.Agent.APISecret,
-			AllowLoopbackBypass:  rt.Agent.AllowLoopbackBypass,
-			OriginPolicy:         servers.OriginPolicy(),
-			TokenVerifier:        paired.TokenVerifier(),
-			Tags:                 rt.Agent,
-			AllowTagModification: rt.Agent.TagModificationAllowed,
-			AllowRawTransceive:   rt.Agent.RawAPDUAllowed,
-			Scans:                &rt.Agent.Events().Tag,
-			ReaderStatus:         &rt.Agent.Events().Reader,
-		}),
-		// The driver serves the protocol; Admit decides who gets that far, and
-		// names the device it admitted so the driver registers it under the
-		// identity it paired with.
 		server.ModeDevice: paired.Admit(devices.Handler(remotenfc.ServerOptions{
 			CheckOrigin:          servers.CheckOrigin(),
 			AllowTagModification: rt.Agent.TagModificationAllowed,

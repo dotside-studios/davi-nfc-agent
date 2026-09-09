@@ -48,6 +48,26 @@ type Config struct {
 	// control. Nil stops the agent and leaves the program running, which is
 	// what a service with no way out of its own wants.
 	Quit func()
+
+	// BasePath is the prefix the control API mounts under; empty selects
+	// DefaultBasePath ("/control/"). Set it to sit the API beside an embedder's
+	// own panel that already occupies /control/ — its routes move with it, and
+	// so does the address the console hands out.
+	//
+	// The bundled page is built against DefaultBasePath, so Endpoints serves
+	// that page only at the default; under a custom base it lists the API
+	// alone, and the embedder serves its own page against it (mount [Server.Routes]
+	// directly, or serve the API from Endpoints).
+	BasePath string
+
+	// AllowSecretExchange lets a caller obtain a control session by presenting
+	// the agent's API secret at POST /control/exchange, for a build with no
+	// tray to mint the handoff token — a headless service, an appliance. Off by
+	// default: the desktop build mints its session through the tray and never
+	// exposes the exchange. The secret is read live from the agent, so a
+	// rotation takes effect at once, and an empty secret is refused rather than
+	// admitting anyone who can reach loopback.
+	AllowSecretExchange bool
 }
 
 // New builds the console from cfg, and follows what changes it: an origin
@@ -66,11 +86,14 @@ func New(cfg Config) *Server {
 	}
 	info := a.Info()
 	s := newServer(serverConfig{
-		Host:    h,
-		Logs:    cfg.Logs,
-		Name:    info.Name,
-		Version: info.FullVersion(),
-		Dev:     info.IsDev(),
+		Host:                h,
+		Logs:                cfg.Logs,
+		Name:                info.Name,
+		Version:             info.FullVersion(),
+		Dev:                 info.IsDev(),
+		BasePath:            cfg.BasePath,
+		AllowSecretExchange: cfg.AllowSecretExchange,
+		Secret:              a.APISecret,
 	})
 
 	// Every change the agent reports, whatever made it: an open page shows
@@ -112,9 +135,19 @@ func (s *Server) Endpoints() []serverplugin.Endpoint {
 		return nil
 	}
 
-	return []serverplugin.Endpoint{
-		{Name: "control API", Pattern: "/control/", Handler: s.Routes()},
-		{
+	endpoints := []serverplugin.Endpoint{
+		{Name: "control API", Pattern: s.basePath, Handler: s.Routes()},
+	}
+
+	// The bundled page is built against DefaultBasePath. Under a custom base it
+	// would call an API that is not there, so it is left out — the embedder
+	// serves its own page against the API above.
+	if s.basePath != DefaultBasePath {
+		return endpoints
+	}
+
+	return append(endpoints,
+		serverplugin.Endpoint{
 			Name:    "control center",
 			Pattern: "/",
 			Handler: s.Assets(),
@@ -138,7 +171,7 @@ func (s *Server) Endpoints() []serverplugin.Endpoint {
 				)
 			},
 		},
-	}
+	)
 }
 
 // open mints a single-use token and opens the console.

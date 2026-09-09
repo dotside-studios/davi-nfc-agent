@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -16,6 +17,12 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 )
+
+// DefaultBasePath is where the control API mounts unless [Config.BasePath] names
+// another. The bundled console page is built against it, so a build serving that
+// page keeps it; an embedder serving its own page can mount the API elsewhere to
+// sit beside a panel of its own at /control/.
+const DefaultBasePath = "/control/"
 
 // Server serves the console's privileged API. See auth.go for the gate.
 //
@@ -29,6 +36,16 @@ type Server struct {
 	version   string
 	dev       bool
 	startedAt time.Time
+
+	// basePath is the prefix the control routes mount under, always leading and
+	// trailing in a slash. The bundled page requires DefaultBasePath; a custom
+	// value is for an embedder serving its own page.
+	basePath string
+
+	// allowSecretExchange mounts /control/exchange; secret reads the agent's
+	// API secret live for it. See auth.go.
+	allowSecretExchange bool
+	secret              func() string
 
 	// changed wakes the connected consoles. Each holds a channel of its own,
 	// so one that is slow to read does not hold up the rest.
@@ -45,7 +62,26 @@ func newServer(config serverConfig) *Server {
 		version:   config.Version,
 		dev:       config.Dev,
 		startedAt: time.Now(),
+		basePath:  normalizeBasePath(config.BasePath),
+
+		allowSecretExchange: config.AllowSecretExchange,
+		secret:              config.Secret,
 	}
+}
+
+// normalizeBasePath resolves a configured base path to a clean prefix with a
+// single leading and trailing slash. An empty value selects DefaultBasePath.
+func normalizeBasePath(p string) string {
+	if p == "" {
+		return DefaultBasePath
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p
 }
 
 // Handler returns the control routes. Everything but the session handoff runs
@@ -54,14 +90,22 @@ func newServer(config serverConfig) *Server {
 func (c *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/control/session", c.handleSession)
-	mux.Handle("/control/signout", c.requireSession(http.HandlerFunc(c.handleSignout)))
-	mux.Handle("/control/state", c.requireSession(http.HandlerFunc(c.handleState)))
-	mux.Handle("/control/logs", c.requireSession(http.HandlerFunc(c.handleLogs)))
-	mux.Handle("/control/action", c.requireSession(http.HandlerFunc(c.handleAction)))
-	mux.Handle("/control/ws", c.requireSession(http.HandlerFunc(c.handleWS)))
+	mux.HandleFunc("/session", c.handleSession)
+	if c.allowSecretExchange {
+		mux.HandleFunc("/exchange", c.handleExchange)
+	}
+	mux.Handle("/signout", c.requireSession(http.HandlerFunc(c.handleSignout)))
+	mux.Handle("/state", c.requireSession(http.HandlerFunc(c.handleState)))
+	mux.Handle("/logs", c.requireSession(http.HandlerFunc(c.handleLogs)))
+	mux.Handle("/action", c.requireSession(http.HandlerFunc(c.handleAction)))
+	mux.Handle("/ws", c.requireSession(http.HandlerFunc(c.handleWS)))
 
-	return mux
+	// The routes are declared once, relative to the base, and this handler
+	// strips the base before matching them — so it self-prefixes wherever it is
+	// mounted, and a change of base moves every route at once with nothing to
+	// keep in step. The caller mounts it at basePath (Endpoints does; an
+	// embedder mounting Routes() does the same).
+	return http.StripPrefix(strings.TrimSuffix(c.basePath, "/"), mux)
 }
 
 // requireSession enforces the control gate. Deliberately without CORS headers,
@@ -91,6 +135,52 @@ func (c *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.setSessionCookie(w, r, session)
+
+	// Redirect so the spent token leaves the address bar and the history.
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleExchange mints a session against the agent's API secret, for a build
+// with no tray to mint a handoff token. The secret is read only from an
+// Authorization: Bearer header, never a URL query, and the route is mounted
+// only when the build opts in with Config.AllowSecretExchange.
+func (c *Server) handleExchange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// The same gate the handoff redemption uses: loopback, and not a
+	// cross-origin page. The origin allowlist is still not consulted here.
+	if !isLoopbackRequest(r) || !isSameOriginRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	session, ok := c.auth.ExchangeSecret(bearerSecret(r), c.currentSecret())
+	if !ok {
+		consoleWarn.Printf("Control exchange refused: invalid API secret")
+		http.Error(w, "invalid API secret", http.StatusForbidden)
+		return
+	}
+
+	c.setSessionCookie(w, r, session)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// currentSecret reports the agent's API secret, or "" when the build wired
+// none. ExchangeSecret refuses an empty one.
+func (c *Server) currentSecret() string {
+	if c.secret == nil {
+		return ""
+	}
+	return c.secret()
+}
+
+// setSessionCookie writes the control session cookie both credential paths
+// mint, so the handoff redemption and the secret exchange agree on its
+// attributes.
+func (c *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, session string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    session,
@@ -101,9 +191,6 @@ func (c *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
-
-	// Redirect so the spent token leaves the address bar and the history.
-	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (c *Server) handleSignout(w http.ResponseWriter, r *http.Request) {
@@ -358,8 +445,8 @@ func (c *Server) ConsoleURL() (string, error) {
 	}
 
 	// Always loopback; the control surface refuses anything else.
-	return fmt.Sprintf("%s://%s/control/session?token=%s",
-		scheme, net.JoinHostPort("localhost", strconv.Itoa(c.host.Port())), token), nil
+	return fmt.Sprintf("%s://%s%ssession?token=%s",
+		scheme, net.JoinHostPort("localhost", strconv.Itoa(c.host.Port())), c.basePath, token), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

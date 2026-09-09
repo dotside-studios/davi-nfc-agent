@@ -101,7 +101,7 @@ to run.
 `make types` is the one to run after changing anything in `protocol/`. It is
 how the client library's view of the wire stays in step with the agent's:
 the error codes, the message types and the payload shapes are declared once in
-Go and written out as TypeScript by `cmd/davi-wiregen`. Do not edit the
+Go and written out as TypeScript by `cmd/sdkgen`. Do not edit the
 generated file. What the client library adds over the wire is hand-written in
 `client/src/session/types.ts` and is not generated.
 

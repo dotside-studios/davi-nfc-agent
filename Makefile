@@ -38,7 +38,7 @@ webui-install:
 # protocol. Run this after changing anything in protocol/ and commit the result
 # — it is the contract the client library compiles against. Needs no Node.
 types:
-	go run ./cmd/davi-wiregen
+	go run ./cmd/sdkgen
 
 # Rebuild the client library's dist. Run this after changing client/src and
 # commit the result — it is what a <script> tag consumes.

@@ -105,9 +105,7 @@ func scannedCard(uid string) *nfc.Card {
 // fixedOps answers every operation with the same canned result, so a response
 // fixture describes the shape the server puts on the wire rather than anything
 // a reader decided.
-type fixedOps struct {
-	stoppedOps
-}
+type fixedOps struct{}
 
 func (fixedOps) Write(context.Context, server.WriteOp) (*nfc.WriteResult, error) {
 	return &nfc.WriteResult{

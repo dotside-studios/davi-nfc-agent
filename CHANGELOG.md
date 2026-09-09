@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The client library's view of the wire is generated from the Go that serves
-  it. `cmd/davi-wiregen` reads package `protocol` and writes
+  it. `cmd/sdkgen` reads package `protocol` and writes
   `client/src/session/wire.generated.ts`: the error codes, the message types
   and an interface per payload, carrying each Go doc comment across. The same
   contract used to be written twice, once in Go and once by hand, with nothing

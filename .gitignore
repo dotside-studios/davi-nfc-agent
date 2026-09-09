@@ -10,5 +10,5 @@ build/
 /davi-virtual-reader.exe
 
 # Built wire-type generator binary
-/davi-wiregen
-/davi-wiregen.exe
+/sdkgen
+/sdkgen.exe

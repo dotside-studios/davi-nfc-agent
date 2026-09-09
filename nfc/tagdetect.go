@@ -24,6 +24,11 @@ const (
 	DetectedDESFireEV1
 	DetectedDESFireEV2
 	DetectedISO14443_4
+	// DetectedNTAG424 is an NTAG 424 DNA: a Type 4 card whose NDEF file is
+	// reached with the same ISO 7816 commands as any other, but whose layout
+	// and AES-protected files are its own. Named separately so its capacity is
+	// known rather than unbounded.
+	DetectedNTAG424
 	DetectedPlus2K
 	DetectedPlus4K
 )
@@ -185,12 +190,48 @@ func containsISO14443_4Indicator(atr []byte) bool {
 	return false
 }
 
+// Version bytes shared by the two GET_VERSION encodings below. NXP publishes
+// these in the product data sheets; they are the only fields either parser
+// needs to name a card.
+const (
+	// versionVendorNXP is the vendor ID every card here carries.
+	versionVendorNXP = 0x04
+
+	// Product types, byte 2 of a version response.
+	versionProductUltralight = 0x03
+	versionProductNTAG       = 0x04
+
+	// Storage sizes, byte 6. The value encodes the user memory, so it separates
+	// the members of a family — except across families, where the same size can
+	// mean two different cards and the protocol byte has to decide.
+	versionStorage128B = 0x0E // MF0UL21
+	versionStorage144B = 0x0F // NTAG213
+	versionStorage504B = 0x11 // NTAG215, and the NTAG 424 DNA
+	versionStorage888B = 0x13 // NTAG216
+
+	// Protocol types, byte 7. The page-addressed NTAG21x speak ISO 14443-3
+	// only; the NTAG 424 DNA is ISO 14443-4, which is what makes it a Type 4
+	// card driven by SELECT and READ BINARY rather than by page.
+	versionProtocol14443_3 = 0x03
+	versionProtocol14443_4 = 0x05
+
+	// versionMajorNTAG424 is the NTAG 424 DNA's major version. Identifying a
+	// card is a claim about its capacity, so the generation is pinned: a later
+	// ISO 14443-4 NTAG reads as a plain Type 4 tag, which still works, rather
+	// than borrowing this one's memory layout.
+	versionMajorNTAG424 = 0x30
+)
+
 // ParseGetVersionResponse parses GET_VERSION response to determine tag type.
 //
 // Only the EV1 generations answer GET_VERSION at all: the original Ultralight
 // and the Ultralight C do not implement the command, so a reply carrying the
 // Ultralight product type identifies an Ultralight EV1 rather than either of
 // those.
+//
+// This is the native encoding, as an ISO 14443-3 card answers it. A card driven
+// over ISO 14443-4 answers the wrapped form instead, which omits the header
+// byte and carries its status in SW2; see ParseWrappedGetVersionResponse.
 //
 // Response format for NTAG/Ultralight EV1:
 // Byte 0: Fixed header 0x00
@@ -209,28 +250,44 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 	vendorID := resp[1]
 	productType := resp[2]
 	storageSize := resp[6]
+	protocolType := resp[7]
 
 	// NXP vendor
-	if vendorID != 0x04 {
+	if vendorID != versionVendorNXP {
 		return DetectedUnknown
 	}
 
 	switch productType {
-	case 0x03: // Ultralight EV1 family
+	case versionProductUltralight: // Ultralight EV1 family
 		switch storageSize {
-		case 0x0E: // 128 bytes of user memory (MF0UL21)
+		case versionStorage128B: // 128 bytes of user memory (MF0UL21)
 			return DetectedUltralightEV1_128
 		default: // 48 bytes (MF0UL11); read an unknown variant conservatively
 			return DetectedUltralightEV1
 		}
 
-	case 0x04: // NTAG family
+	case versionProductNTAG:
+		// The NTAG product type spans two incompatible families. The protocol
+		// byte separates them, and it has to be read before the storage size:
+		// an NTAG 424 DNA reports the same 0x11 as an NTAG215, so keying on
+		// size alone would drive a file-based card with a page-addressed
+		// driver, which fails on the first read.
+		if protocolType == versionProtocol14443_4 {
+			if storageSize == versionStorage504B {
+				return DetectedNTAG424
+			}
+			// Another ISO 14443-4 NTAG. Nothing here knows its layout, and
+			// guessing a page-addressed one would be wrong; the caller falls
+			// back to the generic Type 4 driver.
+			return DetectedUnknown
+		}
+
 		switch storageSize {
-		case 0x0F: // 144 bytes user memory
+		case versionStorage144B:
 			return DetectedNTAG213
-		case 0x11: // 504 bytes user memory
+		case versionStorage504B:
 			return DetectedNTAG215
-		case 0x13: // 888 bytes user memory
+		case versionStorage888B:
 			return DetectedNTAG216
 		}
 		return DetectedNTAG215 // Default NTAG
@@ -238,4 +295,54 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 	default:
 		return DetectedUnknown
 	}
+}
+
+// ParseWrappedGetVersionResponse identifies a card from the first frame of a
+// GET_VERSION answered over ISO 14443-4, as an NTAG 424 DNA or a DESFire
+// answers the ISO-wrapped command 90 60 00 00 00.
+//
+// Two things differ from the native encoding. The frame carries no leading
+// header byte, so every field sits one earlier; and the card reports its status
+// in SW2 under SW1=0x91, answering 0xAF — more frames follow — for the first of
+// the three frames a full version spans. Only the first frame is read here,
+// because it holds everything that names the card.
+//
+// The second result is false for anything this cannot name, including a card
+// that does not implement the command at all: a Type 4 tag that answers "class
+// not supported" is simply one whose kind stays generic.
+func ParseWrappedGetVersionResponse(raw []byte) (DetectedTagType, bool) {
+	parsed, err := ParseAPDUResponse(raw)
+	if err != nil {
+		return DetectedUnknown, false
+	}
+
+	// 91 AF is the expected answer, with 91 00 accepted for a card that fits
+	// its version in one frame and 90 00 for a reader that unwraps the status
+	// itself.
+	wrapped := parsed.SW1 == 0x91 && (parsed.SW2 == dfStatusAdditionalFrame || parsed.SW2 == dfStatusOK)
+	if !wrapped && !parsed.IsSuccess() {
+		return DetectedUnknown, false
+	}
+
+	// Vendor, product type, subtype, major, minor, storage, protocol.
+	const wrappedVersionLen = 7
+	if len(parsed.Data) < wrappedVersionLen {
+		return DetectedUnknown, false
+	}
+	vendorID := parsed.Data[0]
+	productType := parsed.Data[1]
+	majorVersion := parsed.Data[3]
+	storageSize := parsed.Data[5]
+	protocolType := parsed.Data[6]
+
+	if vendorID != versionVendorNXP {
+		return DetectedUnknown, false
+	}
+	if productType == versionProductNTAG &&
+		protocolType == versionProtocol14443_4 &&
+		storageSize == versionStorage504B &&
+		majorVersion == versionMajorNTAG424 {
+		return DetectedNTAG424, true
+	}
+	return DetectedUnknown, false
 }

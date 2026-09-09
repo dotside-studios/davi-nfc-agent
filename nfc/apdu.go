@@ -201,6 +201,15 @@ func UltralightWriteAPDU(page byte, data []byte) []byte {
 	return DirectTransmitAPDU(cmd)
 }
 
+// NTAG424GetVersionAPDU returns the ISO-wrapped GET_VERSION an NTAG 424 DNA
+// answers over ISO 14443-4. The native form built by GetVersionAPDU is the
+// ISO 14443-3 one, which this card does not speak.
+//
+// The reply is read by ParseWrappedGetVersionResponse.
+func NTAG424GetVersionAPDU() []byte {
+	return DESFireWrapAPDU(DFCmdGetVersion, nil)
+}
+
 // DESFire command helpers
 
 // DESFireWrapAPDU wraps a DESFire native command in ISO7816 APDU

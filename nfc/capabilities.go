@@ -194,6 +194,21 @@ func InferTagCapabilities(tagType string) TagCapabilities {
 			caps.MaxNDEFSize = 46
 		}
 
+	case strings.Contains(tagTypeLower, "ntag424") || strings.Contains(tagTypeLower, "ntag 424"):
+		// An NTAG 424 DNA carries the NTAG name but is a Type 4 card: it is
+		// driven by APDU rather than by page, and its keys are AES. Matched
+		// before the NTAG21x case below, which would otherwise never see it but
+		// would leave it to the conservative default.
+		caps.CanWrite = true
+		caps.CanTransceive = true
+		caps.CanLock = false // Rewriting the CC WriteAccess byte is not implemented
+		caps.TagFamily = "NTAG"
+		caps.Technology = "ISO14443A"
+		caps.MemorySize = 416
+		caps.MaxNDEFSize = 254
+		caps.SupportsCrypto = true
+		caps.SupportsAuthentication = true
+
 	case strings.Contains(tagTypeLower, "ntag2") || tagTypeLower == "ntag" || strings.HasPrefix(tagTypeLower, "ntag "):
 		caps.CanWrite = true
 		caps.CanTransceive = false

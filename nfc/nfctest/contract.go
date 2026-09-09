@@ -16,6 +16,8 @@ import (
 //
 //   - UID, type and technology are populated. The technology reaches clients
 //     with every scan.
+//   - A tag carrying NDEF reports CanRead. A tag carrying none declines the
+//     read with a no-payload error.
 //   - Capabilities agree with the query methods (nfc.AssertCapabilitiesConsistent).
 //   - An operation the tag says it does not support fails with a typed
 //     not-supported error. The write path and the wire error mapping both
@@ -41,8 +43,8 @@ func AssertTagContract(t *testing.T, tag nfc.Tag) {
 	if caps.Technology == "" {
 		t.Error("Capabilities().Technology is empty")
 	}
-	if !caps.CanRead {
-		t.Error("Capabilities().CanRead is false; a tag that cannot be read has nothing to offer")
+	if caps.SupportsNDEF && !caps.CanRead {
+		t.Error("Capabilities().SupportsNDEF=true but CanRead=false; nothing can fetch the message")
 	}
 
 	if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {

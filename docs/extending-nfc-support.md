@@ -215,6 +215,30 @@ func (t *MyTag) WriteData(data []byte) error {
 > [Capability-Based Implementation](#capability-based-implementation) for a test
 > helper that catches drift.
 
+### Tags that carry no NDEF
+
+`ReadData` must not report an absent NDEF message by returning zero bytes and a
+nil error, which is indistinguishable from a successful read of an empty tag.
+Return `nfc.NewNoPayloadError` instead:
+
+```go
+func (t *MyTag) ReadData() ([]byte, error) {
+    data, err := t.read()
+    if err != nil {
+        return nil, err
+    }
+    ndef, found := nfc.TLVFindNDEF(data)
+    if !found {
+        return nil, nfc.NewNoPayloadError("ReadData", t.uid, nil)
+    }
+    return ndef, nil
+}
+```
+
+The reader publishes such a tag as a scan carrying its identity alone. A tag
+that never carries NDEF should also report `SupportsNDEF: false`, which skips
+the read.
+
 ### Step 4: Register with MultiManager
 
 In your main.go or initialization code:

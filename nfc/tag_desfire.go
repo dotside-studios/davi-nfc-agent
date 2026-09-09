@@ -149,7 +149,7 @@ func (t *pcscDESFireTag) dfWriteFile(fileNo byte, offset uint32, data []byte) er
 
 func (t *pcscDESFireTag) ReadData() ([]byte, error) {
 	if err := t.dfSelectNDEFApp(); err != nil {
-		return nil, err
+		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, err)
 	}
 
 	// Read file 2 (NDEF data file); first 2 bytes are NLEN (NDEF length).
@@ -163,7 +163,7 @@ func (t *pcscDESFireTag) ReadData() ([]byte, error) {
 
 	nlen := int(nlenData[0])<<8 | int(nlenData[1])
 	if nlen == 0 {
-		return nil, fmt.Errorf("empty NDEF message")
+		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, nil)
 	}
 
 	ndefData, err := t.dfReadFile(0x02, 2, uint32(nlen))

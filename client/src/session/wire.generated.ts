@@ -65,6 +65,8 @@ export type NFCErrorCode =
    * it can queue. Retryable once the earlier work drains.
    */
   | "BUSY"
+  /** Reports that the tag was read and holds no NDEF message. Not retryable. */
+  | "NO_PAYLOAD"
 ;
 
 /**

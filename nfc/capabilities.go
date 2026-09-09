@@ -276,6 +276,8 @@ func CanTagLock(tag Tag) bool {
 //
 //   - Capabilities().CanLock matches CanMakeReadOnly()
 //   - When Capabilities().IsReadOnly is true, IsWritable() reports false
+//   - When Capabilities().SupportsNDEF is false, ReadData() returns raw bytes
+//     or a no-payload error, never zero bytes with a nil error
 //
 // Supported write/transceive/lock behavior cannot be auto-verified without
 // device I/O; cover those directly in your own tests.
@@ -297,6 +299,13 @@ func AssertCapabilitiesConsistent(tag Tag) error {
 		}
 		if writable {
 			return fmt.Errorf("capability drift: Capabilities().IsReadOnly=true but IsWritable() reports the tag is writable")
+		}
+	}
+
+	if !caps.SupportsNDEF {
+		data, err := tag.ReadData()
+		if err == nil && len(data) == 0 {
+			return fmt.Errorf("capability drift: Capabilities().SupportsNDEF=false but ReadData() returned no bytes and no error; want a no-payload error")
 		}
 	}
 

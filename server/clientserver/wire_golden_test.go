@@ -193,6 +193,23 @@ func TestGoldenTagDataWithAnUnnamedType(t *testing.T) {
 	golden(t, "tagdata_untyped", tagDataMessage(nfc.NFCData{Card: card}))
 }
 
+// A tag holding no NDEF message: null err, no message, and supportsNdef false,
+// which is what a client reads to tell it from a failed scan.
+func TestGoldenTagDataWithoutAPayload(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	tag.TagType = nfc.CardTypeDesfire
+	tag.IsConnected = true
+	tag.MockCapabilities = &nfc.TagCapabilities{
+		CanRead:    true,
+		Technology: "ISO14443A",
+		TagFamily:  "DESFire",
+	}
+	card := nfc.NewCard(tag)
+	card.ScannedAt = scannedAt
+
+	golden(t, "tagdata_nopayload", tagDataMessage(nfc.NFCData{Card: card}))
+}
+
 // A scan with no card is how the agent reports the tag leaving the field. It is
 // a different shape from the one above, not the same shape with empty values.
 func TestGoldenTagDataOnRemoval(t *testing.T) {

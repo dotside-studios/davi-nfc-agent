@@ -93,6 +93,9 @@ func (t *RoutedTag) Capabilities() nfc.TagCapabilities {
 func (t *RoutedTag) ReadData() ([]byte, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	if len(t.snapshot) == 0 {
+		return nil, nfc.NewNoPayloadError("ReadData", t.uid, nil)
+	}
 	return t.snapshot, nil
 }
 

@@ -1,0 +1,20 @@
+{
+  "payload": {
+    "capabilities": {
+      "canLock": false,
+      "canRead": true,
+      "canTransceive": false,
+      "canWrite": false,
+      "supportsNdef": false,
+      "tagFamily": "DESFire",
+      "technology": "ISO14443A"
+    },
+    "err": null,
+    "scannedAt": "2026-03-14T09:26:53Z",
+    "technology": "ISO14443A",
+    "text": "",
+    "type": "DESFire",
+    "uid": "04A1B2C3"
+  },
+  "type": "tagData"
+}

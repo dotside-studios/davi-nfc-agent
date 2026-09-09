@@ -146,7 +146,7 @@ func (t *pcscClassicTag) authenticateSector(sector int) error {
 		return NewCardRemovedError(fmt.Errorf("card removed during authentication"))
 	}
 
-	return fmt.Errorf("authentication failed for sector %d: no valid key found", sector)
+	return NewAuthError("authenticateSector", t.uid, fmt.Errorf("no valid key found for sector %d", sector))
 }
 
 // readBlock reads 16 bytes from the specified block, authenticating if needed
@@ -257,6 +257,9 @@ func (t *pcscClassicTag) ReadData() ([]byte, error) {
 		if lastError != nil && !t.device.IsCardPresent() {
 			return nil, NewCardRemovedError(fmt.Errorf("card removed during read"))
 		}
+		if IsAuthError(lastError) {
+			return nil, NewNoPayloadError("ReadData (Classic)", t.uid, lastError)
+		}
 		if lastError != nil {
 			return nil, fmt.Errorf("failed to read any data from tag: %w", lastError)
 		}
@@ -266,7 +269,7 @@ func (t *pcscClassicTag) ReadData() ([]byte, error) {
 	// Parse TLV to extract NDEF message
 	ndefData, found := TLVFindNDEF(allData)
 	if !found {
-		return nil, fmt.Errorf("no NDEF message found")
+		return nil, NewNoPayloadError("ReadData (Classic)", t.uid, nil)
 	}
 
 	return ndefData, nil

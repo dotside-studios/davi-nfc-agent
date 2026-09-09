@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Identity-only scans.** A readable tag holding no NDEF message now reaches
+  clients as an ordinary scan, once, carrying its UID, type, technology and
+  capabilities, with `err` null and no message: a DESFire whose NDEF file
+  requires keys the agent does not hold, a MIFARE Classic not using default
+  keys, a transit card, an access badge. `capabilities.supportsNdef`
+  distinguishes it from a failed read. Each was previously an error, and the
+  error path skipped the per-UID dedupe the success path uses, so one card on a
+  reader produced an error-flagged scan per poll
+- `nfc.NewNoPayloadError` and `nfc.IsNoPayloadError`, carried on the wire as
+  `NO_PAYLOAD`. The Classic, NTAG, Ultralight, DESFire, Type 4, routed and
+  remote drivers return it in place of an untyped "no NDEF message found" or,
+  in the routed and remote backends, zero bytes with a nil error
+- `nfc.AssertCapabilitiesConsistent` checks that a tag reporting
+  `SupportsNDEF: false` returns raw bytes or a no-payload error from `ReadData`,
+  never zero bytes with a nil error. The `nfctest` tag contract requires
+  `CanRead` only of a tag carrying NDEF
 - Golden fixtures for the client protocol, in `server/clientserver/testdata`.
   Every message a browser client can receive is marshalled and compared byte for
   byte, `tagData` with a card, with an NDEF message, with a raw message and on
@@ -109,6 +125,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A permanently failing read is reported once per card rather than once per
+  poll. The reader polls ten times a second, so an unreadable card filled the
+  client log for as long as it sat there
+- `nfc.Card` caches a no-payload result, so repeated `ReadMessage` calls do not
+  re-read the tag. A tag reporting `SupportsNDEF: false` is not read
 - `HealthCheckResponse` in the client library carries `type` and `clients`.
   `/api/v1/health` has sent four keys and the type declared two, so a caller
   reading the client count off it got `undefined` with no type error.

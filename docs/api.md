@@ -594,9 +594,32 @@ When a card is detected and read:
 | `scannedAt` | ISO 8601 timestamp |
 | `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it. That is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
 | `capabilities` | What the tag supports. See [Tag Capabilities](#tag-capabilities) |
-| `message` | Structured NDEF message data |
+| `message` | Structured NDEF message data. Absent when the tag holds none, see [Identity-only scans](#identity-only-scans) |
 | `text` | Quick access to first text record |
 | `err` | Error message or `null` on success |
+
+### Identity-only scans
+
+A readable tag holding no NDEF message scans normally: `err: null`, no
+`message` key, `text: ""`, and `capabilities.supportsNdef` false. This covers a
+DESFire whose NDEF file requires keys the agent does not hold, a MIFARE Classic
+not using default keys, transit cards and access badges.
+
+Read `capabilities.supportsNdef` to distinguish it from a failed read, which
+sets `err`:
+
+```json
+{
+  "uid": "04A1B2C3D4E5F6",
+  "type": "DESFire",
+  "technology": "ISO14443A",
+  "capabilities": { "canRead": true, "supportsNdef": false },
+  "text": "",
+  "err": null
+}
+```
+
+A request that asks such a tag for its message is answered with `NO_PAYLOAD`.
 
 **NDEF Message Structure:**
 
@@ -1241,6 +1264,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `INVALID_DATA` | no | Data was malformed |
 | `MULTIPLE_TAGS` | no | More than one tag in the field; separate them and try again |
 | `NO_CARD` | yes | Nothing is holding the tag the request named |
+| `NO_PAYLOAD` | no | Tag read, holds no NDEF message. See [Identity-only scans](#identity-only-scans) |
 
 ---
 

@@ -2,32 +2,76 @@ package nfc
 
 import (
 	"fmt"
+	"sync"
 )
 
 type pcscDESFireTag struct {
 	pcscBaseTag
+
+	// What the card reported about itself, filled in by probe. Memory size and
+	// NDEF capacity vary per card, so the profile carries neither.
+	//
+	// Guarded by mu: a scan publishes the tag to whoever broadcasts it, and
+	// Capabilities is read there while an operation on this side may still be
+	// probing.
+	mu           sync.Mutex
+	probed       bool
+	memorySize   int
+	ndefFileSize int
+	ndefWritable bool
 }
 
-func newPCSCDESFireTag(dev CardTransport, uid string) *pcscDESFireTag {
+// probedFacts reports what the card said about itself, with a false first
+// result when it has not been asked yet.
+func (t *pcscDESFireTag) probedFacts() (ok bool, memorySize, ndefFileSize int, writable bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.probed, t.memorySize, t.ndefFileSize, t.ndefWritable
+}
+
+func newPCSCDESFireTag(dev CardTransport, uid string, kind DetectedTagType) *pcscDESFireTag {
+	if _, ok := profileFor(kind); !ok {
+		kind = DetectedDESFire
+	}
 	return &pcscDESFireTag{
 		pcscBaseTag: pcscBaseTag{
 			device:       dev,
 			uid:          uid,
-			detectedType: DetectedDESFire,
+			detectedType: kind,
 		},
 	}
 }
 
+func (t *pcscDESFireTag) profile() tagProfile {
+	return tagProfiles[t.detectedType]
+}
+
 func (t *pcscDESFireTag) Type() string {
-	return tagProfiles[DetectedDESFire].name
+	return t.profile().name
 }
 
 func (t *pcscDESFireTag) NumericType() int {
-	return tagProfiles[DetectedDESFire].numericType
+	return t.profile().numericType
 }
 
+// Capabilities reports the profile's, with what probe read off this card
+// layered over it. It sends nothing itself: a card that has not been read
+// reports the kind's defaults, which claim no capacity rather than a wrong one.
 func (t *pcscDESFireTag) Capabilities() TagCapabilities {
-	return tagProfiles[DetectedDESFire].capabilities()
+	caps := t.profile().capabilities()
+
+	probed, memorySize, ndefFileSize, writable := t.probedFacts()
+	if !probed {
+		return caps
+	}
+
+	caps.MemorySize = memorySize
+	if ndefFileSize > dfNLENSize {
+		caps.MaxNDEFSize = ndefFileSize - dfNLENSize
+	}
+	caps.CanWrite = writable
+	caps.IsReadOnly = !writable
+	return caps
 }
 
 func (t *pcscDESFireTag) Transceive(data []byte) ([]byte, error) {
@@ -44,7 +88,24 @@ const (
 	// Larger payloads are split across additional frames. Modeled from the
 	// DESFire 60-byte frame (1 status byte); cross-check on hardware.
 	dfFrameData = 59
+
+	// dfNDEFFileNo is the NDEF data file, and dfNLENSize the length prefix it
+	// opens with. Both come from the NFC Forum's DESFire mapping, which the
+	// NDEF application below is created to.
+	dfNDEFFileNo = 0x02
+	dfNLENSize   = 2
+
+	// dfFileTypeStdData is a standard data file, the only type this driver
+	// reads settings for.
+	dfFileTypeStdData = 0x00
+
+	// Access-right nibbles that need no key. 0x0E grants the operation to
+	// anyone; 0x0F denies it to everyone.
+	dfAccessFree = 0x0E
 )
+
+// dfNDEFAppAID is the NFC Forum's DESFire NDEF application.
+var dfNDEFAppAID = []byte{0x00, 0x00, 0x01}
 
 // dfTransceive sends a wrapped DESFire command and returns the response data and
 // the DESFire native status byte. In ISO-wrapped mode DESFire returns its status
@@ -81,11 +142,71 @@ func dfStatusErr(op string, status byte, err error) error {
 
 // dfSelectNDEFApp selects the NDEF application (AID 0x000001).
 func (t *pcscDESFireTag) dfSelectNDEFApp() error {
-	_, status, err := t.dfTransceive(DESFireSelectAppAPDU([]byte{0x00, 0x00, 0x01}))
+	_, status, err := t.dfTransceive(DESFireSelectAppAPDU(dfNDEFAppAID))
 	if err != nil || status != dfStatusOK {
 		return dfStatusErr("select NDEF application", status, err)
 	}
 	return nil
+}
+
+// probe reads what varies per card: the EEPROM size from GET_VERSION, and the
+// NDEF file's size and access rights from GetFileSettings. Two commands, sent
+// once per tag, before the first read or write.
+//
+// A card that refuses either is left unprobed rather than failing the operation:
+// the capacity check and the memory size are better skipped than wrong, and the
+// read or write that follows reports its own failure.
+func (t *pcscDESFireTag) probe() {
+	if probed, _, _, _ := t.probedFacts(); probed {
+		return
+	}
+
+	var memorySize int
+	if data, status, err := t.dfTransceive(DESFireWrapAPDU(DFCmdGetVersion, nil)); err == nil &&
+		(status == dfStatusAdditionalFrame || status == dfStatusOK) {
+		if version, ok := ParseWrappedVersion(dfResponse(data, status)); ok {
+			memorySize = version.MemorySize()
+		}
+	}
+
+	settings, status, err := t.dfTransceive(DESFireGetFileSettingsAPDU(dfNDEFFileNo))
+	if err != nil || status != dfStatusOK {
+		return
+	}
+	size, writable, ok := parseDESFireFileSettings(settings)
+	if !ok {
+		return
+	}
+
+	t.mu.Lock()
+	t.memorySize, t.ndefFileSize, t.ndefWritable, t.probed = memorySize, size, writable, true
+	t.mu.Unlock()
+}
+
+// dfResponse rebuilds the raw response ParseWrappedVersion expects, which reads
+// the status word itself.
+func dfResponse(data []byte, status byte) []byte {
+	return append(append([]byte(nil), data...), 0x91, status)
+}
+
+// parseDESFireFileSettings reads a standard data file's size and whether it can
+// be written without authenticating.
+//
+// The response is file type, communication settings, two bytes of access rights
+// and three of size, the last two least significant byte first. The rights are
+// four nibbles: read, write, read-write, change. 0x0E grants the operation to
+// anyone, 0x0F denies it outright, and any other value names the key that has
+// it, which this driver cannot present.
+func parseDESFireFileSettings(settings []byte) (size int, writable, ok bool) {
+	const stdDataFileSettingsLen = 7
+	if len(settings) < stdDataFileSettingsLen || settings[0] != dfFileTypeStdData {
+		return 0, false, false
+	}
+
+	write := settings[3] & 0x0F
+	readWrite := settings[2] >> 4
+	size = int(settings[4]) | int(settings[5])<<8 | int(settings[6])<<16
+	return size, write == dfAccessFree || readWrite == dfAccessFree, true
 }
 
 // dfReadFile reads length bytes from a DESFire file, following the additional-
@@ -151,13 +272,14 @@ func (t *pcscDESFireTag) ReadData() ([]byte, error) {
 	if err := t.dfSelectNDEFApp(); err != nil {
 		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, err)
 	}
+	t.probe()
 
-	// Read file 2 (NDEF data file); first 2 bytes are NLEN (NDEF length).
-	nlenData, err := t.dfReadFile(0x02, 0, 2)
+	// Read the NDEF file; its first two bytes are NLEN, the message length.
+	nlenData, err := t.dfReadFile(dfNDEFFileNo, 0, dfNLENSize)
 	if err != nil {
 		return nil, fmt.Errorf("read NLEN: %w", err)
 	}
-	if len(nlenData) < 2 {
+	if len(nlenData) < dfNLENSize {
 		return nil, fmt.Errorf("invalid NLEN data")
 	}
 
@@ -166,7 +288,7 @@ func (t *pcscDESFireTag) ReadData() ([]byte, error) {
 		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, nil)
 	}
 
-	ndefData, err := t.dfReadFile(0x02, 2, uint32(nlen))
+	ndefData, err := t.dfReadFile(dfNDEFFileNo, dfNLENSize, uint32(nlen))
 	if err != nil {
 		return nil, fmt.Errorf("read NDEF data: %w", err)
 	}
@@ -177,21 +299,36 @@ func (t *pcscDESFireTag) WriteData(data []byte) error {
 	if err := t.dfSelectNDEFApp(); err != nil {
 		return err
 	}
+	t.probe()
+
+	probed, _, ndefFileSize, writable := t.probedFacts()
+	if probed && !writable {
+		return NewReadOnlyError("WriteData (DESFire)", t.uid, nil)
+	}
+	if capacity := ndefFileSize - dfNLENSize; probed && len(data) > capacity {
+		return NewCapacityExceededError("WriteData (DESFire)", t.uid, len(data), capacity)
+	}
 
 	// Write NLEN (2 bytes, big-endian) at offset 0, then the NDEF message at
 	// offset 2. Both follow the frame chain for payloads beyond one frame.
 	nlen := len(data)
-	if err := t.dfWriteFile(0x02, 0, []byte{byte(nlen >> 8), byte(nlen & 0xFF)}); err != nil {
+	if err := t.dfWriteFile(dfNDEFFileNo, 0, []byte{byte(nlen >> 8), byte(nlen & 0xFF)}); err != nil {
 		return fmt.Errorf("write NLEN: %w", err)
 	}
-	if err := t.dfWriteFile(0x02, 2, data); err != nil {
+	if err := t.dfWriteFile(dfNDEFFileNo, dfNLENSize, data); err != nil {
 		return fmt.Errorf("write NDEF data: %w", err)
 	}
 	return nil
 }
 
 func (t *pcscDESFireTag) IsWritable() (bool, error) {
-	return t.dfSelectNDEFApp() == nil, nil
+	if err := t.dfSelectNDEFApp(); err != nil {
+		return false, nil
+	}
+	t.probe()
+
+	probed, _, _, writable := t.probedFacts()
+	return !probed || writable, nil
 }
 
 func (t *pcscDESFireTag) CanMakeReadOnly() (bool, error) {

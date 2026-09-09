@@ -23,6 +23,7 @@ const (
 	DetectedDESFire
 	DetectedDESFireEV1
 	DetectedDESFireEV2
+	DetectedDESFireEV3
 	DetectedISO14443_4
 	// DetectedNTAG424 is an NTAG 424 DNA, a Type 4 card with a fixed file
 	// layout. Named separately from DetectedISO14443_4 so its capacity is
@@ -214,7 +215,114 @@ const (
 	// later ISO 14443-4 NTAG is not given this card's memory layout; it stays a
 	// generic Type 4 tag instead.
 	versionMajorNTAG424 = 0x30
+
+	// versionProductDESFire is the product type every DESFire reports.
+	versionProductDESFire = 0x01
+
+	// DESFire hardware major versions, byte 4 of a version response. A major
+	// this does not name is driven as a plain DESFire, which is what the
+	// generations have in common.
+	versionMajorDESFireEV1 = 0x01
+	versionMajorDESFireEV2 = 0x12
+	versionMajorDESFireEV3 = 0x33
 )
+
+// WrappedVersion is the hardware half of a GET_VERSION answered over
+// ISO 14443-4, as an NTAG 424 DNA or a DESFire answers 90 60 00 00 00. A full
+// version spans three frames; this is the first, which carries the fields that
+// identify the card.
+type WrappedVersion struct {
+	Vendor       byte
+	ProductType  byte
+	Subtype      byte
+	MajorVersion byte
+	MinorVersion byte
+	StorageSize  byte
+	Protocol     byte
+}
+
+// Kind names the card, or DetectedUnknown for one this does not recognise.
+func (v WrappedVersion) Kind() DetectedTagType {
+	if v.Vendor != versionVendorNXP {
+		return DetectedUnknown
+	}
+
+	switch v.ProductType {
+	case versionProductNTAG:
+		if v.Protocol == versionProtocol14443_4 &&
+			v.StorageSize == versionStorage504B &&
+			v.MajorVersion == versionMajorNTAG424 {
+			return DetectedNTAG424
+		}
+		return DetectedUnknown
+
+	case versionProductDESFire:
+		switch v.MajorVersion {
+		case versionMajorDESFireEV1:
+			return DetectedDESFireEV1
+		case versionMajorDESFireEV2:
+			return DetectedDESFireEV2
+		case versionMajorDESFireEV3:
+			return DetectedDESFireEV3
+		}
+		return DetectedDESFire
+
+	default:
+		return DetectedUnknown
+	}
+}
+
+// MemorySize reports the EEPROM size the storage byte encodes, or 0 when it
+// encodes none. The byte is 2^(n>>1) bytes; an odd byte means the size falls
+// between that and the next power of two, and the lower bound is reported.
+//
+// This is the DESFire encoding. It does not describe an NTAG 424 DNA, whose
+// usable memory is the sum of three fixed files rather than its EEPROM.
+func (v WrappedVersion) MemorySize() int {
+	exp := int(v.StorageSize >> 1)
+	if exp < 1 || exp > 30 {
+		return 0
+	}
+	return 1 << exp
+}
+
+// ParseWrappedVersion reads the first frame of a GET_VERSION answered over
+// ISO 14443-4.
+//
+// The encoding differs from the native one in two ways: the frame carries no
+// leading header byte, so every field sits one earlier, and the status is in
+// SW2 under SW1=0x91, where 0xAF means more frames follow.
+//
+// The second result is false for a response this cannot read, including one
+// from a card that does not implement the command.
+func ParseWrappedVersion(raw []byte) (WrappedVersion, bool) {
+	parsed, err := ParseAPDUResponse(raw)
+	if err != nil {
+		return WrappedVersion{}, false
+	}
+
+	// 91 AF is the expected answer. 91 00 covers a card that fits its version
+	// in one frame, 90 00 a reader that unwraps the status itself.
+	wrapped := parsed.SW1 == 0x91 && (parsed.SW2 == dfStatusAdditionalFrame || parsed.SW2 == dfStatusOK)
+	if !wrapped && !parsed.IsSuccess() {
+		return WrappedVersion{}, false
+	}
+
+	// Vendor, product type, subtype, major, minor, storage, protocol.
+	const wrappedVersionLen = 7
+	if len(parsed.Data) < wrappedVersionLen {
+		return WrappedVersion{}, false
+	}
+	return WrappedVersion{
+		Vendor:       parsed.Data[0],
+		ProductType:  parsed.Data[1],
+		Subtype:      parsed.Data[2],
+		MajorVersion: parsed.Data[3],
+		MinorVersion: parsed.Data[4],
+		StorageSize:  parsed.Data[5],
+		Protocol:     parsed.Data[6],
+	}, true
+}
 
 // ParseGetVersionResponse parses GET_VERSION response to determine tag type.
 //
@@ -288,49 +396,13 @@ func ParseGetVersionResponse(resp []byte) DetectedTagType {
 	}
 }
 
-// ParseWrappedGetVersionResponse identifies a card from the first frame of a
-// GET_VERSION answered over ISO 14443-4, as an NTAG 424 DNA or a DESFire
-// answers the wrapped command 90 60 00 00 00.
-//
-// The encoding differs from the native one in two ways: the frame carries no
-// leading header byte, so every field sits one earlier, and the status is in
-// SW2 under SW1=0x91, where 0xAF means more frames follow. A full version spans
-// three frames; only the first is read, since it holds the identifying fields.
-//
-// The second result is false for a response this cannot name, including one
-// from a card that does not implement the command.
+// ParseWrappedGetVersionResponse names the card behind a GET_VERSION answered
+// over ISO 14443-4. See ParseWrappedVersion for the fields it reads.
 func ParseWrappedGetVersionResponse(raw []byte) (DetectedTagType, bool) {
-	parsed, err := ParseAPDUResponse(raw)
-	if err != nil {
+	version, ok := ParseWrappedVersion(raw)
+	if !ok {
 		return DetectedUnknown, false
 	}
-
-	// 91 AF is the expected answer. 91 00 covers a card that fits its version
-	// in one frame, 90 00 a reader that unwraps the status itself.
-	wrapped := parsed.SW1 == 0x91 && (parsed.SW2 == dfStatusAdditionalFrame || parsed.SW2 == dfStatusOK)
-	if !wrapped && !parsed.IsSuccess() {
-		return DetectedUnknown, false
-	}
-
-	// Vendor, product type, subtype, major, minor, storage, protocol.
-	const wrappedVersionLen = 7
-	if len(parsed.Data) < wrappedVersionLen {
-		return DetectedUnknown, false
-	}
-	vendorID := parsed.Data[0]
-	productType := parsed.Data[1]
-	majorVersion := parsed.Data[3]
-	storageSize := parsed.Data[5]
-	protocolType := parsed.Data[6]
-
-	if vendorID != versionVendorNXP {
-		return DetectedUnknown, false
-	}
-	if productType == versionProductNTAG &&
-		protocolType == versionProtocol14443_4 &&
-		storageSize == versionStorage504B &&
-		majorVersion == versionMajorNTAG424 {
-		return DetectedNTAG424, true
-	}
-	return DetectedUnknown, false
+	kind := version.Kind()
+	return kind, kind != DetectedUnknown
 }

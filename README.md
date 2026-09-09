@@ -47,7 +47,7 @@ platform.
 - Browsers with WebNFC (Chrome on Android)
 - Custom hardware or IoT devices
 
-**Card Types**: MIFARE Classic (incl. NDEF formatting and custom keys), DESFire, Ultralight, NTAG21x, NTAG 424 DNA (NDEF read/write, and offline SDM/SUN tap verification; its AES commands are not implemented), ISO14443-4 Type 4A (experimental)
+**Card Types**: MIFARE Classic (incl. NDEF formatting and custom keys), DESFire (EV1, EV2 and EV3 named, with memory size and NDEF capacity read off the card), Ultralight, NTAG21x, NTAG 424 DNA (NDEF read/write, and offline SDM/SUN tap verification; its AES commands are not implemented), ISO14443-4 Type 4A (experimental)
 
 ## Quick Start
 

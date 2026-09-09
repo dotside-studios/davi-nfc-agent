@@ -591,6 +591,12 @@ type desfireEmulator struct {
 	present      bool
 	removalModel
 
+	// version is the first GET_VERSION frame, and ndefWritable whether the NDEF
+	// file's access rights let anyone write it. Both are what the driver's probe
+	// reads to report memory size, capacity and writability.
+	version      []byte
+	ndefWritable bool
+
 	readOff, readRemain   int
 	writeOff, writeRemain int
 }
@@ -603,7 +609,34 @@ func (e *desfireEmulator) setRemoveAfter(n int) {
 }
 
 func newDESFireEmulator() *desfireEmulator {
-	return &desfireEmulator{file2: make([]byte, 256), present: true}
+	return &desfireEmulator{
+		file2:   make([]byte, 256),
+		present: true,
+		// An EV2 with 8K of EEPROM: vendor, product, subtype, major, minor,
+		// storage, protocol.
+		version:      []byte{0x04, 0x01, 0x01, 0x12, 0x00, 0x1A, 0x05},
+		ndefWritable: true,
+	}
+}
+
+// fileSettings is the GetFileSettings answer for the NDEF file: a standard data
+// file, plain communication, two bytes of access rights and three of size.
+//
+// The rights are four nibbles packed least significant byte first: read-write
+// and change in the first byte, read and write in the second. 0x0E grants the
+// operation to anyone, and a key number denies it to a driver that cannot
+// authenticate.
+func (e *desfireEmulator) fileSettings() []byte {
+	rights := []byte{0xEE, 0xEE}
+	if !e.ndefWritable {
+		rights = []byte{0x1E, 0xE1} // read free, write and read-write behind key 1
+	}
+	size := len(e.file2)
+	return []byte{
+		0x00, 0x00,
+		rights[0], rights[1],
+		byte(size), byte(size >> 8), byte(size >> 16),
+	}
 }
 
 func (e *desfireEmulator) IsCardPresent() bool {
@@ -634,6 +667,13 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 	}
 	body := cmd[5 : 5+lc]
 	switch cmd[1] {
+	case nfc.DFCmdGetVersion:
+		return dfResp(e.version, dfStatusAdditionalFrame), nil
+	case nfc.DFCmdGetFileSettings:
+		if !e.selectedNDEF || len(body) != 1 || body[0] != 0x02 {
+			return dfResp(nil, 0xBE), nil
+		}
+		return dfResp(e.fileSettings(), dfStatusOK), nil
 	case nfc.DFCmdSelectApplication:
 		if len(body) == 3 && body[0] == 0x00 && body[1] == 0x00 && body[2] == 0x01 {
 			e.selectedNDEF = true
@@ -995,7 +1035,7 @@ func Classic1K(uid string) *EmulatedCard {
 	return newCard(nfc.DetectedClassic1K, uid, newClassicEmulator())
 }
 func DESFire(uid string) *EmulatedCard {
-	return newCard(nfc.DetectedDESFire, uid, newDESFireEmulator())
+	return newCard(nfc.DetectedDESFireEV2, uid, newDESFireEmulator())
 }
 
 // Type4 constructs a blank NFC Forum Type 4 tag (ISO14443-4), driven through the
@@ -1071,6 +1111,25 @@ func (c *EmulatedCard) WithText(text string) *EmulatedCard {
 // WithURI preloads a single URI record.
 func (c *EmulatedCard) WithURI(uri string) *EmulatedCard {
 	return c.WithRecords(&nfc.NDEFURI{Content: uri})
+}
+
+// KeyProtected puts a DESFire's NDEF file behind a key, which is what a
+// provisioned card looks like to a driver that holds none. Apply it after any
+// content is preloaded, since a preload writes through the driver. Panics on a
+// card that is not a DESFire.
+func (c *EmulatedCard) KeyProtected() *EmulatedCard {
+	e, ok := c.transport.(*desfireEmulator)
+	if !ok {
+		panic(fmt.Sprintf("nfctest: KeyProtected on %s, which is not a DESFire", c.uid))
+	}
+	e.mu.Lock()
+	e.ndefWritable = false
+	e.mu.Unlock()
+
+	// A fresh driver over the same emulator. The one that preloaded the content
+	// has already read the file's rights and would go on reporting them, which
+	// no real card does: rights do not change under a driver mid-session.
+	return newCard(c.kind, c.uid, c.transport)
 }
 
 // Locked makes the card read-only (where the tag kind supports it). Panics if

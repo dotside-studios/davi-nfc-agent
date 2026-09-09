@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DESFire generations are named, and its memory and capacity are read off the
+  card.** The wrapped `GET_VERSION` the agent already sends during detection now
+  identifies a DESFire, and its hardware major version separates EV1 (`0x01`),
+  EV2 (`0x12`) and EV3 (`0x33`); a generation this does not name is driven as a
+  plain DESFire. The generation appears in `capabilities.tagFamily`, not in
+  `type`, so a card-type filter naming `DESFire` keeps matching every one of
+  them. `DetectedDESFireEV1` and `DetectedDESFireEV2` had been declared since
+  the package was written and produced by nothing
+- The DESFire driver reads what varies per card before its first read or write:
+  EEPROM size from `GET_VERSION`, and the NDEF file's size and access rights
+  from `GetFileSettings`. Two commands, once per tag. `MemorySize` is now the
+  card's own rather than a hardcoded 8192, `MaxNDEFSize` is the file size less
+  its 2-byte length prefix, so an oversized message is refused by the write
+  path's pre-flight check instead of by the card partway through, and a file
+  written only by a key the driver does not hold reports `CanWrite: false` and
+  `IsReadOnly: true` rather than failing at write time
+- `nfc.ParseWrappedVersion` returns the version fields themselves
+  (`WrappedVersion`, with `Kind` and `MemorySize`), which is what the two
+  additions above read. `ParseWrappedGetVersionResponse` keeps its signature and
+  is now a wrapper over it. `nfc.DESFireGetFileSettingsAPDU` builds the settings
+  command, and `nfctest`'s DESFire emulator answers both, with `KeyProtected`
+  putting its NDEF file behind a key
+
 - **Identity-only scans.** A readable tag holding no NDEF message now reaches
   clients as an ordinary scan, once, carrying its UID, type, technology and
   capabilities, with `err` null and no message: a DESFire whose NDEF file

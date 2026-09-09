@@ -297,6 +297,9 @@ func describeDESFire(e *APDUExplanation, f APDUFields) {
 	case DFCmdGetVersion: // 0x60
 		e.Summary = "DESFire GetVersion — read chip version (continues with 91 AF)"
 		e.Class = ClassInfo
+	case DFCmdGetFileSettings: // 0xF5
+		e.Summary = "DESFire GetFileSettings — read a file's type, access rights and size"
+		e.Class = ClassInfo
 	case DFCmdGetApplicationIDs: // 0x6A
 		e.Summary = "DESFire GetApplicationIDs — list applications"
 		e.Class = ClassRead

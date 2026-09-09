@@ -209,6 +209,7 @@ const (
 	DFCmdAuthenticateISO   = 0x1A // 3DES auth
 	DFCmdAuthenticateAES   = 0xAA // AES auth
 	DFCmdGetVersion        = 0x60
+	DFCmdGetFileSettings   = 0xF5
 	DFCmdAdditionalFrame   = 0xAF
 )
 
@@ -257,6 +258,12 @@ func DESFireWriteDataAPDU(fileNo byte, offset uint32, writeData []byte) []byte {
 	header[6] = byte(length >> 16)
 	data := append(header, writeData...)
 	return DESFireWrapAPDU(DFCmdWriteData, data)
+}
+
+// DESFireGetFileSettingsAPDU returns APDU for reading a file's type, access
+// rights and size.
+func DESFireGetFileSettingsAPDU(fileNo byte) []byte {
+	return DESFireWrapAPDU(DFCmdGetFileSettings, []byte{fileNo})
 }
 
 // DESFireAuthAPDU returns APDU for authentication

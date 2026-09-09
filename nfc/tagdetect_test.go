@@ -158,13 +158,46 @@ func TestParseWrappedGetVersionResponse(t *testing.T) {
 		"non-NXP vendor":                           withSW([]byte{0x05, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}, 0x91, 0xAF),
 		"page-addressed protocol":                  withSW([]byte{0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03}, 0x91, 0xAF),
 		"a later generation this cannot size":      withSW([]byte{0x04, 0x04, 0x02, 0x40, 0x00, 0x11, 0x05}, 0x91, 0xAF),
-		"DESFire":                                  withSW([]byte{0x04, 0x01, 0x01, 0x12, 0x00, 0x18, 0x05}, 0x91, 0xAF),
 		"an error status":                          withSW(ntag424, 0x91, 0x1C),
 	}
 	for name, resp := range rejected {
 		t.Run(name, func(t *testing.T) {
 			if kind, ok := ParseWrappedGetVersionResponse(resp); ok {
 				t.Errorf("identified %v from %s; it should not be named", kind, name)
+			}
+		})
+	}
+}
+
+// The hardware major version separates the DESFire generations. One this does
+// not name is still a DESFire, which is what they have in common.
+func TestParseWrappedVersionNamesTheDESFireGeneration(t *testing.T) {
+	desfire := func(major, storage byte) []byte {
+		return []byte{0x04, 0x01, 0x01, major, 0x00, storage, 0x05, 0x91, 0xAF}
+	}
+
+	tests := []struct {
+		name    string
+		resp    []byte
+		want    DetectedTagType
+		wantMem int
+	}{
+		{"EV1 4K", desfire(0x01, 0x18), DetectedDESFireEV1, 4096},
+		{"EV2 8K", desfire(0x12, 0x1A), DetectedDESFireEV2, 8192},
+		{"EV3 2K", desfire(0x33, 0x16), DetectedDESFireEV3, 2048},
+		{"an unnamed generation", desfire(0x77, 0x18), DetectedDESFire, 4096},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, ok := ParseWrappedVersion(tt.resp)
+			if !ok {
+				t.Fatal("ParseWrappedVersion did not read the frame")
+			}
+			if got := version.Kind(); got != tt.want {
+				t.Errorf("Kind() = %v, want %v", got, tt.want)
+			}
+			if got := version.MemorySize(); got != tt.wantMem {
+				t.Errorf("MemorySize() = %d, want %d", got, tt.wantMem)
 			}
 		})
 	}

@@ -589,7 +589,7 @@ When a card is detected and read:
 | Field | Description |
 |-------|-------------|
 | `uid` | Card unique identifier (hex string). For a non-NFC scan (a QR or barcode), the raw value the device reported, carried verbatim. See [Non-NFC scans](#non-nfc-scans-qr-and-barcodes) |
-| `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `MIFARE DESFire`, `MIFARE Ultralight`, `NTAG424`, `ISO14443-4 Type 4A` (experimental). Free-form for a non-NFC scan (whatever the device reported) |
+| `type` | Card type: `MIFARE Classic 1K`, `MIFARE Classic 4K`, `DESFire`, `MIFARE Ultralight`, `NTAG213`, `NTAG215`, `NTAG216`, `NTAG424`, `Type4`. Free-form for a non-NFC scan (whatever the device reported). A DESFire reports one type across its generations; `capabilities.tagFamily` names the generation |
 | `technology` | NFC technology standard (`ISO14443A`, `ISO14443B`, etc.), or whatever the device reported for a non-NFC scan |
 | `scannedAt` | ISO 8601 timestamp |
 | `deviceID` | The paired device that scanned the tag. Omitted when the agent's own hardware reader read it. That is the only reader `deviceStatus` describes, so a client holding a tag can tell whether that status has anything to say about it |
@@ -860,7 +860,7 @@ when supported, render a capacity meter, etc.) without a round-trip.
 | `isReadOnly` | Tag is already locked (omitted when false) |
 | `memorySize` | Total memory in bytes (omitted when unknown) |
 | `maxNdefSize` | Maximum NDEF message size in bytes (omitted when unknown) |
-| `tagFamily` | `MIFARE Classic`, `DESFire`, `NTAG`, `MIFARE Ultralight`, `Type 4`, … |
+| `tagFamily` | `MIFARE Classic`, `DESFire`, `DESFire EV1`, `DESFire EV2`, `DESFire EV3`, `NTAG`, `MIFARE Ultralight`, `Type 4`, … |
 | `supportsNdef` | Tag supports NDEF |
 | `supportsPassword` | Tag supports simple password protection (NTAG21x `PWD`/`PACK`) |
 

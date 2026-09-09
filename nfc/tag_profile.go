@@ -109,6 +109,31 @@ func ntagProfile(name string, memorySize, maxNDEFSize int) tagProfile {
 	}
 }
 
+// desfireProfile builds the profile a DESFire generation shares. The generation
+// is carried in the family rather than the name, so a card-type filter naming
+// "DESFire" keeps matching every one of them.
+//
+// Memory size and NDEF capacity are per-card rather than per-kind, and the
+// driver reads them off the card; see pcscDESFireTag.probe.
+func desfireProfile(family string) tagProfile {
+	return tagProfile{
+		name:         CardTypeDesfire,
+		numericType:  0x20,
+		family:       family,
+		technology:   "ISO14443A",
+		canWrite:     true,
+		supportsNDEF: true,
+		// Locking a DESFire file means changing its access rights, which is
+		// not implemented.
+		canLock: false,
+		// The driver forwards APDUs to the card, which is how a DESFire
+		// application is meant to be driven.
+		canTransceive:          true,
+		supportsCrypto:         true,
+		supportsAuthentication: true,
+	}
+}
+
 // tagProfiles covers every kind NewTagForType can build a driver for.
 var tagProfiles = map[DetectedTagType]tagProfile{
 	DetectedClassic1K: classicProfile(CardTypeMifareClassic1K, 1024, 716),
@@ -129,23 +154,10 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 	DetectedNTAG215: ntagProfile(CardTypeNtag215, 540, 504),
 	DetectedNTAG216: ntagProfile(CardTypeNtag216, 924, 888),
 
-	DetectedDESFire: {
-		name:         CardTypeDesfire,
-		numericType:  0x20,
-		family:       "DESFire",
-		technology:   "ISO14443A",
-		memorySize:   8192, // varies by model; the driver does not bound writes
-		canWrite:     true,
-		supportsNDEF: true,
-		// Locking a DESFire file means changing its access rights, which is
-		// not implemented.
-		canLock: false,
-		// The driver forwards APDUs to the card, which is how a DESFire
-		// application is meant to be driven.
-		canTransceive:          true,
-		supportsCrypto:         true,
-		supportsAuthentication: true,
-	},
+	DetectedDESFire:    desfireProfile("DESFire"),
+	DetectedDESFireEV1: desfireProfile("DESFire EV1"),
+	DetectedDESFireEV2: desfireProfile("DESFire EV2"),
+	DetectedDESFireEV3: desfireProfile("DESFire EV3"),
 
 	// The NTAG 424 DNA is driven as a Type 4 card. It differs from the generic
 	// profile below only in what is known about it: a fixed layout, so the

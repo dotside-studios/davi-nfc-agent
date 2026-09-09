@@ -69,12 +69,22 @@ func TestGetTagsNamesAnNTAG424(t *testing.T) {
 	}
 }
 
+// A DESFire answers the same command, and the probe names its generation.
+func TestProbeWrappedVersionNamesADESFire(t *testing.T) {
+	card := &scriptedCard{answers: map[string][]byte{
+		string(nfc.NTAG424GetVersionAPDU()): {0x04, 0x01, 0x01, 0x12, 0x00, 0x18, 0x05, 0x91, 0xAF},
+	}}
+
+	if got := type4Device(card).probeWrappedVersion(); got != nfc.DetectedDESFireEV2 {
+		t.Errorf("probeWrappedVersion() = %v, want DetectedDESFireEV2", got)
+	}
+}
+
 // A card that does not implement the command, or answers as something else, is
-// left to the detection that follows rather than being called an NTAG 424.
+// left to the detection that follows rather than being named.
 func TestProbeWrappedVersionNamesOnlyWhatItKnows(t *testing.T) {
 	cases := map[string][]byte{
 		"class not supported": nil, // answered 6E00 by the scripted default
-		"a DESFire version":   {0x04, 0x01, 0x01, 0x12, 0x00, 0x18, 0x05, 0x91, 0xAF},
 		"an NTAG215 version":  {0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03, 0x91, 0xAF},
 		"a truncated frame":   {0x04, 0x04, 0x91, 0xAF},
 	}

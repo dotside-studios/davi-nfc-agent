@@ -30,6 +30,9 @@ var drivenKinds = []nfc.DetectedTagType{
 	nfc.DetectedNTAG215,
 	nfc.DetectedNTAG216,
 	nfc.DetectedDESFire,
+	nfc.DetectedDESFireEV1,
+	nfc.DetectedDESFireEV2,
+	nfc.DetectedDESFireEV3,
 	nfc.DetectedISO14443_4,
 }
 

@@ -90,7 +90,7 @@ type deviceReader struct {
 	lastSignalErr    string         // Last signal failure logged (guarded by statusMux)
 
 	// faulted names the card whose read failed, so a card that keeps failing is
-	// reported once rather than on every poll. Guarded by statusMux.
+	// reported once. Guarded by statusMux.
 	faulted    bool
 	faultedUID string
 }
@@ -498,8 +498,8 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 		// Create Card wrapper
 		r.applyClassicKeys(tag)
 		card := NewCard(tag)
-		// A tag holding no NDEF message is not a failure: it was reached and it
-		// answered. It is published as a scan carrying its identity alone.
+		// A tag holding no NDEF message is published as a scan carrying its
+		// identity alone.
 		if _, err := card.ReadMessage(); err != nil && !IsNoPayloadError(err) {
 			// Check if this is a card removal error - if so, close the device
 			if IsCardRemovedError(err) {
@@ -509,8 +509,7 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 				r.broadcastDeviceStatus("Card removed, waiting for new card")
 				return
 			}
-			// The same card is polled ten times a second, so a permanent fault
-			// is reported once per card rather than once per poll.
+			// Report a permanent fault once per card, not once per poll.
 			if r.faultReported(uid) {
 				continue
 			}
@@ -725,9 +724,8 @@ func (r *deviceReader) setCardPresent(present bool) {
 	r.broadcastDeviceStatus(message)
 }
 
-// faultReported records a failed read of uid and reports whether the same card
-// was already reported as failing. The record is cleared when the card leaves or
-// when a later read of it succeeds.
+// faultReported records a failed read of uid and reports whether that card was
+// already reported. Cleared when the card leaves or a later read succeeds.
 func (r *deviceReader) faultReported(uid string) bool {
 	r.statusMux.Lock()
 	defer r.statusMux.Unlock()

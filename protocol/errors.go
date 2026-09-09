@@ -73,9 +73,8 @@ const (
 	// outstanding than it can queue. Retryable once the earlier work drains.
 	ErrCodeBusy ErrorCode = "BUSY"
 
-	// ErrCodeNoPayload reports that the tag was reached but holds no NDEF
-	// message. Not retryable: the tag is intact and the next read returns the
-	// same answer.
+	// ErrCodeNoPayload reports that the tag was read and holds no NDEF
+	// message. Not retryable.
 	ErrCodeNoPayload ErrorCode = "NO_PAYLOAD"
 )
 

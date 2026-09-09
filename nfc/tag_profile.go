@@ -26,8 +26,7 @@ type tagProfile struct {
 	canLock       bool
 	canTransceive bool
 
-	// supportsNDEF says the driver reads and writes NDEF on this kind. A kind
-	// that carries no NDEF is scanned for its identity alone.
+	// supportsNDEF says the driver reads and writes NDEF on this kind.
 	supportsNDEF bool
 
 	supportsCrypto         bool

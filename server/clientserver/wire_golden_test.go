@@ -193,9 +193,8 @@ func TestGoldenTagDataWithAnUnnamedType(t *testing.T) {
 	golden(t, "tagdata_untyped", tagDataMessage(nfc.NFCData{Card: card}))
 }
 
-// A tag that is present and holds no NDEF message scans like any other, with a
-// null err and no message. A client tells it from a failed read by
-// capabilities.supportsNdef, so that pairing is part of the contract.
+// A tag holding no NDEF message: null err, no message, and supportsNdef false,
+// which is what a client reads to tell it from a failed scan.
 func TestGoldenTagDataWithoutAPayload(t *testing.T) {
 	tag := nfc.NewMockTag("04A1B2C3")
 	tag.TagType = nfc.CardTypeDesfire

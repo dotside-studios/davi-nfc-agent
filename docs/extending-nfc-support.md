@@ -217,11 +217,9 @@ func (t *MyTag) WriteData(data []byte) error {
 
 ### Tags that carry no NDEF
 
-Some tags are readable and hold no NDEF message: a card whose NDEF file sits
-behind keys you do not have, a transit card, an access badge. That is not a
-failure, and `ReadData` must not report it by returning no bytes and no error,
-which the agent cannot tell from a successful read of an empty tag. Return
-`nfc.NewNoPayloadError` instead:
+`ReadData` must not report an absent NDEF message by returning zero bytes and a
+nil error, which is indistinguishable from a successful read of an empty tag.
+Return `nfc.NewNoPayloadError` instead:
 
 ```go
 func (t *MyTag) ReadData() ([]byte, error) {
@@ -237,9 +235,9 @@ func (t *MyTag) ReadData() ([]byte, error) {
 }
 ```
 
-The reader publishes such a tag as an ordinary scan carrying its identity alone,
-rather than as an error repeated on every poll. A tag that never carries NDEF
-should also report `SupportsNDEF: false`, which spares it the read entirely.
+The reader publishes such a tag as a scan carrying its identity alone. A tag
+that never carries NDEF should also report `SupportsNDEF: false`, which skips
+the read.
 
 ### Step 4: Register with MultiManager
 

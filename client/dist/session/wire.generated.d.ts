@@ -31,10 +31,7 @@ export type NFCErrorCode = "PARSE_ERROR" | "INVALID_PAYLOAD" | "INVALID_REQUEST"
  * it can queue. Retryable once the earlier work drains.
  */
  | "BUSY"
-/**
- * Reports that the tag was reached but holds no NDEF message. Not retryable:
- * the tag is intact and the next read returns the same answer.
- */
+/** Reports that the tag was read and holds no NDEF message. Not retryable. */
  | "NO_PAYLOAD";
 /**
  * The messages the client protocol carries. A type not listed here is answered

@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// pollingReader stands up a reader over a mock device holding tag, connected and
-// ready for doPoll.
+// pollingReader returns a reader connected to a mock device holding tag.
 func pollingReader(t *testing.T, tag Tag) *deviceReader {
 	t.Helper()
 
@@ -43,9 +42,8 @@ func pollAndCollect(reader *deviceReader, n int) []NFCData {
 	return got
 }
 
-// A tag holding no NDEF message is still a tag that was presented. It scans
-// once, carrying its identity and no error, rather than once per poll as a
-// failure.
+// A tag holding no NDEF message scans once, carrying its identity and no error,
+// rather than once per poll as a failure.
 func TestPoll_PayloadlessCardScansOnce(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
 	tag.TagType = CardTypeNtag215
@@ -68,8 +66,8 @@ func TestPoll_PayloadlessCardScansOnce(t *testing.T) {
 	}
 }
 
-// A tag whose read genuinely fails is reported, but once per card rather than at
-// the polling rate.
+// A read that genuinely fails is reported once per card, not at the polling
+// rate.
 func TestPoll_ReadFaultReportedOncePerCard(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
 	tag.TagType = CardTypeNtag215
@@ -86,8 +84,8 @@ func TestPoll_ReadFaultReportedOncePerCard(t *testing.T) {
 	}
 }
 
-// A card that faulted and then reads is reported again if it faults later, so
-// the guard suppresses repetition rather than the second fault.
+// The guard suppresses repetition, not a later fault: a card that faults, reads,
+// then faults again is reported twice.
 func TestPoll_ReadFaultReportedAgainAfterASuccessfulRead(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
 	tag.TagType = CardTypeNtag215
@@ -113,8 +111,8 @@ func TestPoll_ReadFaultReportedAgainAfterASuccessfulRead(t *testing.T) {
 	}
 }
 
-// The no-payload answer is cached, so the consumers that each ask a card for its
-// message do not each go back to the tag to be told so again.
+// The no-payload result is cached, so repeated ReadMessage calls do not re-read
+// the tag.
 func TestCard_ReadMessageCachesNoPayload(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
 	tag.TagType = CardTypeNtag215
@@ -148,8 +146,8 @@ func TestCard_SkipsTheReadWhenTheTagCarriesNoNDEF(t *testing.T) {
 	}
 }
 
-// Returning nothing with no error is indistinguishable from a successful read of
-// an empty tag, so a tag carrying no NDEF has to say so.
+// Zero bytes with a nil error is indistinguishable from a successful read of an
+// empty tag.
 func TestAssertCapabilitiesConsistent_RejectsASilentEmptyRead(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
 	tag.IsConnected = true

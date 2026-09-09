@@ -9,24 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Identity-only scans.** A tag that is reached, answers, and holds no NDEF
-  message now scans like any other: it reaches clients once, carrying its UID,
-  type, technology and capabilities, with `err` null and no message. This is a
-  DESFire whose NDEF file sits behind keys the agent does not have, a MIFARE
-  Classic that does not use default keys, a transit card, an access badge. Read
-  `capabilities.supportsNdef` to tell such a scan from one whose read failed.
-  Previously every one of them was an error, and because the error path skipped
-  the per-UID dedupe the success path uses, a card sitting on a reader produced
-  one error-flagged scan per poll, ten a second, each logged at error level
-- `nfc.NewNoPayloadError` and `nfc.IsNoPayloadError` name that outcome, carried
-  on the wire as `NO_PAYLOAD`. The Classic, NTAG, Ultralight, DESFire, Type 4,
-  routed and remote drivers all raise it where they previously returned an
-  untyped "no NDEF message found" or, worse, no bytes and no error
-- `nfc.AssertCapabilitiesConsistent` checks one more pairing: a tag reporting
-  `SupportsNDEF: false` must decline the read rather than return nothing and no
-  error, which is indistinguishable from a successful read of an empty tag. The
-  shared tag contract in `nfctest` requires `CanRead` only of a tag that carries
-  NDEF
+- **Identity-only scans.** A readable tag holding no NDEF message now reaches
+  clients as an ordinary scan, once, carrying its UID, type, technology and
+  capabilities, with `err` null and no message: a DESFire whose NDEF file
+  requires keys the agent does not hold, a MIFARE Classic not using default
+  keys, a transit card, an access badge. `capabilities.supportsNdef`
+  distinguishes it from a failed read. Each was previously an error, and the
+  error path skipped the per-UID dedupe the success path uses, so one card on a
+  reader produced an error-flagged scan per poll
+- `nfc.NewNoPayloadError` and `nfc.IsNoPayloadError`, carried on the wire as
+  `NO_PAYLOAD`. The Classic, NTAG, Ultralight, DESFire, Type 4, routed and
+  remote drivers return it in place of an untyped "no NDEF message found" or,
+  in the routed and remote backends, zero bytes with a nil error
+- `nfc.AssertCapabilitiesConsistent` checks that a tag reporting
+  `SupportsNDEF: false` returns raw bytes or a no-payload error from `ReadData`,
+  never zero bytes with a nil error. The `nfctest` tag contract requires
+  `CanRead` only of a tag carrying NDEF
 - Golden fixtures for the client protocol, in `server/clientserver/testdata`.
   Every message a browser client can receive is marshalled and compared byte for
   byte, `tagData` with a card, with an NDEF message, with a raw message and on
@@ -127,12 +125,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A tag whose read fails permanently is now reported once per card rather than
-  once per poll. The reader polls ten times a second, so an unreadable card
-  filled the client log for as long as it sat there
-- `nfc.Card` caches the fact that a tag holds no message, so the consumers that
-  each ask a scan for its contents do not each go back to the tag to be told so
-  again. A tag declaring `SupportsNDEF: false` is not read at all
+- A permanently failing read is reported once per card rather than once per
+  poll. The reader polls ten times a second, so an unreadable card filled the
+  client log for as long as it sat there
+- `nfc.Card` caches a no-payload result, so repeated `ReadMessage` calls do not
+  re-read the tag. A tag reporting `SupportsNDEF: false` is not read
 - `HealthCheckResponse` in the client library carries `type` and `clients`.
   `/api/v1/health` has sent four keys and the type declared two, so a caller
   reading the client count off it got `undefined` with no type error.

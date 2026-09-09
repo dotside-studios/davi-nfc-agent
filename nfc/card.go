@@ -43,9 +43,8 @@ type Card struct {
 	// Internal state for io.Writer
 	writeBuffer []byte // Buffer for data to be written
 
-	// noPayload records that this card holds no NDEF message, so the consumers
-	// that each ask for it once do not each go back to the tag to be told so
-	// again.
+	// noPayload records that the tag holds no NDEF message, so repeated
+	// ReadMessage calls do not re-read it.
 	noPayload bool
 }
 

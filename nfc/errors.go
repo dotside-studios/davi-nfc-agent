@@ -81,10 +81,9 @@ func NewMultipleTagsError(op string, count int) *NFCError {
 	}
 }
 
-// NewNoPayloadError reports that the tag was reached but holds no NDEF message
-// to return: no NDEF application, no NDEF TLV, a zero-length message, or no key
-// that opens the memory holding one. The tag is intact, so repeating the read
-// yields the same answer.
+// NewNoPayloadError reports that the tag was read and holds no NDEF message:
+// no NDEF application, no NDEF TLV, a zero-length message, or no key that opens
+// the memory holding one. Not retryable.
 func NewNoPayloadError(op, tagUID string, cause error) *NFCError {
 	return &NFCError{
 		Code:    ErrCodeNoPayload,

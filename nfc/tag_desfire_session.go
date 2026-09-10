@@ -133,6 +133,57 @@ func (t *pcscDESFireTag) sessionExchange(session *ev2.Session, ins byte, header,
 	return session.Response(raw, mode)
 }
 
+// canChangeSettings reports whether the file's rights can be rewritten: the
+// change right grants it to anyone, or names a key the agent holds.
+func (t *pcscDESFireTag) canChangeSettings(ndef desfireFileSettings) bool {
+	switch ndef.change {
+	case dfAccessFree:
+		return true
+	case dfAccessNever:
+		return false
+	}
+	_, held := t.keyFor(ndef.change)
+	return held
+}
+
+// encodeAccessRights packs the four rights the way the card reads them: two
+// bytes, least significant first, holding read-write and change, then read and
+// write.
+func encodeAccessRights(s desfireFileSettings) []byte {
+	return []byte{
+		s.readWrite<<4 | s.change,
+		s.read<<4 | s.write,
+	}
+}
+
+// changeFileSettings rewrites the NDEF file's communication setting and access
+// rights. It travels inside a session under the change key, or plainly when the
+// change right is open to anyone.
+func (t *pcscDESFireTag) changeFileSettings(current, want desfireFileSettings) error {
+	settings := append([]byte{want.comm}, encodeAccessRights(want)...)
+
+	if current.change == dfAccessFree {
+		_, status, err := t.dfTransceive(DESFireWrapAPDU(DFCmdChangeFileSettings,
+			append([]byte{dfNDEFFileNo}, settings...)))
+		if err != nil || status != dfStatusOK {
+			return dfStatusErr("change file settings", status, err)
+		}
+		return nil
+	}
+
+	session, err := t.authenticate(current.change)
+	if err != nil {
+		return err
+	}
+	// The card requires this one enciphered whatever the file's own setting is:
+	// the rights travel encrypted or not at all.
+	if _, err := t.sessionExchange(session, DFCmdChangeFileSettings,
+		[]byte{dfNDEFFileNo}, settings, ev2.CommFull); err != nil {
+		return fmt.Errorf("change file settings: %w", err)
+	}
+	return nil
+}
+
 // fileArgs is the header a read or a write opens with: the file, where in it,
 // and how much. The two lengths travel least significant byte first.
 func fileArgs(fileNo byte, offset, length int) []byte {

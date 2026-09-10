@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A DESFire can be locked.** `MakeReadOnly` rewrites the NDEF file's access
+  rights so that nothing may write it and nothing may change that again, which
+  is what makes the lock permanent rather than merely current. The content stays
+  readable. `ChangeFileSettings` travels inside a session under the change key,
+  enciphered, or plainly while the change right is still open to anyone.
+  `CanLock` now answers per card, from the change right the driver reads off it:
+  a card whose change key the agent does not hold reports false and refuses the
+  lock rather than attempting it
+
 - **A DESFire file behind an AES key is now read and written**, over an
   authenticated EV2 session. The driver reads the NDEF file's access rights, and
   where they name a key rather than granting the operation to anyone, it

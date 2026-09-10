@@ -612,7 +612,7 @@ type desfireEmulator struct {
 	version                 []byte
 	comm                    byte
 	readAccess, writeAccess byte
-	rwAccess                byte
+	rwAccess, changeAccess  byte
 	keys                    map[byte][]byte
 	authKeyNo               byte
 	authRndA, authRndB      []byte
@@ -638,11 +638,12 @@ func newDESFireEmulator() *desfireEmulator {
 		version: []byte{0x04, 0x01, 0x01, 0x12, 0x00, 0x1A, 0x05},
 		// A factory NDEF application: plain communication, and the file open to
 		// anyone.
-		comm:        dfCommPlain,
-		readAccess:  dfAccessFree,
-		writeAccess: dfAccessFree,
-		rwAccess:    dfAccessFree,
-		keys:        map[byte][]byte{},
+		comm:         dfCommPlain,
+		readAccess:   dfAccessFree,
+		writeAccess:  dfAccessFree,
+		rwAccess:     dfAccessFree,
+		changeAccess: dfAccessFree,
+		keys:         map[byte][]byte{},
 	}
 }
 
@@ -657,7 +658,7 @@ func (e *desfireEmulator) fileSettings() []byte {
 	size := len(e.file2)
 	return []byte{
 		0x00, e.comm,
-		e.rwAccess<<4 | dfAccessFree, // read-write, then change
+		e.rwAccess<<4 | e.changeAccess, // read-write, then change
 		e.readAccess<<4 | e.writeAccess,
 		byte(size), byte(size >> 8), byte(size >> 16),
 	}
@@ -746,6 +747,47 @@ func rotateLeft(b []byte) []byte {
 	return append(append([]byte(nil), b[1:]...), b[0])
 }
 
+// changeFileSettings rewrites the NDEF file's communication setting and access
+// rights, which is how the file is locked. It is answered plainly while the
+// change right is open to anyone, and inside the session once it names a key.
+func (e *desfireEmulator) changeFileSettings(cmd, body []byte) []byte {
+	settings := body[1:]
+
+	if e.change() != dfAccessFree {
+		if e.session == nil {
+			return dfResp(nil, dfStatusAuthError)
+		}
+		header, data, err := e.session.VerifyCommand(cmd, ev2.CommFull, 1)
+		if err != nil || len(header) != 1 || header[0] != 0x02 {
+			return dfResp(nil, dfStatusAuthError)
+		}
+		settings = data
+	} else if len(body) < 1 || body[0] != 0x02 {
+		return dfResp(nil, 0xBE)
+	}
+
+	// Communication setting, then the rights: read-write and change, then read
+	// and write.
+	if len(settings) < 3 {
+		return dfResp(nil, 0x7E)
+	}
+	e.comm = settings[0]
+	e.rwAccess, e.changeAccess = settings[1]>>4, settings[1]&0x0F
+	e.readAccess, e.writeAccess = settings[2]>>4, settings[2]&0x0F
+
+	if e.session != nil && e.change() != dfAccessFree {
+		out, err := e.session.Answer(dfStatusOK, nil, ev2.CommFull)
+		if err != nil {
+			return dfResp(nil, 0xA0)
+		}
+		return out
+	}
+	return dfResp(nil, dfStatusOK)
+}
+
+// change is the right that governs rewriting the settings themselves.
+func (e *desfireEmulator) change() byte { return e.changeAccess }
+
 // sessionFileCommand answers a read or a write inside the session, verifying
 // the MAC the reader put on it and MACing the answer in turn.
 func (e *desfireEmulator) sessionFileCommand(cmd []byte, ins byte) []byte {
@@ -829,6 +871,8 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		return e.authenticate(body), nil
 	case nfc.DFCmdGetVersion:
 		return dfResp(e.version, dfStatusAdditionalFrame), nil
+	case nfc.DFCmdChangeFileSettings:
+		return e.changeFileSettings(cmd, body), nil
 	case nfc.DFCmdGetFileSettings:
 		if !e.selectedNDEF || len(body) != 1 || body[0] != 0x02 {
 			return dfResp(nil, 0xBE), nil
@@ -1311,6 +1355,18 @@ func (c *EmulatedCard) ReadKeyProtected(mode ev2.CommMode) *EmulatedCard {
 	return c.keyProtect(DESFireWriteKeyNo, DESFireWriteKeyNo, mode)
 }
 
+// ChangeKeyProtected leaves the file open to read and write but puts the right
+// to rewrite its settings behind DESFireWriteKeyNo, so locking it needs the key.
+func (c *EmulatedCard) ChangeKeyProtected(mode ev2.CommMode) *EmulatedCard {
+	card := c.keyProtect(dfAccessFree, dfAccessFree, mode)
+
+	e := card.transport.(*desfireEmulator)
+	e.mu.Lock()
+	e.changeAccess = DESFireWriteKeyNo
+	e.mu.Unlock()
+	return card
+}
+
 func (c *EmulatedCard) keyProtect(read, write byte, mode ev2.CommMode) *EmulatedCard {
 	e, ok := c.transport.(*desfireEmulator)
 	if !ok {
@@ -1328,6 +1384,8 @@ func (c *EmulatedCard) keyProtect(read, write byte, mode ev2.CommMode) *Emulated
 	e.mu.Lock()
 	e.readAccess, e.writeAccess, e.rwAccess = read, write, dfAccessNever
 	e.comm = comm
+	// The change right is left as it was, so a card protected this way can
+	// still be locked unless a caller says otherwise.
 	e.keys[DESFireWriteKeyNo] = append([]byte(nil), DESFireKey...)
 	e.mu.Unlock()
 

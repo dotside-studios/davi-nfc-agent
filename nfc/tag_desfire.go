@@ -91,6 +91,7 @@ func (t *pcscDESFireTag) Capabilities() TagCapabilities {
 	}
 	caps.CanWrite = t.canWrite(ndef)
 	caps.IsReadOnly = !caps.CanWrite
+	caps.CanLock = t.canChangeSettings(ndef)
 	return caps
 }
 
@@ -223,6 +224,7 @@ type desfireFileSettings struct {
 	read      byte
 	write     byte
 	readWrite byte
+	change    byte
 }
 
 func (s desfireFileSettings) freeRead() bool {
@@ -271,6 +273,7 @@ func parseDESFireFileSettings(settings []byte) (desfireFileSettings, bool) {
 		read:      settings[3] >> 4,
 		write:     settings[3] & 0x0F,
 		readWrite: settings[2] >> 4,
+		change:    settings[2] & 0x0F,
 	}, true
 }
 
@@ -455,10 +458,45 @@ func (t *pcscDESFireTag) IsWritable() (bool, error) {
 	return !probed || t.canWrite(ndef), nil
 }
 
+// CanMakeReadOnly reports whether the file's rights can be rewritten, which is
+// what locking one means here.
+//
+// A card nothing has read yet answers with the kind's own capability, as
+// Capabilities does: the driver implements locking, and whether this card
+// permits it is not known until its change right has been read.
 func (t *pcscDESFireTag) CanMakeReadOnly() (bool, error) {
-	return false, nil // DESFire locking is complex
+	probed, _, ndef := t.probedFacts()
+	if !probed {
+		return t.profile().canLock, nil
+	}
+	return t.canChangeSettings(ndef), nil
 }
 
+// MakeReadOnly rewrites the NDEF file's access rights so that nothing may write
+// it and nothing may change that again.
+//
+// This cannot be undone. The change right is set to deny everyone, so no key
+// reopens the file afterwards, which is what makes the lock permanent rather
+// than merely current.
 func (t *pcscDESFireTag) MakeReadOnly() error {
-	return NewNotSupportedError("DESFire MakeReadOnly")
+	if err := t.dfSelectNDEFApp(); err != nil {
+		return NewNotSupportedError("MakeReadOnly (DESFire)")
+	}
+	t.probe()
+
+	probed, _, ndef := t.probedFacts()
+	if !probed || !t.canChangeSettings(ndef) {
+		return NewNotSupportedError("MakeReadOnly (DESFire)")
+	}
+
+	locked := ndef
+	locked.write, locked.readWrite, locked.change = dfAccessNever, dfAccessNever, dfAccessNever
+	if err := t.changeFileSettings(ndef, locked); err != nil {
+		return err
+	}
+
+	t.mu.Lock()
+	t.ndefFile = locked
+	t.mu.Unlock()
+	return nil
 }

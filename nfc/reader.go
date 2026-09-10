@@ -85,6 +85,7 @@ type deviceReader struct {
 	cardCheckTicker  Ticker         // Ticker for periodic card presence checks (based on cache)
 	workerWg         sync.WaitGroup // Tracks worker goroutine completion
 	classicKeys      [][]byte       // Extra MIFARE Classic auth keys (guarded by statusMux)
+	desfireKeys      DESFireKeys    // DESFire NDEF application keys (guarded by statusMux)
 	feedbackOn       atomic.Bool    // Whether the reader flashes and beeps at what it does
 	signalling       atomic.Bool    // Held while a signal plays, so only one does
 	lastSignalErr    string         // Last signal failure logged (guarded by statusMux)
@@ -115,17 +116,32 @@ func (r *deviceReader) SetClassicKeys(keys [][]byte) {
 	r.statusMux.Unlock()
 }
 
-// applyClassicKeys injects any configured Classic keys into a tag that supports
-// them, just before it is wrapped in a Card for a read or write.
-func (r *deviceReader) applyClassicKeys(tag Tag) {
+// SetDESFireKeys configures the AES keys a DESFire's NDEF application is
+// authenticated with, by key number. They are held in memory and applied to
+// each DESFire the reader encounters. Pass nil to clear.
+func (r *deviceReader) SetDESFireKeys(keys DESFireKeys) {
+	cp := keys.Copy()
+	r.statusMux.Lock()
+	r.desfireKeys = cp
+	r.statusMux.Unlock()
+}
+
+// applyKeys injects any configured card keys into a tag that takes them, just
+// before it is wrapped in a Card for a read or write.
+func (r *deviceReader) applyKeys(tag Tag) {
 	r.statusMux.RLock()
-	keys := r.classicKeys
+	classic, desfire := r.classicKeys, r.desfireKeys
 	r.statusMux.RUnlock()
-	if len(keys) == 0 {
-		return
+
+	if len(classic) > 0 {
+		if kc, ok := tag.(classicKeyConfigurable); ok {
+			kc.SetCandidateKeys(classic)
+		}
 	}
-	if kc, ok := tag.(classicKeyConfigurable); ok {
-		kc.SetCandidateKeys(keys)
+	if len(desfire) > 0 {
+		if kc, ok := tag.(desfireKeyConfigurable); ok {
+			kc.SetDESFireKeys(desfire)
+		}
 	}
 }
 
@@ -496,7 +512,7 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 		}
 
 		// Create Card wrapper
-		r.applyClassicKeys(tag)
+		r.applyKeys(tag)
 		card := NewCard(tag)
 		// A tag holding no NDEF message is published as a scan carrying its
 		// identity alone.
@@ -895,7 +911,7 @@ func (r *deviceReader) prepareCardForWrite(expectUID string) (*Card, error) {
 	}
 
 	// Create Card wrapper for the tag
-	r.applyClassicKeys(tag)
+	r.applyKeys(tag)
 	card := NewCard(tag)
 	return card, nil
 }

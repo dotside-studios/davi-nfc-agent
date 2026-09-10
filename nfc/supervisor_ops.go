@@ -60,6 +60,24 @@ func (s *Supervisor) SetClassicKeys(keys [][]byte) {
 	}
 }
 
+// SetDESFireKeys configures the AES keys every reader authenticates a DESFire's
+// NDEF application with, by the key number the card knows each one as.
+//
+// The keys are held in memory for as long as the process runs. Nothing persists
+// them and nothing logs them.
+func (s *Supervisor) SetDESFireKeys(keys DESFireKeys) {
+	cp := keys.Copy()
+
+	s.mu.Lock()
+	s.desfireKeys = cp
+	readers := s.readerList()
+	s.mu.Unlock()
+
+	for _, reader := range readers {
+		reader.SetDESFireKeys(cp)
+	}
+}
+
 // Tags, wherever they are.
 
 // The supervisor answers for every tag the agent can reach: the one on a reader

@@ -23,12 +23,14 @@ package nfctest
 import (
 	"bytes"
 	"context"
+	"crypto/cipher"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/virtualnfc"
 )
 
@@ -44,7 +46,20 @@ type TB interface {
 const (
 	dfStatusOK              = 0x00
 	dfStatusAdditionalFrame = 0xAF
+	dfStatusAuthError       = 0xAE
 	dfFrameData             = 59
+
+	// insAuthEV2First begins an EV2 authentication.
+	insAuthEV2First = 0x71
+
+	// Communication settings a file can demand of a command touching it.
+	dfCommPlain = 0x00
+	dfCommMAC   = 0x01
+	dfCommFull  = 0x03
+
+	// Access-right nibbles that name no key.
+	dfAccessFree  = 0x0E
+	dfAccessNever = 0x0F
 )
 
 // emuFail mimics the reader returning a non-success status (e.g. a NAK'd write
@@ -591,11 +606,17 @@ type desfireEmulator struct {
 	present      bool
 	removalModel
 
-	// version is the first GET_VERSION frame, and ndefWritable whether the NDEF
-	// file's access rights let anyone write it. Both are what the driver's probe
-	// reads to report memory size, capacity and writability.
-	version      []byte
-	ndefWritable bool
+	// version is the first GET_VERSION frame, and the access nibbles are the
+	// NDEF file's rights. Both are what the driver's probe reads to report
+	// memory size, capacity and writability.
+	version                 []byte
+	comm                    byte
+	readAccess, writeAccess byte
+	rwAccess                byte
+	keys                    map[byte][]byte
+	authKeyNo               byte
+	authRndA, authRndB      []byte
+	session                 *ev2.Session
 
 	readOff, readRemain   int
 	writeOff, writeRemain int
@@ -614,8 +635,14 @@ func newDESFireEmulator() *desfireEmulator {
 		present: true,
 		// An EV2 with 8K of EEPROM: vendor, product, subtype, major, minor,
 		// storage, protocol.
-		version:      []byte{0x04, 0x01, 0x01, 0x12, 0x00, 0x1A, 0x05},
-		ndefWritable: true,
+		version: []byte{0x04, 0x01, 0x01, 0x12, 0x00, 0x1A, 0x05},
+		// A factory NDEF application: plain communication, and the file open to
+		// anyone.
+		comm:        dfCommPlain,
+		readAccess:  dfAccessFree,
+		writeAccess: dfAccessFree,
+		rwAccess:    dfAccessFree,
+		keys:        map[byte][]byte{},
 	}
 }
 
@@ -627,15 +654,146 @@ func newDESFireEmulator() *desfireEmulator {
 // operation to anyone, and a key number denies it to a driver that cannot
 // authenticate.
 func (e *desfireEmulator) fileSettings() []byte {
-	rights := []byte{0xEE, 0xEE}
-	if !e.ndefWritable {
-		rights = []byte{0x1E, 0xE1} // read free, write and read-write behind key 1
-	}
 	size := len(e.file2)
 	return []byte{
-		0x00, 0x00,
-		rights[0], rights[1],
+		0x00, e.comm,
+		e.rwAccess<<4 | dfAccessFree, // read-write, then change
+		e.readAccess<<4 | e.writeAccess,
 		byte(size), byte(size >> 8), byte(size >> 16),
+	}
+}
+
+// accessNeedsKey reports the key an access nibble names, where it names one
+// rather than granting the operation to anyone.
+func (e *desfireEmulator) accessNeedsKey(access byte) (byte, bool) {
+	if access == dfAccessFree || e.rwAccess == dfAccessFree {
+		return 0, false
+	}
+	if access != dfAccessNever {
+		return access, true
+	}
+	if e.rwAccess != dfAccessNever {
+		return e.rwAccess, true
+	}
+	return 0, false
+}
+
+// authenticate answers AuthenticateEV2First with the card's random number,
+// encrypted under the key being proved.
+func (e *desfireEmulator) authenticate(body []byte) []byte {
+	if len(body) < 1 {
+		return dfResp(nil, 0x7E)
+	}
+	key, ok := e.keys[body[0]]
+	if !ok {
+		return dfResp(nil, dfStatusAuthError)
+	}
+
+	block, err := ev2.NewCipher(key)
+	if err != nil {
+		return dfResp(nil, dfStatusAuthError)
+	}
+	e.authKeyNo = body[0]
+	e.authRndB = bytes.Repeat([]byte{0x5B}, 16)
+
+	encrypted := make([]byte, len(e.authRndB))
+	cipher.NewCBCEncrypter(block, make([]byte, 16)).CryptBlocks(encrypted, e.authRndB)
+	return dfResp(encrypted, dfStatusAdditionalFrame)
+}
+
+// finishAuth consumes the reader's half of the exchange and opens the session.
+func (e *desfireEmulator) finishAuth(body []byte) []byte {
+	key := e.keys[e.authKeyNo]
+	block, err := ev2.NewCipher(key)
+	if err != nil || len(body) != 32 {
+		return dfResp(nil, dfStatusAuthError)
+	}
+
+	plain := make([]byte, len(body))
+	cipher.NewCBCDecrypter(block, make([]byte, 16)).CryptBlocks(plain, body)
+
+	e.authRndA = append([]byte(nil), plain[:16]...)
+	if !bytes.Equal(plain[16:], rotateLeft(e.authRndB)) {
+		return dfResp(nil, dfStatusAuthError)
+	}
+
+	// TI, our rotation of the reader's number, then both sides' capabilities.
+	ti := []byte{0x9D, 0x00, 0xC4, 0xDF}
+	answer := make([]byte, 0, 32)
+	answer = append(answer, ti...)
+	answer = append(answer, rotateLeft(e.authRndA)...)
+	answer = append(answer, make([]byte, 12)...)
+
+	encrypted := make([]byte, len(answer))
+	cipher.NewCBCEncrypter(block, make([]byte, 16)).CryptBlocks(encrypted, answer)
+
+	encKey, macKey, err := ev2.DeriveSessionKeys(key, e.authRndA, e.authRndB)
+	if err != nil {
+		return dfResp(nil, dfStatusAuthError)
+	}
+	if e.session, err = ev2.NewSession(ti, encKey, macKey); err != nil {
+		return dfResp(nil, dfStatusAuthError)
+	}
+	return dfResp(encrypted, dfStatusOK)
+}
+
+// rotateLeft moves the first byte to the end, which is how each side proves it
+// decrypted the other's number rather than replaying it.
+func rotateLeft(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return append(append([]byte(nil), b[1:]...), b[0])
+}
+
+// sessionFileCommand answers a read or a write inside the session, verifying
+// the MAC the reader put on it and MACing the answer in turn.
+func (e *desfireEmulator) sessionFileCommand(cmd []byte, ins byte) []byte {
+	mode, err := sessionCommMode(e.comm)
+	if err != nil {
+		return dfResp(nil, 0xA0)
+	}
+
+	const fileHeaderLen = 7
+	header, data, err := e.session.VerifyCommand(cmd, mode, fileHeaderLen)
+	if err != nil {
+		return dfResp(nil, dfStatusAuthError)
+	}
+
+	off, length, ok := e.fileRange(header)
+	if !ok {
+		return dfResp(nil, 0xBE)
+	}
+
+	var answer []byte
+	if ins == nfc.DFCmdReadData {
+		answer = append([]byte(nil), e.file2[off:off+length]...)
+	} else {
+		if len(data) < length {
+			return dfResp(nil, 0x7E)
+		}
+		copy(e.file2[off:off+length], data[:length])
+	}
+
+	out, err := e.session.Answer(dfStatusOK, answer, mode)
+	if err != nil {
+		return dfResp(nil, 0xA0)
+	}
+	return out
+}
+
+// sessionCommMode maps the file's communication setting onto the session's,
+// mirroring what the driver does with the same byte.
+func sessionCommMode(setting byte) (ev2.CommMode, error) {
+	switch setting {
+	case dfCommPlain:
+		return ev2.CommPlain, nil
+	case dfCommMAC:
+		return ev2.CommMAC, nil
+	case dfCommFull:
+		return ev2.CommFull, nil
+	default:
+		return 0, fmt.Errorf("nfctest: unknown communication setting %#02x", setting)
 	}
 }
 
@@ -667,6 +825,8 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 	}
 	body := cmd[5 : 5+lc]
 	switch cmd[1] {
+	case insAuthEV2First:
+		return e.authenticate(body), nil
 	case nfc.DFCmdGetVersion:
 		return dfResp(e.version, dfStatusAdditionalFrame), nil
 	case nfc.DFCmdGetFileSettings:
@@ -681,6 +841,12 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		}
 		return dfResp(nil, 0xA0), nil
 	case nfc.DFCmdReadData:
+		if _, needsKey := e.accessNeedsKey(e.readAccess); needsKey {
+			if e.session == nil {
+				return dfResp(nil, dfStatusAuthError), nil
+			}
+			return e.sessionFileCommand(cmd, nfc.DFCmdReadData), nil
+		}
 		off, length, ok := e.fileRange(body)
 		if !ok {
 			return dfResp(nil, 0xBE), nil
@@ -688,6 +854,12 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		e.readOff, e.readRemain = off, length
 		return e.nextReadFrame(), nil
 	case nfc.DFCmdWriteData:
+		if _, needsKey := e.accessNeedsKey(e.writeAccess); needsKey {
+			if e.session == nil {
+				return dfResp(nil, dfStatusAuthError), nil
+			}
+			return e.sessionFileCommand(cmd, nfc.DFCmdWriteData), nil
+		}
 		off, total, ok := e.fileRange(body)
 		if !ok {
 			return dfResp(nil, 0xBE), nil
@@ -703,6 +875,9 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		}
 		return dfResp(nil, dfStatusOK), nil
 	case nfc.DFCmdAdditionalFrame:
+		if e.authRndB != nil && e.session == nil {
+			return e.finishAuth(body), nil
+		}
 		if e.writeRemain > 0 {
 			n := len(body)
 			if n > e.writeRemain {
@@ -1113,23 +1288,64 @@ func (c *EmulatedCard) WithURI(uri string) *EmulatedCard {
 	return c.WithRecords(&nfc.NDEFURI{Content: uri})
 }
 
-// KeyProtected puts a DESFire's NDEF file behind a key, which is what a
-// provisioned card looks like to a driver that holds none. Apply it after any
-// content is preloaded, since a preload writes through the driver. Panics on a
-// card that is not a DESFire.
-func (c *EmulatedCard) KeyProtected() *EmulatedCard {
+// DESFireWriteKeyNo is the key number KeyProtected puts the NDEF file's write
+// right behind, and DESFireKey is the key the card holds for it. Hand the pair
+// to the driver with WithDESFireKeys to let it back through.
+const DESFireWriteKeyNo = 0x01
+
+// DESFireKey is the AES-128 key behind DESFireWriteKeyNo.
+var DESFireKey = bytes.Repeat([]byte{0x11}, 16)
+
+// KeyProtected puts a DESFire's NDEF file's write right behind
+// DESFireWriteKeyNo, demanding mode of every command that touches it. That is
+// the common provisioned card: anyone may read it, only the issuer may change
+// it. Apply it after any content is preloaded, since a preload writes through
+// the driver. Panics on a card that is not a DESFire.
+func (c *EmulatedCard) KeyProtected(mode ev2.CommMode) *EmulatedCard {
+	return c.keyProtect(dfAccessFree, DESFireWriteKeyNo, mode)
+}
+
+// ReadKeyProtected puts both rights behind DESFireWriteKeyNo, which is a card
+// whose contents are private as well as fixed. Reading it needs the key too.
+func (c *EmulatedCard) ReadKeyProtected(mode ev2.CommMode) *EmulatedCard {
+	return c.keyProtect(DESFireWriteKeyNo, DESFireWriteKeyNo, mode)
+}
+
+func (c *EmulatedCard) keyProtect(read, write byte, mode ev2.CommMode) *EmulatedCard {
 	e, ok := c.transport.(*desfireEmulator)
 	if !ok {
-		panic(fmt.Sprintf("nfctest: KeyProtected on %s, which is not a DESFire", c.uid))
+		panic(fmt.Sprintf("nfctest: key protection on %s, which is not a DESFire", c.uid))
 	}
+
+	comm := byte(dfCommPlain)
+	switch mode {
+	case ev2.CommMAC:
+		comm = dfCommMAC
+	case ev2.CommFull:
+		comm = dfCommFull
+	}
+
 	e.mu.Lock()
-	e.ndefWritable = false
+	e.readAccess, e.writeAccess, e.rwAccess = read, write, dfAccessNever
+	e.comm = comm
+	e.keys[DESFireWriteKeyNo] = append([]byte(nil), DESFireKey...)
 	e.mu.Unlock()
 
 	// A fresh driver over the same emulator. The one that preloaded the content
 	// has already read the file's rights and would go on reporting them, which
 	// no real card does: rights do not change under a driver mid-session.
 	return newCard(c.kind, c.uid, c.transport)
+}
+
+// WithDESFireKeys gives the driver the keys it authenticates with, as the agent
+// does for a reader it is configured with.
+func (c *EmulatedCard) WithDESFireKeys(keys nfc.DESFireKeys) *EmulatedCard {
+	kc, ok := c.card.Tag().(interface{ SetDESFireKeys(nfc.DESFireKeys) })
+	if !ok {
+		panic(fmt.Sprintf("nfctest: %s does not take DESFire keys", c.uid))
+	}
+	kc.SetDESFireKeys(keys)
+	return c
 }
 
 // Locked makes the card read-only (where the tag kind supports it). Panics if

@@ -3,30 +3,50 @@ package nfc
 import (
 	"fmt"
 	"sync"
+
+	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
 )
 
 type pcscDESFireTag struct {
 	pcscBaseTag
 
-	// What the card reported about itself, filled in by probe. Memory size and
-	// NDEF capacity vary per card, so the profile carries neither.
+	// What the card reported about itself, filled in by probe, and the keys and
+	// session used to reach a file whose rights name one. Memory size and NDEF
+	// capacity vary per card, so the profile carries neither.
 	//
 	// Guarded by mu: a scan publishes the tag to whoever broadcasts it, and
 	// Capabilities is read there while an operation on this side may still be
 	// probing.
-	mu           sync.Mutex
-	probed       bool
-	memorySize   int
-	ndefFileSize int
-	ndefWritable bool
+	mu         sync.Mutex
+	probed     bool
+	memorySize int
+	ndefFile   desfireFileSettings
+
+	keys         DESFireKeys
+	session      *ev2.Session
+	sessionKeyNo byte
 }
 
 // probedFacts reports what the card said about itself, with a false first
 // result when it has not been asked yet.
-func (t *pcscDESFireTag) probedFacts() (ok bool, memorySize, ndefFileSize int, writable bool) {
+func (t *pcscDESFireTag) probedFacts() (ok bool, memorySize int, ndef desfireFileSettings) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.probed, t.memorySize, t.ndefFileSize, t.ndefWritable
+	return t.probed, t.memorySize, t.ndefFile
+}
+
+// canWrite reports whether the NDEF file can be written: its rights grant it to
+// anyone, or they name a key the agent holds.
+func (t *pcscDESFireTag) canWrite(ndef desfireFileSettings) bool {
+	if ndef.freeWrite() {
+		return true
+	}
+	keyNo, ok := ndef.writeKey()
+	if !ok {
+		return false
+	}
+	_, held := t.keyFor(keyNo)
+	return held
 }
 
 func newPCSCDESFireTag(dev CardTransport, uid string, kind DetectedTagType) *pcscDESFireTag {
@@ -60,17 +80,17 @@ func (t *pcscDESFireTag) NumericType() int {
 func (t *pcscDESFireTag) Capabilities() TagCapabilities {
 	caps := t.profile().capabilities()
 
-	probed, memorySize, ndefFileSize, writable := t.probedFacts()
+	probed, memorySize, ndef := t.probedFacts()
 	if !probed {
 		return caps
 	}
 
 	caps.MemorySize = memorySize
-	if ndefFileSize > dfNLENSize {
-		caps.MaxNDEFSize = ndefFileSize - dfNLENSize
+	if ndef.size > dfNLENSize {
+		caps.MaxNDEFSize = ndef.size - dfNLENSize
 	}
-	caps.CanWrite = writable
-	caps.IsReadOnly = !writable
+	caps.CanWrite = t.canWrite(ndef)
+	caps.IsReadOnly = !caps.CanWrite
 	return caps
 }
 
@@ -99,9 +119,10 @@ const (
 	// reads settings for.
 	dfFileTypeStdData = 0x00
 
-	// Access-right nibbles that need no key. 0x0E grants the operation to
+	// Access-right nibbles that name no key. 0x0E grants the operation to
 	// anyone; 0x0F denies it to everyone.
-	dfAccessFree = 0x0E
+	dfAccessFree  = 0x0E
+	dfAccessNever = 0x0F
 )
 
 // dfNDEFAppAID is the NFC Forum's DESFire NDEF application.
@@ -157,7 +178,7 @@ func (t *pcscDESFireTag) dfSelectNDEFApp() error {
 // the capacity check and the memory size are better skipped than wrong, and the
 // read or write that follows reports its own failure.
 func (t *pcscDESFireTag) probe() {
-	if probed, _, _, _ := t.probedFacts(); probed {
+	if probed, _, _ := t.probedFacts(); probed {
 		return
 	}
 
@@ -173,13 +194,13 @@ func (t *pcscDESFireTag) probe() {
 	if err != nil || status != dfStatusOK {
 		return
 	}
-	size, writable, ok := parseDESFireFileSettings(settings)
+	ndef, ok := parseDESFireFileSettings(settings)
 	if !ok {
 		return
 	}
 
 	t.mu.Lock()
-	t.memorySize, t.ndefFileSize, t.ndefWritable, t.probed = memorySize, size, writable, true
+	t.memorySize, t.ndefFile, t.probed = memorySize, ndef, true
 	t.mu.Unlock()
 }
 
@@ -189,24 +210,68 @@ func dfResponse(data []byte, status byte) []byte {
 	return append(append([]byte(nil), data...), 0x91, status)
 }
 
-// parseDESFireFileSettings reads a standard data file's size and whether it can
-// be written without authenticating.
+// desfireFileSettings is what a standard data file reports about itself: how
+// much protection a command touching it must carry, how large it is, and which
+// key may do what to it.
 //
-// The response is file type, communication settings, two bytes of access rights
-// and three of size, the last two least significant byte first. The rights are
-// four nibbles: read, write, read-write, change. 0x0E grants the operation to
-// anyone, 0x0F denies it outright, and any other value names the key that has
-// it, which this driver cannot present.
-func parseDESFireFileSettings(settings []byte) (size int, writable, ok bool) {
+// The rights are four nibbles: read, write, read-write, change. 0x0E grants the
+// operation to anyone, 0x0F denies it outright, and any other value names the
+// key that has it.
+type desfireFileSettings struct {
+	comm      byte
+	size      int
+	read      byte
+	write     byte
+	readWrite byte
+}
+
+func (s desfireFileSettings) freeRead() bool {
+	return s.read == dfAccessFree || s.readWrite == dfAccessFree
+}
+
+func (s desfireFileSettings) freeWrite() bool {
+	return s.write == dfAccessFree || s.readWrite == dfAccessFree
+}
+
+// readKey names the key that may read the file, where one may. The read-write
+// key stands in when the read nibble denies it, since a key granted both may
+// still read.
+func (s desfireFileSettings) readKey() (byte, bool) {
+	return namedKey(s.read, s.readWrite)
+}
+
+// writeKey names the key that may write the file, where one may.
+func (s desfireFileSettings) writeKey() (byte, bool) {
+	return namedKey(s.write, s.readWrite)
+}
+
+// namedKey picks the first nibble naming a key rather than granting or denying
+// the operation outright.
+func namedKey(nibbles ...byte) (byte, bool) {
+	for _, n := range nibbles {
+		if n != dfAccessFree && n != dfAccessNever {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// parseDESFireFileSettings reads a standard data file's settings. The response
+// is file type, communication settings, two bytes of access rights and three of
+// size, the last two least significant byte first.
+func parseDESFireFileSettings(settings []byte) (desfireFileSettings, bool) {
 	const stdDataFileSettingsLen = 7
 	if len(settings) < stdDataFileSettingsLen || settings[0] != dfFileTypeStdData {
-		return 0, false, false
+		return desfireFileSettings{}, false
 	}
 
-	write := settings[3] & 0x0F
-	readWrite := settings[2] >> 4
-	size = int(settings[4]) | int(settings[5])<<8 | int(settings[6])<<16
-	return size, write == dfAccessFree || readWrite == dfAccessFree, true
+	return desfireFileSettings{
+		comm:      settings[1],
+		size:      int(settings[4]) | int(settings[5])<<8 | int(settings[6])<<16,
+		read:      settings[3] >> 4,
+		write:     settings[3] & 0x0F,
+		readWrite: settings[2] >> 4,
+	}, true
 }
 
 // dfReadFile reads length bytes from a DESFire file, following the additional-
@@ -268,14 +333,61 @@ func (t *pcscDESFireTag) dfWriteFile(fileNo byte, offset uint32, data []byte) er
 	return nil
 }
 
+// fileReader reads part of the NDEF file, through a session when the file's
+// rights name a key and plainly when they do not. The second result reports
+// whether a reader could be had at all: a file no key of ours opens has no
+// payload to give.
+func (t *pcscDESFireTag) fileReader() (func(offset, length int) ([]byte, error), error) {
+	probed, _, ndef := t.probedFacts()
+	if !probed || ndef.freeRead() {
+		return func(offset, length int) ([]byte, error) {
+			return t.dfReadFile(dfNDEFFileNo, uint32(offset), uint32(length))
+		}, nil
+	}
+
+	session, mode, err := t.openFor(ndef, ndef.readKey)
+	if err != nil {
+		return nil, err
+	}
+	return func(offset, length int) ([]byte, error) {
+		return t.sessionReadFile(session, mode, dfNDEFFileNo, offset, length)
+	}, nil
+}
+
+// openFor authenticates with the key the named right points at, and reports the
+// protection the file's settings demand of every command that follows.
+func (t *pcscDESFireTag) openFor(ndef desfireFileSettings, named func() (byte, bool)) (*ev2.Session, ev2.CommMode, error) {
+	keyNo, ok := named()
+	if !ok {
+		return nil, 0, NewAuthError("DESFire file access", t.uid,
+			fmt.Errorf("the file's access rights deny the operation to every key"))
+	}
+	mode, err := commMode(ndef.comm)
+	if err != nil {
+		return nil, 0, err
+	}
+	session, err := t.authenticate(keyNo)
+	if err != nil {
+		return nil, 0, err
+	}
+	return session, mode, nil
+}
+
 func (t *pcscDESFireTag) ReadData() ([]byte, error) {
 	if err := t.dfSelectNDEFApp(); err != nil {
 		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, err)
 	}
 	t.probe()
 
-	// Read the NDEF file; its first two bytes are NLEN, the message length.
-	nlenData, err := t.dfReadFile(dfNDEFFileNo, 0, dfNLENSize)
+	read, err := t.fileReader()
+	if err != nil {
+		// The file is there and shut. That is a tag with nothing to give this
+		// agent, not a broken read.
+		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, err)
+	}
+
+	// The NDEF file opens with NLEN, the message length.
+	nlenData, err := read(0, dfNLENSize)
 	if err != nil {
 		return nil, fmt.Errorf("read NLEN: %w", err)
 	}
@@ -288,7 +400,7 @@ func (t *pcscDESFireTag) ReadData() ([]byte, error) {
 		return nil, NewNoPayloadError("ReadData (DESFire)", t.uid, nil)
 	}
 
-	ndefData, err := t.dfReadFile(dfNDEFFileNo, dfNLENSize, uint32(nlen))
+	ndefData, err := read(dfNLENSize, nlen)
 	if err != nil {
 		return nil, fmt.Errorf("read NDEF data: %w", err)
 	}
@@ -301,21 +413,33 @@ func (t *pcscDESFireTag) WriteData(data []byte) error {
 	}
 	t.probe()
 
-	probed, _, ndefFileSize, writable := t.probedFacts()
-	if probed && !writable {
+	probed, _, ndef := t.probedFacts()
+	if probed && !t.canWrite(ndef) {
 		return NewReadOnlyError("WriteData (DESFire)", t.uid, nil)
 	}
-	if capacity := ndefFileSize - dfNLENSize; probed && len(data) > capacity {
+	if capacity := ndef.size - dfNLENSize; probed && len(data) > capacity {
 		return NewCapacityExceededError("WriteData (DESFire)", t.uid, len(data), capacity)
 	}
 
-	// Write NLEN (2 bytes, big-endian) at offset 0, then the NDEF message at
-	// offset 2. Both follow the frame chain for payloads beyond one frame.
+	write := func(offset int, chunk []byte) error {
+		return t.dfWriteFile(dfNDEFFileNo, uint32(offset), chunk)
+	}
+	if probed && !ndef.freeWrite() {
+		session, mode, err := t.openFor(ndef, ndef.writeKey)
+		if err != nil {
+			return err
+		}
+		write = func(offset int, chunk []byte) error {
+			return t.sessionWriteFile(session, mode, dfNDEFFileNo, offset, chunk)
+		}
+	}
+
+	// NLEN first, two bytes most significant first, then the message after it.
 	nlen := len(data)
-	if err := t.dfWriteFile(dfNDEFFileNo, 0, []byte{byte(nlen >> 8), byte(nlen & 0xFF)}); err != nil {
+	if err := write(0, []byte{byte(nlen >> 8), byte(nlen & 0xFF)}); err != nil {
 		return fmt.Errorf("write NLEN: %w", err)
 	}
-	if err := t.dfWriteFile(dfNDEFFileNo, dfNLENSize, data); err != nil {
+	if err := write(dfNLENSize, data); err != nil {
 		return fmt.Errorf("write NDEF data: %w", err)
 	}
 	return nil
@@ -327,8 +451,8 @@ func (t *pcscDESFireTag) IsWritable() (bool, error) {
 	}
 	t.probe()
 
-	probed, _, _, writable := t.probedFacts()
-	return !probed || writable, nil
+	probed, _, ndef := t.probedFacts()
+	return !probed || t.canWrite(ndef), nil
 }
 
 func (t *pcscDESFireTag) CanMakeReadOnly() (bool, error) {

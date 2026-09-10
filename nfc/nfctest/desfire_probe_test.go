@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
 )
 
 // Memory size and NDEF capacity vary per card, so the profile carries neither
@@ -48,7 +49,7 @@ func TestDESFire_TypeIsTheFamilyName(t *testing.T) {
 // An NDEF file written only by a key the driver does not hold is read-only to
 // it. The write is refused before any byte reaches the card.
 func TestDESFire_KeyProtectedFileIsReadOnly(t *testing.T) {
-	tag := DESFire("04DE5F1RE0").WithText("hello").KeyProtected().Tag()
+	tag := DESFire("04DE5F1RE0").WithText("hello").KeyProtected(ev2.CommFull).Tag()
 
 	if _, err := tag.ReadData(); err != nil {
 		t.Fatalf("ReadData: %v", err)

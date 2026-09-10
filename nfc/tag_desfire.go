@@ -106,8 +106,13 @@ const (
 	dfStatusAdditionalFrame = 0xAF // more data follows / send next frame
 
 	// dfFrameData is the max bytes of file data carried in one native frame.
-	// Larger payloads are split across additional frames. Modeled from the
-	// DESFire 60-byte frame (1 status byte); cross-check on hardware.
+	// Larger payloads are split across additional frames.
+	//
+	// Corroborated by the Capability Container an NDEF-formatted DESFire
+	// carries: AN11004's layout, as libfreefare writes it, declares MLe 0x003B
+	// (59) for a read and MLc 0x0034 (52) for a write, which is this figure
+	// less the 7-byte command header. Both match what the frame arithmetic
+	// here already produced.
 	dfFrameData = 59
 
 	// dfNDEFFileNo is the NDEF data file, and dfNLENSize the length prefix it

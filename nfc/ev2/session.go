@@ -1,4 +1,4 @@
-package ntag424
+package ev2
 
 import (
 	"crypto/aes"
@@ -44,9 +44,22 @@ type Session struct {
 	counter uint16
 }
 
-func newSession(ti, encKey, macKey []byte) (*Session, error) {
-	if len(ti) != tiSize {
-		return nil, fmt.Errorf("ntag424: transaction identifier is %d bytes, want %d", len(ti), tiSize)
+// NewSession builds a session from the transaction identifier and the two keys
+// an authentication derived, with the counter at zero.
+//
+// Authenticate rather than calling this, unless you are resuming a transaction
+// whose state you already hold, or reproducing a published transcript. See
+// NewSessionAt for one that has already carried commands.
+func NewSession(ti, encKey, macKey []byte) (*Session, error) {
+	return NewSessionAt(ti, encKey, macKey, 0)
+}
+
+// NewSessionAt is NewSession for a transaction that has already sent counter
+// commands. The counter goes into every MAC, so one that does not match the
+// card's is refused by it.
+func NewSessionAt(ti, encKey, macKey []byte, counter uint16) (*Session, error) {
+	if len(ti) != TISize {
+		return nil, fmt.Errorf("ev2: transaction identifier is %d bytes, want %d", len(ti), TISize)
 	}
 	encBlock, err := aes.NewCipher(encKey)
 	if err != nil {
@@ -62,6 +75,7 @@ func newSession(ti, encKey, macKey []byte) (*Session, error) {
 		macKey:   macKey,
 		encBlock: encBlock,
 		macBlock: macBlock,
+		counter:  counter,
 	}, nil
 }
 
@@ -93,7 +107,7 @@ func (s *Session) Command(ins byte, header, data []byte, mode CommMode) ([]byte,
 	switch mode {
 	case CommPlain:
 		payload = append(payload, data...)
-		return wrapAPDU(ins, payload), nil
+		return WrapAPDU(ins, payload), nil
 
 	case CommMAC:
 		payload = append(payload, data...)
@@ -108,11 +122,11 @@ func (s *Session) Command(ins byte, header, data []byte, mode CommMode) ([]byte,
 		}
 
 	default:
-		return nil, fmt.Errorf("ntag424: unknown communication mode %d", mode)
+		return nil, fmt.Errorf("ev2: unknown communication mode %d", mode)
 	}
 
 	mac := s.commandMAC(ins, payload)
-	return wrapAPDU(ins, append(payload, mac...)), nil
+	return WrapAPDU(ins, append(payload, mac...)), nil
 }
 
 // Response verifies the card's answer to the command just sent and returns its
@@ -120,11 +134,11 @@ func (s *Session) Command(ins byte, header, data []byte, mode CommMode) ([]byte,
 // verifies, so a command the card never saw leaves the session unchanged.
 func (s *Session) Response(response []byte, mode CommMode) ([]byte, error) {
 	if len(response) < 2 {
-		return nil, fmt.Errorf("ntag424: response is %d bytes, too short for a status word", len(response))
+		return nil, fmt.Errorf("ev2: response is %d bytes, too short for a status word", len(response))
 	}
 	data, sw1, sw2 := response[:len(response)-2], response[len(response)-2], response[len(response)-1]
-	if !statusOK(sw1, sw2) {
-		return nil, fmt.Errorf("ntag424: card answered %02X%02X", sw1, sw2)
+	if !StatusOK(sw1, sw2) {
+		return nil, fmt.Errorf("ev2: card answered %02X%02X", sw1, sw2)
 	}
 
 	if mode == CommPlain {
@@ -133,7 +147,7 @@ func (s *Session) Response(response []byte, mode CommMode) ([]byte, error) {
 	}
 
 	if len(data) < MACSize {
-		return nil, fmt.Errorf("ntag424: response carries %d bytes, too few for a MAC", len(data))
+		return nil, fmt.Errorf("ev2: response carries %d bytes, too few for a MAC", len(data))
 	}
 	body, mac := data[:len(data)-MACSize], data[len(data)-MACSize:]
 
@@ -161,7 +175,7 @@ func (s *Session) commandMAC(ins byte, payload []byte) []byte {
 	input = append(input, s.counterBytes()...)
 	input = append(input, s.ti...)
 	input = append(input, payload...)
-	return truncateMAC(cmac(s.macBlock, input))
+	return TruncateMAC(CMAC(s.macBlock, input))
 }
 
 // responseMAC is the MAC the card computes over its answer. It carries the
@@ -173,7 +187,7 @@ func (s *Session) responseMAC(status byte, body []byte) []byte {
 	input = append(input, counterBytes(s.counter+1)...)
 	input = append(input, s.ti...)
 	input = append(input, body...)
-	return truncateMAC(cmac(s.macBlock, input))
+	return TruncateMAC(CMAC(s.macBlock, input))
 }
 
 // encrypt enciphers command data under an IV built from this command's place in
@@ -190,7 +204,7 @@ func (s *Session) decrypt(data []byte) ([]byte, error) {
 }
 
 func (s *Session) encryptWithIV(iv, data []byte) []byte {
-	padded := padISO9797(data)
+	padded := PadISO9797(data)
 	out := make([]byte, len(padded))
 	cipher.NewCBCEncrypter(s.encBlock, iv).CryptBlocks(out, padded)
 	return out
@@ -198,11 +212,11 @@ func (s *Session) encryptWithIV(iv, data []byte) []byte {
 
 func (s *Session) decryptWithIV(iv, data []byte) ([]byte, error) {
 	if len(data)%aes.BlockSize != 0 {
-		return nil, fmt.Errorf("ntag424: encrypted data is %d bytes, want a multiple of %d", len(data), aes.BlockSize)
+		return nil, fmt.Errorf("ev2: encrypted data is %d bytes, want a multiple of %d", len(data), aes.BlockSize)
 	}
 	out := make([]byte, len(data))
 	cipher.NewCBCDecrypter(s.encBlock, iv).CryptBlocks(out, data)
-	return unpadISO9797(out)
+	return UnpadISO9797(out)
 }
 
 // iv builds a command's or response's initialisation vector by encrypting its
@@ -233,7 +247,7 @@ func counterBytes(counter uint16) []byte {
 // padISO9797 appends the 0x80 marker and zeros out to a whole block, which is
 // padding method 2. A message that already fills a block still gains one, so
 // the padding is always removable.
-func padISO9797(data []byte) []byte {
+func PadISO9797(data []byte) []byte {
 	out := append([]byte(nil), data...)
 	out = append(out, 0x80)
 	for len(out)%aes.BlockSize != 0 {
@@ -244,7 +258,7 @@ func padISO9797(data []byte) []byte {
 
 // unpadISO9797 removes that padding. Data whose last block is all zeros with no
 // marker never came from padISO9797.
-func unpadISO9797(data []byte) ([]byte, error) {
+func UnpadISO9797(data []byte) ([]byte, error) {
 	for i := len(data) - 1; i >= 0 && i >= len(data)-aes.BlockSize; i-- {
 		switch data[i] {
 		case 0x00:
@@ -252,8 +266,8 @@ func unpadISO9797(data []byte) ([]byte, error) {
 		case 0x80:
 			return data[:i], nil
 		default:
-			return nil, fmt.Errorf("ntag424: decrypted response is not padded")
+			return nil, fmt.Errorf("ev2: decrypted response is not padded")
 		}
 	}
-	return nil, fmt.Errorf("ntag424: decrypted response is not padded")
+	return nil, fmt.Errorf("ev2: decrypted response is not padded")
 }

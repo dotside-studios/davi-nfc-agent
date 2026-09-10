@@ -1,4 +1,4 @@
-package ntag424
+package ev2
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 // which Tables 7 and 17 then send commands in.
 func tableSession(t *testing.T, ti, encKey, macKey string) *Session {
 	t.Helper()
-	s, err := newSession(mustHex(t, ti), mustHex(t, encKey), mustHex(t, macKey))
+	s, err := NewSession(mustHex(t, ti), mustHex(t, encKey), mustHex(t, macKey))
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestSessionPlainModeStillCounts(t *testing.T) {
 func TestPaddingRoundTrips(t *testing.T) {
 	for _, size := range []int{0, 1, 15, 16, 17, 31, 32} {
 		data := bytes.Repeat([]byte{0xAB}, size)
-		back, err := unpadISO9797(padISO9797(data))
+		back, err := UnpadISO9797(PadISO9797(data))
 		if err != nil {
 			t.Fatalf("%d bytes: %v", size, err)
 		}
@@ -197,7 +197,7 @@ func TestPaddingRoundTrips(t *testing.T) {
 		}
 	}
 
-	if _, err := unpadISO9797(bytes.Repeat([]byte{0x00}, 16)); err == nil {
+	if _, err := UnpadISO9797(bytes.Repeat([]byte{0x00}, 16)); err == nil {
 		t.Error("a block with no padding marker was accepted")
 	}
 }

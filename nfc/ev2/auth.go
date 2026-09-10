@@ -1,4 +1,4 @@
-package ntag424
+package ev2
 
 import (
 	"bytes"
@@ -43,17 +43,19 @@ const (
 // Sizes the exchange works in.
 const (
 	randomSize = 16 // RndA and RndB
-	tiSize     = 4  // transaction identifier
+
+	// TISize is the length of the transaction identifier the card assigns.
+	TISize = 4
 )
 
 // Errors from an authentication exchange.
 var (
 	// ErrAuthFailed reports that the card returned the wrong random number,
 	// meaning the key is wrong or the exchange was tampered with.
-	ErrAuthFailed = errors.New("ntag424: authentication failed")
+	ErrAuthFailed = errors.New("ev2: authentication failed")
 
 	// ErrAuthState reports the steps being taken out of order.
-	ErrAuthState = errors.New("ntag424: authentication step out of order")
+	ErrAuthState = errors.New("ev2: authentication step out of order")
 )
 
 // Authenticator drives one authentication exchange, in two round trips: Command
@@ -76,12 +78,12 @@ type Authenticator struct {
 // pass the transaction identifier from the first authentication; for AuthFirst
 // pass nil, since the card assigns one.
 func NewAuthenticator(mode AuthMode, keyNo byte, key, ti []byte) (*Authenticator, error) {
-	block, err := newCipher(key)
+	block, err := NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	if mode == AuthNonFirst && len(ti) != tiSize {
-		return nil, fmt.Errorf("ntag424: AuthNonFirst needs the transaction identifier from the first authentication")
+	if mode == AuthNonFirst && len(ti) != TISize {
+		return nil, fmt.Errorf("ev2: AuthNonFirst needs the transaction identifier from the first authentication")
 	}
 	return &Authenticator{
 		mode:   mode,
@@ -103,9 +105,9 @@ func (a *Authenticator) SetRandom(r io.Reader) {
 func (a *Authenticator) Command() []byte {
 	if a.mode == AuthNonFirst {
 		// NonFirst sends the key number alone; First adds a capability length.
-		return wrapAPDU(insAuthNonFirst, []byte{a.keyNo})
+		return WrapAPDU(insAuthNonFirst, []byte{a.keyNo})
 	}
-	return wrapAPDU(insAuthFirst, []byte{a.keyNo, 0x00})
+	return WrapAPDU(insAuthFirst, []byte{a.keyNo, 0x00})
 }
 
 // Challenge consumes the card's answer to Command and returns the second APDU.
@@ -125,7 +127,7 @@ func (a *Authenticator) Challenge(response []byte) ([]byte, error) {
 
 	a.rndA = make([]byte, randomSize)
 	if _, err := io.ReadFull(a.random, a.rndA); err != nil {
-		return nil, fmt.Errorf("ntag424: reading a random number: %w", err)
+		return nil, fmt.Errorf("ev2: reading a random number: %w", err)
 	}
 
 	payload := make([]byte, 0, 2*randomSize)
@@ -136,7 +138,7 @@ func (a *Authenticator) Challenge(response []byte) ([]byte, error) {
 	encryptCBC(a.block, encrypted, payload)
 
 	a.stage = 1
-	return wrapAPDU(insAdditionalFrame, encrypted), nil
+	return WrapAPDU(insAdditionalFrame, encrypted), nil
 }
 
 // Finish consumes the card's answer to Challenge and returns the session. The
@@ -151,7 +153,7 @@ func (a *Authenticator) Finish(response []byte) (*Session, error) {
 	// and both sides' capabilities; NonFirst answers with the number alone.
 	size := randomSize
 	if a.mode == AuthFirst {
-		size = tiSize + randomSize + 12 // TI, RndA', PDcap2, PCDcap2
+		size = TISize + randomSize + 12 // TI, RndA', PDcap2, PCDcap2
 	}
 	data, err := frameData(response, size)
 	if err != nil {
@@ -164,8 +166,8 @@ func (a *Authenticator) Finish(response []byte) (*Session, error) {
 	ti := a.ti
 	rotated := plain
 	if a.mode == AuthFirst {
-		ti = append([]byte(nil), plain[:tiSize]...)
-		rotated = plain[tiSize : tiSize+randomSize]
+		ti = append([]byte(nil), plain[:TISize]...)
+		rotated = plain[TISize : TISize+randomSize]
 	}
 
 	if !bytes.Equal(rotateRight(rotated), a.rndA) {
@@ -173,9 +175,9 @@ func (a *Authenticator) Finish(response []byte) (*Session, error) {
 	}
 
 	a.stage = 2
-	encKey := cmac(a.block, sessionVectorSSM(ssmSV1Prefix, a.rndA, a.rndB))
-	macKey := cmac(a.block, sessionVectorSSM(ssmSV2Prefix, a.rndA, a.rndB))
-	return newSession(ti, encKey, macKey)
+	encKey := CMAC(a.block, sessionVectorSSM(ssmSV1Prefix, a.rndA, a.rndB))
+	macKey := CMAC(a.block, sessionVectorSSM(ssmSV2Prefix, a.rndA, a.rndB))
+	return NewSession(ti, encKey, macKey)
 }
 
 // Session vector prefixes for secure messaging. Not interchangeable with the SDM
@@ -214,22 +216,22 @@ func rotateRight(b []byte) []byte {
 // its length. A card mid-exchange answers 91 AF, and a completed one 91 00.
 func frameData(response []byte, size int) ([]byte, error) {
 	if len(response) < 2 {
-		return nil, fmt.Errorf("ntag424: response is %d bytes, too short for a status word", len(response))
+		return nil, fmt.Errorf("ev2: response is %d bytes, too short for a status word", len(response))
 	}
 	data, sw1, sw2 := response[:len(response)-2], response[len(response)-2], response[len(response)-1]
 
-	if !statusOK(sw1, sw2) && !statusMoreFrames(sw1, sw2) {
-		return nil, fmt.Errorf("ntag424: card answered %02X%02X", sw1, sw2)
+	if !StatusOK(sw1, sw2) && !statusMoreFrames(sw1, sw2) {
+		return nil, fmt.Errorf("ev2: card answered %02X%02X", sw1, sw2)
 	}
 	if len(data) != size {
-		return nil, fmt.Errorf("ntag424: response carries %d bytes, want %d", len(data), size)
+		return nil, fmt.Errorf("ev2: response carries %d bytes, want %d", len(data), size)
 	}
 	return data, nil
 }
 
 // statusOK reports a status word meaning the command succeeded. 91 00 is the
 // card's own encoding; 90 00 is a reader that unwraps it.
-func statusOK(sw1, sw2 byte) bool {
+func StatusOK(sw1, sw2 byte) bool {
 	return (sw1 == 0x91 || sw1 == 0x90) && sw2 == 0x00
 }
 
@@ -241,7 +243,7 @@ func statusMoreFrames(sw1, sw2 byte) bool {
 
 // wrapAPDU builds the ISO-wrapped native command the card expects: CLA 90, the
 // instruction, and the data with a trailing Le.
-func wrapAPDU(ins byte, data []byte) []byte {
+func WrapAPDU(ins byte, data []byte) []byte {
 	cmd := make([]byte, 0, 6+len(data))
 	cmd = append(cmd, 0x90, ins, 0x00, 0x00)
 	if len(data) > 0 {

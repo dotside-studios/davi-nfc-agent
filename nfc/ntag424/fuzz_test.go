@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
 )
 
 // Verification reads whatever a caller was handed: a URL from a phone, a
@@ -80,7 +82,7 @@ func FuzzSessionResponse(f *testing.F) {
 	f.Add([]byte{}, 2)
 
 	f.Fuzz(func(t *testing.T, response []byte, mode int) {
-		s, err := newSession(make([]byte, tiSize), zeroKey, zeroKey)
+		s, err := ev2.NewSession(make([]byte, ev2.TISize), zeroKey, zeroKey)
 		if err != nil {
 			t.Fatalf("newSession: %v", err)
 		}

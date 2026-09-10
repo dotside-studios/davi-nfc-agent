@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A DESFire file behind an AES key is now read and written**, over an
+  authenticated EV2 session. The driver reads the NDEF file's access rights, and
+  where they name a key rather than granting the operation to anyone, it
+  authenticates with the key held for that number and drives the file inside the
+  session that leaves: every command MACed, encrypted where the file's
+  communication setting says so, and counted, so the card refuses one replayed or
+  reordered. A file whose key the agent does not hold still reports itself
+  read-only, and reading it gives an identity-only scan rather than an error
+- `Supervisor.SetDESFireKeys` configures those keys, by the key number the card
+  knows each one as, mirroring `SetClassicKeys`. They are held in memory for as
+  long as the process runs: nothing persists them to settings, and nothing logs
+  them. An agent configured with none behaves exactly as before
+- **Package `nfc/ev2`** holds NXP's EV2 secure messaging, lifted out of
+  `nfc/ntag424`: the authenticator, the session, AES-CMAC and the padding. The
+  NTAG 424 DNA speaks the DESFire EV2 command set, so this was never the one
+  card's protocol, and a DESFire driver needed the same code. `ntag424` keeps its
+  API through aliases, and every AN12196 vector moved with the code it pins
+- `ev2.Session.VerifyCommand` and `ev2.Session.Answer` are the card's half of a
+  session, and `ev2.DeriveSessionKeys` the key derivation both halves share.
+  They let a card emulator answer a real session, which is what tests the driver
+  here, and they hold the initiator honest: what one half builds, the other
+  reads. `ev2.NewSessionAt` starts a session at a known counter
+
 - **DESFire generations are named, and its memory and capacity are read off the
   card.** The wrapped `GET_VERSION` the agent already sends during detection now
   identifies a DESFire, and its hardware major version separates EV1 (`0x01`),

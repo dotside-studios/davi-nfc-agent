@@ -1,4 +1,4 @@
-package ntag424
+package ev2
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func TestCMACAgainstRFC4493(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cmac(block, mustHex(t, tt.msg))
+			got := CMAC(block, mustHex(t, tt.msg))
 			if want := mustHex(t, tt.want); !bytes.Equal(got, want) {
 				t.Errorf("cmac = %X, want %X", got, want)
 			}
@@ -87,7 +87,7 @@ func TestCMACDoesNotModifyItsInput(t *testing.T) {
 
 	msg := []byte("a partial final block")
 	before := append([]byte(nil), msg...)
-	cmac(block, msg)
+	CMAC(block, msg)
 	if !bytes.Equal(msg, before) {
 		t.Errorf("message changed: %q, want %q", msg, before)
 	}

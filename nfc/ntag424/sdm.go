@@ -26,14 +26,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
 )
-
-// KeySize is the length of every SDM key: AES-128.
-const KeySize = 16
-
-// MACSize is the length of an SDMMAC, which is a CMAC truncated to half its
-// width.
-const MACSize = 8
 
 // PICCDataSize is the length of the encrypted PICCData block a tag mirrors.
 const PICCDataSize = 16
@@ -44,10 +39,6 @@ const PICCDataSize = 16
 var (
 	// ErrMACMismatch reports that the MAC did not match the data. The tap is
 	// not genuine, or the key is not this tag's.
-	ErrMACMismatch = errors.New("ntag424: SDM MAC does not match")
-
-	// ErrKeySize reports a key that is not AES-128.
-	ErrKeySize = errors.New("ntag424: key must be 16 bytes")
 
 	// ErrPICCData reports encrypted PICCData that is not one AES block, or
 	// that does not decrypt to a well-formed PICCData structure.
@@ -105,7 +96,7 @@ const counterLength = 3
 // leading tag byte describes the structure that follows, which is all this step
 // can check on its own; the MAC is what authenticates a tap.
 func DecryptPICCData(metaReadKey, encrypted []byte) (*PICCData, error) {
-	block, err := newCipher(metaReadKey)
+	block, err := ev2.NewCipher(metaReadKey)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +105,7 @@ func DecryptPICCData(metaReadKey, encrypted []byte) (*PICCData, error) {
 	}
 
 	plain := make([]byte, PICCDataSize)
-	cipher.NewCBCDecrypter(block, make([]byte, blockSize)).CryptBlocks(plain, encrypted)
+	cipher.NewCBCDecrypter(block, make([]byte, ev2.BlockSize)).CryptBlocks(plain, encrypted)
 	return parsePICCData(plain)
 }
 
@@ -173,19 +164,19 @@ var (
 // Only the mirrored fields go into the vectors, so a tag that mirrors the
 // counter but not the UID derives different keys from one that mirrors both.
 func SessionKeys(fileReadKey []byte, data *PICCData) (encKey, macKey []byte, err error) {
-	block, err := newCipher(fileReadKey)
+	block, err := ev2.NewCipher(fileReadKey)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cmac(block, sessionVector(sv1Prefix, data)),
-		cmac(block, sessionVector(sv2Prefix, data)),
+	return ev2.CMAC(block, sessionVector(sv1Prefix, data)),
+		ev2.CMAC(block, sessionVector(sv2Prefix, data)),
 		nil
 }
 
 // sessionVector builds the 16-byte input the session keys are derived from:
 // the prefix, the mirrored fields, then zero padding.
 func sessionVector(prefix []byte, data *PICCData) []byte {
-	sv := make([]byte, blockSize)
+	sv := make([]byte, ev2.BlockSize)
 	n := copy(sv, prefix)
 	if data.UIDMirrored {
 		n += copy(sv[n:], data.UID)
@@ -210,17 +201,7 @@ func MAC(fileReadKey []byte, data *PICCData, input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return truncateMAC(cmac(session, input)), nil
-}
-
-// truncateMAC keeps the odd-indexed bytes of a full CMAC, which is the tag's
-// truncation to 8 bytes.
-func truncateMAC(full []byte) []byte {
-	out := make([]byte, 0, MACSize)
-	for i := 1; i < len(full); i += 2 {
-		out = append(out, full[i])
-	}
-	return out
+	return ev2.TruncateMAC(ev2.CMAC(session, input)), nil
 }
 
 // VerifyMAC reports whether mac is the tag's MAC over input for this tap. The
@@ -251,26 +232,17 @@ func DecryptFileData(fileReadKey []byte, data *PICCData, encrypted []byte) ([]by
 	if err != nil {
 		return nil, err
 	}
-	if len(encrypted) == 0 || len(encrypted)%blockSize != 0 {
-		return nil, fmt.Errorf("ntag424: encrypted file data is %d bytes, want a multiple of %d", len(encrypted), blockSize)
+	if len(encrypted) == 0 || len(encrypted)%ev2.BlockSize != 0 {
+		return nil, fmt.Errorf("ntag424: encrypted file data is %d bytes, want a multiple of %d", len(encrypted), ev2.BlockSize)
 	}
 
-	iv := make([]byte, blockSize)
+	iv := make([]byte, ev2.BlockSize)
 	copy(iv, encodeCounter(data.ReadCounter))
 	session.Encrypt(iv, iv)
 
 	plain := make([]byte, len(encrypted))
 	cipher.NewCBCDecrypter(session, iv).CryptBlocks(plain, encrypted)
 	return plain, nil
-}
-
-// newCipher builds the AES block cipher for an SDM key, refusing a key of the
-// wrong size rather than letting AES report it in its own words.
-func newCipher(key []byte) (cipher.Block, error) {
-	if len(key) != KeySize {
-		return nil, fmt.Errorf("%w, got %d", ErrKeySize, len(key))
-	}
-	return aes.NewCipher(key)
 }
 
 // UIDString renders the UID the way the rest of the agent writes one:

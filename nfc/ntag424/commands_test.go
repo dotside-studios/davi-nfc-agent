@@ -10,11 +10,13 @@ import (
 // the second command of Table 14's session, so its IV and MAC are the ones for
 // command number 1.
 func TestChangeFileSettingsAN12196Table18(t *testing.T) {
+	// Table 17's WriteData was the session's first command, so this one is
+	// counted second.
 	s := tableSession(t, "9D00C4DF",
 		"1309C877509E5A215007FF0ED19CA564",
 		"4C6626F5E72EA694202139295C7A7FC7",
+		1,
 	)
-	s.counter = 1 // Table 17's WriteData was the session's first command.
 
 	settings := mustHex(t, "4000E0C1F121200000430000430000")
 	cmd, err := ChangeFileSettings(s, NDEFFileNo, settings)
@@ -65,8 +67,8 @@ func TestChangeKeyOtherThanSessionsAN12196Table25(t *testing.T) {
 	s := tableSession(t, "7614281A",
 		"4CF3CB41A22583A61E89B158D252FC53",
 		"5529860B2FC5FB6154B7F28361D30BF9",
+		2,
 	)
-	s.counter = 2
 
 	cmd, err := ChangeKey(s,
 		0x02, 0x00,
@@ -98,8 +100,8 @@ func TestChangeKeyOwnAN12196Table26(t *testing.T) {
 	s := tableSession(t, "7614281A",
 		"4CF3CB41A22583A61E89B158D252FC53",
 		"5529860B2FC5FB6154B7F28361D30BF9",
+		3,
 	)
-	s.counter = 3
 
 	cmd, err := ChangeKey(s, 0x00, 0x00, nil, mustHex(t, "5004BF991F408672B1EF00F08F9E8647"), 0x01)
 	if err != nil {
@@ -117,6 +119,7 @@ func TestGetCardUIDAN12196Table28(t *testing.T) {
 	s := tableSession(t, "DF055522",
 		"2B4D963C014DC36F24F69A50A394F875",
 		"379D32130CE61705DD5FD8C36B95D764",
+		0,
 	)
 
 	cmd, err := GetCardUID(s)
@@ -139,7 +142,7 @@ func TestGetCardUIDAN12196Table28(t *testing.T) {
 // A key change that cannot be built is refused rather than sent wrong. The old
 // key has no default: without it the card cannot check the change.
 func TestChangeKeyRefusesWhatItCannotBuild(t *testing.T) {
-	s := tableSession(t, "7614281A", zeroHex, zeroHex)
+	s := tableSession(t, "7614281A", zeroHex, zeroHex, 0)
 
 	t.Run("no session", func(t *testing.T) {
 		if _, err := ChangeKey(nil, 0, 0, nil, make([]byte, KeySize), 1); err == nil {
@@ -165,13 +168,13 @@ func TestChangeKeyRefusesWhatItCannotBuild(t *testing.T) {
 func TestChangeKeyFormDependsOnTheSessionsKey(t *testing.T) {
 	newKey := mustHex(t, "5004BF991F408672B1EF00F08F9E8647")
 
-	own := tableSession(t, "7614281A", zeroHex, zeroHex)
+	own := tableSession(t, "7614281A", zeroHex, zeroHex, 0)
 	sameKey, err := ChangeKey(own, 0x00, 0x00, nil, newKey, 0x01)
 	if err != nil {
 		t.Fatalf("ChangeKey: %v", err)
 	}
 
-	other := tableSession(t, "7614281A", zeroHex, zeroHex)
+	other := tableSession(t, "7614281A", zeroHex, zeroHex, 0)
 	otherKey, err := ChangeKey(other, 0x00, 0x01, zeroKey, newKey, 0x01)
 	if err != nil {
 		t.Fatalf("ChangeKey: %v", err)

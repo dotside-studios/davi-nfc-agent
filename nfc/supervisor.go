@@ -40,6 +40,7 @@ type Supervisor struct {
 	mode        ReaderMode
 	feedback    bool
 	classicKeys [][]byte
+	desfireKeys DESFireKeys
 
 	scans  event.Signal[NFCData]
 	status event.Signal[DeviceStatus]
@@ -168,7 +169,7 @@ func (s *Supervisor) reconcile() {
 			opened = append(opened, device)
 		}
 	}
-	mode, feedback, keys := s.mode, s.feedback, s.classicKeys
+	mode, feedback, keys, aesKeys := s.mode, s.feedback, s.classicKeys, s.desfireKeys
 	s.mu.Unlock()
 
 	for _, reader := range dropped {
@@ -185,6 +186,7 @@ func (s *Supervisor) reconcile() {
 		reader.SetMode(mode)
 		reader.SetFeedback(feedback)
 		reader.SetClassicKeys(keys)
+		reader.SetDESFireKeys(aesKeys)
 
 		s.mu.Lock()
 		if !s.started {

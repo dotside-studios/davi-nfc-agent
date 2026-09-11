@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A DESFire's NDEF application was selected with its identifier reversed.**
+  An application identifier travels least significant byte first, so the NFC
+  Forum's 0x000001 is `01 00 00` on the wire; the driver sent `00 00 01`, which
+  names application 0x010000 and is on no NDEF-formatted card. Every DESFire
+  would have failed its SELECT and scanned as identity-only, never yielding its
+  message. Nothing here caught it: the emulator was written to answer what the
+  driver sends, so both sides agreed on the wrong bytes. `nfc.DESFireAID`
+  encodes an identifier so the order is stated once rather than written out at
+  each call
+
 ### Added
+
+- **Differential vectors for the DESFire commands this driver builds**, in
+  `nfc/desfire_vectors_test.go`, taken from libfreefare and the Proxmark3
+  client. Both have been driving real cards for years, and neither shares an
+  ancestor with this code, so they can say what the bytes are where an emulator
+  written against this driver cannot. They pin SelectApplication, GetVersion,
+  GetFileSettings, ReadData, WriteData, the header a session command carries in
+  the clear, the access-right nibbles in both directions, the frame sizes the
+  Capability Container declares, the hardware major versions that separate EV1
+  from EV2 and EV3, and the storage byte's exponent. The first of them found the
+  bug above. Not covered: the per-chunk transfer this driver uses instead of
+  frame chaining, which is its own choice rather than a protocol claim
+- **A DESFire can be locked.** `MakeReadOnly` rewrites the NDEF file's access
+  rights so that nothing may write it and nothing may change that again, which
+  is what makes the lock permanent rather than merely current. The content stays
+  readable. `ChangeFileSettings` travels inside a session under the change key,
+  enciphered, or plainly while the change right is still open to anyone.
+  `CanLock` now answers per card, from the change right the driver reads off it:
+  a card whose change key the agent does not hold reports false and refuses the
+  lock rather than attempting it
 
 - **A DESFire file behind an AES key is now read and written**, over an
   authenticated EV2 session. The driver reads the NDEF file's access rights, and

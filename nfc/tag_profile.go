@@ -123,9 +123,10 @@ func desfireProfile(family string) tagProfile {
 		technology:   "ISO14443A",
 		canWrite:     true,
 		supportsNDEF: true,
-		// Locking a DESFire file means changing its access rights, which is
-		// not implemented.
-		canLock: false,
+		// Locking means rewriting the file's access rights to deny writing and
+		// deny changing them again. Whether a given card allows it depends on
+		// its change right, which the driver reads off the card.
+		canLock: true,
 		// The driver forwards APDUs to the card, which is how a DESFire
 		// application is meant to be driven.
 		canTransceive:          true,

@@ -200,20 +200,29 @@ func DESFireWrapAPDU(cmd byte, data []byte) []byte {
 
 // DESFire native command codes
 const (
-	DFCmdSelectApplication = 0x5A
-	DFCmdGetApplicationIDs = 0x6A
-	DFCmdGetFileIDs        = 0x6F
-	DFCmdReadData          = 0xBD
-	DFCmdWriteData         = 0x3D
-	DFCmdAuthenticate      = 0x0A // Legacy DES auth
-	DFCmdAuthenticateISO   = 0x1A // 3DES auth
-	DFCmdAuthenticateAES   = 0xAA // AES auth
-	DFCmdGetVersion        = 0x60
-	DFCmdGetFileSettings   = 0xF5
-	DFCmdAdditionalFrame   = 0xAF
+	DFCmdSelectApplication  = 0x5A
+	DFCmdGetApplicationIDs  = 0x6A
+	DFCmdGetFileIDs         = 0x6F
+	DFCmdReadData           = 0xBD
+	DFCmdWriteData          = 0x3D
+	DFCmdAuthenticate       = 0x0A // Legacy DES auth
+	DFCmdAuthenticateISO    = 0x1A // 3DES auth
+	DFCmdAuthenticateAES    = 0xAA // AES auth
+	DFCmdGetVersion         = 0x60
+	DFCmdGetFileSettings    = 0xF5
+	DFCmdChangeFileSettings = 0x5F
+	DFCmdAdditionalFrame    = 0xAF
 )
 
-// DESFireSelectAppAPDU returns APDU for selecting a DESFire application
+// DESFireAID encodes a 24-bit application identifier the way a DESFire reads
+// one: least significant byte first. Application 0x000001, the NFC Forum's NDEF
+// application, travels as 01 00 00.
+func DESFireAID(aid uint32) []byte {
+	return []byte{byte(aid), byte(aid >> 8), byte(aid >> 16)}
+}
+
+// DESFireSelectAppAPDU returns APDU for selecting a DESFire application. aid is
+// the three bytes as the card reads them; build it with DESFireAID.
 func DESFireSelectAppAPDU(aid []byte) []byte {
 	if len(aid) != 3 {
 		return nil

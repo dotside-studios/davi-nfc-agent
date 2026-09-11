@@ -91,6 +91,7 @@ func (t *pcscDESFireTag) Capabilities() TagCapabilities {
 	}
 	caps.CanWrite = t.canWrite(ndef)
 	caps.IsReadOnly = !caps.CanWrite
+	caps.CanLock = t.canChangeSettings(ndef)
 	return caps
 }
 
@@ -105,8 +106,13 @@ const (
 	dfStatusAdditionalFrame = 0xAF // more data follows / send next frame
 
 	// dfFrameData is the max bytes of file data carried in one native frame.
-	// Larger payloads are split across additional frames. Modeled from the
-	// DESFire 60-byte frame (1 status byte); cross-check on hardware.
+	// Larger payloads are split across additional frames.
+	//
+	// Corroborated by the Capability Container an NDEF-formatted DESFire
+	// carries: AN11004's layout, as libfreefare writes it, declares MLe 0x003B
+	// (59) for a read and MLc 0x0034 (52) for a write, which is this figure
+	// less the 7-byte command header. Both match what the frame arithmetic
+	// here already produced.
 	dfFrameData = 59
 
 	// dfNDEFFileNo is the NDEF data file, and dfNLENSize the length prefix it
@@ -125,8 +131,9 @@ const (
 	dfAccessNever = 0x0F
 )
 
-// dfNDEFAppAID is the NFC Forum's DESFire NDEF application.
-var dfNDEFAppAID = []byte{0x00, 0x00, 0x01}
+// dfNDEFAppAID is the NFC Forum's DESFire NDEF application, 0x000001, encoded
+// the way the card reads an application identifier.
+var dfNDEFAppAID = DESFireAID(0x000001)
 
 // dfTransceive sends a wrapped DESFire command and returns the response data and
 // the DESFire native status byte. In ISO-wrapped mode DESFire returns its status
@@ -223,6 +230,7 @@ type desfireFileSettings struct {
 	read      byte
 	write     byte
 	readWrite byte
+	change    byte
 }
 
 func (s desfireFileSettings) freeRead() bool {
@@ -271,6 +279,7 @@ func parseDESFireFileSettings(settings []byte) (desfireFileSettings, bool) {
 		read:      settings[3] >> 4,
 		write:     settings[3] & 0x0F,
 		readWrite: settings[2] >> 4,
+		change:    settings[2] & 0x0F,
 	}, true
 }
 
@@ -455,10 +464,45 @@ func (t *pcscDESFireTag) IsWritable() (bool, error) {
 	return !probed || t.canWrite(ndef), nil
 }
 
+// CanMakeReadOnly reports whether the file's rights can be rewritten, which is
+// what locking one means here.
+//
+// A card nothing has read yet answers with the kind's own capability, as
+// Capabilities does: the driver implements locking, and whether this card
+// permits it is not known until its change right has been read.
 func (t *pcscDESFireTag) CanMakeReadOnly() (bool, error) {
-	return false, nil // DESFire locking is complex
+	probed, _, ndef := t.probedFacts()
+	if !probed {
+		return t.profile().canLock, nil
+	}
+	return t.canChangeSettings(ndef), nil
 }
 
+// MakeReadOnly rewrites the NDEF file's access rights so that nothing may write
+// it and nothing may change that again.
+//
+// This cannot be undone. The change right is set to deny everyone, so no key
+// reopens the file afterwards, which is what makes the lock permanent rather
+// than merely current.
 func (t *pcscDESFireTag) MakeReadOnly() error {
-	return NewNotSupportedError("DESFire MakeReadOnly")
+	if err := t.dfSelectNDEFApp(); err != nil {
+		return NewNotSupportedError("MakeReadOnly (DESFire)")
+	}
+	t.probe()
+
+	probed, _, ndef := t.probedFacts()
+	if !probed || !t.canChangeSettings(ndef) {
+		return NewNotSupportedError("MakeReadOnly (DESFire)")
+	}
+
+	locked := ndef
+	locked.write, locked.readWrite, locked.change = dfAccessNever, dfAccessNever, dfAccessNever
+	if err := t.changeFileSettings(ndef, locked); err != nil {
+		return err
+	}
+
+	t.mu.Lock()
+	t.ndefFile = locked
+	t.mu.Unlock()
+	return nil
 }

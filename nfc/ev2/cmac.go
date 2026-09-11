@@ -19,6 +19,16 @@ const cmacSubkeyConstant = 0x87
 // cmac returns the AES-CMAC of msg under key. The message may be empty, which a
 // tag mirroring nothing but PICCData relies on.
 func CMAC(block cipher.Block, msg []byte) []byte {
+	return CMACFrom(block, make([]byte, BlockSize), msg)
+}
+
+// CMACFrom is CMAC with the CBC chain starting somewhere other than zero.
+//
+// The generation before this one chains its MACs: each command's MAC begins
+// where the last one ended, and the MAC itself becomes the next starting point,
+// so a command cannot be lifted out of the sequence it was sent in. Pass a zero
+// vector for a standalone CMAC, which is what CMAC does.
+func CMACFrom(block cipher.Block, iv, msg []byte) []byte {
 	k1, k2 := cmacSubkeys(block)
 
 	// The last block is XORed with k1 when it is whole, or padded and XORed
@@ -39,9 +49,10 @@ func CMAC(block cipher.Block, msg []byte) []byte {
 		xor(last[:], padded[:], k2)
 	}
 
-	// CBC-MAC over the whole message: the chaining value starts at zero, and
-	// the tag is the encryption of the final block.
+	// CBC-MAC over the whole message: the chaining value starts where the
+	// caller said, and the tag is the encryption of the final block.
 	var chain [BlockSize]byte
+	copy(chain[:], iv)
 	for i := 0; i < len(head); i += BlockSize {
 		xor(chain[:], chain[:], head[i:i+BlockSize])
 		block.Encrypt(chain[:], chain[:])

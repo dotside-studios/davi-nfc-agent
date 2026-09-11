@@ -163,6 +163,34 @@ func TestAssertCapabilitiesConsistent_RejectsASilentEmptyRead(t *testing.T) {
 	}
 }
 
+// A FeliCa is the case identity-only scans were built for: present, answering,
+// and holding nothing this agent can read. It reaches a client once, with its
+// identity and no error.
+func TestPoll_FeliCaScansAsItsIdentity(t *testing.T) {
+	tag := NewTagForType(DetectedFeliCa, &stubCardTransport{}, "0123456789ABCDEF")
+
+	got := pollAndCollect(pollingReader(t, tag), 20)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d scans across 20 polls, want 1", len(got))
+	}
+	if got[0].Err != nil {
+		t.Errorf("scan carries err = %v, want nil", got[0].Err)
+	}
+	if got[0].Card == nil {
+		t.Fatal("scan carries no card")
+	}
+	if got[0].Card.UID != "0123456789ABCDEF" {
+		t.Errorf("UID = %q, want the IDm", got[0].Card.UID)
+	}
+	if got[0].Card.Technology != "ISO18092" {
+		t.Errorf("Technology = %q, want ISO18092", got[0].Card.Technology)
+	}
+	if caps := got[0].Card.Capabilities(); caps.SupportsNDEF {
+		t.Error("the scan claims an NDEF message the driver cannot read")
+	}
+}
+
 func countCalls(tag *MockTag, method string) int {
 	n := 0
 	for _, call := range tag.GetCallLog() {

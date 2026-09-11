@@ -169,6 +169,16 @@ func InferTagCapabilities(tagType string) TagCapabilities {
 			caps.MaxNDEFSize = 3356
 		}
 
+	case strings.Contains(tagTypeLower, "felica"):
+		// Scanned for its identifier. Reading a FeliCa's memory needs its own
+		// command set, which nothing here sends.
+		caps.SupportsNDEF = false
+		caps.CanWrite = false
+		caps.CanTransceive = false
+		caps.CanLock = false
+		caps.TagFamily = "FeliCa"
+		caps.Technology = "ISO18092"
+
 	case strings.Contains(tagTypeLower, "desfire"):
 		caps.CanWrite = true
 		caps.CanTransceive = false

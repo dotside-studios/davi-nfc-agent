@@ -131,8 +131,9 @@ const (
 	dfAccessNever = 0x0F
 )
 
-// dfNDEFAppAID is the NFC Forum's DESFire NDEF application.
-var dfNDEFAppAID = []byte{0x00, 0x00, 0x01}
+// dfNDEFAppAID is the NFC Forum's DESFire NDEF application, 0x000001, encoded
+// the way the card reads an application identifier.
+var dfNDEFAppAID = DESFireAID(0x000001)
 
 // dfTransceive sends a wrapped DESFire command and returns the response data and
 // the DESFire native status byte. In ISO-wrapped mode DESFire returns its status

@@ -214,7 +214,15 @@ const (
 	DFCmdAdditionalFrame    = 0xAF
 )
 
-// DESFireSelectAppAPDU returns APDU for selecting a DESFire application
+// DESFireAID encodes a 24-bit application identifier the way a DESFire reads
+// one: least significant byte first. Application 0x000001, the NFC Forum's NDEF
+// application, travels as 01 00 00.
+func DESFireAID(aid uint32) []byte {
+	return []byte{byte(aid), byte(aid >> 8), byte(aid >> 16)}
+}
+
+// DESFireSelectAppAPDU returns APDU for selecting a DESFire application. aid is
+// the three bytes as the card reads them; build it with DESFireAID.
 func DESFireSelectAppAPDU(aid []byte) []byte {
 	if len(aid) != 3 {
 		return nil

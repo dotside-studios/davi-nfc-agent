@@ -879,7 +879,9 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		}
 		return dfResp(e.fileSettings(), dfStatusOK), nil
 	case nfc.DFCmdSelectApplication:
-		if len(body) == 3 && body[0] == 0x00 && body[1] == 0x00 && body[2] == 0x01 {
+		// The NDEF application, 0x000001, as the card reads one: least
+		// significant byte first.
+		if len(body) == 3 && body[0] == 0x01 && body[1] == 0x00 && body[2] == 0x00 {
 			e.selectedNDEF = true
 			return dfResp(nil, dfStatusOK), nil
 		}

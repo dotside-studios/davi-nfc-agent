@@ -2,25 +2,35 @@ package nfc
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
 
-// Differential vectors for the DESFire commands this driver builds, taken from
-// two independent implementations that have been run against real cards for
-// years:
+// Differential vectors for the DESFire commands this driver builds and the
+// version fields it reads, taken from implementations that have been run
+// against real cards for years:
 //
 //   - libfreefare, libfreefare/mifare_desfire.c and mifare_desfire_aid.c
 //     (github.com/nfc-tools/libfreefare)
-//   - the Proxmark3 client, client/src/mifare/desfirecore.c
-//     (github.com/RfidResearchGroup/proxmark3)
+//   - the Proxmark3 client, client/src/mifare/desfirecore.c and
+//     client/src/cmdhfmfdes.c (github.com/RfidResearchGroup/proxmark3)
+//   - nfcutils, src/lsnfc.c (github.com/nfc-tools/nfcutils)
 //
 // The emulator in nfctest answers whatever this driver sends, so it cannot
 // catch a command that is well-formed and wrong. These can: they say what the
-// bytes are, sourced from somewhere other than this package.
+// bytes are, sourced from somewhere other than this package. The first of them
+// found an application identifier sent in the wrong byte order, which three
+// rounds of work on this driver had gone past.
 //
 // libfreefare speaks the native protocol over libnfc, so its command buffers
 // carry no ISO wrapper. The expectations below add the 90 xx 00 00 Lc … 00
 // envelope this driver sends over PC/SC, which is the only difference.
+//
+// Not covered: the chunking in tag_desfire_session.go, which is this driver's
+// own choice rather than a protocol claim. libfreefare chains a long transfer
+// across additional frames; this driver addresses each chunk by offset instead,
+// to keep every command a whole MACed exchange. What can be checked is that the
+// chunks fit what the card says it accepts, which is below.
 
 func TestDESFireCommandVectors(t *testing.T) {
 	tests := []struct {
@@ -192,5 +202,88 @@ func TestDESFireCapabilityContainerFrameSizes(t *testing.T) {
 	// Both session chunk sizes have to fit what a write may carry.
 	if dfSessionChunk > mlc || dfSessionChunkFull > mlc {
 		t.Errorf("session chunks %d and %d exceed MLc %d", dfSessionChunk, dfSessionChunkFull, mlc)
+	}
+}
+
+// The hardware version a DESFire reports, and what it says about the card.
+//
+// Proxmark3's getCardType matches on product type 0x01 with a major version:
+// 0x01 is an EV1, 0x12 an EV2, 0x22 an EV2 XL, 0x33 an EV3 and 0xA0 a DUOX.
+// This driver names the three it drives and leaves the rest as a plain DESFire,
+// which is the safe reading: an unnamed generation still speaks the commands
+// they share.
+func TestDESFireVersionVectors(t *testing.T) {
+	// vendor, product, subtype, major, minor, storage, protocol, then 91 AF.
+	frame := func(major, storage byte) []byte {
+		return []byte{0x04, 0x01, 0x01, major, 0x00, storage, 0x05, 0x91, 0xAF}
+	}
+
+	tests := []struct {
+		name    string
+		major   byte
+		storage byte
+		want    DetectedTagType
+		source  string
+	}{
+		{"EV1", 0x01, 0x18, DetectedDESFireEV1, "desfirecore.c getCardType: type 01, major 01"},
+		{"EV2", 0x12, 0x1A, DetectedDESFireEV2, "desfirecore.c getCardType: type 01, major 12"},
+		{"EV3", 0x33, 0x1A, DetectedDESFireEV3, "desfirecore.c getCardType: type 01, major 33"},
+		{"EV2 XL, which this driver does not name", 0x22, 0x1C, DetectedDESFire,
+			"desfirecore.c getCardType names major 22 an EV2 XL; here it falls back"},
+		{"DUOX, which this driver does not name", 0xA0, 0x1A, DetectedDESFire,
+			"desfirecore.c getCardType names major A0 a DUOX; here it falls back"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, ok := ParseWrappedVersion(frame(tt.major, tt.storage))
+			if !ok {
+				t.Fatal("ParseWrappedVersion refused a well-formed frame")
+			}
+			if got := version.Kind(); got != tt.want {
+				t.Errorf("Kind() = %v, want %v (%s)", got, tt.want, tt.source)
+			}
+		})
+	}
+}
+
+// The storage byte is an exponent: the size in bytes is 1 << (byte >> 1).
+//
+// nfc-tools/nfcutils prints it as 1 << ((version[5] >> 1) - 10) kilobytes,
+// which is the same figure divided by 1024, and reads the byte at the same
+// offset this parser does.
+func TestDESFireStorageSizeVectors(t *testing.T) {
+	tests := []struct {
+		storage byte
+		want    int
+	}{
+		{0x16, 2 * 1024},
+		{0x18, 4 * 1024},
+		{0x1A, 8 * 1024},
+		{0x1C, 16 * 1024},
+		{0x1E, 32 * 1024},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%#02x", tt.storage), func(t *testing.T) {
+			version := WrappedVersion{StorageSize: tt.storage}
+			if got := version.MemorySize(); got != tt.want {
+				t.Errorf("MemorySize() = %d, want %d (lsnfc.c mifare_desfire_identification)", got, tt.want)
+			}
+			// The same arithmetic the reference does, in kilobytes.
+			if kb := 1 << ((int(tt.storage) >> 1) - 10); kb*1024 != tt.want {
+				t.Errorf("reference formula gives %dk, want %d bytes", kb, tt.want)
+			}
+		})
+	}
+}
+
+// A storage byte encoding no size at all leaves the memory unreported rather
+// than producing a number from nothing.
+func TestDESFireStorageSizeRefusesNonsense(t *testing.T) {
+	for _, storage := range []byte{0x00, 0x01} {
+		if got := (WrappedVersion{StorageSize: storage}).MemorySize(); got != 0 {
+			t.Errorf("MemorySize(%#02x) = %d, want 0", storage, got)
+		}
 	}
 }

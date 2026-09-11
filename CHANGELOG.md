@@ -27,8 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ancestor with this code, so they can say what the bytes are where an emulator
   written against this driver cannot. They pin SelectApplication, GetVersion,
   GetFileSettings, ReadData, WriteData, the header a session command carries in
-  the clear, the access-right nibbles in both directions, and the frame sizes
-  the Capability Container declares. The first of them found the bug above
+  the clear, the access-right nibbles in both directions, the frame sizes the
+  Capability Container declares, the hardware major versions that separate EV1
+  from EV2 and EV3, and the storage byte's exponent. The first of them found the
+  bug above. Not covered: the per-chunk transfer this driver uses instead of
+  frame chaining, which is its own choice rather than a protocol claim
 - **A DESFire can be locked.** `MakeReadOnly` rewrites the NDEF file's access
   rights so that nothing may write it and nothing may change that again, which
   is what makes the lock permanent rather than merely current. The content stays

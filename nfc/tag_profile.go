@@ -185,6 +185,21 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 		supportsAuthentication: true,
 	},
 
+	// A FeliCa is scanned for its identifier. The driver sends it no command,
+	// so it claims nothing beyond what the reader already reported.
+	DetectedFeliCa: {
+		name:        CardTypeFeliCa,
+		numericType: -1, // no SAK; a FeliCa is not ISO 14443
+		family:      "FeliCa",
+		technology:  "ISO18092",
+		// Reading a FeliCa's memory needs its own command set, which a PC/SC
+		// reader carries only through a vendor escape. Nothing here sends one.
+		supportsNDEF:  false,
+		canWrite:      false,
+		canLock:       false,
+		canTransceive: false,
+	},
+
 	DetectedISO14443_4: {
 		name:         CardTypeType4,
 		numericType:  0x20,

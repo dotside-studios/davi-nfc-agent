@@ -34,6 +34,7 @@ var drivenKinds = []nfc.DetectedTagType{
 	nfc.DetectedDESFireEV2,
 	nfc.DetectedDESFireEV3,
 	nfc.DetectedISO14443_4,
+	nfc.DetectedFeliCa,
 }
 
 // TestEveryDriverKeepsTheContract runs the drivers through the contract both

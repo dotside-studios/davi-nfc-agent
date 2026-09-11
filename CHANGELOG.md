@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **FeliCa is detected and scans for its identifier.** A FeliCa presented to a
+  reader was previously an unsupported tag; it now reaches clients as an
+  identity-only scan carrying its IDm, `type` `FeliCa` and `technology`
+  `ISO18092`. Its own command set is not implemented: a FeliCa is ISO 18092
+  rather than ISO 14443, and a PC/SC reader carries those commands only through
+  an escape that differs per reader. The contents of a transit card or an access
+  badge sit behind issuer keys and would not be readable in any case. Reading a
+  FeliCa that carries NDEF, which is an NFC Forum Type 3 tag, still needs that
+  command set
+- **Differential vectors for ATR card-name detection**, taken from the registry
+  in pcsc-tools. Detection constants are the part of this package with nothing
+  behind them: no round trip to fail, and no emulator to disagree, because the
+  emulators are built from a kind detection already chose
+
+### Fixed
+
+- **Four card names in the ATR table named the wrong card.** Against the
+  registry: `0x0004` is an SLE55R rather than a MIFARE Mini, `0x0006` and
+  `0x0007` are ST SR176 and SRI X4K rather than MIFARE Plus, `0x000A` and
+  `0x000B` are Atmel AT88SC parts rather than Plus in SL2, and `0x0026`, read
+  here as a DESFire, is the Mini. Only the last had a driver behind it, so a
+  MIFARE Mini was being driven down the DESFire path; the rest named kinds with
+  no driver and fell through to command detection either way. The table now
+  reads the card name as the two bytes it is, rather than the low byte alone,
+  and ignores the standard byte before it, which varies by reader
+
 ### Fixed
 
 - **A DESFire's NDEF application was selected with its identifier reversed.**

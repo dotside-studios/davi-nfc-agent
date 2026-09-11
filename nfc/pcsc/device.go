@@ -183,7 +183,7 @@ func (d *device) DeviceType() string {
 
 // SupportedTagTypes returns the list of supported tag types (implements DeviceInfoProvider)
 func (d *device) SupportedTagTypes() []string {
-	return []string{"MIFARE Classic", "DESFire", "Ultralight", "NTAG", "ISO14443-4"}
+	return []string{"MIFARE Classic", "DESFire", "Ultralight", "NTAG", "ISO14443-4", "FeliCa"}
 }
 
 // SupportsTransceive reports that a PC/SC reader can exchange APDUs with the

@@ -31,21 +31,40 @@ const (
 	DetectedNTAG424
 	DetectedPlus2K
 	DetectedPlus4K
+	// DetectedFeliCa is a FeliCa card. It is ISO 18092 rather than ISO 14443
+	// and speaks its own command set, so the agent reads its identifier and
+	// nothing else; see tag_felica.go.
+	DetectedFeliCa
 )
 
-// ATR historical byte patterns for tag type detection
-// These are found in the ATR returned by PC/SC readers
-var atrPatterns = map[byte]DetectedTagType{
-	0x01: DetectedClassic1K,
-	0x02: DetectedClassic4K,
-	0x03: DetectedUltralight,
-	0x04: DetectedMini,
-	0x05: DetectedUltralightC,
-	0x06: DetectedPlus2K,  // MIFARE Plus 2K in SL1
-	0x07: DetectedPlus4K,  // MIFARE Plus 4K in SL1
-	0x0A: DetectedPlus2K,  // MIFARE Plus 2K in SL2
-	0x0B: DetectedPlus4K,  // MIFARE Plus 4K in SL2
-	0x26: DetectedDESFire, // DESFire (various versions)
+// atrCardNames maps the two-byte card name a PC/SC reader puts in the ATR's
+// historical bytes onto the card it names.
+//
+// The name follows the standard byte, which says which contactless standard the
+// card follows. The standard byte is not matched on: the ATR registry carries it
+// as a wildcard for these cards, because readers differ on what they report
+// there.
+//
+// Sourced from the registry in pcsc-tools (smartcard_list.txt), which follows
+// the PC/SC Part 3 supplemental document, and pinned in TestATRCardNameVectors.
+// Four of the names this table carried before did not survive that check: 0x0004
+// is an SLE55R rather than a MIFARE Mini, 0x0006 and 0x0007 are ST SR176 and
+// SRI X4K rather than MIFARE Plus, 0x000A and 0x000B are Atmel AT88SC parts
+// rather than Plus in SL2, and 0x0026, which this table read as a DESFire, is
+// the Mini. None had a driver behind it except the DESFire reading, which sent
+// a Mini down the DESFire path.
+var atrCardNames = map[uint16]DetectedTagType{
+	0x0001: DetectedClassic1K,
+	0x0002: DetectedClassic4K,
+	0x0003: DetectedUltralight,
+	// Not in the registry, and not contradicted by it. Kept because a driver
+	// for this kind exists and nothing else produces it.
+	0x0005: DetectedUltralightC,
+	0x0026: DetectedMini,
+	0x003B: DetectedFeliCa,
+	// Observed on a DESFire EV3 4K. A DESFire that presents another name is
+	// still recognised by the wrapped GET_VERSION during command detection.
+	0xFF20: DetectedDESFire,
 }
 
 // DetectTagTypeFromATR parses ATR and returns detected tag type
@@ -68,9 +87,8 @@ func DetectTagTypeFromATR(atr []byte) DetectedTagType {
 
 	histBytes := atr[histStart:]
 
-	// Look for PC/SC 2.01 Part 3 format
-	// Historical bytes: 80 4F 0C A0 00 00 03 06 03 00 XX ...
-	// Where XX is the card type
+	// PC/SC Part 3 historical bytes: 80 4F 0C A0 00 00 03 06 SS NN NN 00 00 00 00,
+	// where SS is the standard the card follows and NN NN names the card.
 	for i := 0; i < len(histBytes)-10; i++ {
 		// Look for standard prefix: 80 4F 0C A0 00 00 03 06
 		if histBytes[i] == 0x80 && i+11 < len(histBytes) {
@@ -80,9 +98,8 @@ func DetectTagTypeFromATR(atr []byte) DetectedTagType {
 				histBytes[i+5] == 0x00 &&
 				histBytes[i+6] == 0x03 &&
 				histBytes[i+7] == 0x06 {
-				// Found the pattern, card type is at offset +10
-				cardType := histBytes[i+10]
-				if t, ok := atrPatterns[cardType]; ok {
+				name := uint16(histBytes[i+9])<<8 | uint16(histBytes[i+10])
+				if t, ok := atrCardNames[name]; ok {
 					return t
 				}
 			}

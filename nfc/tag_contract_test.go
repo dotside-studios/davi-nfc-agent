@@ -39,8 +39,11 @@ func TestProfilesAreComplete(t *testing.T) {
 		if profile.technology == "" {
 			t.Errorf("%s has no technology", profile.name)
 		}
-		if profile.numericType < 0 {
-			t.Errorf("%s has no numeric type", profile.name)
+		// -1 is the documented way to say a kind has no SAK-like number, which
+		// is the honest answer for a card that is not ISO 14443. Anything
+		// further negative is a mistake.
+		if profile.numericType < -1 {
+			t.Errorf("%s has a nonsense numeric type %d", profile.name, profile.numericType)
 		}
 		if profile.family == "" {
 			t.Errorf("%s has no family", profile.name)

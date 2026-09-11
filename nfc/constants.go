@@ -17,6 +17,7 @@ const (
 	CardTypeNtag424          = "NTAG424"
 	CardTypeDesfire          = "DESFire"
 	CardTypeType4            = "Type4"
+	CardTypeFeliCa           = "FeliCa"
 )
 
 // MIFARE Classic key type constants for authentication
@@ -49,6 +50,7 @@ func GetAllCardTypes() []string {
 		CardTypeNtag424,
 		CardTypeDesfire,
 		CardTypeType4,
+		CardTypeFeliCa,
 	}
 }
 

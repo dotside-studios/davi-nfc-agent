@@ -3,8 +3,6 @@ package nfc
 import (
 	"fmt"
 	"sync"
-
-	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
 )
 
 type pcscDESFireTag struct {
@@ -23,7 +21,7 @@ type pcscDESFireTag struct {
 	ndefFile   desfireFileSettings
 
 	keys         DESFireKeys
-	session      *ev2.Session
+	session      desfireChannel
 	sessionKeyNo byte
 }
 
@@ -354,32 +352,23 @@ func (t *pcscDESFireTag) fileReader() (func(offset, length int) ([]byte, error),
 		}, nil
 	}
 
-	session, mode, err := t.openFor(ndef, ndef.readKey)
+	session, err := t.openFor(ndef, ndef.readKey)
 	if err != nil {
 		return nil, err
 	}
 	return func(offset, length int) ([]byte, error) {
-		return t.sessionReadFile(session, mode, dfNDEFFileNo, offset, length)
+		return t.sessionReadFile(session, ndef.comm, dfNDEFFileNo, offset, length)
 	}, nil
 }
 
-// openFor authenticates with the key the named right points at, and reports the
-// protection the file's settings demand of every command that follows.
-func (t *pcscDESFireTag) openFor(ndef desfireFileSettings, named func() (byte, bool)) (*ev2.Session, ev2.CommMode, error) {
+// openFor authenticates with the key the named right points at.
+func (t *pcscDESFireTag) openFor(ndef desfireFileSettings, named func() (byte, bool)) (desfireChannel, error) {
 	keyNo, ok := named()
 	if !ok {
-		return nil, 0, NewAuthError("DESFire file access", t.uid,
+		return nil, NewAuthError("DESFire file access", t.uid,
 			fmt.Errorf("the file's access rights deny the operation to every key"))
 	}
-	mode, err := commMode(ndef.comm)
-	if err != nil {
-		return nil, 0, err
-	}
-	session, err := t.authenticate(keyNo)
-	if err != nil {
-		return nil, 0, err
-	}
-	return session, mode, nil
+	return t.authenticate(keyNo)
 }
 
 func (t *pcscDESFireTag) ReadData() ([]byte, error) {
@@ -434,12 +423,12 @@ func (t *pcscDESFireTag) WriteData(data []byte) error {
 		return t.dfWriteFile(dfNDEFFileNo, uint32(offset), chunk)
 	}
 	if probed && !ndef.freeWrite() {
-		session, mode, err := t.openFor(ndef, ndef.writeKey)
+		session, err := t.openFor(ndef, ndef.writeKey)
 		if err != nil {
 			return err
 		}
 		write = func(offset int, chunk []byte) error {
-			return t.sessionWriteFile(session, mode, dfNDEFFileNo, offset, chunk)
+			return t.sessionWriteFile(session, ndef.comm, dfNDEFFileNo, offset, chunk)
 		}
 	}
 

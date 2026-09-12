@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A DESFire EV1's files behind AES keys are now reachable.** An EV1 does not
+  answer `AuthenticateEV2First`, so an EV1 whose NDEF file named a key fell back
+  to unauthenticated access and reported itself read-only. **Package `nfc/ev1`**
+  implements the exchange it does answer, `AuthenticateAES` (`0xAA`), and the
+  messaging that follows: no transaction identifier and no counter, a chaining
+  vector that every MAC continues and replaces, and the leading eight bytes of
+  each MAC on the wire, where the generation after it keeps the odd-indexed ones
+- The driver picks the exchange from the generation the card reported, so an EV1
+  is offered only the older one and an EV2 or EV3 only the newer. A DESFire whose
+  generation is unknown tries the newer first and falls back, since a card that
+  does not implement it refuses it without changing anything
+- `ev2.CMACFrom` is CMAC with the chain starting somewhere other than zero, which
+  is what the older generation's messaging needs. `CMAC` is now that with a zero
+  vector, and RFC 4493's vectors still pin it
+- `nfctest.DESFireEV1` is an emulated card of that generation: it refuses the
+  newer exchange and answers the older, and its card side verifies what the
+  driver sends rather than accepting it
+
+### Changed
+
+- Enciphered communication on an EV1 is refused rather than driven with the
+  wrong scheme. That generation protects an enciphered file with a checksum
+  inside the ciphertext rather than a MAC beside it, which `nfc/ev1` does not
+  implement; a file asking for it reports so instead of failing at the card
+
+### Added
+
 - **FeliCa is detected and scans for its identifier.** A FeliCa presented to a
   reader was previously an unsupported tag; it now reaches clients as an
   identity-only scan carrying its IDm, `type` `FeliCa` and `technology`

@@ -47,10 +47,13 @@ const (
 	dfStatusOK              = 0x00
 	dfStatusAdditionalFrame = 0xAF
 	dfStatusAuthError       = 0xAE
+	dfStatusIllegalCommand  = 0x1C
 	dfFrameData             = 59
 
-	// insAuthEV2First begins an EV2 authentication.
-	insAuthEV2First = 0x71
+	// insAuthEV2First begins an EV2 authentication, and insAuthenticateAES the
+	// exchange the generation before it offers.
+	insAuthEV2First    = 0x71
+	insAuthenticateAES = 0xAA
 
 	// Communication settings a file can demand of a command touching it.
 	dfCommPlain = 0x00
@@ -616,7 +619,8 @@ type desfireEmulator struct {
 	keys                    map[byte][]byte
 	authKeyNo               byte
 	authRndA, authRndB      []byte
-	session                 *ev2.Session
+	ev1IV                   []byte
+	channel                 emuChannel
 
 	readOff, readRemain   int
 	writeOff, writeRemain int
@@ -732,9 +736,11 @@ func (e *desfireEmulator) finishAuth(body []byte) []byte {
 	if err != nil {
 		return dfResp(nil, dfStatusAuthError)
 	}
-	if e.session, err = ev2.NewSession(ti, encKey, macKey); err != nil {
+	session, err := ev2.NewSession(ti, encKey, macKey)
+	if err != nil {
 		return dfResp(nil, dfStatusAuthError)
 	}
+	e.channel = emuEV2Channel{session: session}
 	return dfResp(encrypted, dfStatusOK)
 }
 
@@ -754,10 +760,10 @@ func (e *desfireEmulator) changeFileSettings(cmd, body []byte) []byte {
 	settings := body[1:]
 
 	if e.change() != dfAccessFree {
-		if e.session == nil {
+		if e.channel == nil {
 			return dfResp(nil, dfStatusAuthError)
 		}
-		header, data, err := e.session.VerifyCommand(cmd, ev2.CommFull, 1)
+		header, data, err := e.channel.verify(cmd, dfCommFull, 1)
 		if err != nil || len(header) != 1 || header[0] != 0x02 {
 			return dfResp(nil, dfStatusAuthError)
 		}
@@ -775,8 +781,8 @@ func (e *desfireEmulator) changeFileSettings(cmd, body []byte) []byte {
 	e.rwAccess, e.changeAccess = settings[1]>>4, settings[1]&0x0F
 	e.readAccess, e.writeAccess = settings[2]>>4, settings[2]&0x0F
 
-	if e.session != nil && e.change() != dfAccessFree {
-		out, err := e.session.Answer(dfStatusOK, nil, ev2.CommFull)
+	if e.channel != nil && e.change() != dfAccessFree {
+		out, err := e.channel.answer(dfStatusOK, nil, dfCommFull)
 		if err != nil {
 			return dfResp(nil, 0xA0)
 		}
@@ -788,16 +794,17 @@ func (e *desfireEmulator) changeFileSettings(cmd, body []byte) []byte {
 // change is the right that governs rewriting the settings themselves.
 func (e *desfireEmulator) change() byte { return e.changeAccess }
 
+// legacyOnly reports a card of the generation that does not implement
+// AuthenticateEV2First, which is every EV1. The hardware major version says so.
+func (e *desfireEmulator) legacyOnly() bool {
+	return len(e.version) > 3 && e.version[3] == 0x01
+}
+
 // sessionFileCommand answers a read or a write inside the session, verifying
 // the MAC the reader put on it and MACing the answer in turn.
 func (e *desfireEmulator) sessionFileCommand(cmd []byte, ins byte) []byte {
-	mode, err := sessionCommMode(e.comm)
-	if err != nil {
-		return dfResp(nil, 0xA0)
-	}
-
 	const fileHeaderLen = 7
-	header, data, err := e.session.VerifyCommand(cmd, mode, fileHeaderLen)
+	header, data, err := e.channel.verify(cmd, e.comm, fileHeaderLen)
 	if err != nil {
 		return dfResp(nil, dfStatusAuthError)
 	}
@@ -817,26 +824,11 @@ func (e *desfireEmulator) sessionFileCommand(cmd []byte, ins byte) []byte {
 		copy(e.file2[off:off+length], data[:length])
 	}
 
-	out, err := e.session.Answer(dfStatusOK, answer, mode)
+	out, err := e.channel.answer(dfStatusOK, answer, e.comm)
 	if err != nil {
 		return dfResp(nil, 0xA0)
 	}
 	return out
-}
-
-// sessionCommMode maps the file's communication setting onto the session's,
-// mirroring what the driver does with the same byte.
-func sessionCommMode(setting byte) (ev2.CommMode, error) {
-	switch setting {
-	case dfCommPlain:
-		return ev2.CommPlain, nil
-	case dfCommMAC:
-		return ev2.CommMAC, nil
-	case dfCommFull:
-		return ev2.CommFull, nil
-	default:
-		return 0, fmt.Errorf("nfctest: unknown communication setting %#02x", setting)
-	}
 }
 
 func (e *desfireEmulator) IsCardPresent() bool {
@@ -868,7 +860,12 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 	body := cmd[5 : 5+lc]
 	switch cmd[1] {
 	case insAuthEV2First:
+		if e.legacyOnly() {
+			return dfResp(nil, dfStatusIllegalCommand), nil
+		}
 		return e.authenticate(body), nil
+	case insAuthenticateAES:
+		return e.authenticateAES(body), nil
 	case nfc.DFCmdGetVersion:
 		return dfResp(e.version, dfStatusAdditionalFrame), nil
 	case nfc.DFCmdChangeFileSettings:
@@ -888,7 +885,7 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		return dfResp(nil, 0xA0), nil
 	case nfc.DFCmdReadData:
 		if _, needsKey := e.accessNeedsKey(e.readAccess); needsKey {
-			if e.session == nil {
+			if e.channel == nil {
 				return dfResp(nil, dfStatusAuthError), nil
 			}
 			return e.sessionFileCommand(cmd, nfc.DFCmdReadData), nil
@@ -901,7 +898,7 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		return e.nextReadFrame(), nil
 	case nfc.DFCmdWriteData:
 		if _, needsKey := e.accessNeedsKey(e.writeAccess); needsKey {
-			if e.session == nil {
+			if e.channel == nil {
 				return dfResp(nil, dfStatusAuthError), nil
 			}
 			return e.sessionFileCommand(cmd, nfc.DFCmdWriteData), nil
@@ -921,7 +918,10 @@ func (e *desfireEmulator) Transceive(cmd []byte) ([]byte, error) {
 		}
 		return dfResp(nil, dfStatusOK), nil
 	case nfc.DFCmdAdditionalFrame:
-		if e.authRndB != nil && e.session == nil {
+		if e.authRndB != nil && e.channel == nil {
+			if e.legacyOnly() {
+				return e.finishAuthAES(body), nil
+			}
 			return e.finishAuth(body), nil
 		}
 		if e.writeRemain > 0 {
@@ -1257,6 +1257,16 @@ func Classic1K(uid string) *EmulatedCard {
 }
 func DESFire(uid string) *EmulatedCard {
 	return newCard(nfc.DetectedDESFireEV2, uid, newDESFireEmulator())
+}
+
+// DESFireEV1 constructs a DESFire of the generation before EV2: it refuses
+// AuthenticateEV2First and offers AuthenticateAES instead, which is what makes
+// it worth having beside DESFire.
+func DESFireEV1(uid string) *EmulatedCard {
+	e := newDESFireEmulator()
+	// An EV1 with 4K of EEPROM: the hardware major version is what says so.
+	e.version = []byte{0x04, 0x01, 0x01, 0x01, 0x00, 0x18, 0x05}
+	return newCard(nfc.DetectedDESFireEV1, uid, e)
 }
 
 // Type4 constructs a blank NFC Forum Type 4 tag (ISO14443-4), driven through the

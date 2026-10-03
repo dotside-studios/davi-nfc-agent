@@ -2,6 +2,7 @@ package clientserver
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
@@ -94,6 +95,28 @@ func auditRawSequence(steps []nfc.SequenceStep, device, uid, sessionID string) {
 	clientLog.Printf("Raw sequence of %d steps %s", len(steps), where)
 	for _, step := range steps {
 		auditRawExchange(step.Data, false, device, uid)
+	}
+}
+
+// auditRawFollowups records the commands autoGetResponse sent after the ones the
+// client asked for, a GET RESPONSE or a command re-sent with a corrected Le,
+// each as part of the exchange it followed. One list per step; a step that
+// needed none has an empty one. They are recorded after the run, as it is the
+// card's replies that decide whether there are any.
+func auditRawFollowups(followups [][][]byte, device, uid, sessionID string) {
+	for _, follow := range followups {
+		for _, cmd := range follow {
+			level, msg := rawExchangeAudit(cmd, false, device, uid)
+			msg = "Raw exchange follow-up (autoGetResponse)" + strings.TrimPrefix(msg, "Raw exchange")
+			if sessionID != "" {
+				msg += " (session " + sessionID + ")"
+			}
+			if level == auditWarn {
+				clientWarn.Printf("%s", msg)
+			} else {
+				clientLog.Printf("%s", msg)
+			}
+		}
 	}
 }
 

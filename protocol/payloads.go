@@ -305,9 +305,11 @@ type NTAG424ResponsePayload struct {
 	KeyNo      *int `json:"keyNo,omitempty"`
 	KeyVersion *int `json:"keyVersion,omitempty"`
 
-	// Signature answers readSig: the 56-byte originality signature, base64,
-	// unverified.
+	// Signature answers readSig: the 56-byte originality signature, base64.
+	// Genuine is whether it verifies over the card's real UID under NXP's
+	// public key.
 	Signature string `json:"signature,omitempty"`
+	Genuine   *bool  `json:"genuine,omitempty"`
 
 	// Locked answers lock and Changed answers changeKey.
 	Locked  bool `json:"locked,omitempty"`

@@ -36,6 +36,12 @@ const (
 	WSMessageTypeRawSessionEndRequest    = protocol.WSTypeRawSessionEndRequest
 	WSMessageTypeRawSessionEndResponse   = protocol.WSTypeRawSessionEndResponse
 
+	WSMessageTypeTransceiveSequenceRequest  = protocol.WSTypeTransceiveSequenceRequest
+	WSMessageTypeTransceiveSequenceResponse = protocol.WSTypeTransceiveSequenceResponse
+
+	WSMessageTypeNTAG424Request  = protocol.WSTypeNTAG424Request
+	WSMessageTypeNTAG424Response = protocol.WSTypeNTAG424Response
+
 	WSMessageTypeError = protocol.WSTypeError
 )
 

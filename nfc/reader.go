@@ -1412,6 +1412,12 @@ func (r *deviceReader) soleTag(expectUID string) (Tag, error) {
 	return tag, nil
 }
 
+// capabilityProber is a tag that can learn one more fact for a capability
+// report, at the cost of an exchange with the card.
+type capabilityProber interface {
+	probeCapabilities()
+}
+
 // GetCapabilities reports the capabilities of the tag currently presented to
 // the reader: memory size, writability, lock and password support, and
 // read-only state. It requires exactly one tag to be present, performs no
@@ -1433,6 +1439,10 @@ func (r *deviceReader) GetCapabilitiesExpecting(ctx context.Context, expectUID s
 			return err
 		}
 
+		r.applyKeys(tag)
+		if p, ok := tag.(capabilityProber); ok {
+			p.probeCapabilities()
+		}
 		caps = GetTagCapabilities(tag)
 		return nil
 	})

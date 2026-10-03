@@ -21,6 +21,8 @@ import (
 
 var _ nfc.TagHolder = (*Agent)(nil)
 var _ nfc.RawSessionHolder = (*Agent)(nil)
+var _ nfc.SequenceHolder = (*Agent)(nil)
+var _ nfc.NTAG424Holder = (*Agent)(nil)
 
 // errNotServing is what an operation gets before Start and after Stop. The
 // agent answers rather than leaving a caller with a nil to dereference.
@@ -171,6 +173,43 @@ func (a *Agent) TransceiveInSessionTag(ctx context.Context, leaseID string, data
 		return nil, errNotServing
 	}
 	return readers.TransceiveInSessionTag(ctx, leaseID, data)
+}
+
+// TransceiveSequenceTag runs several raw exchanges under one tag operation.
+func (a *Agent) TransceiveSequenceTag(ctx context.Context, device, tagUID string, steps []nfc.SequenceStep) (*nfc.SequenceResult, error) {
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return nil, errNotServing
+	}
+	device, err := a.operateOn(device)
+	if err != nil {
+		return nil, err
+	}
+	return readers.TransceiveSequenceTag(ctx, device, tagUID, steps)
+}
+
+// TransceiveSequenceInSessionTag runs several raw exchanges inside a raw
+// session lease.
+func (a *Agent) TransceiveSequenceInSessionTag(ctx context.Context, leaseID string, steps []nfc.SequenceStep) (*nfc.SequenceResult, error) {
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return nil, errNotServing
+	}
+	return readers.TransceiveSequenceInSessionTag(ctx, leaseID, steps)
+}
+
+// WithNTAG424Tag runs fn under one tag operation on the NTAG 424 DNA the named
+// device is holding.
+func (a *Agent) WithNTAG424Tag(ctx context.Context, device, tagUID string, fn func(nfc.NTAG424Operator) error) error {
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return errNotServing
+	}
+	device, err := a.operateOn(device)
+	if err != nil {
+		return err
+	}
+	return readers.WithNTAG424Tag(ctx, device, tagUID, fn)
 }
 
 // TagCapabilities reports what the tag the named device is holding supports.

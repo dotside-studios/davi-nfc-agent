@@ -36,6 +36,8 @@ type tagOps struct {
 
 var _ server.TagOps = (*tagOps)(nil)
 var _ server.RawSessionOps = (*tagOps)(nil)
+var _ server.SequenceOps = (*tagOps)(nil)
+var _ server.NTAG424Ops = (*tagOps)(nil)
 
 // modificationAllowed reports whether the agent permits a write, a lock or a
 // raw exchange. It governs tags held by devices as well as those on a reader:
@@ -174,6 +176,40 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 		return nil, sourceFailure(err, rt.device, "exchange", protocol.ErrCodeTransceiveFailed)
 	}
 	return data, nil
+}
+
+// TransceiveSequence runs several exchanges under one tag operation, under the
+// same gates and audit as a single raw exchange.
+func (s *tagOps) TransceiveSequence(ctx context.Context, req server.SequenceOp) (*nfc.SequenceResult, error) {
+	if err := s.rawChannelGate("raw exchanges"); err != nil {
+		return nil, err
+	}
+	holder, ok := s.tags.(nfc.SequenceHolder)
+	if !ok {
+		return nil, protocol.WrapError(protocol.ErrCodeNotSupported, nfc.NewNotSupportedError("TransceiveSequence"),
+			"raw sequences are not supported here")
+	}
+
+	if req.SessionID != "" {
+		auditRawSequence(req.Steps, req.DeviceID, req.TagUID, req.SessionID)
+		result, err := holder.TransceiveSequenceInSessionTag(ctx, req.SessionID, req.Steps)
+		if err != nil {
+			return nil, sourceFailure(err, req.DeviceID, "sequence", protocol.ErrCodeTransceiveFailed)
+		}
+		return result, nil
+	}
+
+	rt, err := s.resolveRoute(req.TagUID, req.DeviceID, req.AllowUntargeted)
+	if err != nil {
+		return nil, err
+	}
+
+	auditRawSequence(req.Steps, rt.device, rt.uid, "")
+	result, err := holder.TransceiveSequenceTag(ctx, rt.device, rt.uid, req.Steps)
+	if err != nil {
+		return nil, sourceFailure(err, rt.device, "sequence", protocol.ErrCodeTransceiveFailed)
+	}
+	return result, nil
 }
 
 // BeginRawSession leases the reader holding the named tag, under the same

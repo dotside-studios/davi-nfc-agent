@@ -147,6 +147,173 @@ type RawSessionEndResponsePayload struct {
 	SessionID string `json:"sessionId"`
 }
 
+// TransceiveStep is one command of a transceiveSequenceRequest.
+type TransceiveStep struct {
+	// Data is the command, base64.
+	Data string `json:"data"`
+
+	// ExpectSW ends the run after this step unless the reply's status word is
+	// one of these, each four hex characters. Omitted expects anything.
+	ExpectSW []string `json:"expectSW,omitempty"`
+
+	// StopOnSW ends the run after this step when the reply's status word is one
+	// of these, each four hex characters.
+	StopOnSW []string `json:"stopOnSW,omitempty"`
+}
+
+// TransceiveSequenceRequestPayload runs several APDU exchanges with the tag it
+// names under one tag operation, so nothing else reaches the card between
+// them. At most 32 steps.
+type TransceiveSequenceRequestPayload struct {
+	TagTarget
+
+	Steps []TransceiveStep `json:"steps"`
+
+	// SessionID runs the sequence inside a raw session begun with
+	// rawSessionBeginRequest, which already names the tag.
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// TransceiveSequenceResponsePayload answers a transceiveSequenceRequest.
+type TransceiveSequenceResponsePayload struct {
+	// Results holds one entry per step that ran, in order.
+	Results []TransceiveResponsePayload `json:"results"`
+
+	// StoppedAt is the index of the step whose reply ended the run early, or -1
+	// when every step ran.
+	StoppedAt int `json:"stoppedAt"`
+}
+
+// NTAG424SDMOptions are the key numbers and access rights an SDM URL is planned
+// with. Each is a key number 0 to 4, 14 for free access or 15 for never. An
+// omitted one takes its default: read is free, counterRet is never, and the
+// rest are key 0. No key material appears here.
+type NTAG424SDMOptions struct {
+	MetaRead   *int `json:"metaRead,omitempty"`
+	FileRead   *int `json:"fileRead,omitempty"`
+	CounterRet *int `json:"counterRet,omitempty"`
+	Change     *int `json:"change,omitempty"`
+	Read       *int `json:"read,omitempty"`
+	Write      *int `json:"write,omitempty"`
+	ReadWrite  *int `json:"readWrite,omitempty"`
+
+	// EncLength is the width of {enc} in mirrored characters, a multiple of 32.
+	// Omitted means 32.
+	EncLength int `json:"encLength,omitempty"`
+}
+
+// NTAG424RequestPayload is an operation on an NTAG 424 DNA the agent holds
+// keys for. Op selects it: getFileSettings, configureSDM, changeKey,
+// getCardUID, getKeyVersion, readSig or lock. configureSDM, changeKey and lock
+// change the tag and are refused in read-only mode; changeKey and lock are
+// irreversible and also need Confirm.
+type NTAG424RequestPayload struct {
+	TagTarget
+
+	Op string `json:"op"`
+
+	// FileNo is the file getFileSettings reads. Omitted means the NDEF file, 2.
+	FileNo int `json:"fileNo,omitempty"`
+
+	// URLTemplate and SDM plan configureSDM. The template holds {picc} or {uid}
+	// and {ctr}, optionally {enc}, and {mac}.
+	URLTemplate string             `json:"urlTemplate,omitempty"`
+	SDM         *NTAG424SDMOptions `json:"sdm,omitempty"`
+
+	// KeyNo is the key changeKey replaces and getKeyVersion reads. AuthKeyNo is
+	// the key the session for changeKey authenticates with. Version is the new
+	// key's version byte.
+	KeyNo     int `json:"keyNo,omitempty"`
+	AuthKeyNo int `json:"authKeyNo,omitempty"`
+	Version   int `json:"version,omitempty"`
+
+	// NewKeySource is "configured", the key the agent holds for KeyNo, or
+	// "explicit", the 32 hex characters in NewKey. The key is never echoed or
+	// logged.
+	NewKeySource string `json:"newKeySource,omitempty"`
+	NewKey       string `json:"newKey,omitempty"`
+
+	// Confirm acknowledges an irreversible operation.
+	Confirm bool `json:"confirm,omitempty"`
+}
+
+// NTAG424FileSettings is a file's settings as the card reports them. The
+// access rights are key numbers 0 to 4, 14 for free or 15 for never.
+type NTAG424FileSettings struct {
+	FileType int    `json:"fileType"`
+	FileSize uint32 `json:"fileSize"`
+
+	// CommMode is "plain", "mac" or "full".
+	CommMode string `json:"commMode"`
+
+	ReadWrite int `json:"readWrite"`
+	Change    int `json:"change"`
+	Read      int `json:"read"`
+	Write     int `json:"write"`
+
+	SDMEnabled        bool `json:"sdmEnabled"`
+	MirrorUID         bool `json:"mirrorUID,omitempty"`
+	MirrorReadCounter bool `json:"mirrorReadCounter,omitempty"`
+	ReadCounterLimit  bool `json:"readCounterLimit,omitempty"`
+	EncryptFileData   bool `json:"encryptFileData,omitempty"`
+	ASCIIEncoding     bool `json:"asciiEncoding,omitempty"`
+
+	SDMMetaRead   int `json:"sdmMetaRead,omitempty"`
+	SDMFileRead   int `json:"sdmFileRead,omitempty"`
+	SDMCounterRet int `json:"sdmCounterRet,omitempty"`
+
+	UIDOffset         uint32 `json:"uidOffset,omitempty"`
+	ReadCounterOffset uint32 `json:"readCounterOffset,omitempty"`
+	PICCDataOffset    uint32 `json:"piccDataOffset,omitempty"`
+	MACInputOffset    uint32 `json:"macInputOffset,omitempty"`
+	MACOffset         uint32 `json:"macOffset,omitempty"`
+	ENCOffset         uint32 `json:"encOffset,omitempty"`
+	ENCLength         uint32 `json:"encLength,omitempty"`
+}
+
+// NTAG424SDMResult is what configureSDM reports: the URL the card mirrored when
+// read back, and whether it verified under the keys the agent holds.
+type NTAG424SDMResult struct {
+	URL string `json:"url"`
+
+	// Verified is true when the read-back URL's MAC verified. The settings are
+	// applied either way; VerifyError says why a verification failed.
+	Verified    bool   `json:"verified"`
+	VerifyError string `json:"verifyError,omitempty"`
+
+	// UID and Counter are the verified tap's, when it verified. The read-back
+	// counts as a tap.
+	UID     string `json:"uid,omitempty"`
+	Counter uint32 `json:"counter,omitempty"`
+}
+
+// NTAG424ResponsePayload answers an ntag424Request. Op echoes the request, and
+// only the fields of that operation are set.
+type NTAG424ResponsePayload struct {
+	Op string `json:"op"`
+
+	// FileSettings answers getFileSettings.
+	FileSettings *NTAG424FileSettings `json:"fileSettings,omitempty"`
+
+	// SDM answers configureSDM.
+	SDM *NTAG424SDMResult `json:"sdm,omitempty"`
+
+	// UID answers getCardUID: the card's real UID, uppercase hex.
+	UID string `json:"uid,omitempty"`
+
+	// KeyNo and KeyVersion answer getKeyVersion.
+	KeyNo      *int `json:"keyNo,omitempty"`
+	KeyVersion *int `json:"keyVersion,omitempty"`
+
+	// Signature answers readSig: the 56-byte originality signature, base64,
+	// unverified.
+	Signature string `json:"signature,omitempty"`
+
+	// Locked answers lock and Changed answers changeKey.
+	Locked  bool `json:"locked,omitempty"`
+	Changed bool `json:"changed,omitempty"`
+}
+
 // HealthPayload is the body of /health and /api/v1/health, which is what a
 // client library polls to find the agent.
 type HealthPayload struct {

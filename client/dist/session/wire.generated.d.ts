@@ -32,12 +32,18 @@ export type NFCErrorCode = "PARSE_ERROR" | "INVALID_PAYLOAD" | "INVALID_REQUEST"
  */
  | "BUSY"
 /** Reports that the tag was read and holds no NDEF message. Not retryable. */
- | "NO_PAYLOAD";
+ | "NO_PAYLOAD"
+/**
+ * Reports that the raw session a request named is unknown, ended, or past
+ * its time to live. Not retryable: begin a new session, which also means
+ * authenticating again.
+ */
+ | "RAW_SESSION_EXPIRED";
 /**
  * The messages the client protocol carries. A type not listed here is answered
  * with UNKNOWN_TYPE.
  */
-export type NFCMessageType = "tagData" | "deviceStatus" | "writeRequest" | "writeResponse" | "lockRequest" | "lockResponse" | "capabilitiesRequest" | "capabilitiesResponse" | "transceiveRequest" | "transceiveResponse" | "error";
+export type NFCMessageType = "tagData" | "deviceStatus" | "writeRequest" | "writeResponse" | "lockRequest" | "lockResponse" | "capabilitiesRequest" | "capabilitiesResponse" | "transceiveRequest" | "transceiveResponse" | "rawSessionBeginRequest" | "rawSessionBeginResponse" | "rawSessionEndRequest" | "rawSessionEndResponse" | "transceiveSequenceRequest" | "transceiveSequenceResponse" | "ntag424Request" | "ntag424Response" | "error";
 /**
  * ErrorPayload is the payload of an error response. `code` carries the same
  * strings as before the taxonomy existed; everything else is additive, so a
@@ -147,9 +153,16 @@ export interface WriteAcknowledgement {
 /**
  * TransceiveResponsePayload answers a transceiveRequest with the tag's
  * reply, base64 as raw bytes are in both directions.
+ *
+ * Data is the card's whole reply, status word included. SW and Body split it
+ * for an APDU-level exchange that returned at least a status word.
  */
 export interface TransceiveResponsePayload {
     data: string;
+    /** SW is the reply's trailing status word, four uppercase hex characters. */
+    sw?: string;
+    /** Body is the reply without its status word, base64. */
+    body?: string;
 }
 /**
  * TransceiveRequestPayload is a raw exchange with the tag it names.
@@ -166,6 +179,206 @@ export interface TransceiveRequestPayload extends TagTarget {
      * APDU. A framing-level reply carries no ISO 7816 status word.
      */
     raw: boolean;
+    /**
+     * SessionID sends the exchange inside a raw session begun with
+     * rawSessionBeginRequest. The session already names the tag, so the target
+     * fields are not needed.
+     */
+    sessionId?: string;
+}
+/**
+ * RawSessionBeginRequestPayload leases the reader holding the tag it names,
+ * so a multi-step exchange such as an authentication is not reset by polling
+ * or by another operation.
+ */
+export interface RawSessionBeginRequestPayload extends TagTarget {
+    /**
+     * TTLMs is how long the session lives without an exchange. Omitted selects
+     * five seconds; the most is thirty.
+     */
+    ttlMs?: number;
+}
+/** RawSessionBeginResponsePayload answers a rawSessionBeginRequest. */
+export interface RawSessionBeginResponsePayload {
+    sessionId: string;
+    /** ExpiresInMs is the time to live granted, renewed by each exchange. */
+    expiresInMs: number;
+}
+/** RawSessionEndRequestPayload ends a raw session. */
+export interface RawSessionEndRequestPayload {
+    sessionId: string;
+}
+/** RawSessionEndResponsePayload answers a rawSessionEndRequest. */
+export interface RawSessionEndResponsePayload {
+    sessionId: string;
+}
+/** TransceiveStep is one command of a transceiveSequenceRequest. */
+export interface TransceiveStep {
+    /** Data is the command, base64. */
+    data: string;
+    /**
+     * ExpectSW ends the run after this step unless the reply's status word is
+     * one of these, each four hex characters. Omitted expects anything.
+     */
+    expectSW?: string[];
+    /**
+     * StopOnSW ends the run after this step when the reply's status word is one
+     * of these, each four hex characters.
+     */
+    stopOnSW?: string[];
+}
+/**
+ * TransceiveSequenceRequestPayload runs several APDU exchanges with the tag
+ * it names under one tag operation, so nothing else reaches the card between
+ * them. At most 32 steps.
+ */
+export interface TransceiveSequenceRequestPayload extends TagTarget {
+    steps: TransceiveStep[];
+    /**
+     * SessionID runs the sequence inside a raw session begun with
+     * rawSessionBeginRequest, which already names the tag.
+     */
+    sessionId?: string;
+}
+/** TransceiveSequenceResponsePayload answers a transceiveSequenceRequest. */
+export interface TransceiveSequenceResponsePayload {
+    /** Results holds one entry per step that ran, in order. */
+    results: TransceiveResponsePayload[];
+    /**
+     * StoppedAt is the index of the step whose reply ended the run early, or -1
+     * when every step ran.
+     */
+    stoppedAt: number;
+}
+/**
+ * NTAG424SDMOptions are the key numbers and access rights an SDM URL is
+ * planned with. Each is a key number 0 to 4, 14 for free access or 15 for
+ * never. An omitted one takes its default: read is free, counterRet is
+ * never, and the rest are key 0. No key material appears here.
+ */
+export interface NTAG424SDMOptions {
+    metaRead?: number;
+    fileRead?: number;
+    counterRet?: number;
+    change?: number;
+    read?: number;
+    write?: number;
+    readWrite?: number;
+    /**
+     * EncLength is the width of {enc} in mirrored characters, a multiple of 32.
+     * Omitted means 32.
+     */
+    encLength?: number;
+}
+/**
+ * NTAG424RequestPayload is an operation on an NTAG 424 DNA the agent holds
+ * keys for. Op selects it: getFileSettings, configureSDM, changeKey,
+ * getCardUID, getKeyVersion, readSig or lock. configureSDM, changeKey and
+ * lock change the tag and are refused in read-only mode; changeKey and lock
+ * are irreversible and also need Confirm.
+ */
+export interface NTAG424RequestPayload extends TagTarget {
+    op: string;
+    /**
+     * FileNo is the file getFileSettings reads. Omitted means the NDEF file, 2.
+     */
+    fileNo?: number;
+    /**
+     * URLTemplate and SDM plan configureSDM. The template holds {picc} or {uid}
+     * and {ctr}, optionally {enc}, and {mac}.
+     */
+    urlTemplate?: string;
+    sdm?: NTAG424SDMOptions;
+    /**
+     * KeyNo is the key changeKey replaces and getKeyVersion reads. AuthKeyNo is
+     * the key the session for changeKey authenticates with. Version is the new
+     * key's version byte.
+     */
+    keyNo?: number;
+    authKeyNo?: number;
+    version?: number;
+    /**
+     * NewKeySource is "configured", the key the agent holds for KeyNo, or
+     * "explicit", the 32 hex characters in NewKey. The key is never echoed or
+     * logged.
+     */
+    newKeySource?: string;
+    newKey?: string;
+    /** Confirm acknowledges an irreversible operation. */
+    confirm?: boolean;
+}
+/**
+ * NTAG424FileSettings is a file's settings as the card reports them. The
+ * access rights are key numbers 0 to 4, 14 for free or 15 for never.
+ */
+export interface NTAG424FileSettings {
+    fileType: number;
+    fileSize: number;
+    /** CommMode is "plain", "mac" or "full". */
+    commMode: string;
+    readWrite: number;
+    change: number;
+    read: number;
+    write: number;
+    sdmEnabled: boolean;
+    mirrorUID?: boolean;
+    mirrorReadCounter?: boolean;
+    readCounterLimit?: boolean;
+    encryptFileData?: boolean;
+    asciiEncoding?: boolean;
+    sdmMetaRead?: number;
+    sdmFileRead?: number;
+    sdmCounterRet?: number;
+    uidOffset?: number;
+    readCounterOffset?: number;
+    piccDataOffset?: number;
+    macInputOffset?: number;
+    macOffset?: number;
+    encOffset?: number;
+    encLength?: number;
+}
+/**
+ * NTAG424SDMResult is what configureSDM reports: the URL the card mirrored
+ * when read back, and whether it verified under the keys the agent holds.
+ */
+export interface NTAG424SDMResult {
+    url: string;
+    /**
+     * Verified is true when the read-back URL's MAC verified. The settings are
+     * applied either way; VerifyError says why a verification failed.
+     */
+    verified: boolean;
+    verifyError?: string;
+    /**
+     * UID and Counter are the verified tap's, when it verified. The read-back
+     * counts as a tap.
+     */
+    uid?: string;
+    counter?: number;
+}
+/**
+ * NTAG424ResponsePayload answers an ntag424Request. Op echoes the request,
+ * and only the fields of that operation are set.
+ */
+export interface NTAG424ResponsePayload {
+    op: string;
+    /** FileSettings answers getFileSettings. */
+    fileSettings?: NTAG424FileSettings;
+    /** SDM answers configureSDM. */
+    sdm?: NTAG424SDMResult;
+    /** UID answers getCardUID: the card's real UID, uppercase hex. */
+    uid?: string;
+    /** KeyNo and KeyVersion answer getKeyVersion. */
+    keyNo?: number;
+    keyVersion?: number;
+    /**
+     * Signature answers readSig: the 56-byte originality signature, base64,
+     * unverified.
+     */
+    signature?: string;
+    /** Locked answers lock and Changed answers changeKey. */
+    locked?: boolean;
+    changed?: boolean;
 }
 /**
  * HealthPayload is the body of /health and /api/v1/health, which is what a
@@ -331,6 +544,17 @@ export interface TagCapabilities {
      * which covers crypto-based mutual authentication (DESFire, Ultralight C).
      */
     supportsPassword?: boolean;
+    /**
+     * 424 DNA. SDMEnabled reports that the NDEF file mirrors per-tap data, as
+     * far as its settings were last read. KeysHeld lists the key numbers the
+     * agent holds a key for, never the keys. RandomID reports that the card
+     * presented a random UID. LRP reports a card in LRP mode, which the agent
+     * cannot authenticate.
+     */
+    sdmEnabled?: boolean;
+    keysHeld?: number[];
+    randomID?: boolean;
+    lrp?: boolean;
 }
 /**
  * Represents the status of the NFC device. This type might be used by the

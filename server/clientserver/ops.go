@@ -43,6 +43,13 @@ func (o stoppedOps) Capabilities(context.Context, server.CapabilitiesOp) (*nfc.T
 	return nil, o.refuse()
 }
 
+func (o stoppedOps) TransceiveSequence(context.Context, server.SequenceOp) (*nfc.SequenceResult, error) {
+	return nil, o.refuse()
+}
+func (o stoppedOps) NTAG424(context.Context, server.NTAG424Op) (*protocol.NTAG424ResponsePayload, error) {
+	return nil, o.refuse()
+}
+
 // targetOf builds the target an operation applies to.
 func targetOf(uid, deviceID string, allowUntargeted bool) server.Target {
 	return server.Target{TagUID: uid, DeviceID: deviceID, AllowUntargeted: allowUntargeted}

@@ -46,6 +46,16 @@ type TagCapabilities struct {
 	// (e.g. NTAG PWD/PACK/AUTH0). This is distinct from SupportsAuthentication,
 	// which covers crypto-based mutual authentication (DESFire, Ultralight C).
 	SupportsPassword bool `json:"supportsPassword,omitempty"`
+
+	// NTAG 424 DNA. SDMEnabled reports that the NDEF file mirrors per-tap data,
+	// as far as its settings were last read. KeysHeld lists the key numbers the
+	// agent holds a key for, never the keys. RandomID reports that the card
+	// presented a random UID. LRP reports a card in LRP mode, which the agent
+	// cannot authenticate.
+	SDMEnabled bool  `json:"sdmEnabled,omitempty"`
+	KeysHeld   []int `json:"keysHeld,omitempty"`
+	RandomID   bool  `json:"randomID,omitempty"`
+	LRP        bool  `json:"lrp,omitempty"`
 }
 
 // DeviceCapabilities describes what operations a device supports.

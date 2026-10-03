@@ -8,11 +8,15 @@ import type {
   NFCEventHandler,
   NFCEventName,
   NFCEventPayloadMap,
+  NTAG424Request,
+  NTAG424Response,
   RawSession,
   TagCapabilities,
   TagData,
   TagTarget,
   TransceiveRequest,
+  TransceiveSequenceRequest,
+  TransceiveSequenceResult,
   WriteRequest,
   WriteResponse,
 } from "./types";
@@ -346,6 +350,55 @@ export class NFCClient {
       this.aimed(body, target),
     );
     return response.data ? decodeBase64(response.data) : new Uint8Array();
+  }
+
+  /**
+   * Runs several APDU exchanges under one tag operation, so nothing else
+   * reaches the card between them. A step's `expectSW` and `stopOnSW` end the
+   * run early; `stoppedAt` names the step that did.
+   */
+  async transceiveSequence(request: TransceiveSequenceRequest): Promise<TransceiveSequenceResult> {
+    const { steps, sessionId, ...target } = request;
+    if (steps.length === 0) {
+      throw new Error("transceiveSequence requires at least one step");
+    }
+    if (steps.some((step) => step.data.length === 0)) {
+      throw new Error("transceiveSequence steps require a command");
+    }
+    const body: Record<string, unknown> = {
+      steps: steps.map(({ data, expectSW, stopOnSW }) => ({
+        data: encodeBase64(data),
+        ...(expectSW?.length ? { expectSW } : {}),
+        ...(stopOnSW?.length ? { stopOnSW } : {}),
+      })),
+    };
+    if (sessionId) {
+      body.sessionId = sessionId;
+    }
+    const response = await this.sendRequest<{
+      results?: Array<{ data?: string; sw?: string; body?: string }>;
+      stoppedAt?: number;
+    }>("transceiveSequenceRequest", this.aimed(body, target));
+    return {
+      results: (response.results ?? []).map((r) => ({
+        data: r.data ? decodeBase64(r.data) : new Uint8Array(),
+        ...(r.sw ? { sw: r.sw } : {}),
+        ...(r.body ? { body: decodeBase64(r.body) } : {}),
+      })),
+      stoppedAt: response.stoppedAt ?? -1,
+    };
+  }
+
+  /**
+   * Runs an NTAG 424 DNA operation with the keys the agent holds for the tag.
+   * Keys are never returned.
+   */
+  async ntag424(request: NTAG424Request): Promise<NTAG424Response> {
+    const { uid, deviceID, allowUntargeted, ...operation } = request;
+    return this.sendRequest<NTAG424Response>(
+      "ntag424Request",
+      this.aimed(operation, { uid, deviceID, allowUntargeted }),
+    );
   }
 
   /**

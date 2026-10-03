@@ -1,4 +1,4 @@
-import type { HealthCheckResponse, LockResponse, NFCClientOptions, NFCErrorCodeValue, NFCEventHandler, NFCEventName, TagCapabilities, TagData, TagTarget, TransceiveRequest, WriteRequest, WriteResponse } from "./types";
+import type { HealthCheckResponse, LockResponse, NFCClientOptions, NFCErrorCodeValue, NFCEventHandler, NFCEventName, NTAG424Request, NTAG424Response, RawSession, TagCapabilities, TagData, TagTarget, TransceiveRequest, TransceiveSequenceRequest, TransceiveSequenceResult, WriteRequest, WriteResponse } from "./types";
 /** A refused request, with the agent's code and whether a retry could work. */
 export declare class NFCRequestError extends Error {
     readonly code?: NFCErrorCodeValue;
@@ -53,6 +53,25 @@ export declare class NFCClient {
     /** Irreversible. */
     lock(target?: TagTarget): Promise<LockResponse>;
     transceive(request: TransceiveRequest): Promise<Uint8Array>;
+    /**
+     * Runs several APDU exchanges under one tag operation, so nothing else
+     * reaches the card between them. A step's `expectSW` and `stopOnSW` end the
+     * run early; `stoppedAt` names the step that did.
+     */
+    transceiveSequence(request: TransceiveSequenceRequest): Promise<TransceiveSequenceResult>;
+    /**
+     * Runs an NTAG 424 DNA operation with the keys the agent holds for the tag.
+     * Keys are never returned.
+     */
+    ntag424(request: NTAG424Request): Promise<NTAG424Response>;
+    /**
+     * Leases the reader holding the tag, so an exchange that builds on earlier
+     * ones, such as an authentication, is not reset by polling or by another
+     * operation. Pass the returned `sessionId` to `transceive`, and end it with
+     * `endRawSession`.
+     */
+    beginRawSession(target?: TagTarget, ttlMs?: number): Promise<RawSession>;
+    endRawSession(sessionId: string): Promise<void>;
     /** Asks the tag, rather than reading what the scan captured. */
     getCapabilities(target?: TagTarget): Promise<TagCapabilities>;
     healthCheck(): Promise<HealthCheckResponse>;

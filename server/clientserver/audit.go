@@ -76,3 +76,44 @@ func auditRawSession(event, device, uid, sessionID string) {
 	}
 	clientLog.Printf("Raw session %s %s", event, where)
 }
+
+// auditRawSequence records a raw sequence in the client log: one line for the
+// run, then each step as an exchange. Steps are recorded before the run, so one
+// that is never sent because an earlier reply stopped the run is listed too.
+func auditRawSequence(steps []nfc.SequenceStep, device, uid, sessionID string) {
+	where := "on the reader"
+	if device != "" {
+		where = "on " + device
+	}
+	if uid != "" {
+		where += " (tag " + uid + ")"
+	}
+	if sessionID != "" {
+		where += " (session " + sessionID + ")"
+	}
+	clientLog.Printf("Raw sequence of %d steps %s", len(steps), where)
+	for _, step := range steps {
+		auditRawExchange(step.Data, false, device, uid)
+	}
+}
+
+// auditNTAG424 records an NTAG 424 operation in the client log. It takes the
+// operation's name and its non-secret arguments only, never key material.
+func auditNTAG424(op string, mutating bool, device, uid, detail string) {
+	where := "on the reader"
+	if device != "" {
+		where = "on " + device
+	}
+	if uid != "" {
+		where += " (tag " + uid + ")"
+	}
+	msg := fmt.Sprintf("NTAG 424 %s %s", op, where)
+	if detail != "" {
+		msg += ": " + detail
+	}
+	if mutating {
+		clientWarn.Printf("%s", msg)
+	} else {
+		clientLog.Printf("%s", msg)
+	}
+}

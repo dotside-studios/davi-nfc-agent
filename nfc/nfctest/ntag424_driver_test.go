@@ -3,7 +3,9 @@ package nfctest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -354,5 +356,40 @@ func TestNTAG424WrongKeyIsTriedOnce(t *testing.T) {
 	}
 	if n := card.NTAG424FailedAuths(); n != 1 {
 		t.Errorf("failed authentications = %d, want 1", n)
+	}
+}
+
+func TestNTAG424CapabilitiesCarryTheDriversFacts(t *testing.T) {
+	zero := make([]byte, 16)
+	plan, err := ntag424.PlanSDM("https://davi.social/t?p={picc}&m={mac}", ntag424.SDMOptions{
+		Read: ntag424.AccessFree, ReadWrite: ntag424.AccessNever,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := nfc.NTAG424Keys{Slots: map[byte][]byte{0: zero, 3: zero}}
+	card := NTAG424(ntag424UID, NTAG424WithSDM(plan), NTAG424WithRandomID()).WithNTAG424Keys(keys)
+
+	reader := NewEmulatedReader(t, card)
+	reader.SetNTAG424Keys(keys)
+	caps, err := reader.Capabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !caps.SDMEnabled || !caps.RandomID || caps.LRP {
+		t.Errorf("caps = %+v, want SDM and random ID on, LRP off", caps)
+	}
+	if len(caps.KeysHeld) != 2 {
+		t.Errorf("keysHeld = %v, want two slots", caps.KeysHeld)
+	}
+
+	raw, err := json.Marshal(nfc.TagCapabilities{CanRead: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"sdmEnabled", "keysHeld", "randomID", "lrp"} {
+		if strings.Contains(string(raw), field) {
+			t.Errorf("zero value carries %q: %s", field, raw)
+		}
 	}
 }

@@ -79,6 +79,24 @@ func (s *Supervisor) SetDESFireKeys(keys DESFireKeys) {
 	}
 }
 
+// SetNTAG424Keys configures the AES keys every reader authenticates an NTAG 424
+// DNA with. See [NTAG424Keys] for diversification and the random UID.
+//
+// The keys are held in memory for as long as the process runs. Nothing persists
+// them and nothing logs them.
+func (s *Supervisor) SetNTAG424Keys(keys NTAG424Keys) {
+	cp := keys.Copy()
+
+	s.mu.Lock()
+	s.ntag424Keys = cp
+	readers := s.readerList()
+	s.mu.Unlock()
+
+	for _, reader := range readers {
+		reader.SetNTAG424Keys(cp)
+	}
+}
+
 // Tags, wherever they are.
 
 // The supervisor answers for every tag the agent can reach: the one on a reader

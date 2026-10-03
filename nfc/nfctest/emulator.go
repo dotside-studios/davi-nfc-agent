@@ -1287,7 +1287,24 @@ func Type4(uid string) *EmulatedCard {
 // from any other Type 4 tag. The AES side (EV2 authentication, keys, file
 // settings, SDM) is modelled in ntag424_emulator.go; see NTAG424Option.
 func NTAG424(uid string, opts ...NTAG424Option) *EmulatedCard {
-	return newCard(nfc.DetectedNTAG424, uid, newNTAG424Emulator(uid, opts...))
+	e := newNTAG424Emulator(uid, opts...)
+	c := newCard(nfc.DetectedNTAG424, uid, e)
+	if e.ntag.randomID {
+		// A reader sees the UID the card presents, not its real one.
+		c.card = virtualnfc.NewDriverCard(strictTransport{e}, nfc.BytesToHex(e.ntag.presented), nfc.DetectedNTAG424)
+	}
+	return c
+}
+
+// WithNTAG424Keys gives the driver the keys it authenticates with, as the agent
+// does for a reader it is configured with.
+func (c *EmulatedCard) WithNTAG424Keys(keys nfc.NTAG424Keys) *EmulatedCard {
+	kc, ok := c.card.Tag().(interface{ SetNTAG424Keys(nfc.NTAG424Keys) })
+	if !ok {
+		panic(fmt.Sprintf("nfctest: %s does not take NTAG 424 keys", c.uid))
+	}
+	kc.SetNTAG424Keys(keys)
+	return c
 }
 
 // newNTAG424Emulator is a Type 4 emulator that answers GET_VERSION as an

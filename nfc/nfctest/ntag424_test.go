@@ -67,7 +67,7 @@ func TestNTAG424ReportsItsOwnIdentity(t *testing.T) {
 		t.Errorf("CanWrite = %v, CanTransceive = %v, want both true", caps.CanWrite, caps.CanTransceive)
 	}
 	if caps.CanLock {
-		t.Error("CanLock is true, but locking an NTAG 424 is not implemented")
+		t.Error("CanLock is true with no keys held")
 	}
 	if !caps.SupportsAuthentication {
 		t.Error("SupportsAuthentication is false, but the card carries AES keys")

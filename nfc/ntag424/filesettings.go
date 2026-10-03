@@ -40,6 +40,11 @@ type FileSettings struct {
 	// counter back.
 	SDMMetaRead, SDMFileRead, SDMCounterRet byte
 
+	// FileType and FileSize are read from the card by ParseFileSettings and
+	// ignored by Encode.
+	FileType byte
+	FileSize uint32
+
 	// Offsets into the NDEF message, in bytes. Which ones are read depends on
 	// the flags above, and Encode writes exactly those the card expects.
 	UIDOffset             uint32
@@ -138,12 +143,14 @@ func (f FileSettings) Encode() ([]byte, error) {
 	if f.SDMMetaRead <= 0x04 {
 		out = append(out, offset24(f.PICCDataOffset)...)
 	}
+	if f.SDMFileRead != AccessNever {
+		out = append(out, offset24(f.MACInputOffset)...)
+	}
 	if f.EncryptFileData {
 		out = append(out, offset24(f.ENCOffset)...)
 		out = append(out, offset24(f.ENCLength)...)
 	}
 	if f.SDMFileRead != AccessNever {
-		out = append(out, offset24(f.MACInputOffset)...)
 		out = append(out, offset24(f.MACOffset)...)
 	}
 	if f.ReadCounterLimit {

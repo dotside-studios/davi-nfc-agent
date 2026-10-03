@@ -153,7 +153,7 @@ for the tag they describe. See [Tag Capabilities](#tag-capabilities).
 | `canRead` / `canWrite` | Device can read / write NDEF |
 | `nfcType` | Radio technology or library: `nfca`, `isodep`, `corenfc`, `webnfc`, … |
 | `canTransceive` | APDU-level exchange: Android `IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange` |
-| `canTransceiveRaw` | Framing-level exchange: Android `NfcA.transceive`, PN532 `InCommunicateThru` |
+| `canTransceiveRaw` | Framing-level exchange: Android `NfcA.transceive`, PN532 `InCommunicateThru`. An agent's own PC/SC readers report it too, see [Framing-level exchange on a reader](#framing-level-exchange-on-a-reader) |
 | `canLock` | Device can make a tag read-only |
 | `deviceType` | Free-form kind, e.g. `smartphone`, `pn532-serial`. Defaults to `smartphone` |
 | `supportedTagTypes` | Tag families this device handles, e.g. `["MIFARE Classic", "NTAG"]` |
@@ -802,7 +802,7 @@ base64 in transit, matching how the device protocol carries byte slices.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `data` | bytes (base64) | Yes | Command bytes to send |
-| `raw` | bool | No | Framing-level exchange (`NfcA.transceive`, `InCommunicateThru`) instead of APDU-level (`IsoDep.transceive`, `InDataExchange`) |
+| `raw` | bool | No | Framing-level exchange (`NfcA.transceive`, `InCommunicateThru`) instead of APDU-level (`IsoDep.transceive`, `InDataExchange`). See [Framing-level exchange on a reader](#framing-level-exchange-on-a-reader) |
 | `sessionId` | string | No | Send the exchange inside a [raw session](#raw-sessions). The session already names the tag |
 
 **Response:**
@@ -861,6 +861,30 @@ A request naming an unknown, ended or expired session fails with
 (`RAW_CHANNEL_DISABLED`, `READ_ONLY`) and are written to the audit log, as is
 each exchange. A tag held by a remote device cannot be leased and answers
 `NOT_SUPPORTED`.
+
+#### Framing-level exchange on a reader
+
+An NTAG21x, Ultralight or MIFARE Classic tag does not speak APDUs, so an
+APDU-level exchange (`raw` false) is refused for it. `raw: true` sends the tag's
+own frame instead, with the reader adding and checking the CRC: `3C 00`
+(READ_SIG), `39 02` (READ_CNT), `3A 04 07` (FAST_READ), `1B` and a password
+(PWD_AUTH), `30 04` (READ). The reply is the tag's answer without a status word.
+
+A phone honours `raw` as before. On a PC/SC reader it depends on the reader:
+
+| Reader | Method | `canTransceiveRaw` |
+|--------|--------|--------------------|
+| ACR122 class (PN532/PN533 behind CCID, named `ACR122...`) | Direct Transmit (`FF 00 00 00 Lc`) carrying PN532 `InCommunicateThru` (`D4 42`). A nonzero PN532 status byte is an error: `01` is a timeout, the tag did not answer | `true`, known from the reader's name |
+| Any other PC/SC reader | PC/SC Part 3 transparent exchange session (`FF C2`): start, transceive, end | `true` only once the reader accepted a start-session command, probed once per reader when its first card is connected |
+| A reader that does neither | | omitted (false) |
+
+A reader that cannot carry a framing-level exchange refuses `raw: true` with
+`NOT_SUPPORTED`. The frame is never sent as an APDU instead. A framing-level
+exchange is also refused with `NOT_SUPPORTED` inside a [raw session](#raw-sessions),
+which carries APDU-level exchanges only, and `transceiveSequence` has no `raw`
+step. A framing-level exchange runs under the reader's operation slot like any
+other tag I/O, takes the same gates and is written to the audit log decoded as
+a framing-level command.
 
 > **Gated behind the raw APDU channel.** The channel that carries raw exchanges
 > is off by default and refuses one with `RAW_CHANNEL_DISABLED` until an operator

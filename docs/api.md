@@ -121,6 +121,7 @@ registration fields, so setup costs one round trip:
       "nfcType": "corenfc",
       "canTransceive": false,
       "canTransceiveRaw": false,
+      "canTransceiveSequence": false,
       "canLock": false,
       "deviceType": "smartphone",
       "supportedTagTypes": ["NTAG", "MIFARE Ultralight"]
@@ -154,6 +155,7 @@ for the tag they describe. See [Tag Capabilities](#tag-capabilities).
 | `nfcType` | Radio technology or library: `nfca`, `isodep`, `corenfc`, `webnfc`, … |
 | `canTransceive` | APDU-level exchange: Android `IsoDep.transceive`, iOS `sendCommand`, PN532 `InDataExchange` |
 | `canTransceiveRaw` | Framing-level exchange: Android `NfcA.transceive`, PN532 `InCommunicateThru` |
+| `canTransceiveSequence` | Device runs a batch of APDU exchanges itself and answers [`deviceTransceiveSequenceRequest`](#transceive-sequence-request). Presumes `canTransceive` |
 | `canLock` | Device can make a tag read-only |
 | `deviceType` | Free-form kind, e.g. `smartphone`, `pn532-serial`. Defaults to `smartphone` |
 | `supportedTagTypes` | Tag families this device handles, e.g. `["MIFARE Classic", "NTAG"]` |
@@ -495,6 +497,72 @@ single message on the NDEF path. Use the command channel for what genuinely
 needs it (DESFire, ISO-DEP applets, capability probing), not as a general read
 path. iOS also enforces its own session timeouts, so long sequences are more
 likely to fail there.
+
+#### Transceive Sequence Request
+
+The agent asks the device to run several APDU-level exchanges with the tag it is
+holding, one after another, with nothing else reaching the tag between them.
+Sent only to devices that declared both `canTransceive` and
+`canTransceiveSequence`. A device that did not declare it is sent one
+`deviceTransceiveRequest` per step instead, under the same stop rules, so a
+client's `transceiveSequenceRequest` works either way. The sequence request
+saves a round trip per step, which matters while the user is holding the tag
+against the phone.
+
+```json
+{
+  "type": "deviceTransceiveSequenceRequest",
+  "payload": {
+    "requestID": "req_abc",
+    "deviceID": "dev_abc123",
+    "tagUID": "04:A1:B2:C3",
+    "steps": [
+      { "data": "AKQEAAfSdgAAhQEBAA==", "expectSW": ["9000"] },
+      { "data": "kEEAAAA=", "stopOnSW": ["91AF"] }
+    ],
+    "timeoutMs": 5000
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `steps` | At most 32. Each is `data` (command bytes, base64) with the optional stop rules below |
+| `steps[].expectSW` | Stop after this step unless the reply's status word is one of these, each four hex characters. Absent expects anything |
+| `steps[].stopOnSW` | Stop after this step when the reply's status word is one of these |
+| `tagUID` | UID the agent expects in the field. Report `TAG_REMOVED` if a different tag is present |
+| `timeoutMs` | Bound for each exchange |
+
+Run the steps in order, each as an APDU-level exchange as for
+`deviceTransceiveRequest`. After each reply, take its last two bytes as the
+status word: stop if it is in `stopOnSW`, or if `expectSW` is present and does
+not contain it. The reply of the step that stops the run is still returned.
+Respond with `deviceTransceiveSequenceResponse`:
+
+```json
+{
+  "type": "deviceTransceiveSequenceResponse",
+  "payload": {
+    "requestID": "req_abc",
+    "success": true,
+    "replies": ["kAA=", "ka8="],
+    "stoppedAt": 1
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `replies` | The whole reply of every step that ran, in order, each ending with SW1SW2 as in `deviceTransceiveResponse.data` |
+| `stoppedAt` | Index of the step whose reply ended the run early, or `-1` when every step ran. Always sent on success |
+| `success` | False only when an exchange could not be performed; then send `error` and `errorCode`, and no replies |
+
+The agent checks the answer against the rules it sent: replies that run past a
+stop, end before one, or a `stoppedAt` that disagrees with them, are refused as
+a failed exchange rather than believed. Keep the same per-request timeout and
+`TAG_REMOVED` behaviour as a single exchange. A phone cannot hold a raw session
+for the agent (the operating system owns the tag session), and does not need
+to: this request is the unit the agent treats as one tag operation.
 
 ### mDNS Discovery
 
@@ -859,8 +927,18 @@ without an exchange, when the card leaves, or when the client disconnects.
 A request naming an unknown, ended or expired session fails with
 `RAW_SESSION_EXPIRED`. Sessions are subject to the same gates as an exchange
 (`RAW_CHANNEL_DISABLED`, `READ_ONLY`) and are written to the audit log, as is
-each exchange. A tag held by a remote device cannot be leased and answers
-`NOT_SUPPORTED`.
+each exchange.
+
+**A tag held by a phone is never leased.** The agent does not poll a phone's
+tag, so there is no poll for a lease to hold off, and the phone's operating
+system owns the tag session (CoreNFC and Android's tag dispatch keep it open for
+as long as the tag is in the field and end it on their own terms). A lease the
+agent could not enforce would only promise what it cannot deliver, so
+`rawSessionBeginRequest` for such a tag keeps answering `NOT_SUPPORTED`, with a
+message saying why. What a lease is for is covered another way: a
+`transceiveSequenceRequest` or an `ntag424Request` on a phone's tag runs as one
+tag operation, with nothing else from the agent reaching the device between its
+steps.
 
 > **Gated behind the raw APDU channel.** The channel that carries raw exchanges
 > is off by default and refuses one with `RAW_CHANNEL_DISABLED` until an operator
@@ -936,16 +1014,29 @@ step ran. A step that stops the run still returns its result with
 
 Gating is the same as a single exchange: `RAW_CHANNEL_DISABLED` while the raw
 channel is closed and `READ_ONLY` in read-only mode. Each step is written to the
-audit log before the run. A tag held by a remote device answers
-`NOT_SUPPORTED`. A request with no steps, more than 32, bad base64 or a status
+audit log before the run. A tag a phone holds is driven too, outside a raw
+session: see [Sequences on a phone](#sequences-on-a-phone). A request with no steps, more than 32, bad base64 or a status
 word that is not four hex characters is `INVALID_REQUEST`.
+
+#### Sequences on a phone
+
+A `transceiveSequenceRequest` for a tag a phone holds runs as one tag operation
+on the device: the agent sends the whole batch in one
+[`deviceTransceiveSequenceRequest`](#transceive-sequence-request) when the phone
+declared `canTransceiveSequence`, and one `deviceTransceiveRequest` per step when
+it did not, with the same `expectSW` and `stopOnSW` rules and the same
+`stoppedAt` either way. A phone that declared no APDU exchange answers
+`NOT_SUPPORTED`. Operations on one phone are serialized, and a request naming a
+UID the phone is not holding fails instead of being sent. A sequence cannot run
+in a [raw session](#raw-sessions) on a phone, since none can be begun.
 
 ### NTAG 424 DNA (ntag424Request)
 
 Operations on an NTAG 424 DNA the agent holds keys for (see
 `Supervisor.SetNTAG424Keys`). The agent builds every command and runs it in an
 authenticated session; keys are held by the agent and never returned. The tag
-must be on one of the agent's own readers, and is named like any other
+is on one of the agent's own readers or in a phone's field (see
+[NTAG 424 on a phone](#ntag-424-on-a-phone)), and is named like any other
 ([Naming the tag](#naming-the-tag)).
 
 ```json
@@ -968,6 +1059,7 @@ operation's fields set.
 | `configureSDM` | `urlTemplate`, optional `sdm` | `sdm`: `url`, `verified`, `verifyError`, `uid`, `counter` | Yes |
 | `changeKey` | `keyNo`, `authKeyNo`, `version`, `newKeySource`, `newKey`, `confirm` | `changed` | Yes, irreversible |
 | `lock` | `confirm` | `locked` | Yes, irreversible |
+| `planSDM` | `urlTemplate`, optional `sdm` | `plan`: `ndefHex`, `length`, `settings` | No |
 
 **configureSDM** writes a URL that the tag mirrors per tap. `urlTemplate` holds
 `{picc}` (encrypted UID and counter) or `{uid}` and `{ctr}` (in the clear),
@@ -980,6 +1072,15 @@ file settings, reads the file back as a tap and checks its MAC under the keys it
 holds. The settings are applied even when verification fails: `verified` is then
 false and `verifyError` says why. The read-back counts as one tap, so
 `counter` is one higher than before.
+
+**planSDM** is the dry run of `configureSDM`: it lays out the same URL template
+with the same options and returns what would be written, touching no tag. It
+needs no tag present and no key, is allowed in read-only mode, and is not
+audited. `plan.ndefHex` is the whole NDEF file content (NLEN, then one URI
+record with every mirror as ASCII zeros of its final width), `plan.length` its
+size, and `plan.settings` the file settings that would be applied, in the shape
+`getFileSettings` returns. The offsets count from the start of `ndefHex`, so the
+first record byte is at 2. A template the planner refuses is `INVALID_REQUEST`.
 
 **changeKey** replaces key `keyNo`, authenticating with `authKeyNo`, and sets
 its version byte. `newKeySource` is `"configured"`, meaning the key the agent
@@ -998,8 +1099,8 @@ keeping the change right. It needs the change key.
 `READ_ONLY` in read-only mode; the rest are reads. None needs the raw channel,
 and each is written to the audit log (changes at warning level).
 
-Errors: a tag that is not an NTAG 424 DNA, or one held by a remote device, is
-`NOT_SUPPORTED`; a missing key, a refused key, the card's authentication delay
+Errors: a tag that is not an NTAG 424 DNA, or a phone that declared no
+APDU exchange, is `NOT_SUPPORTED`; a missing key, a refused key, the card's authentication delay
 (`91 AD`), a permission denial or an LRP-mode card is `AUTH_FAILED`; other card
 statuses are `TRANSCEIVE_FAILED`.
 
@@ -1008,6 +1109,25 @@ To check a tapped SDM URL on the backend, use the Go library
 keys, store)` verifies the MAC and refuses a replay with `ErrReplay` by tracking
 the highest counter seen per UID in a `CounterStore` (`MemoryCounterStore` is
 one). The agent itself exposes no verify route.
+
+#### NTAG 424 on a phone
+
+The agent runs the same session against a tag a phone holds, over the phone's
+`deviceTransceiveRequest` (or the sequence request below). Nothing is asked of
+the phone beyond what it already declared with `canTransceive`. The cost is
+round trips: an EV2 authentication is two exchanges after the application
+select, and every protected command one more, so an operation that needs a
+session takes at least four, and the next one authenticates again, since the
+session lives only as long as the operation. The phone's reply must follow the
+[reply format](#transceive-request), and a phone's own timeouts apply (iOS ends
+a tag session after about twenty seconds). The agent's configured keys are used
+as for a reader.
+
+Operations on one phone are serialized, as a reader's are, so two clients'
+exchanges do not interleave on the tag. A phone that names another card family
+for the tag it holds (MIFARE Classic, Ultralight, NTAG21x, DESFire) is refused
+with `NOT_SUPPORTED` before anything is sent; one that reports only `Type4` or
+ISO-DEP is taken as it comes and the card's own answers decide.
 
 ### Tag Capabilities
 

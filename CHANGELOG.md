@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sequences and NTAG 424 operations on a phone's tag.** `transceiveSequenceRequest`
+  and `ntag424Request` now work on a tag a phone holds, as one tag operation on
+  the device: serialized per device, refused for a tag the phone is not holding
+  and for a card family that is not an NTAG 424 DNA. The device protocol gains
+  `deviceTransceiveSequenceRequest` / `deviceTransceiveSequenceResponse` and the
+  `canTransceiveSequence` capability; the device runs the batch under the same
+  `expectSW` / `stopOnSW` rules and reports `stoppedAt`, and the agent verifies
+  the run against the rules. A device that does not declare it is sent one
+  `deviceTransceiveRequest` per step. The NTAG 424 driver runs over a
+  `CardTransport` adapter on the device's exchange (`nfc.NewNTAG424Session`,
+  `nfc.TagTransport`), so EV2 authentication costs two device round trips. Raw
+  sessions stay `NOT_SUPPORTED` on a phone, with the reason documented. The
+  device client library gains `canTransceiveSequence` and
+  `respondToTransceiveSequence`
+- **`ntag424Request` op `planSDM`.** A dry run of `configureSDM`: returns the
+  NDEF content (`plan.ndefHex`, `plan.length`) and file settings with offsets
+  for a URL template, touching no tag and needing none present
+
 - **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
   ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
   any status word as a successful exchange, so `91 AF` and `6A 82` reach the

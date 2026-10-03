@@ -2,6 +2,8 @@ import {
   NFCClient,
   type LockResponse,
   type NFCErrorEvent,
+  type NTAG424Request,
+  type NTAG424Response,
   type TagCapabilities,
   type TagData,
   type WriteRecord,
@@ -34,6 +36,8 @@ export interface Tags {
   lock: () => Promise<LockResponse>
   refreshCapabilities: () => Promise<TagCapabilities>
   transceive: (data: Uint8Array, raw: boolean) => Promise<Uint8Array>
+  /** An NTAG 424 DNA operation. Keys stay with the agent. */
+  ntag424: (request: NTAG424Request) => Promise<NTAG424Response>
 }
 
 export function useTags(secret?: string): Tags {
@@ -192,6 +196,22 @@ export function useTags(secret?: string): Tags {
     [connected, push],
   )
 
+  const ntag424 = useCallback(
+    async (request: NTAG424Request) => {
+      // A plan touches no tag, so it is not worth a line in the feed.
+      const quiet = request.op === 'planSDM'
+      try {
+        const res = await connected().ntag424(request)
+        if (!quiet) push({ kind: 'apdu', summary: `NTAG 424 ${request.op} completed`, ok: true })
+        return res
+      } catch (err) {
+        if (!quiet) push({ kind: 'apdu', summary: `NTAG 424 ${request.op} failed: ${describe(err)}`, ok: false })
+        throw err
+      }
+    },
+    [connected, push],
+  )
+
   const refreshCapabilities = useCallback(async () => {
     const caps = await connected().getCapabilities()
     setCapabilities(caps)
@@ -215,8 +235,9 @@ export function useTags(secret?: string): Tags {
       lock,
       refreshCapabilities,
       transceive,
+      ntag424,
     }),
-    [link, tag, capabilities, events, history, clearEvents, write, lock, refreshCapabilities, transceive],
+    [link, tag, capabilities, events, history, clearEvents, write, lock, refreshCapabilities, transceive, ntag424],
   )
 }
 

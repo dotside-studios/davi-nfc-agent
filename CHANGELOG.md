@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sessions stay `NOT_SUPPORTED` on a phone, with the reason documented. The
   device client library gains `canTransceiveSequence` and
   `respondToTransceiveSequence`
+- **Control Center NTAG 424 panel.** In the Tag tab: card info (UID, key
+  versions, signature, file settings), an SDM form with the agent's own layout
+  preview via `planSDM`, Configure SDM, and change key and lock that confirm in
+  the page before sending `confirm: true`. The client library exports the
+  `NTAG424FileSettings`, `NTAG424SDMPlan` and `NTAG424SDMResult` types
 - **`ntag424Request` op `planSDM`.** A dry run of `configureSDM`: returns the
   NDEF content (`plan.ndefHex`, `plan.length`) and file settings with offsets
   for a URL template, touching no tag and needing none present

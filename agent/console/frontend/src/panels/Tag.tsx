@@ -5,6 +5,7 @@ import type { Tags } from '../useTags'
 import { fmtBytes, fmtDateTime } from '../format'
 import { ActionLink, Copyable, Dot, Empty, KV, Notice, Panel, Row } from '../ui'
 import { Apdu } from './Apdu'
+import { Ntag424 } from './Ntag424'
 
 /** Tag inspector and NDEF composer. */
 export function Tag({
@@ -23,6 +24,7 @@ export function Tag({
       <div>
         <Inspector tags={tags} />
         {capabilities ? <Capabilities tags={tags} /> : null}
+        <Ntag424 tags={tags} writable={writable} />
       </div>
       <div>
         {tag ? <Records records={tag.message?.records} text={tag.text} /> : null}

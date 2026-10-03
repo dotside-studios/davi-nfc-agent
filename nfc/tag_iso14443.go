@@ -47,7 +47,7 @@ func (t *pcscISO14443Tag) Capabilities() TagCapabilities {
 }
 
 func (t *pcscISO14443Tag) Transceive(data []byte) ([]byte, error) {
-	return t.transceive(data)
+	return t.transmitRaw(data)
 }
 
 func (t *pcscISO14443Tag) ReadData() ([]byte, error) {

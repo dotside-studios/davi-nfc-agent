@@ -8,6 +8,7 @@ import type {
   NFCEventHandler,
   NFCEventName,
   NFCEventPayloadMap,
+  RawSession,
   TagCapabilities,
   TagData,
   TagTarget,
@@ -332,15 +333,36 @@ export class NFCClient {
   }
 
   async transceive(request: TransceiveRequest): Promise<Uint8Array> {
-    const { data, raw, ...target } = request;
+    const { data, raw, sessionId, ...target } = request;
     if (data.length === 0) {
       throw new Error("transceive requires a command");
     }
+    const body: Record<string, unknown> = { data: encodeBase64(data), raw: raw === true };
+    if (sessionId) {
+      body.sessionId = sessionId;
+    }
     const response = await this.sendRequest<{ data?: string }>(
       "transceiveRequest",
-      this.aimed({ data: encodeBase64(data), raw: raw === true }, target),
+      this.aimed(body, target),
     );
     return response.data ? decodeBase64(response.data) : new Uint8Array();
+  }
+
+  /**
+   * Leases the reader holding the tag, so an exchange that builds on earlier
+   * ones, such as an authentication, is not reset by polling or by another
+   * operation. Pass the returned `sessionId` to `transceive`, and end it with
+   * `endRawSession`.
+   */
+  async beginRawSession(target?: TagTarget, ttlMs?: number): Promise<RawSession> {
+    return this.sendRequest<RawSession>(
+      "rawSessionBeginRequest",
+      this.aimed(ttlMs === undefined ? {} : { ttlMs }, target),
+    );
+  }
+
+  async endRawSession(sessionId: string): Promise<void> {
+    await this.sendRequest<unknown>("rawSessionEndRequest", { sessionId });
   }
 
   /** Asks the tag, rather than reading what the scan captured. */

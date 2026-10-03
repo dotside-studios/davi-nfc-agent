@@ -479,6 +479,12 @@ Respond with `deviceTransceiveResponse`:
 }
 ```
 
+`data` is the card's whole reply and must end with SW1SW2. A phone API that
+returns the status word separately (iOS `sendCommand` returns it beside the
+payload) must append it before answering, so the agent can tell `91 AF` from
+`91 00` and leave interpretation to the client. A reply of status word alone is
+valid.
+
 There is no connect/disconnect pair around a transceive: a tag session is
 already delimited by `tagScanned` and `tagRemoved`, and on phones the OS owns
 the session.
@@ -797,6 +803,7 @@ base64 in transit, matching how the device protocol carries byte slices.
 |-------|------|----------|-------------|
 | `data` | bytes (base64) | Yes | Command bytes to send |
 | `raw` | bool | No | Framing-level exchange (`NfcA.transceive`, `InCommunicateThru`) instead of APDU-level (`IsoDep.transceive`, `InDataExchange`) |
+| `sessionId` | string | No | Send the exchange inside a [raw session](#raw-sessions). The session already names the tag |
 
 **Response:**
 
@@ -805,16 +812,55 @@ base64 in transit, matching how the device protocol carries byte slices.
   "id": "req_3",
   "type": "transceiveResponse",
   "success": true,
-  "payload": { "data": "BKKzxNXmgJAA" }
+  "payload": { "data": "BKKzxNXmgJAA", "sw": "9000", "body": "BKKzxNXmgA==" }
 }
 ```
+
+`data` is the card's whole reply, status word included, byte for byte. For an
+APDU-level exchange (`raw` false) whose reply is at least two bytes, `sw` is the
+trailing status word as four uppercase hex characters and `body` is the reply
+without it, base64 (omitted when empty). Framing-level replies carry no status
+word, so neither field is sent.
 
 The request is routed like a write: to the remote device holding a tag when no
 hardware reader has a card present, otherwise to the reader.
 
-A tag answering with an error status word is still `success: true`, because the
-exchange happened, and interpreting SW1SW2 is the caller's job. `success` is
+A tag answering with any status word is still `success: true`, because the
+exchange happened, and interpreting SW1SW2 is the caller's job. That includes
+`91 AF` (more frames, as in `AuthenticateEV2First`) and `91 AE`. `success` is
 false only when the exchange itself could not be performed.
+
+#### Raw sessions
+
+Polling and other operations send commands to the card, and on some cards
+(an NTAG 424 DNA among them) any ISO `SELECT` or probe ends an authenticated
+session. A raw session leases the reader to one client for a multi-step
+exchange:
+
+```json
+{ "id": "req_4", "type": "rawSessionBeginRequest",
+  "payload": { "uid": "04A1B2C3D4E5F6", "ttlMs": 5000 } }
+```
+
+```json
+{ "id": "req_4", "type": "rawSessionBeginResponse", "success": true,
+  "payload": { "sessionId": "9f2c0e...", "expiresInMs": 5000 } }
+```
+
+The request takes the usual tag target fields. `ttlMs` is optional: the default
+is 5000 and the most is 30000. While the session is held the agent sends the
+card nothing of its own, and other tag operations wait for the reader and fail
+with `BUSY` if it is not released within the operation timeout. Each
+`transceiveRequest` carrying the `sessionId` renews the time to live; the
+session ends when the client sends `rawSessionEndRequest`
+(`{ "sessionId": "..." }`, answered by `rawSessionEndResponse`), after `ttlMs`
+without an exchange, when the card leaves, or when the client disconnects.
+
+A request naming an unknown, ended or expired session fails with
+`RAW_SESSION_EXPIRED`. Sessions are subject to the same gates as an exchange
+(`RAW_CHANNEL_DISABLED`, `READ_ONLY`) and are written to the audit log, as is
+each exchange. A tag held by a remote device cannot be leased and answers
+`NOT_SUPPORTED`.
 
 > **Gated behind the raw APDU channel.** The channel that carries raw exchanges
 > is off by default and refuses one with `RAW_CHANNEL_DISABLED` until an operator
@@ -1259,6 +1305,7 @@ Something happened at the tag. These mirror the agent's internal error codes.
 | `READ_FAILED` | yes | Read failed |
 | `WRITE_FAILED` | yes | Write failed |
 | `TRANSCEIVE_FAILED` | yes | Raw exchange failed |
+| `RAW_SESSION_EXPIRED` | no | The raw session is unknown, ended or expired; begin a new one |
 | `TAG_NOT_CONNECTED` | yes | No tag connected |
 | `READ_ONLY` | no | Tag is locked, or the agent is in read-only mode |
 | `RAW_CHANNEL_DISABLED` | no | The raw APDU channel is off; enable it to send raw exchanges |

@@ -1,5 +1,7 @@
 package nfc
 
+import "bytes"
+
 // DESFireKeys are the AES-128 keys the agent holds for a DESFire's NDEF
 // application, by the key number the card knows each one as.
 //
@@ -24,6 +26,19 @@ func (k DESFireKeys) Copy() DESFireKeys {
 		out[no] = append([]byte(nil), key...)
 	}
 	return out
+}
+
+// equal reports whether both hold the same keys under the same numbers.
+func (k DESFireKeys) equal(other DESFireKeys) bool {
+	if len(k) != len(other) {
+		return false
+	}
+	for no, key := range k {
+		if o, ok := other[no]; !ok || !bytes.Equal(key, o) {
+			return false
+		}
+	}
+	return true
 }
 
 // desfireKeyConfigurable is implemented by tags that authenticate with AES keys

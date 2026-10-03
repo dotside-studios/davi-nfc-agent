@@ -26,6 +26,12 @@ const (
 	WSTypeTransceiveRequest  MessageType = "transceiveRequest"
 	WSTypeTransceiveResponse MessageType = "transceiveResponse"
 
+	WSTypeRawSessionBeginRequest  MessageType = "rawSessionBeginRequest"
+	WSTypeRawSessionBeginResponse MessageType = "rawSessionBeginResponse"
+
+	WSTypeRawSessionEndRequest  MessageType = "rawSessionEndRequest"
+	WSTypeRawSessionEndResponse MessageType = "rawSessionEndResponse"
+
 	WSTypeError MessageType = "error"
 )
 

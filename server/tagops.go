@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
@@ -63,6 +64,35 @@ type TransceiveOp struct {
 
 	// Raw selects framing-level exchange over APDU-level.
 	Raw bool
+
+	// SessionID sends the exchange inside a raw session, which already names
+	// the tag. Empty is an ordinary exchange.
+	SessionID string
+}
+
+// RawSessionOps is what TagOps offers when it can lease the reader for a
+// multi-step raw exchange. It is separate so an operation layer that cannot is
+// not obliged to stub it: the server answers such a request as not supported.
+type RawSessionOps interface {
+	BeginRawSession(ctx context.Context, req RawSessionBeginOp) (RawSessionLease, error)
+	EndRawSession(ctx context.Context, sessionID string) error
+}
+
+// RawSessionBeginOp leases the reader holding the named tag.
+type RawSessionBeginOp struct {
+	Target
+
+	// TTL is how long the session lives without an exchange. Zero selects the
+	// default.
+	TTL time.Duration
+}
+
+// RawSessionLease is a granted raw session.
+type RawSessionLease struct {
+	SessionID string
+
+	// TTL is the time to live granted, renewed by each exchange.
+	TTL time.Duration
 }
 
 // CapabilitiesOp asks what the named tag supports.

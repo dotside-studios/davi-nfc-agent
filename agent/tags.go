@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
@@ -19,6 +20,7 @@ import (
 // reach. See [nfc.TagHolder] and [Agent.pinAdmits].
 
 var _ nfc.TagHolder = (*Agent)(nil)
+var _ nfc.RawSessionHolder = (*Agent)(nil)
 
 // errNotServing is what an operation gets before Start and after Stop. The
 // agent answers rather than leaving a caller with a nil to dereference.
@@ -137,6 +139,38 @@ func (a *Agent) TransceiveTag(ctx context.Context, device, tagUID string, data [
 		return nil, err
 	}
 	return readers.TransceiveTag(ctx, device, tagUID, data, raw)
+}
+
+// BeginRawSessionTag leases the reader holding the tag for a multi-step raw
+// exchange.
+func (a *Agent) BeginRawSessionTag(ctx context.Context, device, tagUID string, ttl time.Duration) (string, error) {
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return "", errNotServing
+	}
+	device, err := a.operateOn(device)
+	if err != nil {
+		return "", err
+	}
+	return readers.BeginRawSessionTag(ctx, device, tagUID, ttl)
+}
+
+// EndRawSessionTag ends a raw session lease.
+func (a *Agent) EndRawSessionTag(ctx context.Context, leaseID string) error {
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return errNotServing
+	}
+	return readers.EndRawSessionTag(ctx, leaseID)
+}
+
+// TransceiveInSessionTag exchanges raw bytes inside a raw session lease.
+func (a *Agent) TransceiveInSessionTag(ctx context.Context, leaseID string, data []byte) ([]byte, error) {
+	readers := a.supervisor.Load()
+	if readers == nil {
+		return nil, errNotServing
+	}
+	return readers.TransceiveInSessionTag(ctx, leaseID, data)
 }
 
 // TagCapabilities reports what the tag the named device is holding supports.

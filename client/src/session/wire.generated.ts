@@ -67,6 +67,12 @@ export type NFCErrorCode =
   | "BUSY"
   /** Reports that the tag was read and holds no NDEF message. Not retryable. */
   | "NO_PAYLOAD"
+  /**
+   * Reports that the raw session a request named is unknown, ended, or past
+   * its time to live. Not retryable: begin a new session, which also means
+   * authenticating again.
+   */
+  | "RAW_SESSION_EXPIRED"
 ;
 
 /**
@@ -84,6 +90,10 @@ export type NFCMessageType =
   | "capabilitiesResponse"
   | "transceiveRequest"
   | "transceiveResponse"
+  | "rawSessionBeginRequest"
+  | "rawSessionBeginResponse"
+  | "rawSessionEndRequest"
+  | "rawSessionEndResponse"
   | "error"
 ;
 
@@ -204,9 +214,16 @@ export interface WriteAcknowledgement {
 /**
  * TransceiveResponsePayload answers a transceiveRequest with the tag's
  * reply, base64 as raw bytes are in both directions.
+ *
+ * Data is the card's whole reply, status word included. SW and Body split it
+ * for an APDU-level exchange that returned at least a status word.
  */
 export interface TransceiveResponsePayload {
   data: string;
+  /** SW is the reply's trailing status word, four uppercase hex characters. */
+  sw?: string;
+  /** Body is the reply without its status word, base64. */
+  body?: string;
 }
 
 /**
@@ -224,6 +241,42 @@ export interface TransceiveRequestPayload extends TagTarget {
    * APDU. A framing-level reply carries no ISO 7816 status word.
    */
   raw: boolean;
+  /**
+   * SessionID sends the exchange inside a raw session begun with
+   * rawSessionBeginRequest. The session already names the tag, so the target
+   * fields are not needed.
+   */
+  sessionId?: string;
+}
+
+/**
+ * RawSessionBeginRequestPayload leases the reader holding the tag it names,
+ * so a multi-step exchange such as an authentication is not reset by polling
+ * or by another operation.
+ */
+export interface RawSessionBeginRequestPayload extends TagTarget {
+  /**
+   * TTLMs is how long the session lives without an exchange. Omitted selects
+   * five seconds; the most is thirty.
+   */
+  ttlMs?: number;
+}
+
+/** RawSessionBeginResponsePayload answers a rawSessionBeginRequest. */
+export interface RawSessionBeginResponsePayload {
+  sessionId: string;
+  /** ExpiresInMs is the time to live granted, renewed by each exchange. */
+  expiresInMs: number;
+}
+
+/** RawSessionEndRequestPayload ends a raw session. */
+export interface RawSessionEndRequestPayload {
+  sessionId: string;
+}
+
+/** RawSessionEndResponsePayload answers a rawSessionEndRequest. */
+export interface RawSessionEndResponsePayload {
+  sessionId: string;
 }
 
 /**

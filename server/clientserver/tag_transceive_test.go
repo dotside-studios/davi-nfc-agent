@@ -240,3 +240,62 @@ func TestANamedTagIsEnforcedOnASourceThatCannotNameItsOwn(t *testing.T) {
 		t.Errorf("err = %v, want the write refused for naming another tag", err)
 	}
 }
+
+func TestRawSessionRefusedByTheSameGatesAsAnExchange(t *testing.T) {
+	cfg := configInMode(t, nfc.ModeReadOnly)
+	cfg.AllowRawTransceive = func() bool { return true }
+	_, err := newTagOps(cfg).BeginRawSession(context.Background(), server.RawSessionBeginOp{
+		Target: server.Target{AllowUntargeted: true},
+	})
+	if got := codeOf(err); got != protocol.ErrCodeReadOnly {
+		t.Errorf("read-only: errorCode = %q, want %q", got, protocol.ErrCodeReadOnly)
+	}
+
+	cfg = configInMode(t, nfc.ModeReadWrite)
+	cfg.AllowRawTransceive = func() bool { return false }
+	_, err = newTagOps(cfg).BeginRawSession(context.Background(), server.RawSessionBeginOp{
+		Target: server.Target{AllowUntargeted: true},
+	})
+	if got := codeOf(err); got != protocol.ErrCodeRawChannelDisabled {
+		t.Errorf("channel closed: errorCode = %q, want %q", got, protocol.ErrCodeRawChannelDisabled)
+	}
+}
+
+func TestRawSessionRunsThroughTheReader(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	tag.TagType = "Type4A"
+	tag.IsConnected = true
+	tag.TransceiveResponse = []byte{0x91, 0xAF}
+	m := nfc.NewMockManager()
+	m.MockDevice.SetTags([]nfc.Tag{tag})
+
+	cfg := configOver(t, m, nfc.ModeReadWrite)
+	cfg.AllowRawTransceive = func() bool { return true }
+	s := newTagOps(cfg)
+	awaitCardOnReader(t, s.tags, "mock:usb:001")
+
+	ctx := context.Background()
+	lease, err := s.BeginRawSession(ctx, server.RawSessionBeginOp{Target: server.Target{TagUID: "04A1B2C3"}})
+	if err != nil {
+		t.Fatalf("BeginRawSession: %v", err)
+	}
+	if lease.TTL != nfc.DefaultRawSessionTTL {
+		t.Errorf("ttl = %v, want the default", lease.TTL)
+	}
+
+	reply, err := s.Transceive(ctx, server.TransceiveOp{SessionID: lease.SessionID, Data: []byte{0x90, 0x71}})
+	if err != nil {
+		t.Fatalf("Transceive in session: %v", err)
+	}
+	if string(reply) != "\x91\xAF" {
+		t.Errorf("reply = % X, want 91 AF", reply)
+	}
+
+	if err := s.EndRawSession(ctx, lease.SessionID); err != nil {
+		t.Fatalf("EndRawSession: %v", err)
+	}
+	_, err = s.Transceive(ctx, server.TransceiveOp{SessionID: lease.SessionID, Data: []byte{0x90, 0x71}})
+	if got := codeOf(err); got != protocol.ErrCodeRawSessionExpired {
+		t.Errorf("after end: errorCode = %q, want %q", got, protocol.ErrCodeRawSessionExpired)
+	}
+}

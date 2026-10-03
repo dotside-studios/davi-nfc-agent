@@ -129,6 +129,9 @@ type clientSession struct {
 	writes int
 	locks  int
 
+	// leases are the raw sessions this client holds, ended when it leaves.
+	leases map[string]struct{}
+
 	// cancel ends the operations this client asked for. Called when the
 	// connection drops and by Disconnect.
 	cancel context.CancelFunc
@@ -301,8 +304,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		_ = conn.Close()
 		s.clientsMux.Lock()
+		var leases map[string]struct{}
+		if c, ok := s.clients[conn]; ok {
+			leases = c.leases
+		}
 		delete(s.clients, conn)
 		s.clientsMux.Unlock()
+		s.endLeases(leases)
 		clientLog.Printf("Client disconnected: %s (total: %d)", clientID[:8], s.clientCount())
 		s.notifyChange()
 	}()
@@ -376,6 +384,11 @@ func (s *Server) dispatch(ctx context.Context, conn *wsconn.SafeConn, clientID s
 	case server.WSMessageTypeTransceiveRequest:
 		s.countOperation(conn, "transceive")
 		s.handleTransceiveRequest(ctx, conn, clientID, req)
+	case server.WSMessageTypeRawSessionBeginRequest:
+		s.countOperation(conn, "transceive")
+		s.handleRawSessionBegin(ctx, conn, req)
+	case server.WSMessageTypeRawSessionEndRequest:
+		s.handleRawSessionEnd(ctx, conn, req)
 	default:
 		clientWarn.Printf("Unknown message type: %s", req.Type)
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
@@ -460,15 +473,103 @@ func (s *Server) handleTransceiveRequest(ctx context.Context, conn *wsconn.SafeC
 		Target: targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
 		Data:   data,
 		Raw:    payload.Raw,
+
+		SessionID: payload.SessionID,
 	})
 	if err != nil {
 		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
 		return
 	}
 
-	s.reply(conn, req.ID, server.WSMessageTypeTransceiveResponse, protocol.TransceiveResponsePayload{
-		Data: base64.StdEncoding.EncodeToString(resp),
+	reply := protocol.TransceiveResponsePayload{Data: base64.StdEncoding.EncodeToString(resp)}
+	if !payload.Raw && len(resp) >= 2 {
+		reply.SW = fmt.Sprintf("%02X%02X", resp[len(resp)-2], resp[len(resp)-1])
+		if body := resp[:len(resp)-2]; len(body) > 0 {
+			reply.Body = base64.StdEncoding.EncodeToString(body)
+		}
+	}
+	s.reply(conn, req.ID, server.WSMessageTypeTransceiveResponse, reply)
+}
+
+// handleRawSessionBegin leases the reader holding the named tag for this
+// client.
+func (s *Server) handleRawSessionBegin(ctx context.Context, conn *wsconn.SafeConn, req protocol.WebSocketRequest) {
+	var payload protocol.RawSessionBeginRequestPayload
+	if !decodePayload(req.Payload, &payload) {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid raw session request")
+		return
+	}
+
+	sessions, ok := s.ops().(server.RawSessionOps)
+	if !ok {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeNotSupported, "Raw sessions are not supported")
+		return
+	}
+
+	lease, err := sessions.BeginRawSession(ctx, server.RawSessionBeginOp{
+		Target: targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
+		TTL:    time.Duration(payload.TTLMs) * time.Millisecond,
 	})
+	if err != nil {
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
+		return
+	}
+
+	s.clientsMux.Lock()
+	if c, ok := s.clients[conn]; ok {
+		if c.leases == nil {
+			c.leases = make(map[string]struct{})
+		}
+		c.leases[lease.SessionID] = struct{}{}
+	}
+	s.clientsMux.Unlock()
+
+	s.reply(conn, req.ID, server.WSMessageTypeRawSessionBeginResponse, protocol.RawSessionBeginResponsePayload{
+		SessionID:   lease.SessionID,
+		ExpiresInMs: int(lease.TTL / time.Millisecond),
+	})
+}
+
+// handleRawSessionEnd releases a raw session this client holds.
+func (s *Server) handleRawSessionEnd(ctx context.Context, conn *wsconn.SafeConn, req protocol.WebSocketRequest) {
+	var payload protocol.RawSessionEndRequestPayload
+	if !decodePayload(req.Payload, &payload) || payload.SessionID == "" {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid raw session request")
+		return
+	}
+
+	sessions, ok := s.ops().(server.RawSessionOps)
+	if !ok {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeNotSupported, "Raw sessions are not supported")
+		return
+	}
+
+	s.clientsMux.Lock()
+	if c, ok := s.clients[conn]; ok {
+		delete(c.leases, payload.SessionID)
+	}
+	s.clientsMux.Unlock()
+
+	if err := sessions.EndRawSession(ctx, payload.SessionID); err != nil {
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
+		return
+	}
+	s.reply(conn, req.ID, server.WSMessageTypeRawSessionEndResponse, protocol.RawSessionEndResponsePayload(payload))
+}
+
+// endLeases releases the raw sessions a departed client still held, so the
+// reader is not kept for one that is gone.
+func (s *Server) endLeases(leases map[string]struct{}) {
+	if len(leases) == 0 {
+		return
+	}
+	sessions, ok := s.ops().(server.RawSessionOps)
+	if !ok {
+		return
+	}
+	for id := range leases {
+		_ = sessions.EndRawSession(context.Background(), id)
+	}
 }
 
 // handleCapabilitiesRequest reports what the named tag supports.

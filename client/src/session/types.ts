@@ -189,6 +189,14 @@ export interface TransceiveRequest extends TagTarget {
    * framing-level response carries no ISO 7816 status word.
    */
   raw?: boolean;
+  /** Sends the exchange inside a raw session from `beginRawSession`. */
+  sessionId?: string;
+}
+
+export interface RawSession {
+  sessionId: string;
+  /** Time to live granted, renewed by each exchange. */
+  expiresInMs: number;
 }
 
 export interface HealthCheckResponse {

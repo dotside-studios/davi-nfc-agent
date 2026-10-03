@@ -85,7 +85,7 @@ func TestPoll_ReadFaultReportedOncePerCard(t *testing.T) {
 }
 
 // The guard suppresses repetition, not a later fault: a card that faults, reads,
-// then faults again is reported twice.
+// leaves, then faults on its next presentation is reported twice.
 func TestPoll_ReadFaultReportedAgainAfterASuccessfulRead(t *testing.T) {
 	tag := NewMockTag("04A1B2C3")
 	tag.TagType = CardTypeNtag215
@@ -99,6 +99,8 @@ func TestPoll_ReadFaultReportedAgainAfterASuccessfulRead(t *testing.T) {
 	tag.Data = EncodeNdefMessageWithTextRecord("hello", "en")
 	got = append(got, pollAndCollect(reader, 1)...)
 
+	reader.cache.Clear()
+	reader.clearFault()
 	tag.ReadDataError = NewReadError("ReadData", errors.New("bad response"))
 	got = append(got, pollAndCollect(reader, 3)...)
 

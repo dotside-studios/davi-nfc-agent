@@ -3,4 +3,4 @@ export { decodeBase64, encodeBase64, parseTagData, } from "./session/protocol";
 export type { RawTagPayload, WireMessage } from "./session/protocol";
 export { diagnoseAgent } from "./session/diagnose";
 export type { AgentDiagnosis, AgentDiagnosisKind } from "./session/diagnose";
-export type { DeviceStatus, HealthCheckResponse, LockResponse, NDEFRecord, NDEFRecordWrite, NFCClientOptions, NFCErrorCode, NFCErrorCodeValue, NFCErrorEvent, NFCEventHandler, NFCEventName, NFCEventPayloadMap, RawSession, TagCapabilities, TagData, TagMessage, TagTarget, TransceiveRequest, WriteRecord, WriteRequest, WriteResponse, } from "./session/types";
+export type { DeviceStatus, HealthCheckResponse, LockResponse, NDEFRecord, NDEFRecordWrite, NFCClientOptions, NFCErrorCode, NFCErrorCodeValue, NFCErrorEvent, NFCEventHandler, NFCEventName, NFCEventPayloadMap, NTAG424Request, NTAG424Response, NTAG424SDMOptions, RawSession, SequenceStep, SequenceStepResult, TagCapabilities, TagData, TagMessage, TagTarget, TransceiveRequest, TransceiveSequenceRequest, TransceiveSequenceResult, WriteRecord, WriteRequest, WriteResponse, } from "./session/types";

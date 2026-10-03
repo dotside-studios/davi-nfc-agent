@@ -45,6 +45,25 @@ type NTAG424Operator interface {
 
 var _ NTAG424Operator = (*pcscNTAG424Tag)(nil)
 
+// NTAG424KeySource is an NTAG424Operator that can name the key the agent holds
+// for a key number. It exists so a caller can program the card with a key the
+// agent already has, without that key crossing any boundary it need not.
+type NTAG424KeySource interface {
+	ConfiguredKey(keyNo byte) ([]byte, error)
+}
+
+var _ NTAG424KeySource = (*pcscNTAG424Tag)(nil)
+
+// ConfiguredKey returns the key held for keyNo for this card, diversified by
+// its UID when the key set says so.
+func (t *pcscNTAG424Tag) ConfiguredKey(keyNo byte) ([]byte, error) {
+	key, err := t.keyFor(keyNo)
+	if err != nil {
+		return nil, NewAuthError("ConfiguredKey (NTAG 424)", t.UID(), err)
+	}
+	return key, nil
+}
+
 // NTAG424SDMResult is the outcome of ConfigureSDM. When the settings were
 // applied but the tap could not be verified, the result carries the URL read
 // back with a nil Tap, alongside the error.

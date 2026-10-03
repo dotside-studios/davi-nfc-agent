@@ -795,8 +795,31 @@ func (t *pcscNTAG424Tag) Capabilities() TagCapabilities {
 		_, err := t.routeFor(fs, true)
 		caps.CanWrite = err == nil
 		caps.IsReadOnly = !caps.CanWrite
+		caps.SDMEnabled = fs.SDMEnabled
 	}
+	for n := 0; n <= 4; n++ {
+		if t.holds(byte(n)) {
+			caps.KeysHeld = append(caps.KeysHeld, n)
+		}
+	}
+	caps.RandomID = t.RandomID()
+	t.mu.Lock()
+	caps.LRP = t.lrp
+	t.mu.Unlock()
 	return caps
+}
+
+// probeCapabilities reads the NDEF file's settings once when they have never
+// been read and no session is open, so a capability report can say whether SDM
+// is on. A failure leaves the report without it.
+func (t *pcscNTAG424Tag) probeCapabilities() {
+	if t.cachedSettings() != nil {
+		return
+	}
+	if s, _ := t.currentSession(); s != nil {
+		return
+	}
+	_, _ = t.getFileSettings(n4FileNDEF)
 }
 
 func (t *pcscNTAG424Tag) CanMakeReadOnly() (bool, error) {

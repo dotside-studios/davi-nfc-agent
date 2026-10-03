@@ -157,6 +157,42 @@ hashing. The agent uses ECDSA P-256, whose header is a fixed 26-byte constant.
 Getting this wrong is the iOS equivalent of the `CertificatePinner` trap: the
 code looks right and every connection fails.
 
+## Raw APDU access (NTAG 424 DNA, DESFire, ISO-DEP applets)
+
+The agent can send a tag raw commands through a phone only if the phone's app
+can speak ISO 7816 to it, which both platforms gate.
+
+**iOS.** The app's entitlements must list the applications it selects, in
+`com.apple.developer.nfc.readersession.iso7816.select-identifiers`, and an
+`NFCTagReaderSession` must be opened with `.iso14443`. Without the identifier
+the OS refuses the select. For NDEF on an NTAG 424 DNA, and for any raw access
+to it, the list must include `D2760000850101`, the NDEF application:
+
+```xml
+<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+<array>
+  <string>D2760000850101</string>
+</array>
+```
+
+Add the identifiers of any other application the agent will be asked to select
+(a DESFire application's AID, for instance). The same value belongs in the
+app's `Info.plist` under `com.apple.developer.nfc.readersession.iso7816.select-identifiers`.
+
+**Android.** Use `IsoDep` for APDU-level exchange (`IsoDep.transceive`) and
+`NfcA` for framing-level. Call `IsoDep.connect()` once per tag and keep the
+connection for the whole session; raise `IsoDep.setTimeout` for slow commands.
+
+**Reply format.** `deviceTransceiveResponse.data` must be the card's whole
+reply and must end with SW1SW2. Android's `IsoDep.transceive` already returns
+it that way. iOS `sendCommand` returns the status word beside the payload, so
+append `sw1` and `sw2` to the data before answering. A reply of the status word
+alone is valid. See [Transceive Request](api.md#transceive-request).
+
+A tag held by a phone cannot be driven by `transceiveSequence` or
+`ntag424Request`, or leased as a raw session: those need the agent's own
+reader and answer `NOT_SUPPORTED`.
+
 ## Local network permission (iOS 14+)
 
 Any connection to a LAN address needs the local network permission, whether or

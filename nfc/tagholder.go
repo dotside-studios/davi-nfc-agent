@@ -71,6 +71,26 @@ type RawSessionHolder interface {
 	TransceiveInSessionTag(ctx context.Context, leaseID string, data []byte) ([]byte, error)
 }
 
+// SequenceHolder is what a TagHolder offers when it can run several raw
+// exchanges under one tag operation. A holder that cannot is simply not one.
+type SequenceHolder interface {
+	// TransceiveSequenceTag runs the steps against the tag, with nothing else
+	// reaching the card between them.
+	TransceiveSequenceTag(ctx context.Context, deviceID, tagUID string, steps []SequenceStep) (*SequenceResult, error)
+
+	// TransceiveSequenceInSessionTag runs the steps inside a lease.
+	TransceiveSequenceInSessionTag(ctx context.Context, leaseID string, steps []SequenceStep) (*SequenceResult, error)
+}
+
+// NTAG424Holder is what a TagHolder offers when it can run NTAG 424 DNA
+// operations on a tag it holds. A tag held by a phone cannot, so the holder
+// answers it as not supported.
+type NTAG424Holder interface {
+	// WithNTAG424Tag runs fn under one tag operation on the tag, which must be
+	// an NTAG 424 DNA.
+	WithNTAG424Tag(ctx context.Context, deviceID, tagUID string, fn func(NTAG424Operator) error) error
+}
+
 // TagsHeldBy returns the manager's holder of tags, or nil for one whose devices
 // hold none, which is every manager whose devices are polled through a reader.
 func TagsHeldBy(m Manager) TagHolder {

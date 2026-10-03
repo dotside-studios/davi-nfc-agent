@@ -4,6 +4,7 @@ package clientserver
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -389,6 +390,11 @@ func (s *Server) dispatch(ctx context.Context, conn *wsconn.SafeConn, clientID s
 		s.handleRawSessionBegin(ctx, conn, req)
 	case server.WSMessageTypeRawSessionEndRequest:
 		s.handleRawSessionEnd(ctx, conn, req)
+	case server.WSMessageTypeTransceiveSequenceRequest:
+		s.countOperation(conn, "transceive")
+		s.handleTransceiveSequence(ctx, conn, req)
+	case server.WSMessageTypeNTAG424Request:
+		s.handleNTAG424(ctx, conn, req)
 	default:
 		clientWarn.Printf("Unknown message type: %s", req.Type)
 		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeUnknownType, fmt.Sprintf("Unknown message type: %s", req.Type))
@@ -482,13 +488,121 @@ func (s *Server) handleTransceiveRequest(ctx context.Context, conn *wsconn.SafeC
 	}
 
 	reply := protocol.TransceiveResponsePayload{Data: base64.StdEncoding.EncodeToString(resp)}
-	if !payload.Raw && len(resp) >= 2 {
-		reply.SW = fmt.Sprintf("%02X%02X", resp[len(resp)-2], resp[len(resp)-1])
-		if body := resp[:len(resp)-2]; len(body) > 0 {
-			reply.Body = base64.StdEncoding.EncodeToString(body)
-		}
+	if !payload.Raw {
+		reply = splitReply(resp)
 	}
 	s.reply(conn, req.ID, server.WSMessageTypeTransceiveResponse, reply)
+}
+
+// splitReply fills the status word and body of an APDU-level reply.
+func splitReply(reply []byte) protocol.TransceiveResponsePayload {
+	out := protocol.TransceiveResponsePayload{Data: base64.StdEncoding.EncodeToString(reply)}
+	if len(reply) >= 2 {
+		out.SW = fmt.Sprintf("%02X%02X", reply[len(reply)-2], reply[len(reply)-1])
+		if body := reply[:len(reply)-2]; len(body) > 0 {
+			out.Body = base64.StdEncoding.EncodeToString(body)
+		}
+	}
+	return out
+}
+
+// parseSW reads four hex characters as a status word.
+func parseSW(text string) (uint16, bool) {
+	b, err := hex.DecodeString(text)
+	if err != nil || len(b) != 2 {
+		return 0, false
+	}
+	return uint16(b[0])<<8 | uint16(b[1]), true
+}
+
+// handleTransceiveSequence runs several APDU exchanges under one tag operation.
+func (s *Server) handleTransceiveSequence(ctx context.Context, conn *wsconn.SafeConn, req protocol.WebSocketRequest) {
+	var payload protocol.TransceiveSequenceRequestPayload
+	if !decodePayload(req.Payload, &payload) {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid transceive sequence request")
+		return
+	}
+	if len(payload.Steps) == 0 || len(payload.Steps) > nfc.MaxSequenceSteps {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest,
+			fmt.Sprintf("steps must hold 1 to %d commands", nfc.MaxSequenceSteps))
+		return
+	}
+
+	steps := make([]nfc.SequenceStep, len(payload.Steps))
+	for i, in := range payload.Steps {
+		data, err := base64.StdEncoding.DecodeString(in.Data)
+		if err != nil || len(data) == 0 {
+			s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest,
+				fmt.Sprintf("step %d: data must be non-empty base64", i))
+			return
+		}
+		steps[i].Data = data
+		for _, list := range []struct {
+			in  []string
+			out *[]uint16
+		}{{in.ExpectSW, &steps[i].ExpectSW}, {in.StopOnSW, &steps[i].StopOnSW}} {
+			for _, text := range list.in {
+				sw, ok := parseSW(text)
+				if !ok {
+					s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest,
+						fmt.Sprintf("step %d: %q is not a status word of four hex characters", i, text))
+					return
+				}
+				*list.out = append(*list.out, sw)
+			}
+		}
+	}
+
+	sequences, ok := s.ops().(server.SequenceOps)
+	if !ok {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeNotSupported, "Raw sequences are not supported")
+		return
+	}
+	result, err := sequences.TransceiveSequence(ctx, server.SequenceOp{
+		Target:    targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
+		Steps:     steps,
+		SessionID: payload.SessionID,
+	})
+	if err != nil {
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
+		return
+	}
+
+	reply := protocol.TransceiveSequenceResponsePayload{
+		Results:   make([]protocol.TransceiveResponsePayload, len(result.Replies)),
+		StoppedAt: result.StoppedAt,
+	}
+	for i, r := range result.Replies {
+		reply.Results[i] = splitReply(r)
+	}
+	s.reply(conn, req.ID, server.WSMessageTypeTransceiveSequenceResponse, reply)
+}
+
+// handleNTAG424 runs an NTAG 424 DNA operation on the named tag.
+func (s *Server) handleNTAG424(ctx context.Context, conn *wsconn.SafeConn, req protocol.WebSocketRequest) {
+	var payload protocol.NTAG424RequestPayload
+	if !decodePayload(req.Payload, &payload) {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "Invalid ntag424 request")
+		return
+	}
+	if ntag424Mutating(payload.Op) {
+		s.countOperation(conn, "write")
+	}
+
+	ops, ok := s.ops().(server.NTAG424Ops)
+	if !ok {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeNotSupported, "NTAG 424 operations are not supported")
+		return
+	}
+	result, err := ops.NTAG424(ctx, server.NTAG424Op{
+		Target:  targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
+		Request: payload,
+	})
+	if err != nil {
+		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
+		return
+	}
+	s.reply(conn, req.ID, server.WSMessageTypeNTAG424Response, result)
 }
 
 // handleRawSessionBegin leases the reader holding the named tag for this

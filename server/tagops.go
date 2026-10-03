@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/protocol"
 )
 
 // TagOps performs an operation on the tag a request names, wherever it is: the
@@ -93,6 +94,37 @@ type RawSessionLease struct {
 
 	// TTL is the time to live granted, renewed by each exchange.
 	TTL time.Duration
+}
+
+// SequenceOps is what TagOps offers when it can run several raw exchanges under
+// one tag operation. Separate for the same reason as RawSessionOps.
+type SequenceOps interface {
+	TransceiveSequence(ctx context.Context, req SequenceOp) (*nfc.SequenceResult, error)
+}
+
+// SequenceOp runs steps against the named tag, or inside a raw session.
+type SequenceOp struct {
+	Target
+
+	Steps []nfc.SequenceStep
+
+	// SessionID runs the steps inside a raw session, which already names the
+	// tag. Empty is an ordinary run.
+	SessionID string
+}
+
+// NTAG424Ops is what TagOps offers when it can run NTAG 424 DNA operations.
+// Separate so an operation layer that cannot is not obliged to stub it.
+type NTAG424Ops interface {
+	NTAG424(ctx context.Context, req NTAG424Op) (*protocol.NTAG424ResponsePayload, error)
+}
+
+// NTAG424Op is an NTAG 424 DNA operation on the named tag. Request carries the
+// operation and its arguments as the client sent them.
+type NTAG424Op struct {
+	Target
+
+	Request protocol.NTAG424RequestPayload
 }
 
 // CapabilitiesOp asks what the named tag supports.

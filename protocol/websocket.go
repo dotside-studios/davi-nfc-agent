@@ -32,6 +32,12 @@ const (
 	WSTypeRawSessionEndRequest  MessageType = "rawSessionEndRequest"
 	WSTypeRawSessionEndResponse MessageType = "rawSessionEndResponse"
 
+	WSTypeTransceiveSequenceRequest  MessageType = "transceiveSequenceRequest"
+	WSTypeTransceiveSequenceResponse MessageType = "transceiveSequenceResponse"
+
+	WSTypeNTAG424Request  MessageType = "ntag424Request"
+	WSTypeNTAG424Response MessageType = "ntag424Response"
+
 	WSTypeError MessageType = "error"
 )
 

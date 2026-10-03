@@ -1,4 +1,4 @@
-import type { NFCErrorCode } from "./wire.generated";
+import type { NFCErrorCode, NTAG424ResponsePayload, NTAG424SDMOptions } from "./wire.generated";
 export type { NFCErrorCode };
 export interface NFCClientOptions {
     /**
@@ -91,6 +91,14 @@ export interface TagCapabilities {
     supportsAuthentication?: boolean;
     /** NTAG PWD/PACK/AUTH0, as distinct from `supportsAuthentication`. */
     supportsPassword?: boolean;
+    /** NTAG 424 DNA: the NDEF file mirrors per-tap data, as last read. */
+    sdmEnabled?: boolean;
+    /** NTAG 424 DNA: key numbers the agent holds a key for, never the keys. */
+    keysHeld?: number[];
+    /** NTAG 424 DNA: the card presents a random UID. */
+    randomID?: boolean;
+    /** NTAG 424 DNA: the card is in LRP mode, which the agent cannot use. */
+    lrp?: boolean;
 }
 export interface TagData {
     uid: string;
@@ -176,6 +184,68 @@ export interface TransceiveRequest extends TagTarget {
     /** Sends the exchange inside a raw session from `beginRawSession`. */
     sessionId?: string;
 }
+export interface SequenceStep {
+    data: Uint8Array;
+    /** Stops the run after this step unless the status word is one of these, as four hex characters. */
+    expectSW?: string[];
+    /** Stops the run after this step when the status word is one of these. */
+    stopOnSW?: string[];
+}
+/** Runs under one tag operation; at most 32 steps. */
+export interface TransceiveSequenceRequest extends TagTarget {
+    steps: SequenceStep[];
+    /** Runs the sequence inside a raw session from `beginRawSession`. */
+    sessionId?: string;
+}
+export interface SequenceStepResult {
+    /** The whole reply, status word included. */
+    data: Uint8Array;
+    /** The reply's status word, four uppercase hex characters. */
+    sw?: string;
+    /** The reply without its status word. */
+    body?: Uint8Array;
+}
+export interface TransceiveSequenceResult {
+    /** One entry per step that ran. */
+    results: SequenceStepResult[];
+    /** Index of the step whose reply ended the run early, or -1 when all ran. */
+    stoppedAt: number;
+}
+export type { NTAG424SDMOptions };
+export type NTAG424Response = NTAG424ResponsePayload;
+/**
+ * An NTAG 424 DNA operation. `configureSDM`, `changeKey` and `lock` change the
+ * tag and are refused in read-only mode; `changeKey` and `lock` are
+ * irreversible and need `confirm: true`.
+ */
+export type NTAG424Request = TagTarget & ({
+    op: "getFileSettings";
+    fileNo?: number;
+} | {
+    op: "configureSDM";
+    urlTemplate: string;
+    sdm?: NTAG424SDMOptions;
+} | {
+    op: "changeKey";
+    keyNo: number;
+    authKeyNo: number;
+    version?: number;
+    /** "configured" takes the key the agent holds for `keyNo`; "explicit" sends `newKey`. */
+    newKeySource: "configured" | "explicit";
+    /** 32 hex characters, for the explicit source. Never echoed back or logged. */
+    newKey?: string;
+    confirm: true;
+} | {
+    op: "getCardUID";
+} | {
+    op: "getKeyVersion";
+    keyNo: number;
+} | {
+    op: "readSig";
+} | {
+    op: "lock";
+    confirm: true;
+});
 export interface RawSession {
     sessionId: string;
     /** Time to live granted, renewed by each exchange. */

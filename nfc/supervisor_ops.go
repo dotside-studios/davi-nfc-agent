@@ -106,6 +106,8 @@ func (s *Supervisor) SetNTAG424Keys(keys NTAG424Keys) {
 
 var _ TagHolder = (*Supervisor)(nil)
 var _ RawSessionHolder = (*Supervisor)(nil)
+var _ SequenceHolder = (*Supervisor)(nil)
+var _ NTAG424Holder = (*Supervisor)(nil)
 
 // TagOn reports the tag a device is holding, by UID. An empty device asks a
 // reader with a card on it, and failing that the most recent scan a device
@@ -277,6 +279,43 @@ func (s *Supervisor) TransceiveInSessionTag(ctx context.Context, leaseID string,
 		}
 	}
 	return nil, NewRawSessionExpiredError("RawSession")
+}
+
+// TransceiveSequenceTag runs several raw exchanges under one tag operation. A
+// tag held by a remote device cannot be driven this way.
+func (s *Supervisor) TransceiveSequenceTag(ctx context.Context, device, tagUID string, steps []SequenceStep) (*SequenceResult, error) {
+	if s.heldElsewhere(device) != nil {
+		return nil, NewNotSupportedError("TransceiveSequence")
+	}
+	_, reader, err := s.readerFor(device)
+	if err != nil {
+		return nil, err
+	}
+	return reader.TransceiveSequenceExpecting(ctx, steps, tagUID)
+}
+
+// TransceiveSequenceInSessionTag runs several raw exchanges inside a lease.
+func (s *Supervisor) TransceiveSequenceInSessionTag(ctx context.Context, leaseID string, steps []SequenceStep) (*SequenceResult, error) {
+	for _, reader := range s.leasedReaders() {
+		if _, err := reader.leaseByID(leaseID); err == nil {
+			return reader.TransceiveSequenceInSession(ctx, leaseID, steps)
+		}
+	}
+	return nil, NewRawSessionExpiredError("RawSession")
+}
+
+// WithNTAG424Tag runs fn under one tag operation on the NTAG 424 DNA the named
+// device is holding. A tag held by a remote device is not one the agent can
+// authenticate with.
+func (s *Supervisor) WithNTAG424Tag(ctx context.Context, device, tagUID string, fn func(NTAG424Operator) error) error {
+	if s.heldElsewhere(device) != nil {
+		return NewNotSupportedError("NTAG424")
+	}
+	_, reader, err := s.readerFor(device)
+	if err != nil {
+		return err
+	}
+	return reader.WithNTAG424(ctx, tagUID, fn)
 }
 
 func (s *Supervisor) leasedReaders() []*deviceReader {

@@ -402,6 +402,58 @@ describe("tag operations", () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
+  it("transceiveSequence() encodes the steps and decodes each result", async () => {
+    const { client, ws } = await connected();
+    const run = client.transceiveSequence({
+      sessionId: "s1",
+      steps: [
+        { data: new Uint8Array([0x00, 0xa4]), expectSW: ["9000"] },
+        { data: new Uint8Array([0x00, 0xb0]), stopOnSW: ["6A82"] },
+      ],
+    });
+
+    const sent = JSON.parse(ws.send.mock.calls[0][0]);
+    expect(sent.type).toBe("transceiveSequenceRequest");
+    expect(sent.payload.sessionId).toBe("s1");
+    expect(sent.payload.steps[0]).toEqual({ data: "AKQ=", expectSW: ["9000"] });
+    expect(sent.payload.steps[1]).toEqual({ data: "ALA=", stopOnSW: ["6A82"] });
+
+    ws.emit({
+      id: sent.id,
+      success: true,
+      payload: {
+        results: [{ data: "AZAA", sw: "9000", body: "AQ==" }, { data: "aoI=", sw: "6A82" }],
+        stoppedAt: 1,
+      },
+    });
+
+    const result = await run;
+    expect(result.stoppedAt).toBe(1);
+    expect(result.results[0]).toEqual({
+      data: new Uint8Array([0x01, 0x90, 0x00]),
+      sw: "9000",
+      body: new Uint8Array([0x01]),
+    });
+    expect(result.results[1].body).toBeUndefined();
+  });
+
+  it("transceiveSequence() refuses an empty sequence without a round trip", async () => {
+    const { client, ws } = await connected();
+    await expect(client.transceiveSequence({ steps: [] })).rejects.toThrow(/at least one step/);
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it("ntag424() sends the operation and aims it at the tag", async () => {
+    const { client, ws } = await connected();
+    const asking = client.ntag424({ op: "getKeyVersion", keyNo: 1, uid: "04A1" });
+    const sent = JSON.parse(ws.send.mock.calls[0][0]);
+    expect(sent.type).toBe("ntag424Request");
+    expect(sent.payload).toEqual({ op: "getKeyVersion", keyNo: 1, uid: "04A1" });
+
+    ws.emit({ id: sent.id, success: true, payload: { op: "getKeyVersion", keyNo: 1, keyVersion: 0 } });
+    await expect(asking).resolves.toMatchObject({ keyVersion: 0 });
+  });
+
   it("getCapabilities() unwraps the capabilities the agent nests", async () => {
     const { client, ws } = await connected();
     const asking = client.getCapabilities();

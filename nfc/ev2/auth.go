@@ -66,8 +66,10 @@ type Authenticator struct {
 	block  cipher.Block
 	random io.Reader
 
-	// ti carries over from an earlier authentication, for AuthNonFirst.
-	ti []byte
+	// ti and counter carry over from an earlier authentication, for
+	// AuthNonFirst.
+	ti      []byte
+	counter uint16
 
 	rndA  []byte
 	rndB  []byte
@@ -92,6 +94,12 @@ func NewAuthenticator(mode AuthMode, keyNo byte, key, ti []byte) (*Authenticator
 		random: rand.Reader,
 		ti:     append([]byte(nil), ti...),
 	}, nil
+}
+
+// SetCounter sets the command counter an AuthNonFirst session continues from,
+// which is the counter of the session it replaces. The card does not reset it.
+func (a *Authenticator) SetCounter(counter uint16) {
+	a.counter = counter
 }
 
 // SetRandom replaces the source of this side's random number, so a test can
@@ -177,6 +185,9 @@ func (a *Authenticator) Finish(response []byte) (*Session, error) {
 	a.stage = 2
 	encKey := CMAC(a.block, sessionVectorSSM(ssmSV1Prefix, a.rndA, a.rndB))
 	macKey := CMAC(a.block, sessionVectorSSM(ssmSV2Prefix, a.rndA, a.rndB))
+	if a.mode == AuthNonFirst {
+		return NewSessionAt(ti, encKey, macKey, a.counter)
+	}
 	return NewSession(ti, encKey, macKey)
 }
 

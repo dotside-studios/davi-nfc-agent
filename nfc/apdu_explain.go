@@ -382,6 +382,9 @@ func describeISO(e *APDUExplanation, f APDUFields) {
 	case INSUpdateBin: // 0xD6
 		e.Summary = fmt.Sprintf("UPDATE BINARY — write %d byte(s) at offset %d", len(f.Data), isoOffset(f))
 		e.Class = ClassWrite
+	case INSGetResponse: // 0xC0
+		e.Summary = fmt.Sprintf("GET RESPONSE — fetch up to %d byte(s) the card is holding", bytesRead(f))
+		e.Class = ClassRead
 	default:
 		e.Summary = fmt.Sprintf("ISO 7816 command (INS %02X)", f.INS)
 		e.Class = ClassUnknown

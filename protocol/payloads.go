@@ -116,6 +116,12 @@ type TransceiveRequestPayload struct {
 	// rawSessionBeginRequest. The session already names the tag, so the target
 	// fields are not needed.
 	SessionID string `json:"sessionId,omitempty"`
+
+	// AutoGetResponse has the agent follow a 61xx reply with GET RESPONSE
+	// until the card stops, and retry a 6Cxx reply once with the corrected Le,
+	// returning the concatenated body with the final status word. Omitted
+	// returns the card's first reply unchanged. Not valid with Raw.
+	AutoGetResponse bool `json:"autoGetResponse,omitempty"`
 }
 
 // RawSessionBeginRequestPayload leases the reader holding the tag it names, so
@@ -159,6 +165,10 @@ type TransceiveStep struct {
 	// StopOnSW ends the run after this step when the reply's status word is one
 	// of these, each four hex characters.
 	StopOnSW []string `json:"stopOnSW,omitempty"`
+
+	// AutoGetResponse chains this step's reply as it does on a
+	// transceiveRequest. ExpectSW and StopOnSW then see the final status word.
+	AutoGetResponse bool `json:"autoGetResponse,omitempty"`
 }
 
 // TransceiveSequenceRequestPayload runs several APDU exchanges with the tag it
@@ -305,9 +315,11 @@ type NTAG424ResponsePayload struct {
 	KeyNo      *int `json:"keyNo,omitempty"`
 	KeyVersion *int `json:"keyVersion,omitempty"`
 
-	// Signature answers readSig: the 56-byte originality signature, base64,
-	// unverified.
+	// Signature answers readSig: the 56-byte originality signature, base64.
+	// Genuine is whether it verifies over the card's real UID under NXP's
+	// public key.
 	Signature string `json:"signature,omitempty"`
+	Genuine   *bool  `json:"genuine,omitempty"`
 
 	// Locked answers lock and Changed answers changeKey.
 	Locked  bool `json:"locked,omitempty"`

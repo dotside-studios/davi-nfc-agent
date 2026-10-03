@@ -69,6 +69,10 @@ type TransceiveOp struct {
 	// SessionID sends the exchange inside a raw session, which already names
 	// the tag. Empty is an ordinary exchange.
 	SessionID string
+
+	// AutoGetResponse follows 61xx and 6Cxx replies; see
+	// [nfc.ExchangeChained]. Meaningless with Raw.
+	AutoGetResponse bool
 }
 
 // RawSessionOps is what TagOps offers when it can lease the reader for a

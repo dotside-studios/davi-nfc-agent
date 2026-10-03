@@ -462,10 +462,12 @@ export interface NTAG424ResponsePayload {
   keyNo?: number;
   keyVersion?: number;
   /**
-   * Signature answers readSig: the 56-byte originality signature, base64,
-   * unverified.
+   * Signature answers readSig: the 56-byte originality signature, base64.
+   * Genuine is whether it verifies over the card's real UID under NXP's public
+   * key.
    */
   signature?: string;
+  genuine?: boolean;
   /** Locked answers lock and Changed answers changeKey. */
   locked?: boolean;
   changed?: boolean;

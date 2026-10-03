@@ -7,9 +7,9 @@ import (
 
 // The commands that change a tag, built for a session to carry.
 //
-// These build APDUs and read answers. Nothing here sends anything, and nothing
-// in the agent calls them: the tag operations, the client protocol and the
-// console have no route to a keyed command, and this package holds no keys.
+// These build APDUs and read answers. Nothing here sends anything and this
+// package holds no keys. The reader's NTAG 424 driver (nfc.NTAG424Operator)
+// sends them in a session opened with the keys the agent was given.
 
 // Instruction bytes for the commands below.
 const (

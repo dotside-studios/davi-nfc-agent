@@ -90,6 +90,7 @@ type deviceReader struct {
 	workerWg         sync.WaitGroup // Tracks worker goroutine completion
 	classicKeys      [][]byte       // Extra MIFARE Classic auth keys (guarded by statusMux)
 	desfireKeys      DESFireKeys    // DESFire NDEF application keys (guarded by statusMux)
+	ntag424Keys      NTAG424Keys    // NTAG 424 DNA keys (guarded by statusMux)
 	feedbackOn       atomic.Bool    // Whether the reader flashes and beeps at what it does
 	signalling       atomic.Bool    // Held while a signal plays, so only one does
 	lastSignalErr    string         // Last signal failure logged (guarded by statusMux)
@@ -130,11 +131,59 @@ func (r *deviceReader) SetDESFireKeys(keys DESFireKeys) {
 	r.statusMux.Unlock()
 }
 
+// SetNTAG424Keys configures the AES keys an NTAG 424 DNA is authenticated with.
+// They are held in memory and applied to each such tag the reader encounters;
+// keys equal to those already applied leave a tag's open session alone. Pass an
+// empty set to clear.
+func (r *deviceReader) SetNTAG424Keys(keys NTAG424Keys) {
+	cp := keys.Copy()
+	r.statusMux.Lock()
+	r.ntag424Keys = cp
+	r.statusMux.Unlock()
+}
+
+// uidResolver is implemented by a tag that can learn its real UID when it
+// presents a random one.
+type uidResolver interface {
+	ResolveUID()
+}
+
+// uidAliaser is implemented by a tag that answers to more than one UID for the
+// presence on the reader.
+type uidAliaser interface {
+	UIDAliases() []string
+}
+
+// tagHasUID reports whether a request naming uid means this tag, by its UID or
+// by one it has presented.
+func tagHasUID(tag Tag, uid string) bool {
+	if strings.EqualFold(tag.UID(), uid) {
+		return true
+	}
+	if a, ok := tag.(uidAliaser); ok {
+		for _, alias := range a.UIDAliases() {
+			if strings.EqualFold(alias, uid) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// identify applies the keys and lets a tag with a random UID resolve the real
+// one, so the UID read afterwards is the one to publish and route by.
+func (r *deviceReader) identify(tag Tag) {
+	r.applyKeys(tag)
+	if res, ok := tag.(uidResolver); ok {
+		res.ResolveUID()
+	}
+}
+
 // applyKeys injects any configured card keys into a tag that takes them, just
 // before it is wrapped in a Card for a read or write.
 func (r *deviceReader) applyKeys(tag Tag) {
 	r.statusMux.RLock()
-	classic, desfire := r.classicKeys, r.desfireKeys
+	classic, desfire, ntag424Keys := r.classicKeys, r.desfireKeys, r.ntag424Keys
 	r.statusMux.RUnlock()
 
 	if len(classic) > 0 {
@@ -146,6 +195,9 @@ func (r *deviceReader) applyKeys(tag Tag) {
 		if kc, ok := tag.(desfireKeyConfigurable); ok {
 			kc.SetDESFireKeys(desfire)
 		}
+	}
+	if kc, ok := tag.(ntag424KeyConfigurable); ok {
+		kc.SetNTAG424Keys(ntag424Keys)
 	}
 }
 
@@ -510,6 +562,7 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 	}
 
 	for _, tag := range tags {
+		r.identify(tag)
 		uid := tag.UID()
 
 		if uid != "" {
@@ -523,7 +576,6 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 		}
 
 		// Create Card wrapper
-		r.applyKeys(tag)
 		card := NewCard(tag)
 		// A tag holding no NDEF message is published as a scan carrying its
 		// identity alone.
@@ -907,9 +959,10 @@ func (r *deviceReader) prepareCardForWrite(expectUID string) (*Card, error) {
 	}
 
 	tag := tags[0] // Safe because we checked len(tags) == 1
+	r.identify(tag)
 
 	// Checked inside the tag operation, so it cannot go stale before the write.
-	if expectUID != "" && !strings.EqualFold(tag.UID(), expectUID) {
+	if expectUID != "" && !tagHasUID(tag, expectUID) {
 		return nil, fmt.Errorf("%w: request named %s but the reader is holding %s",
 			ErrTagUIDMismatch, expectUID, tag.UID())
 	}
@@ -1352,7 +1405,7 @@ func (r *deviceReader) soleTag(expectUID string) (Tag, error) {
 	}
 
 	tag := tags[0]
-	if expectUID != "" && !strings.EqualFold(tag.UID(), expectUID) {
+	if expectUID != "" && !tagHasUID(tag, expectUID) {
 		return nil, fmt.Errorf("%w: request named %s but the reader is holding %s",
 			ErrTagUIDMismatch, expectUID, tag.UID())
 	}

@@ -175,12 +175,12 @@ var tagProfiles = map[DetectedTagType]tagProfile{
 		maxNDEFSize:  254,
 		canWrite:     true,
 		supportsNDEF: true,
-		// Locking means rewriting the CC file's WriteAccess byte or changing
-		// file settings under AES, neither of which is implemented.
+		// Locking changes the NDEF file's settings under the change key, so
+		// the driver reports it per card, from the keys held.
 		canLock:       false,
 		canTransceive: true,
-		// AES-128 across five keys. This is what the card supports; no driver
-		// here authenticates yet.
+		// AES-128 across five keys. The driver authenticates with the keys the
+		// agent holds.
 		supportsCrypto:         true,
 		supportsAuthentication: true,
 	},

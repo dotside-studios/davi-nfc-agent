@@ -3,6 +3,10 @@ package nfctest
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -391,5 +395,58 @@ func TestNTAG424CapabilitiesCarryTheDriversFacts(t *testing.T) {
 		if strings.Contains(string(raw), field) {
 			t.Errorf("zero value carries %q: %s", field, raw)
 		}
+	}
+}
+
+func TestNTAG424ReadOriginality(t *testing.T) {
+	uid, err := hex.DecodeString(ntag424UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign := func(uid []byte) []byte {
+		r, s, err := ecdsa.Sign(rand.Reader, key, uid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sig := make([]byte, ntag424.SigSize)
+		r.FillBytes(sig[:ntag424.SigSize/2])
+		s.FillBytes(sig[ntag424.SigSize/2:])
+		return sig
+	}
+	keys := nfc.NTAG424Keys{Master: make([]byte, 16)}
+	run := func(name string, sig []byte, opts ...NTAG424Option) bool {
+		t.Helper()
+		opts = append(opts, NTAG424WithSignature(sig))
+		op := NTAG424(ntag424UID, opts...).WithNTAG424Keys(keys).Tag().(nfc.NTAG424Operator)
+		got, genuine, err := op.ReadOriginality(&key.PublicKey)
+		if err != nil || !bytes.Equal(got, sig) {
+			t.Fatalf("%s: ReadOriginality = % X, %v", name, got, err)
+		}
+		return genuine
+	}
+
+	good := sign(uid)
+	if !run("genuine", good) {
+		t.Error("a signature over the UID is not genuine")
+	}
+	if !run("random ID", good, NTAG424WithRandomID()) {
+		t.Error("a random-ID card is not verified against its real UID")
+	}
+	tampered := append([]byte(nil), good...)
+	tampered[3] ^= 0x80
+	if run("tampered signature", tampered) {
+		t.Error("a tampered signature is genuine")
+	}
+	other := append([]byte(nil), uid...)
+	other[0] ^= 0x01
+	if run("other UID", sign(other)) {
+		t.Error("a signature over another UID is genuine")
+	}
+	if run("default signature", NTAG424Signature) {
+		t.Error("the emulator's placeholder signature is genuine")
 	}
 }

@@ -84,6 +84,9 @@ func TestNTAG424ReadOps(t *testing.T) {
 	if sig, _ := base64.StdEncoding.DecodeString(res.Signature); len(sig) != 56 {
 		t.Errorf("signature is %d bytes, want 56", len(sig))
 	}
+	if res.Genuine == nil || *res.Genuine {
+		t.Errorf("genuine = %v, want false for the emulator's placeholder signature", res.Genuine)
+	}
 }
 
 func TestNTAG424MutatingOpsRefusedInReadOnlyMode(t *testing.T) {
@@ -124,7 +127,7 @@ func TestNTAG424IrreversibleOpsNeedConfirm(t *testing.T) {
 }
 
 func TestNTAG424ChangeKeyWithoutLeakingTheKey(t *testing.T) {
-	var logged bytes.Buffer
+	var logged lockedBuffer
 	restore := captureClientLogs(&logged)
 	defer restore()
 
@@ -467,6 +470,25 @@ func TestNTAG424OverTheWire(t *testing.T) {
 	if msg["type"] != "error" {
 		t.Errorf("lock without confirm: type = %v, want error", msg["type"])
 	}
+}
+
+// lockedBuffer collects log output from several loggers, and from server
+// goroutines a test does not wait for, without racing.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func captureClientLogs(w io.Writer) func() {

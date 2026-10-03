@@ -66,6 +66,7 @@ func TestAuthenticateNonFirstAN12196Table23(t *testing.T) {
 		t.Fatalf("NewAuthenticator: %v", err)
 	}
 	auth.SetRandom(&fixedRandom{mustHex(t, "60BE759EDA560250AC57CDDC11743CF6")})
+	auth.SetCounter(7)
 
 	if got, want := auth.Command(), mustHex(t, "90770000010000"); !bytes.Equal(got, want) {
 		t.Errorf("first command = %X, want %X", got, want)
@@ -94,6 +95,9 @@ func TestAuthenticateNonFirstAN12196Table23(t *testing.T) {
 	}
 	if want := mustHex(t, "5529860B2FC5FB6154B7F28361D30BF9"); !bytes.Equal(macKey, want) {
 		t.Errorf("KSesAuthMAC = %X, want %X", macKey, want)
+	}
+	if session.Counter() != 7 {
+		t.Errorf("counter after NonFirst = %d, want 7 carried over", session.Counter())
 	}
 }
 

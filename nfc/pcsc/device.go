@@ -30,6 +30,11 @@ type device struct {
 	// Tracks if unsupported tag error was already reported for current card
 	unsupportedReported bool
 
+	// tag is the driver built for the card on the reader, kept for as long as
+	// the card is: detection sends probe APDUs that reset an authenticated
+	// session on some cards, and per-tag driver state outlives a single poll.
+	tag nfc.Tag
+
 	// feedback is the channel this reader's LED and buzzer commands travel
 	// on, settled on the first signal. See feedback.go.
 	feedback feedbackTransport
@@ -87,6 +92,7 @@ func (d *device) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	d.tag = nil
 	if d.card != nil {
 		err := d.card.Disconnect(leaveCard)
 		d.card = nil
@@ -258,6 +264,9 @@ func (d *device) Transceive(txData []byte) ([]byte, error) {
 	if d.cardRemoved != nil {
 		select {
 		case <-d.cardRemoved:
+			d.mu.Lock()
+			d.tag = nil
+			d.mu.Unlock()
 			return nil, nfc.NewCardRemovedError(fmt.Errorf("card removed (detected by monitor)"))
 		default:
 		}
@@ -267,6 +276,7 @@ func (d *device) Transceive(txData []byte) ([]byte, error) {
 	defer d.mu.Unlock()
 
 	if d.card == nil {
+		d.tag = nil
 		return nil, nfc.NewCardRemovedError(fmt.Errorf("device not connected"))
 	}
 
@@ -281,6 +291,7 @@ func (d *device) Transceive(txData []byte) ([]byte, error) {
 	if err != nil {
 		// Check if this is a card removal error
 		if isCardRemovedPCSCError(err) {
+			d.tag = nil
 			return nil, nfc.NewCardRemovedError(err)
 		}
 		return nil, fmt.Errorf("pcsc device transceive: %w", err)
@@ -350,6 +361,9 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	if d.cardRemoved != nil {
 		select {
 		case <-d.cardRemoved:
+			d.mu.Lock()
+			d.tag = nil
+			d.mu.Unlock()
 			return nil, nfc.NewCardRemovedError(fmt.Errorf("card removed (detected by monitor)"))
 		default:
 		}
@@ -359,7 +373,12 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	defer d.mu.Unlock()
 
 	if d.card == nil {
+		d.tag = nil
 		return nil, fmt.Errorf("device not connected")
+	}
+
+	if d.tag != nil {
+		return []nfc.Tag{d.tag}, nil
 	}
 
 	// Detect tag type from ATR
@@ -396,6 +415,7 @@ func (d *device) GetTags() ([]nfc.Tag, error) {
 	}
 
 	if tag != nil {
+		d.tag = tag
 		return []nfc.Tag{tag}, nil
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 )
 
 // The policy every reader runs under. It is the supervisor's rather than each
@@ -86,6 +87,7 @@ func (s *Supervisor) SetDESFireKeys(keys DESFireKeys) {
 // place too. See [TagHolder].
 
 var _ TagHolder = (*Supervisor)(nil)
+var _ RawSessionHolder = (*Supervisor)(nil)
 
 // TagOn reports the tag a device is holding, by UID. An empty device asks a
 // reader with a card on it, and failing that the most recent scan a device
@@ -223,6 +225,46 @@ func (s *Supervisor) TransceiveTag(ctx context.Context, device, tagUID string, d
 		return holder.TransceiveTag(ctx, device, tagUID, data, raw)
 	}
 	return s.Transceive(ctx, device, data, tagUID)
+}
+
+// BeginRawSessionTag leases the reader holding the tag, so a multi-step raw
+// exchange is not disturbed by polling or other operations. A tag held by a
+// remote device cannot be leased.
+func (s *Supervisor) BeginRawSessionTag(ctx context.Context, device, tagUID string, ttl time.Duration) (string, error) {
+	if s.heldElsewhere(device) != nil {
+		return "", NewNotSupportedError("RawSession")
+	}
+	_, reader, err := s.readerFor(device)
+	if err != nil {
+		return "", err
+	}
+	return reader.BeginRawSession(ctx, tagUID, ttl)
+}
+
+// EndRawSessionTag ends a lease begun with BeginRawSessionTag.
+func (s *Supervisor) EndRawSessionTag(_ context.Context, leaseID string) error {
+	for _, reader := range s.leasedReaders() {
+		if err := reader.EndRawSession(leaseID); err == nil {
+			return nil
+		}
+	}
+	return NewRawSessionExpiredError("RawSession")
+}
+
+// TransceiveInSessionTag exchanges raw bytes inside a lease.
+func (s *Supervisor) TransceiveInSessionTag(ctx context.Context, leaseID string, data []byte) ([]byte, error) {
+	for _, reader := range s.leasedReaders() {
+		if _, err := reader.leaseByID(leaseID); err == nil {
+			return reader.TransceiveInSession(ctx, leaseID, data)
+		}
+	}
+	return nil, NewRawSessionExpiredError("RawSession")
+}
+
+func (s *Supervisor) leasedReaders() []*deviceReader {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readerList()
 }
 
 // TagCapabilities reports what the tag the named device is holding supports.

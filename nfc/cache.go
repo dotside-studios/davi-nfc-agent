@@ -45,6 +45,16 @@ func (c *TagCache) HasChanged(uid string) bool {
 	return true
 }
 
+// IsCurrent reports whether uid is the card already published and still
+// present, so a poll has nothing to read for it. It refreshes the last-seen
+// time as HasChanged does.
+func (c *TagCache) IsCurrent(uid string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSeenTime = time.Now()
+	return uid != "" && uid == c.lastUID
+}
+
 // Clear resets the cache to its initial state.
 func (c *TagCache) Clear() {
 	c.mu.Lock()

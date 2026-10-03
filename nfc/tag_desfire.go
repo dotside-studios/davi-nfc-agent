@@ -94,7 +94,7 @@ func (t *pcscDESFireTag) Capabilities() TagCapabilities {
 }
 
 func (t *pcscDESFireTag) Transceive(data []byte) ([]byte, error) {
-	return t.transceive(data)
+	return t.transmitRaw(data)
 }
 
 // DESFire native status codes carried in SW2 of a wrapped response, plus the

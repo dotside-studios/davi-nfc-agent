@@ -39,7 +39,9 @@ type TagWriter interface {
 // Only some tag types (e.g., Type 4) support this.
 // Use GetTagCapabilities(tag).CanTransceive to check if a tag supports this.
 type TagTransceiver interface {
-	// Transceive sends raw data to the tag and returns the response.
+	// Transceive sends raw data to the tag and returns the card's whole reply,
+	// status word included. A status word is not an error: only a failed
+	// exchange is.
 	Transceive(data []byte) ([]byte, error)
 }
 

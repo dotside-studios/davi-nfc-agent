@@ -267,15 +267,34 @@ var NFCClient = class {
     return this.sendRequest("lockRequest", this.aimed({}, target));
   }
   async transceive(request) {
-    const { data, raw, ...target } = request;
+    const { data, raw, sessionId, ...target } = request;
     if (data.length === 0) {
       throw new Error("transceive requires a command");
     }
+    const body = { data: encodeBase64(data), raw: raw === true };
+    if (sessionId) {
+      body.sessionId = sessionId;
+    }
     const response = await this.sendRequest(
       "transceiveRequest",
-      this.aimed({ data: encodeBase64(data), raw: raw === true }, target)
+      this.aimed(body, target)
     );
     return response.data ? decodeBase64(response.data) : new Uint8Array();
+  }
+  /**
+   * Leases the reader holding the tag, so an exchange that builds on earlier
+   * ones, such as an authentication, is not reset by polling or by another
+   * operation. Pass the returned `sessionId` to `transceive`, and end it with
+   * `endRawSession`.
+   */
+  async beginRawSession(target, ttlMs) {
+    return this.sendRequest(
+      "rawSessionBeginRequest",
+      this.aimed(ttlMs === void 0 ? {} : { ttlMs }, target)
+    );
+  }
+  async endRawSession(sessionId) {
+    await this.sendRequest("rawSessionEndRequest", { sessionId });
   }
   /** Asks the tag, rather than reading what the scan captured. */
   async getCapabilities(target) {

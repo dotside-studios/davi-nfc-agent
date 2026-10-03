@@ -1,6 +1,9 @@
 package nfc
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // TagHolder is what the tag router asks: which source is holding which tag, and
 // how to act on the tag one of them holds.
@@ -48,6 +51,24 @@ type TagHolder interface {
 	// TagCapabilities reports what the tag the named device is holding
 	// supports.
 	TagCapabilities(ctx context.Context, deviceID, tagUID string) (*TagCapabilities, error)
+}
+
+// RawSessionHolder is what a TagHolder offers when it can lease the reader
+// holding a tag for a multi-step raw exchange, such as an authentication whose
+// state a poll or another operation would reset. It is separate from TagHolder
+// because a phone cannot grant one, and a holder that cannot is simply not one.
+type RawSessionHolder interface {
+	// BeginRawSessionTag leases the reader holding the tag. A zero ttl selects
+	// DefaultRawSessionTTL, and it is capped at MaxRawSessionTTL. Each exchange
+	// renews the lease.
+	BeginRawSessionTag(ctx context.Context, deviceID, tagUID string, ttl time.Duration) (leaseID string, err error)
+
+	// EndRawSessionTag releases a lease. An unknown one is refused with a
+	// raw-session-expired error.
+	EndRawSessionTag(ctx context.Context, leaseID string) error
+
+	// TransceiveInSessionTag exchanges raw bytes inside a lease.
+	TransceiveInSessionTag(ctx context.Context, leaseID string, data []byte) ([]byte, error)
 }
 
 // TagsHeldBy returns the manager's holder of tags, or nil for one whose devices

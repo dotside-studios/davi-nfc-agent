@@ -40,11 +40,14 @@ func chunkSizeFor(comm byte) int {
 }
 
 // SetDESFireKeys gives the tag the AES keys to authenticate with, implementing
-// desfireKeyConfigurable. Replacing them drops any session opened under the old
-// ones.
+// desfireKeyConfigurable. Replacing them with different keys drops any session
+// opened under the old ones.
 func (t *pcscDESFireTag) SetDESFireKeys(keys DESFireKeys) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.keys.equal(keys) {
+		return
+	}
 	t.keys = keys.Copy()
 	t.session = nil
 	t.sessionKeyNo = 0

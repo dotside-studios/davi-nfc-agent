@@ -84,8 +84,17 @@ type LockResponsePayload = nfc.LockResult
 
 // TransceiveResponsePayload answers a transceiveRequest with the tag's reply,
 // base64 as raw bytes are in both directions.
+//
+// Data is the card's whole reply, status word included. SW and Body split it
+// for an APDU-level exchange that returned at least a status word.
 type TransceiveResponsePayload struct {
 	Data string `json:"data"`
+
+	// SW is the reply's trailing status word, four uppercase hex characters.
+	SW string `json:"sw,omitempty"`
+
+	// Body is the reply without its status word, base64.
+	Body string `json:"body,omitempty"`
 }
 
 // TransceiveRequestPayload is a raw exchange with the tag it names.
@@ -102,6 +111,40 @@ type TransceiveRequestPayload struct {
 	// Raw exchanges at the framing level rather than wrapping the bytes as an
 	// APDU. A framing-level reply carries no ISO 7816 status word.
 	Raw bool `json:"raw"`
+
+	// SessionID sends the exchange inside a raw session begun with
+	// rawSessionBeginRequest. The session already names the tag, so the target
+	// fields are not needed.
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// RawSessionBeginRequestPayload leases the reader holding the tag it names, so
+// a multi-step exchange such as an authentication is not reset by polling or
+// by another operation.
+type RawSessionBeginRequestPayload struct {
+	TagTarget
+
+	// TTLMs is how long the session lives without an exchange. Omitted selects
+	// five seconds; the most is thirty.
+	TTLMs int `json:"ttlMs,omitempty"`
+}
+
+// RawSessionBeginResponsePayload answers a rawSessionBeginRequest.
+type RawSessionBeginResponsePayload struct {
+	SessionID string `json:"sessionId"`
+
+	// ExpiresInMs is the time to live granted, renewed by each exchange.
+	ExpiresInMs int `json:"expiresInMs"`
+}
+
+// RawSessionEndRequestPayload ends a raw session.
+type RawSessionEndRequestPayload struct {
+	SessionID string `json:"sessionId"`
+}
+
+// RawSessionEndResponsePayload answers a rawSessionEndRequest.
+type RawSessionEndResponsePayload struct {
+	SessionID string `json:"sessionId"`
 }
 
 // HealthPayload is the body of /health and /api/v1/health, which is what a

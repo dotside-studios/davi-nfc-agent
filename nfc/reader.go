@@ -81,6 +81,10 @@ type deviceReader struct {
 	opsWg     sync.WaitGroup
 	abandoned atomic.Int64
 
+	// lease is the raw session holding the reader, if any. See BeginRawSession.
+	leaseMu sync.Mutex
+	lease   *rawLease
+
 	operationTimeout time.Duration  // Timeout for tag operations
 	cardCheckTicker  Ticker         // Ticker for periodic card presence checks (based on cache)
 	workerWg         sync.WaitGroup // Tracks worker goroutine completion
@@ -284,6 +288,7 @@ func (r *deviceReader) Stop() {
 	}
 	// Wait for the worker to finish
 	r.workerWg.Wait()
+	r.endAnyLease()
 	readerLog.Println("deviceReader worker stopped successfully.")
 	r.drainOperations()
 	// Worker's defer will handle device closing and final status.
@@ -511,6 +516,12 @@ func (r *deviceReader) handleTagPolling(tags []Tag) {
 			r.cache.UpdateLastSeenTime(uid)
 		}
 
+		// A card already published stays published until it leaves: re-reading it
+		// every poll sends the card commands that reset an authenticated session.
+		if uid != "" && r.cache.IsCurrent(uid) {
+			continue
+		}
+
 		// Create Card wrapper
 		r.applyKeys(tag)
 		card := NewCard(tag)
@@ -663,6 +674,11 @@ func (r *deviceReader) doPoll() {
 	}
 
 	if isWrite {
+		return
+	}
+
+	if uid, leased := r.leaseUID(); leased {
+		r.cache.UpdateLastSeenTime(uid)
 		return
 	}
 

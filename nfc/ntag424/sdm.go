@@ -9,6 +9,10 @@
 // These are pure functions over the values a URL carries. Nothing here touches a
 // reader, so a server that never sees an NFC device can verify a tap.
 //
+// The agent itself exposes no verify route and holds no verification keys. A
+// backend that checks taps uses VerifyURLFresh with a CounterStore, since a MAC
+// alone cannot tell a replayed URL from a fresh one.
+//
 // Changing a tag, rather than reading one, needs an authenticated session. See
 // Authenticator and Session, which establish and carry one; the transport stays
 // the caller's there too.

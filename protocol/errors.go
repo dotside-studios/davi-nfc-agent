@@ -76,6 +76,11 @@ const (
 	// ErrCodeNoPayload reports that the tag was read and holds no NDEF
 	// message. Not retryable.
 	ErrCodeNoPayload ErrorCode = "NO_PAYLOAD"
+
+	// ErrCodeRawSessionExpired reports that the raw session a request named is
+	// unknown, ended, or past its time to live. Not retryable: begin a new
+	// session, which also means authenticating again.
+	ErrCodeRawSessionExpired ErrorCode = "RAW_SESSION_EXPIRED"
 )
 
 // ErrorPayload is the payload of an error response. `code` carries the same

@@ -59,3 +59,20 @@ func auditRawExchange(cmd []byte, raw bool, device, uid string) {
 		clientLog.Printf("%s", msg)
 	}
 }
+
+// auditRawSession records the start or end of a raw session in the client log.
+// A session holds the reader to one client, so who held it and for which tag is
+// part of the trail.
+func auditRawSession(event, device, uid, sessionID string) {
+	where := "on the reader"
+	if device != "" {
+		where = "on " + device
+	}
+	if uid != "" {
+		where += " (tag " + uid + ")"
+	}
+	if sessionID != "" {
+		where += " (session " + sessionID + ")"
+	}
+	clientLog.Printf("Raw session %s %s", event, where)
+}

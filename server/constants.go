@@ -31,6 +31,11 @@ const (
 	WSMessageTypeTransceiveRequest  = protocol.WSTypeTransceiveRequest
 	WSMessageTypeTransceiveResponse = protocol.WSTypeTransceiveResponse
 
+	WSMessageTypeRawSessionBeginRequest  = protocol.WSTypeRawSessionBeginRequest
+	WSMessageTypeRawSessionBeginResponse = protocol.WSTypeRawSessionBeginResponse
+	WSMessageTypeRawSessionEndRequest    = protocol.WSTypeRawSessionEndRequest
+	WSMessageTypeRawSessionEndResponse   = protocol.WSTypeRawSessionEndResponse
+
 	WSMessageTypeError = protocol.WSTypeError
 )
 

@@ -23,6 +23,7 @@ const (
 	ErrCodeMultipleTags
 	ErrCodeBusy
 	ErrCodeNoPayload
+	ErrCodeRawSessionExpired
 )
 
 // NFCError provides structured error information for programmatic handling.
@@ -67,6 +68,16 @@ func NewBusyError(op string, cause error) *NFCError {
 		Op:      op,
 		Message: "the reader is still finishing an earlier operation",
 		Cause:   cause,
+	}
+}
+
+// NewRawSessionExpiredError reports that a raw session lease is unknown, ended
+// or past its time to live. Not retryable: a new session has to be begun.
+func NewRawSessionExpiredError(op string) *NFCError {
+	return &NFCError{
+		Code:    ErrCodeRawSessionExpired,
+		Op:      op,
+		Message: "raw session is unknown, ended or expired",
 	}
 }
 

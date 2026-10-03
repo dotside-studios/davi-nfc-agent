@@ -1,7 +1,9 @@
 {
   "id": "req-transceive",
   "payload": {
-    "data": "BKKzkAA="
+    "body": "BKKz",
+    "data": "BKKzkAA=",
+    "sw": "9000"
   },
   "success": true,
   "type": "transceiveResponse"

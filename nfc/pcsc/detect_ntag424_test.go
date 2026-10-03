@@ -127,3 +127,49 @@ func TestRefineType4OnlyProbesType4Cards(t *testing.T) {
 		t.Errorf("refineType4(ISO14443_4) = %v, want DetectedNTAG424 once the card names itself", got)
 	}
 }
+
+// The kind is settled once per card: a probe resets an authenticated session,
+// and GetTags runs for every poll and every operation.
+func TestGetTagsProbesOncePerCard(t *testing.T) {
+	card := &scriptedCard{answers: map[string][]byte{
+		string(nfc.NTAG424GetVersionAPDU()): ntag424Version,
+	}}
+	dev := type4Device(card)
+
+	first, err := dev.GetTags()
+	if err != nil {
+		t.Fatalf("GetTags: %v", err)
+	}
+	sent := len(card.sent)
+	if sent == 0 {
+		t.Fatal("first GetTags sent nothing, want the probe")
+	}
+
+	for range 3 {
+		again, err := dev.GetTags()
+		if err != nil {
+			t.Fatalf("GetTags: %v", err)
+		}
+		if again[0] != first[0] {
+			t.Error("GetTags built a new tag for the same card")
+		}
+	}
+	if len(card.sent) != sent {
+		t.Errorf("later GetTags sent %d commands, want 0", len(card.sent)-sent)
+	}
+}
+
+func TestGetTagsForgetsTheCardOnClose(t *testing.T) {
+	card := &scriptedCard{answers: map[string][]byte{
+		string(nfc.NTAG424GetVersionAPDU()): ntag424Version,
+	}}
+	dev := type4Device(card)
+	if _, err := dev.GetTags(); err != nil {
+		t.Fatalf("GetTags: %v", err)
+	}
+
+	_ = dev.Close()
+	if dev.tag != nil {
+		t.Error("tag survived Close")
+	}
+}

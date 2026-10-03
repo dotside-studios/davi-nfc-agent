@@ -113,7 +113,7 @@ func TestTransceiveSequenceAutoGetResponsePerStep(t *testing.T) {
 // Each command sent after the client's own is logged, as part of the exchange
 // it followed, and never with its bytes.
 func TestAutoGetResponseFollowUpsAreAudited(t *testing.T) {
-	var logged bytes.Buffer
+	var logged lockedBuffer
 	restore := captureClientLogs(&logged)
 	defer restore()
 

@@ -251,6 +251,13 @@ export interface TransceiveRequestPayload extends TagTarget {
    * fields are not needed.
    */
   sessionId?: string;
+  /**
+   * AutoGetResponse has the agent follow a 61xx reply with GET RESPONSE until
+   * the card stops, and retry a 6Cxx reply once with the corrected Le,
+   * returning the concatenated body with the final status word. Omitted
+   * returns the card's first reply unchanged. Not valid with Raw.
+   */
+  autoGetResponse?: boolean;
 }
 
 /**
@@ -297,6 +304,11 @@ export interface TransceiveStep {
    * of these, each four hex characters.
    */
   stopOnSW?: string[];
+  /**
+   * AutoGetResponse chains this step's reply as it does on a
+   * transceiveRequest. ExpectSW and StopOnSW then see the final status word.
+   */
+  autoGetResponse?: boolean;
 }
 
 /**
@@ -474,10 +486,12 @@ export interface NTAG424ResponsePayload {
   keyNo?: number;
   keyVersion?: number;
   /**
-   * Signature answers readSig: the 56-byte originality signature, base64,
-   * unverified.
+   * Signature answers readSig: the 56-byte originality signature, base64.
+   * Genuine is whether it verifies over the card's real UID under NXP's public
+   * key.
    */
   signature?: string;
+  genuine?: boolean;
   /** Locked answers lock and Changed answers changeKey. */
   locked?: boolean;
   changed?: boolean;

@@ -242,12 +242,13 @@ func (s *tagOps) ntag424Plan(r protocol.NTAG424RequestPayload) (func(nfc.NTAG424
 
 	case ntag424ReadSig:
 		return func(op nfc.NTAG424Operator) (*protocol.NTAG424ResponsePayload, error) {
-			sig, err := op.ReadSig()
+			sig, genuine, err := op.ReadOriginality(nil)
 			if err != nil {
 				return nil, err
 			}
 			o := out()
 			o.Signature = base64.StdEncoding.EncodeToString(sig)
+			o.Genuine = &genuine
 			return o, nil
 		}, "", nil
 

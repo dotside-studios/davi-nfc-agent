@@ -68,6 +68,20 @@ func (t *pcscBaseTag) transmitRaw(cmd []byte) ([]byte, error) {
 	return resp, err
 }
 
+// TransceiveRaw sends a framing-level frame through the reader, which must offer
+// one (see RawCardTransport). Card removal is detected at the device layer.
+func (t *pcscBaseTag) TransceiveRaw(frame []byte) ([]byte, error) {
+	transport, ok := t.device.(RawCardTransport)
+	if !ok || !transport.SupportsTransceiveRaw() {
+		return nil, NewNotSupportedError("TransceiveRaw")
+	}
+	resp, err := transport.TransceiveRaw(frame)
+	if apduTrace {
+		traceFrame(t.uid, frame, resp, err)
+	}
+	return resp, err
+}
+
 // ndefAreaLocked reports whether page 4 — the first NDEF user page of a
 // page-oriented NTAG/Ultralight tag — is locked, by reading the static lock
 // bytes. A tag locked with MakeReadOnly sets these, so a write to it would be

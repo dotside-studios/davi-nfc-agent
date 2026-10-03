@@ -21,6 +21,12 @@ type SequenceStep struct {
 	// StopOnSW stops the run after this step when the reply's status word is one
 	// of these.
 	StopOnSW []uint16
+
+	// AutoGetResponse follows 61xx and 6Cxx replies to this step as
+	// ExchangeChained describes, within the same tag operation. The step's
+	// reply is then the whole chained reply, and the status words above are
+	// matched against its final one.
+	AutoGetResponse bool
 }
 
 // SequenceResult is what a sequence returned.
@@ -32,6 +38,11 @@ type SequenceResult struct {
 	// StoppedAt is the index of the step whose reply ended the run early, or -1
 	// when every step ran.
 	StoppedAt int
+
+	// Followups holds, for each step that ran, the commands sent after its own
+	// by AutoGetResponse, in order: a re-sent command for 6Cxx and each GET
+	// RESPONSE. An entry is empty for a step that needed none.
+	Followups [][][]byte
 }
 
 // Stops reports whether the reply to this step ends the run.
@@ -83,11 +94,19 @@ func ValidateSequence(steps []SequenceStep) error {
 func RunSequence(steps []SequenceStep, exchange func([]byte) ([]byte, error)) (*SequenceResult, error) {
 	result := &SequenceResult{StoppedAt: -1}
 	for i, step := range steps {
-		reply, err := exchange(step.Data)
+		var reply []byte
+		var follow [][]byte
+		var err error
+		if step.AutoGetResponse {
+			reply, follow, err = ExchangeChained(step.Data, exchange)
+		} else {
+			reply, err = exchange(step.Data)
+		}
 		if err != nil {
 			return nil, err
 		}
 		result.Replies = append(result.Replies, reply)
+		result.Followups = append(result.Followups, follow)
 		if step.Stops(reply) {
 			result.StoppedAt = i
 			break

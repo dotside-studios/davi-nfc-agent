@@ -299,3 +299,95 @@ func TestRawSessionRunsThroughTheReader(t *testing.T) {
 		t.Errorf("after end: errorCode = %q, want %q", got, protocol.ErrCodeRawSessionExpired)
 	}
 }
+
+// rawOpsOver is the router over a reader holding one connected tag, with the
+// raw channel open.
+func rawOpsOver(t *testing.T, tag *nfc.MockTag) *tagOps {
+	t.Helper()
+
+	m := nfc.NewMockManager()
+	tag.IsConnected = true
+	m.MockDevice.SetTags([]nfc.Tag{tag})
+	cfg := configOver(t, m, nfc.ModeReadWrite)
+	cfg.AllowRawTransceive = func() bool { return true }
+	s := newTagOps(cfg)
+	awaitCardOnReader(t, s.tags, "mock:usb:001")
+	return s
+}
+
+// raw true asks for a framing-level exchange. A reader that cannot carry one
+// refuses it, and does not send the bytes as an APDU instead.
+func TestRawTransceiveRefusedNotSupportedOnAReaderWithoutIt(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	var apdus int
+	tag.TransceiveFunc = func([]byte) ([]byte, error) { apdus++; return []byte{0x90, 0x00}, nil }
+	s := rawOpsOver(t, tag)
+
+	_, err := s.Transceive(context.Background(), server.TransceiveOp{
+		Target: server.Target{DeviceID: "mock:usb:001"},
+		Data:   []byte{0x3C, 0x00},
+		Raw:    true,
+	})
+	if got := codeOf(err); got != protocol.ErrCodeNotSupported {
+		t.Errorf("errorCode = %q, want %q (err %v)", got, protocol.ErrCodeNotSupported, err)
+	}
+	if apdus != 0 {
+		t.Errorf("the frame was sent as %d APDU exchange(s)", apdus)
+	}
+}
+
+func TestRawTransceiveReachesAReaderThatCarriesFrames(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	tag.TransceiveRawFunc = func(frame []byte) ([]byte, error) { return append([]byte{0xAA}, frame...), nil }
+	s := rawOpsOver(t, tag)
+
+	got, err := s.Transceive(context.Background(), server.TransceiveOp{
+		Target: server.Target{DeviceID: "mock:usb:001"},
+		Data:   []byte{0x3C, 0x00},
+		Raw:    true,
+	})
+	if err != nil {
+		t.Fatalf("Transceive: %v", err)
+	}
+	if want := []byte{0xAA, 0x3C, 0x00}; string(got) != string(want) {
+		t.Errorf("reply = % X, want % X", got, want)
+	}
+}
+
+// Raw exchanges are held to the same gates as any other.
+func TestRawTransceiveKeepsTheGates(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	tag.TransceiveRawFunc = func([]byte) ([]byte, error) {
+		t.Error("a gated raw exchange reached the tag")
+		return nil, nil
+	}
+	s := rawOpsOver(t, tag)
+	op := server.TransceiveOp{Target: server.Target{DeviceID: "mock:usb:001"}, Data: []byte{0x3C, 0x00}, Raw: true}
+
+	s.allowRawTransceive = func() bool { return false }
+	if _, err := s.Transceive(context.Background(), op); codeOf(err) != protocol.ErrCodeRawChannelDisabled {
+		t.Errorf("channel closed: errorCode = %q, want %q", codeOf(err), protocol.ErrCodeRawChannelDisabled)
+	}
+
+	s.allowRawTransceive = func() bool { return true }
+	s.allowModification = func() bool { return false }
+	if _, err := s.Transceive(context.Background(), op); codeOf(err) != protocol.ErrCodeReadOnly {
+		t.Errorf("read-only: errorCode = %q, want %q", codeOf(err), protocol.ErrCodeReadOnly)
+	}
+}
+
+// A lease carries APDU-level exchanges, so a framing-level one inside it is
+// refused rather than downgraded.
+func TestRawTransceiveInsideASessionIsRefused(t *testing.T) {
+	tag := nfc.NewMockTag("04A1B2C3")
+	s := rawOpsOver(t, tag)
+
+	_, err := s.Transceive(context.Background(), server.TransceiveOp{
+		SessionID: "lease-1",
+		Data:      []byte{0x3C, 0x00},
+		Raw:       true,
+	})
+	if got := codeOf(err); got != protocol.ErrCodeNotSupported {
+		t.Errorf("errorCode = %q, want %q (err %v)", got, protocol.ErrCodeNotSupported, err)
+	}
+}

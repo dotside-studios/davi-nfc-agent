@@ -394,6 +394,23 @@ describe("tag operations", () => {
     await expect(exchange).resolves.toEqual(new Uint8Array([0x90, 0x00]));
   });
 
+  it("transceive() and sequence steps send autoGetResponse only when set", async () => {
+    const { client, ws } = await connected();
+    const command = new Uint8Array([0x00, 0xca, 0x00, 0x00, 0x00]);
+
+    void client.transceive({ data: command });
+    void client.transceive({ data: command, autoGetResponse: true });
+    void client.transceiveSequence({
+      steps: [{ data: command }, { data: command, autoGetResponse: true }],
+    });
+
+    const sent = ws.send.mock.calls.map((call) => JSON.parse(call[0]));
+    expect(sent[0].payload).not.toHaveProperty("autoGetResponse");
+    expect(sent[1].payload.autoGetResponse).toBe(true);
+    expect(sent[2].payload.steps[0]).not.toHaveProperty("autoGetResponse");
+    expect(sent[2].payload.steps[1].autoGetResponse).toBe(true);
+  });
+
   it("transceive() refuses an empty command without a round trip", async () => {
     const { client, ws } = await connected();
     await expect(client.transceive({ data: new Uint8Array() })).rejects.toThrow(

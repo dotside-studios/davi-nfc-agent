@@ -475,10 +475,17 @@ func (s *Server) handleTransceiveRequest(ctx context.Context, conn *wsconn.SafeC
 		return
 	}
 
+	if payload.AutoGetResponse && payload.Raw {
+		s.sendErrorResponse(conn, req.ID, protocol.ErrCodeInvalidRequest, "autoGetResponse needs an APDU-level exchange, not raw")
+		return
+	}
+
 	resp, err := s.ops().Transceive(ctx, server.TransceiveOp{
 		Target: targetOf(payload.UID, payload.DeviceID, payload.AllowUntargeted),
 		Data:   data,
 		Raw:    payload.Raw,
+
+		AutoGetResponse: payload.AutoGetResponse,
 
 		SessionID: payload.SessionID,
 	})
@@ -537,6 +544,7 @@ func (s *Server) handleTransceiveSequence(ctx context.Context, conn *wsconn.Safe
 			return
 		}
 		steps[i].Data = data
+		steps[i].AutoGetResponse = in.AutoGetResponse
 		for _, list := range []struct {
 			in  []string
 			out *[]uint16

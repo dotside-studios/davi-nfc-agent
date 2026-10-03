@@ -1508,6 +1508,39 @@ func (r *deviceReader) TransceiveExpecting(ctx context.Context, data []byte, exp
 	return response, nil
 }
 
+// TransceiveRawExpecting exchanges a framing-level frame only with the tag
+// expectUID names, refusing otherwise. It is held to the same guard as
+// TransceiveExpecting and runs under the operation slot like any other tag I/O.
+// A tag whose reader cannot carry a framing-level exchange is refused as not
+// supported, never sent the frame as an APDU.
+func (r *deviceReader) TransceiveRawExpecting(ctx context.Context, frame []byte, expectUID string) ([]byte, error) {
+	if len(frame) == 0 {
+		return nil, fmt.Errorf("no command bytes to send")
+	}
+
+	var response []byte
+	err := r.withTagOperation(ctx, func() error {
+		tag, err := r.soleTag(expectUID)
+		if err != nil {
+			return err
+		}
+		transceiver, ok := tag.(TagRawTransceiver)
+		if !ok {
+			return NewNotSupportedError("TransceiveRaw")
+		}
+		resp, err := transceiver.TransceiveRaw(frame)
+		if err != nil {
+			return err
+		}
+		response = resp
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
 // GetTags retrieves available tags from the connected NFC device.
 func (r *deviceReader) GetTags() ([]Tag, error) {
 	dev := r.deviceManager.Device()

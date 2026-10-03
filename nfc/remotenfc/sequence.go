@@ -113,7 +113,7 @@ func (m *Manager) TransceiveSequenceTag(ctx context.Context, deviceID, tagUID st
 	err := m.WithTagSession(ctx, deviceID, tagUID, func() error {
 		info, _ := m.ActiveTag(deviceID)
 		var err error
-		if m.deviceCanSequence(info.DeviceID) {
+		if m.deviceCanSequence(info.DeviceID) && !chained(steps) {
 			result, err = m.deviceSequence(ctx, info.DeviceID, tagUID, steps)
 		} else {
 			result, err = nfc.RunSequence(steps, func(data []byte) ([]byte, error) {
@@ -126,6 +126,18 @@ func (m *Manager) TransceiveSequenceTag(ctx context.Context, deviceID, tagUID st
 		return nil, err
 	}
 	return result, nil
+}
+
+// chained reports whether any step asks for autoGetResponse. The device
+// sequence message carries no such flag, so those runs are driven step by step
+// here, where the agent follows the chaining itself.
+func chained(steps []nfc.SequenceStep) bool {
+	for _, step := range steps {
+		if step.AutoGetResponse {
+			return true
+		}
+	}
+	return false
 }
 
 // deviceSequence sends the whole batch to the device and checks what comes back

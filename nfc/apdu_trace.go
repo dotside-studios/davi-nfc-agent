@@ -23,6 +23,17 @@ func traceAPDU(uid string, cmd, resp []byte, err error) {
 	readerLog.Printf("APDU %s: %s [%s] %s", traceUID(uid), ex.Summary, ex.Class, traceOutcome(resp, err))
 }
 
+// traceFrame is traceAPDU for a framing-level exchange, whose reply carries no
+// status word.
+func traceFrame(uid string, frame, resp []byte, err error) {
+	ex := Explain(frame, true)
+	outcome := fmt.Sprintf("<- %d byte(s)", len(resp))
+	if err != nil {
+		outcome = "failed: " + err.Error()
+	}
+	readerLog.Printf("Frame %s: %s [%s] %s", traceUID(uid), ex.Summary, ex.Class, outcome)
+}
+
 // traceUID names the tag a command was sent to, or a placeholder before one is
 // known.
 func traceUID(uid string) string {

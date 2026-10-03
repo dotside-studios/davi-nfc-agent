@@ -302,6 +302,28 @@ func TestSimPhone_SequenceFallsBackToOneExchangePerStep(t *testing.T) {
 	}
 }
 
+// The device sequence message has no autoGetResponse, so a run that asks for it
+// is driven step by step even on a phone that declared sequences.
+func TestSimPhone_ChainedSequenceRunsStepByStep(t *testing.T) {
+	m, url := serveManager(t, time.Minute)
+	phone := newSimPhone(t, m, url, sequenceCaps(), "Type4")
+	s := simSupervisor(t, m, nfc.ModeReadWrite)
+
+	res, err := s.TransceiveSequenceTag(context.Background(), phone.deviceID, simTagUID, []nfc.SequenceStep{
+		{Data: selectNDEFApp, AutoGetResponse: true},
+		{Data: selectNDEFApp},
+	})
+	if err != nil {
+		t.Fatalf("TransceiveSequenceTag: %v", err)
+	}
+	if phone.sequences.Load() != 0 || phone.singles.Load() != 2 {
+		t.Errorf("round trips: %d sequence and %d single requests, want 0 and 2", phone.sequences.Load(), phone.singles.Load())
+	}
+	if res.StoppedAt != -1 || len(res.Replies) != 2 {
+		t.Errorf("StoppedAt = %d with %d replies, want -1 with 2", res.StoppedAt, len(res.Replies))
+	}
+}
+
 // A device is not believed over the rules the agent sent it.
 func TestSimPhone_InconsistentSequenceAnswerIsRefused(t *testing.T) {
 	cases := map[string]func(*DeviceTransceiveSequenceResponse){

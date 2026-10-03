@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
@@ -38,10 +39,18 @@ type device struct {
 	// feedback is the channel this reader's LED and buzzer commands travel
 	// on, settled on the first signal. See feedback.go.
 	feedback feedbackTransport
+
+	// raw is how this reader carries a framing-level exchange, a rawMode.
+	// Atomic because capabilities read it without taking mu, which a card
+	// exchange holds for as long as it lasts.
+	raw atomic.Int32
 }
 
 // newDevice creates a device for a card already connected on a reader.
-func newDevice(ctx scardContext, card scardCard, readerName string) (*device, error) {
+//
+// probes remembers which readers have been asked about framing-level exchange,
+// so that is settled once per reader rather than once per card. It may be nil.
+func newDevice(ctx scardContext, card scardCard, readerName string, probes *rawProbes) (*device, error) {
 	// Validate protocol before any operations - the scard library panics on invalid protocol
 	proto := card.ActiveProtocol()
 	if proto != protocolT0 && proto != protocolT1 {
@@ -78,6 +87,10 @@ func newDevice(ctx scardContext, card scardCard, readerName string) (*device, er
 	} else {
 		dev.uid = uid
 	}
+
+	// Nothing else holds this device yet, so the probe cannot interleave with
+	// another exchange.
+	dev.probeRawMode(probes)
 
 	// Start background card removal monitor
 	dev.startCardMonitor()

@@ -277,6 +277,10 @@ func describePCSCDirect(e *APDUExplanation, f APDUFields) {
 			e.Recognized = false
 			return
 		}
+		if f.Data[0] == pn532HostByte {
+			describePN532(e, f.Data)
+			return
+		}
 		inner := Explain(f.Data, true)
 		e.Summary = "direct transmit → " + inner.Summary
 		e.Class = inner.Class
@@ -286,6 +290,38 @@ func describePCSCDirect(e *APDUExplanation, f APDUFields) {
 		e.Summary = fmt.Sprintf("PC/SC direct command (P1 %02X)", f.P1)
 		e.Class = ClassReaderControl
 	}
+}
+
+// pn532HostByte opens every command the host sends a PN532 or PN533, which an
+// ACR122 passes through Direct Transmit.
+const pn532HostByte = 0xD4
+
+// pn532InCommunicateThru is the PN532 command that exchanges a frame with the
+// tag as it is, which is how a reader of this family sends a native command.
+const pn532InCommunicateThru = 0x42
+
+// describePN532 decodes a PN532 command carried in a Direct Transmit. Only
+// InCommunicateThru is understood, and its frame is decoded as a native
+// command; any other chip command is unrecognised, so it is not assumed
+// harmless.
+func describePN532(e *APDUExplanation, data []byte) {
+	if len(data) < 2 || data[1] != pn532InCommunicateThru {
+		e.Summary = "direct transmit → PN532 command, not InCommunicateThru"
+		e.Class = ClassUnknown
+		e.Recognized = false
+		return
+	}
+	if len(data) == 2 {
+		e.Summary = "direct transmit → PN532 InCommunicateThru — empty frame"
+		e.Class = ClassUnknown
+		e.Recognized = false
+		return
+	}
+	inner := explainFraming(data[2:])
+	e.Summary = "direct transmit → PN532 InCommunicateThru → " + inner.Summary
+	e.Class = inner.Class
+	e.Recognized = inner.Recognized
+	e.Warnings = append(e.Warnings, inner.Warnings...)
 }
 
 // describeDESFire decodes the DESFire-wrapped family (CLA=0x90), where the INS
@@ -346,6 +382,9 @@ func describeISO(e *APDUExplanation, f APDUFields) {
 	case INSUpdateBin: // 0xD6
 		e.Summary = fmt.Sprintf("UPDATE BINARY — write %d byte(s) at offset %d", len(f.Data), isoOffset(f))
 		e.Class = ClassWrite
+	case INSGetResponse: // 0xC0
+		e.Summary = fmt.Sprintf("GET RESPONSE — fetch up to %d byte(s) the card is holding", bytesRead(f))
+		e.Class = ClassRead
 	default:
 		e.Summary = fmt.Sprintf("ISO 7816 command (INS %02X)", f.INS)
 		e.Class = ClassUnknown
@@ -435,6 +474,9 @@ func explainFraming(cmd []byte) APDUExplanation {
 		e.Class = ClassRead
 	case 0x3A:
 		e.Summary = "native FAST_READ — NTAG page range"
+		if len(cmd) >= 3 {
+			e.Summary = fmt.Sprintf("native FAST_READ — NTAG pages %d to %d", cmd[1], cmd[2])
+		}
 		e.Class = ClassRead
 	case 0xA2:
 		e.Summary = fmt.Sprintf("native WRITE — Ultralight/NTAG page %s (4 bytes)", framingArg(cmd))
@@ -455,11 +497,17 @@ func explainFraming(cmd []byte) APDUExplanation {
 		e.Summary = "native PWD_AUTH — NTAG password authentication"
 		e.Class = ClassAuth
 	case 0x3C:
-		e.Summary = "native READ_SIG — NTAG originality signature"
+		e.Summary = fmt.Sprintf("native READ_SIG — NTAG originality signature (address %s)", framingArg(cmd))
 		e.Class = ClassInfo
 	case 0x39:
-		e.Summary = "native READ_CNT — NTAG counter"
+		e.Summary = fmt.Sprintf("native READ_CNT — NTAG counter %s", framingArg(cmd))
 		e.Class = ClassRead
+	case 0xA5:
+		e.Summary = fmt.Sprintf("native INCR_CNT — raises Ultralight EV1/NTAG counter %s", framingArg(cmd))
+		e.Class = ClassWrite
+	case 0x1A:
+		e.Summary = "native AUTHENTICATE — Ultralight C 3DES authentication"
+		e.Class = ClassAuth
 	case 0x50:
 		e.Summary = "native HALT"
 		e.Class = ClassInfo

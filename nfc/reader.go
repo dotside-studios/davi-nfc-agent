@@ -734,6 +734,15 @@ func (r *deviceReader) doPoll() {
 		return
 	}
 
+	// A poll talks to the card, so it takes the operation slot rather than
+	// interleave its APDUs with an operation's. A busy reader skips the poll.
+	select {
+	case r.opSlot <- struct{}{}:
+		defer func() { <-r.opSlot }()
+	default:
+		return
+	}
+
 	tags, err := r.GetTags()
 	if err != nil {
 		r.handleDeviceErrors(err)

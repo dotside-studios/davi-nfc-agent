@@ -16,11 +16,11 @@ func mustHex(t *testing.T, s string) []byte {
 	return b
 }
 
-// The vectors below are those of NXP's LRP worked examples (AN12304): plaintext
-// generation, updated keys, LRICB and CMAC_LRP. They were reproduced from
-// memory rather than copied from the document, and the implementation matches
-// every one exactly, which is what makes a mistaken recollection or a mistaken
-// implementation unlikely: neither would agree with the other by chance.
+// The vectors below are meant to be NXP's LRP worked examples (AN12304):
+// plaintext generation, updated keys, LRICB and CMAC_LRP. They were reproduced
+// from memory, not copied from the document, and some were only partly recalled
+// before the implementation's output was seen. Confirm them against AN12304
+// before relying on them.
 
 func TestPlaintextsAgainstAN12304(t *testing.T) {
 	key := mustHex(t, "567826B8DA8E768432A9548DBE4AA3A0")

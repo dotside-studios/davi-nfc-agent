@@ -52,6 +52,10 @@ type MockTag struct {
 	// If nil, returns TransceiveResponse or TransceiveError
 	TransceiveFunc func([]byte) ([]byte, error)
 
+	// TransceiveRawFunc answers TransceiveRaw. If nil, the mock refuses a
+	// framing-level exchange as not supported. Called with the mock's lock held.
+	TransceiveRawFunc func([]byte) ([]byte, error)
+
 	// TransceiveResponse is the default response for Transceive calls
 	TransceiveResponse []byte
 
@@ -228,6 +232,19 @@ func (m *MockTag) Transceive(data []byte) ([]byte, error) {
 	}
 
 	return m.TransceiveResponse, nil
+}
+
+// TransceiveRaw simulates a framing-level exchange with the tag.
+func (m *MockTag) TransceiveRaw(frame []byte) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.CallLog = append(m.CallLog, fmt.Sprintf("TransceiveRaw(%d bytes)", len(frame)))
+
+	if m.TransceiveRawFunc == nil {
+		return nil, NewNotSupportedError("TransceiveRaw")
+	}
+	return m.TransceiveRawFunc(frame)
 }
 
 // Connect simulates connecting to the tag.

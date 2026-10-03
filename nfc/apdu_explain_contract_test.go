@@ -67,6 +67,16 @@ var explainContractInputs = []struct {
 	{"A20300000000", true},                // native WRITE to page 3 (framing, lock/OTP)
 	{"60", true},                          // native GET_VERSION (framing, ambiguous)
 	{"1BFFFFFFFF", true},                  // native PWD_AUTH (framing)
+	{"3A0407", true},                      // native FAST_READ, pages 4 to 7
+	{"3C00", true},                        // native READ_SIG
+	{"3902", true},                        // native READ_CNT
+	{"A5020100000000", true},              // native INCR_CNT, a counter write
+	{"1A00", true},                        // native AUTHENTICATE, Ultralight C
+	{"FF00000004D4423C00", false},         // direct transmit -> InCommunicateThru READ_SIG
+	{"FF00000004D4423000", false},         // direct transmit -> InCommunicateThru READ
+	{"FF00000003D4421B", false},           // direct transmit -> InCommunicateThru, PWD_AUTH opcode only
+	{"FF00000002D442", false},             // direct transmit -> InCommunicateThru, no frame
+	{"FF00000003D44A01", false},           // direct transmit -> other PN532 command
 	{"FF", true},                          // unknown framing opcode
 	{"", false},                           // empty command
 	{"FFCA", false},                       // truncated APDU

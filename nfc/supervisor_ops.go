@@ -239,10 +239,15 @@ func (s *Supervisor) LockTag(ctx context.Context, device, tagUID, idempotencyKey
 }
 
 // TransceiveTag exchanges raw bytes with the tag the named device is holding. A
-// reader speaks to the tag directly, so raw is what it always is there.
+// reader exchanges APDUs with the tag directly; raw asks for a framing-level
+// exchange instead, which only a reader that can carry one performs and any
+// other refuses as not supported.
 func (s *Supervisor) TransceiveTag(ctx context.Context, device, tagUID string, data []byte, raw bool) ([]byte, error) {
 	if holder := s.heldElsewhere(device); holder != nil {
 		return holder.TransceiveTag(ctx, device, tagUID, data, raw)
+	}
+	if raw {
+		return s.TransceiveRaw(ctx, device, data, tagUID)
 	}
 	return s.Transceive(ctx, device, data, tagUID)
 }
@@ -371,6 +376,16 @@ func (s *Supervisor) Transceive(ctx context.Context, device string, data []byte,
 		return nil, err
 	}
 	return reader.TransceiveExpecting(ctx, data, expectUID)
+}
+
+// TransceiveRaw exchanges a framing-level frame with the tag on the named
+// reader.
+func (s *Supervisor) TransceiveRaw(ctx context.Context, device string, data []byte, expectUID string) ([]byte, error) {
+	_, reader, err := s.readerFor(device)
+	if err != nil {
+		return nil, err
+	}
+	return reader.TransceiveRawExpecting(ctx, data, expectUID)
 }
 
 // Capabilities reports what the tag on the named reader supports.

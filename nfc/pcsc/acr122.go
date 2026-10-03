@@ -92,6 +92,12 @@ var (
 // the like). There is no capability to query: a reader that does not know the
 // command refuses it exactly as one that never received it does.
 func hasACR122LEDBuzzer(readerName string) bool {
+	return isACR122(readerName)
+}
+
+// isACR122 reports whether a reader is an ACR122 class one, a PN532 or PN533
+// behind a CCID bridge, judged by name for the same reason.
+func isACR122(readerName string) bool {
 	return strings.Contains(strings.ToUpper(readerName), "ACR122")
 }
 

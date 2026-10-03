@@ -154,6 +154,12 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 	}
 
 	if req.SessionID != "" {
+		// A lease carries APDU-level exchanges only. Sending the frame as an
+		// APDU instead would be the silent downgrade raw exists to avoid.
+		if req.Raw {
+			return nil, protocol.WrapError(protocol.ErrCodeNotSupported, nfc.NewNotSupportedError("TransceiveRaw"),
+				"framing-level exchanges are not supported inside a raw session")
+		}
 		holder, err := s.rawSessions()
 		if err != nil {
 			return nil, err

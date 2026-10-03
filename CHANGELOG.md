@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extended form for data beyond 255 bytes instead of truncating Lc, and
   `BuildExtendedAPDU` and `ATRExtendedLength` (extended Lc/Le from the ATR's
   card capabilities) are added for driver code.
+- **`raw: true` works on PC/SC readers.** A `transceiveRequest` with `raw` set now
+  sends a framing-level exchange through the reader, so an NTAG21x, Ultralight or
+  Classic tag can be sent `READ_SIG` (`3C 00`), `READ_CNT`, `FAST_READ` and
+  `PWD_AUTH`. ACR122 class readers wrap the frame in Direct Transmit carrying PN532
+  `InCommunicateThru` and map a nonzero PN532 status byte to an error. Other readers
+  use a PC/SC Part 3 transparent exchange session, and are only taken to support it
+  once they accept a start-session command (probed once per reader). A reader with
+  neither refuses `raw: true` with `NOT_SUPPORTED` instead of sending an APDU, as
+  does `raw: true` inside a raw session. The agent's own readers report
+  `canTransceiveRaw` in their device capabilities (omitted when false). The APDU
+  explainer labels `FAST_READ`, `READ_SIG`, `READ_CNT`, `INCR_CNT` and the
+  PN532-wrapped Direct Transmit, in Go and in the console. The PC/SC Part 3 data
+  object tags and the PN532 and ACR122 frames are from the manuals and unchecked
+  against hardware; see `docs/api.md`.
 - **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
   ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
   any status word as a successful exchange, so `91 AF` and `6A 82` reach the

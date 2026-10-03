@@ -554,9 +554,7 @@ func (s *Server) handleRawSessionEnd(ctx context.Context, conn *wsconn.SafeConn,
 		s.sendOperationError(conn, req.ID, protocol.ErrCodeTransceiveFailed, err)
 		return
 	}
-	s.reply(conn, req.ID, server.WSMessageTypeRawSessionEndResponse, protocol.RawSessionEndResponsePayload{
-		SessionID: payload.SessionID,
-	})
+	s.reply(conn, req.ID, server.WSMessageTypeRawSessionEndResponse, protocol.RawSessionEndResponsePayload(payload))
 }
 
 // endLeases releases the raw sessions a departed client still held, so the

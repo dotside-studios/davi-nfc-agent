@@ -31,7 +31,7 @@ type pcscNTAG424Tag struct {
 	// Capabilities and UID are read there while an operation may be running.
 	mu           sync.Mutex
 	keys         NTAG424Keys
-	session      *ev2.Session
+	session      ev2.Channel
 	sessionKeyNo byte
 
 	// realUID is the card's own UID, once learned. With the random UID on, uid
@@ -255,7 +255,7 @@ func (t *pcscNTAG424Tag) fetchRealUID() error {
 	if err != nil {
 		return NewAuthError("resolve UID (NTAG 424)", t.uid, err)
 	}
-	return t.withSession(keyNo, func(s *ev2.Session) error {
+	return t.withSession(keyNo, func(s ev2.Channel) error {
 		cmd, err := ntag424.GetCardUID(s)
 		if err != nil {
 			return err
@@ -293,7 +293,7 @@ func (t *pcscNTAG424Tag) dropSession() {
 	t.mu.Unlock()
 }
 
-func (t *pcscNTAG424Tag) currentSession() (*ev2.Session, byte) {
+func (t *pcscNTAG424Tag) currentSession() (ev2.Channel, byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.session, t.sessionKeyNo
@@ -327,10 +327,13 @@ func authStatus(resp []byte) error {
 // already open under it. The NDEF application is selected first, which also
 // clears any session the card held.
 //
-// A tag in LRP mode is refused. The card's delay (91 AD) and a key it refused
-// are remembered and not tried again until the keys change, because each
-// failure counts toward the card's lockout.
-func (t *pcscNTAG424Tag) authenticate(keyNo byte) (*ev2.Session, error) {
+// The cipher suite is the card's: its first answer says whether it is in AES
+// or LRP mode. A card in LRP mode is refused unless NTAG424Keys.AllowLRP asks
+// for it, since the LRP exchange is not validated against real hardware. The
+// card's delay (91 AD) and a key it refused are remembered and not tried again
+// until the keys change, because each failure counts toward the card's
+// lockout.
+func (t *pcscNTAG424Tag) authenticate(keyNo byte) (ev2.Channel, error) {
 	const op = "authenticate (NTAG 424)"
 
 	t.mu.Lock()
@@ -341,7 +344,7 @@ func (t *pcscNTAG424Tag) authenticate(keyNo byte) (*ev2.Session, error) {
 	}
 	var refused error
 	switch {
-	case t.lrp:
+	case t.lrp && !t.keys.AllowLRP:
 		refused = ntag424.ErrLRP
 	case t.delayed:
 		refused = ntag424.ErrAuthDelay
@@ -368,6 +371,10 @@ func (t *pcscNTAG424Tag) authenticate(keyNo byte) (*ev2.Session, error) {
 		return nil, NewAuthError(op, t.UID(), fmt.Errorf("select NDEF application: card answered % X", resp))
 	}
 
+	if t.knownLRP() {
+		return t.authenticateLRP(op, keyNo, key)
+	}
+
 	auth, err := ev2.NewAuthenticator(ev2.AuthFirst, keyNo, key, nil)
 	if err != nil {
 		return nil, NewAuthError(op, t.UID(), err)
@@ -380,8 +387,57 @@ func (t *pcscNTAG424Tag) authenticate(keyNo byte) (*ev2.Session, error) {
 	if ntag424.IsLRPAuthResponse(first) {
 		t.mu.Lock()
 		t.lrp = true
+		allowed := t.keys.AllowLRP
 		t.mu.Unlock()
-		return nil, NewAuthError(op, t.UID(), ntag424.ErrLRP)
+		if !allowed {
+			return nil, NewAuthError(op, t.UID(), ntag424.ErrLRP)
+		}
+		return t.authenticateLRP(op, keyNo, key)
+	}
+	if err := authStatus(first); err != nil {
+		return nil, t.authRefused(op, keyNo, err)
+	}
+	second, err := auth.Challenge(first)
+	if err != nil {
+		return nil, NewAuthError(op, t.UID(), err)
+	}
+	answer, err := t.transmitRaw(second)
+	if err != nil {
+		return nil, err
+	}
+	if err := authStatus(answer); err != nil {
+		return nil, t.authRefused(op, keyNo, err)
+	}
+	session, err := auth.Finish(answer)
+	if err != nil {
+		return nil, t.authRefused(op, keyNo, err)
+	}
+
+	t.mu.Lock()
+	t.session, t.sessionKeyNo = session, keyNo
+	t.mu.Unlock()
+	return session, nil
+}
+
+// knownLRP reports that the card has answered an authentication in LRP mode and
+// the keys allow driving it.
+func (t *pcscNTAG424Tag) knownLRP() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lrp && t.keys.AllowLRP
+}
+
+// authenticateLRP runs AuthenticateLRPFirst and opens the session it leaves.
+// Starting it discards any exchange the card left half done, such as the AES
+// one that revealed the mode.
+func (t *pcscNTAG424Tag) authenticateLRP(op string, keyNo byte, key []byte) (ev2.Channel, error) {
+	auth, err := ev2.NewLRPAuthenticator(ev2.AuthFirst, keyNo, key, nil)
+	if err != nil {
+		return nil, NewAuthError(op, t.UID(), err)
+	}
+	first, err := t.transmitRaw(auth.Command())
+	if err != nil {
+		return nil, err
 	}
 	if err := authStatus(first); err != nil {
 		return nil, t.authRefused(op, keyNo, err)
@@ -427,7 +483,7 @@ func (t *pcscNTAG424Tag) authRefused(op string, keyNo byte, cause error) error {
 // longer holds the session (91 AE, 91 1E, 91 7E) gets one fresh authentication
 // and one more try; any other failure drops the session, since after one the
 // card's counter and this side's may no longer agree.
-func (t *pcscNTAG424Tag) withSession(keyNo byte, fn func(*ev2.Session) error) error {
+func (t *pcscNTAG424Tag) withSession(keyNo byte, fn func(ev2.Channel) error) error {
 	for attempt := 0; ; attempt++ {
 		s, err := t.authenticate(keyNo)
 		if err != nil {
@@ -463,7 +519,7 @@ func (t *pcscNTAG424Tag) selectApp() error {
 // is one, plainly when the card allows it, and otherwise under key 0, the
 // factory change key.
 func (t *pcscNTAG424Tag) getFileSettings(fileNo byte) (*ntag424.FileSettings, error) {
-	inSession := func(s *ev2.Session) (fs *ntag424.FileSettings, err error) {
+	inSession := func(s ev2.Channel) (fs *ntag424.FileSettings, err error) {
 		cmd, err := ntag424.GetFileSettings(s, fileNo)
 		if err != nil {
 			return nil, err
@@ -504,7 +560,7 @@ func (t *pcscNTAG424Tag) getFileSettings(fileNo byte) (*ntag424.FileSettings, er
 		return nil, err
 	}
 
-	err = t.withSession(0, func(s *ev2.Session) error {
+	err = t.withSession(0, func(s ev2.Channel) error {
 		var err error
 		fs, err = inSession(s)
 		return err
@@ -627,7 +683,7 @@ func (t *pcscNTAG424Tag) ReadData() ([]byte, error) {
 	}
 
 	var out []byte
-	err = t.withSession(route.keyNo, func(s *ev2.Session) error {
+	err = t.withSession(route.keyNo, func(s ev2.Channel) error {
 		nlenData, err := t.readChunks(s, route.mode, 0, 2)
 		if err != nil {
 			return fmt.Errorf("read NLEN: %w", err)
@@ -656,7 +712,7 @@ func (t *pcscNTAG424Tag) ReadData() ([]byte, error) {
 
 // readChunks reads length bytes of the NDEF file inside a session, one command
 // per chunk.
-func (t *pcscNTAG424Tag) readChunks(s *ev2.Session, mode ntag424.CommMode, offset, length int) ([]byte, error) {
+func (t *pcscNTAG424Tag) readChunks(s ev2.Channel, mode ntag424.CommMode, offset, length int) ([]byte, error) {
 	chunk := n4ReadChunk
 	if mode == ntag424.CommFull {
 		chunk = n4ReadChunkFull
@@ -709,7 +765,7 @@ func (t *pcscNTAG424Tag) WriteData(data []byte) error {
 		return t.pcscISO14443Tag.WriteData(data)
 	}
 
-	return t.withSession(route.keyNo, func(s *ev2.Session) error {
+	return t.withSession(route.keyNo, func(s ev2.Channel) error {
 		if err := t.writeChunks(s, route.mode, 0, []byte{0x00, 0x00}); err != nil {
 			return fmt.Errorf("clear NLEN: %w", err)
 		}
@@ -726,7 +782,7 @@ func (t *pcscNTAG424Tag) WriteData(data []byte) error {
 
 // writeChunks writes data into the NDEF file inside a session, one command per
 // chunk.
-func (t *pcscNTAG424Tag) writeChunks(s *ev2.Session, mode ntag424.CommMode, offset int, data []byte) error {
+func (t *pcscNTAG424Tag) writeChunks(s ev2.Channel, mode ntag424.CommMode, offset int, data []byte) error {
 	chunk := ntag424.MaxWriteChunk(mode)
 	for written := 0; written < len(data); {
 		part := data[written:min(written+chunk, len(data))]

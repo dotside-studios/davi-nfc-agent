@@ -13,10 +13,12 @@ import (
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/lrp"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/ntag424"
 )
 
-// The NTAG 424 DNA's secure side: EV2 authentication, five AES keys, three
+// The NTAG 424 DNA's secure side: EV2 authentication (AES, or LRP once the card
+// is switched with NTAG424WithLRP), five AES keys, three
 // files with settings, SDM mirroring and the native commands the ntag424
 // package builds. Defaults follow NT4H2421Gx: every key zero at version 0, file
 // 01 the CC, file 02 the NDEF file free to read and write, file 03 a
@@ -107,8 +109,12 @@ type ntag424State struct {
 	pendKey   byte
 	rndB      []byte
 
-	session *ev2.Session
+	session ev2.CardChannel
 	authKey byte
+
+	// lrp is the card switched to the LRP cipher suite, permanently as the real
+	// switch is.
+	lrp bool
 
 	appSelected bool
 	selected    int
@@ -222,6 +228,14 @@ func NTAG424WithSDM(plan *ntag424.SDMPlan) NTAG424Option {
 		NTAG424WithNDEF(plan.NDEF)(s)
 		NTAG424WithFileSettings(ntag424.NDEFFileNo, plan.Settings)(s)
 	}
+}
+
+// NTAG424WithLRP switches the card to the LRP cipher suite, as the permanent
+// SetConfiguration switch does. It then answers authentication with the LRP
+// exchange, secures messages with LRP, and mirrors LRP PICCData. File data
+// encryption is refused in this mode.
+func NTAG424WithLRP() NTAG424Option {
+	return func(s *ntag424State) { s.lrp = true }
 }
 
 // NTAG424WithRandomID turns the random UID on.
@@ -395,6 +409,10 @@ func (s *ntag424State) authFirstStep(first bool, payload []byte) []byte {
 	_, _ = rand.Read(s.rndB)
 	s.pendStage, s.pendFirst, s.pendKey = 1, first, keyNo
 
+	if s.lrp {
+		return append(append([]byte{0x01}, s.rndB...), 0x91, n4InsAdditionalFrame)
+	}
+
 	out := make([]byte, 16)
 	cipher.NewCBCEncrypter(block, make([]byte, 16)).CryptBlocks(out, s.rndB)
 	return append(out, 0x91, n4InsAdditionalFrame)
@@ -414,6 +432,9 @@ func (s *ntag424State) authSecond(payload []byte) []byte {
 		return n4SW(n4StLength)
 	}
 	key := s.keys[s.pendKey]
+	if s.lrp {
+		return s.authSecondLRP(key, payload)
+	}
 	block, err := ev2.NewCipher(key)
 	if err != nil {
 		return s.failAuth()
@@ -454,6 +475,29 @@ func (s *ntag424State) authSecond(payload []byte) []byte {
 	out := make([]byte, len(reply))
 	cipher.NewCBCEncrypter(block, make([]byte, 16)).CryptBlocks(out, reply)
 	return append(out, 0x91, n4StOK)
+}
+
+func (s *ntag424State) authSecondLRP(key, payload []byte) []byte {
+	var ti []byte
+	var counter uint16
+	if s.pendFirst {
+		ti = make([]byte, ev2.TISize)
+		_, _ = rand.Read(ti)
+	} else {
+		ti, counter = s.session.TI(), s.session.Counter()
+	}
+	reply, session, err := ev2.LRPAnswer(s.pendFirst, key, s.rndB, payload, ti, counter)
+	if err != nil {
+		return s.failAuth()
+	}
+	s.session, s.authKey = session, s.pendKey
+
+	if s.failDec >= s.failTotal {
+		s.failTotal = 0
+	} else {
+		s.failTotal -= s.failDec
+	}
+	return append(reply, 0x91, n4StOK)
 }
 
 // secure verifies a command inside the open session and returns its header and
@@ -722,7 +766,11 @@ func (s *ntag424State) checkSettings(fileNo byte, fs ntag424.FileSettings) byte 
 	if fs.MirrorReadCounter && fs.SDMMetaRead == ntag424.AccessFree && !fits(fs.ReadCounterOffset, 6) {
 		return n4StBoundary
 	}
-	if fs.SDMMetaRead <= 4 && !fits(fs.PICCDataOffset, 2*n4PICCDataLen) {
+	piccWidth := uint32(2 * n4PICCDataLen)
+	if s.lrp {
+		piccWidth = 2 * ntag424.LRPPICCDataSize
+	}
+	if fs.SDMMetaRead <= 4 && !fits(fs.PICCDataOffset, piccWidth) {
 		return n4StBoundary
 	}
 	if fs.SDMFileRead <= 4 {
@@ -731,7 +779,7 @@ func (s *ntag424State) checkSettings(fileNo byte, fs ntag424.FileSettings) byte 
 		}
 	}
 	if fs.EncryptFileData {
-		if fs.SDMFileRead > 4 || fs.ENCLength == 0 || fs.ENCLength%32 != 0 || !fits(fs.ENCOffset, fs.ENCLength) {
+		if s.lrp || fs.SDMFileRead > 4 || fs.ENCLength == 0 || fs.ENCLength%32 != 0 || !fits(fs.ENCOffset, fs.ENCLength) {
 			return n4StParameter
 		}
 	}
@@ -977,6 +1025,7 @@ func (s *ntag424State) view(fileNo byte, f *n4File) []byte {
 	picc := &ntag424.PICCData{
 		UID: s.uid, ReadCounter: ctr,
 		UIDMirrored: fs.MirrorUID, CounterMirrored: fs.MirrorReadCounter,
+		LRP: s.lrp,
 	}
 	switch {
 	case fs.SDMMetaRead <= 4:
@@ -992,6 +1041,20 @@ func (s *ntag424State) view(fileNo byte, f *n4File) []byte {
 			copy(plain[n:], ctr3)
 		}
 		plain[0] = tag
+		if s.lrp {
+			key, err := lrp.New(s.keys[fs.SDMMetaRead], lrp.UpdateMAC)
+			if err != nil {
+				return out
+			}
+			piccRand := make([]byte, ntag424.PICCRandSize)
+			_, _ = rand.Read(piccRand)
+			enc, err := key.Encrypt(piccRand, plain)
+			if err != nil {
+				return out
+			}
+			put(fs.PICCDataOffset, hexUp(append(piccRand, enc...)))
+			break
+		}
 		block, err := aes.NewCipher(s.keys[fs.SDMMetaRead])
 		if err != nil {
 			return out

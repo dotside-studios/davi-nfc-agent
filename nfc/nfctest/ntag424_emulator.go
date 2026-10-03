@@ -668,12 +668,12 @@ func commModeOf(m ntag424.CommMode) ev2.CommMode { return ev2.CommMode(m) }
 
 // needChange checks the session may change a file's settings.
 func (s *ntag424State) needChange(f *n4File) []byte {
-	switch c := f.settings.Change; {
-	case c == ntag424.AccessFree:
+	switch f.settings.Change {
+	case ntag424.AccessFree:
 		return nil
-	case c == ntag424.AccessNever:
+	case ntag424.AccessNever:
 		return n4SW(n4StPermission)
-	case c == s.authKey:
+	case s.authKey:
 		return nil
 	}
 	return n4SW(n4StPermission)

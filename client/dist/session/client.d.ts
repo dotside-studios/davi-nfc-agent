@@ -1,4 +1,4 @@
-import type { HealthCheckResponse, LockResponse, NFCClientOptions, NFCErrorCodeValue, NFCEventHandler, NFCEventName, TagCapabilities, TagData, TagTarget, TransceiveRequest, WriteRequest, WriteResponse } from "./types";
+import type { HealthCheckResponse, LockResponse, NFCClientOptions, NFCErrorCodeValue, NFCEventHandler, NFCEventName, RawSession, TagCapabilities, TagData, TagTarget, TransceiveRequest, WriteRequest, WriteResponse } from "./types";
 /** A refused request, with the agent's code and whether a retry could work. */
 export declare class NFCRequestError extends Error {
     readonly code?: NFCErrorCodeValue;
@@ -53,6 +53,14 @@ export declare class NFCClient {
     /** Irreversible. */
     lock(target?: TagTarget): Promise<LockResponse>;
     transceive(request: TransceiveRequest): Promise<Uint8Array>;
+    /**
+     * Leases the reader holding the tag, so an exchange that builds on earlier
+     * ones, such as an authentication, is not reset by polling or by another
+     * operation. Pass the returned `sessionId` to `transceive`, and end it with
+     * `endRawSession`.
+     */
+    beginRawSession(target?: TagTarget, ttlMs?: number): Promise<RawSession>;
+    endRawSession(sessionId: string): Promise<void>;
     /** Asks the tag, rather than reading what the scan captured. */
     getCapabilities(target?: TagTarget): Promise<TagCapabilities>;
     healthCheck(): Promise<HealthCheckResponse>;

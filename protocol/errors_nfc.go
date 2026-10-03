@@ -10,19 +10,20 @@ import (
 // It lives here rather than in nfc so that the domain does not have to know a
 // wire exists.
 var wireErrorCodes = map[nfc.ErrorCode]ErrorCode{
-	nfc.ErrCodeNotSupported:     ErrCodeNotSupported,
-	nfc.ErrCodeTagRemoved:       ErrCodeTagRemoved,
-	nfc.ErrCodeAuthFailed:       ErrCodeAuthFailed,
-	nfc.ErrCodeReadFailed:       ErrCodeReadFailed,
-	nfc.ErrCodeWriteFailed:      ErrCodeWriteFailed,
-	nfc.ErrCodeTransceiveFailed: ErrCodeTransceiveFailed,
-	nfc.ErrCodeTagNotConnected:  ErrCodeTagNotConnected,
-	nfc.ErrCodeReadOnly:         ErrCodeReadOnly,
-	nfc.ErrCodeCapacityExceeded: ErrCodeCapacityExceeded,
-	nfc.ErrCodeInvalidData:      ErrCodeInvalidData,
-	nfc.ErrCodeMultipleTags:     ErrCodeMultipleTags,
-	nfc.ErrCodeBusy:             ErrCodeBusy,
-	nfc.ErrCodeNoPayload:        ErrCodeNoPayload,
+	nfc.ErrCodeNotSupported:      ErrCodeNotSupported,
+	nfc.ErrCodeTagRemoved:        ErrCodeTagRemoved,
+	nfc.ErrCodeAuthFailed:        ErrCodeAuthFailed,
+	nfc.ErrCodeReadFailed:        ErrCodeReadFailed,
+	nfc.ErrCodeWriteFailed:       ErrCodeWriteFailed,
+	nfc.ErrCodeTransceiveFailed:  ErrCodeTransceiveFailed,
+	nfc.ErrCodeTagNotConnected:   ErrCodeTagNotConnected,
+	nfc.ErrCodeReadOnly:          ErrCodeReadOnly,
+	nfc.ErrCodeCapacityExceeded:  ErrCodeCapacityExceeded,
+	nfc.ErrCodeInvalidData:       ErrCodeInvalidData,
+	nfc.ErrCodeMultipleTags:      ErrCodeMultipleTags,
+	nfc.ErrCodeBusy:              ErrCodeBusy,
+	nfc.ErrCodeNoPayload:         ErrCodeNoPayload,
+	nfc.ErrCodeRawSessionExpired: ErrCodeRawSessionExpired,
 }
 
 // InternalErrorCode maps a wire code back to the nfc code it came from, for

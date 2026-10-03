@@ -34,6 +34,7 @@ func TestRetryableClassification(t *testing.T) {
 		ErrCodeUnknownType,
 		ErrCodeInvalidDevice,
 		ErrCodeAuthFailed,
+		ErrCodeRawSessionExpired,
 		ErrCodeUnknownError,
 	}
 	for _, code := range permanent {

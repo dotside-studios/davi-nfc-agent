@@ -35,6 +35,7 @@ type tagOps struct {
 }
 
 var _ server.TagOps = (*tagOps)(nil)
+var _ server.RawSessionOps = (*tagOps)(nil)
 
 // modificationAllowed reports whether the agent permits a write, a lock or a
 // raw exchange. It governs tags held by devices as well as those on a reader:
@@ -111,21 +112,52 @@ func (s *tagOps) Lock(ctx context.Context, req server.LockOp) (*nfc.LockResult, 
 	return result, nil
 }
 
-// Transceive exchanges raw bytes with the named tag.
-func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
+// rawChannelGate refuses a raw exchange, or the lease that carries a run of
+// them, unless the mode and the channel both allow it.
+func (s *tagOps) rawChannelGate(what string) error {
 	// A raw exchange cannot be assumed harmless: the same call carries a SELECT
 	// and a write to a configuration page, so the mode treats it as a write.
 	if !s.modificationAllowed() {
-		return nil, protocol.Errorf(protocol.ErrCodeReadOnly,
-			"Reader is in read-only mode; raw exchanges are refused because they can write")
+		return protocol.Errorf(protocol.ErrCodeReadOnly,
+			"Reader is in read-only mode; %s are refused because they can write", what)
 	}
 
 	// The channel is gated on its own beyond the mode: a raw command reaches the
 	// tag unmodified and can lock or brick it in ways nothing here can undo, so a
 	// writable agent still refuses one until the operator opens the channel.
 	if !s.rawTransceiveAllowed() {
-		return nil, protocol.Errorf(protocol.ErrCodeRawChannelDisabled,
+		return protocol.Errorf(protocol.ErrCodeRawChannelDisabled,
 			"Raw APDU channel is disabled; enable it to send raw exchanges")
+	}
+	return nil
+}
+
+// rawSessions is the holder's lease support, if it has any.
+func (s *tagOps) rawSessions() (nfc.RawSessionHolder, error) {
+	if holder, ok := s.tags.(nfc.RawSessionHolder); ok {
+		return holder, nil
+	}
+	return nil, protocol.WrapError(protocol.ErrCodeNotSupported, nfc.NewNotSupportedError("RawSession"),
+		"raw sessions are not supported here")
+}
+
+// Transceive exchanges raw bytes with the named tag.
+func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
+	if err := s.rawChannelGate("raw exchanges"); err != nil {
+		return nil, err
+	}
+
+	if req.SessionID != "" {
+		holder, err := s.rawSessions()
+		if err != nil {
+			return nil, err
+		}
+		auditRawExchange(req.Data, req.Raw, req.DeviceID, req.TagUID)
+		data, err := holder.TransceiveInSessionTag(ctx, req.SessionID, req.Data)
+		if err != nil {
+			return nil, sourceFailure(err, req.DeviceID, "exchange", protocol.ErrCodeTransceiveFailed)
+		}
+		return data, nil
 	}
 
 	rt, err := s.resolveRoute(req.TagUID, req.DeviceID, req.AllowUntargeted)
@@ -142,6 +174,49 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 		return nil, sourceFailure(err, rt.device, "exchange", protocol.ErrCodeTransceiveFailed)
 	}
 	return data, nil
+}
+
+// BeginRawSession leases the reader holding the named tag, under the same
+// gates as a raw exchange.
+func (s *tagOps) BeginRawSession(ctx context.Context, req server.RawSessionBeginOp) (server.RawSessionLease, error) {
+	if err := s.rawChannelGate("raw sessions"); err != nil {
+		return server.RawSessionLease{}, err
+	}
+	holder, err := s.rawSessions()
+	if err != nil {
+		return server.RawSessionLease{}, err
+	}
+
+	rt, err := s.resolveRoute(req.TagUID, req.DeviceID, req.AllowUntargeted)
+	if err != nil {
+		return server.RawSessionLease{}, err
+	}
+
+	auditRawSession("begin", rt.device, rt.uid, "")
+	id, err := holder.BeginRawSessionTag(ctx, rt.device, rt.uid, req.TTL)
+	if err != nil {
+		return server.RawSessionLease{}, sourceFailure(err, rt.device, "raw session", protocol.ErrCodeTransceiveFailed)
+	}
+
+	ttl := req.TTL
+	if ttl <= 0 {
+		ttl = nfc.DefaultRawSessionTTL
+	}
+	return server.RawSessionLease{SessionID: id, TTL: min(ttl, nfc.MaxRawSessionTTL)}, nil
+}
+
+// EndRawSession ends a raw session. Ending is never refused by the gates, so a
+// lease can always be let go.
+func (s *tagOps) EndRawSession(ctx context.Context, sessionID string) error {
+	holder, err := s.rawSessions()
+	if err != nil {
+		return err
+	}
+	auditRawSession("end", "", "", sessionID)
+	if err := holder.EndRawSessionTag(ctx, sessionID); err != nil {
+		return sourceFailure(err, "", "raw session", protocol.ErrCodeTransceiveFailed)
+	}
+	return nil
 }
 
 // Capabilities reports what the named tag supports.

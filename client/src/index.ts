@@ -20,6 +20,7 @@ export type {
   NFCEventHandler,
   NFCEventName,
   NFCEventPayloadMap,
+  RawSession,
   TagCapabilities,
   TagData,
   TagMessage,

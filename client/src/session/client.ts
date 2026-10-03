@@ -337,13 +337,16 @@ export class NFCClient {
   }
 
   async transceive(request: TransceiveRequest): Promise<Uint8Array> {
-    const { data, raw, sessionId, ...target } = request;
+    const { data, raw, sessionId, autoGetResponse, ...target } = request;
     if (data.length === 0) {
       throw new Error("transceive requires a command");
     }
     const body: Record<string, unknown> = { data: encodeBase64(data), raw: raw === true };
     if (sessionId) {
       body.sessionId = sessionId;
+    }
+    if (autoGetResponse) {
+      body.autoGetResponse = true;
     }
     const response = await this.sendRequest<{ data?: string }>(
       "transceiveRequest",
@@ -366,8 +369,9 @@ export class NFCClient {
       throw new Error("transceiveSequence steps require a command");
     }
     const body: Record<string, unknown> = {
-      steps: steps.map(({ data, expectSW, stopOnSW }) => ({
+      steps: steps.map(({ data, expectSW, stopOnSW, autoGetResponse }) => ({
         data: encodeBase64(data),
+        ...(autoGetResponse ? { autoGetResponse: true } : {}),
         ...(expectSW?.length ? { expectSW } : {}),
         ...(stopOnSW?.length ? { stopOnSW } : {}),
       })),

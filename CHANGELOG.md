@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ISO 7816 response chaining on the raw channel.** `transceiveRequest` and
+  each step of `transceiveSequenceRequest` take an optional `autoGetResponse`.
+  Set, the agent follows `61xx` with GET RESPONSE until the card stops (at most
+  64 rounds), retries `6Cxx` once with the corrected Le, and returns the
+  concatenated body with the final status word, all inside the exchange's tag
+  operation or raw session. Each follow-up is audited as part of the same
+  exchange. Unset, replies are returned unchanged. `BuildAPDU` now builds the
+  extended form for data beyond 255 bytes instead of truncating Lc, and
+  `BuildExtendedAPDU` and `ATRExtendedLength` (extended Lc/Le from the ATR's
+  card capabilities) are added for driver code
 - **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
   ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
   any status word as a successful exchange, so `91 AF` and `6A 82` reach the

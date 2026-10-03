@@ -1,4 +1,4 @@
-import type { NFCErrorCode, NTAG424ResponsePayload, NTAG424SDMOptions } from "./wire.generated";
+import type { NFCErrorCode, NTAG424FileSettings, NTAG424ResponsePayload, NTAG424SDMOptions, NTAG424SDMPlan, NTAG424SDMResult } from "./wire.generated";
 export type { NFCErrorCode };
 export interface NFCClientOptions {
     /**
@@ -211,7 +211,7 @@ export interface TransceiveSequenceResult {
     /** Index of the step whose reply ended the run early, or -1 when all ran. */
     stoppedAt: number;
 }
-export type { NTAG424SDMOptions };
+export type { NTAG424FileSettings, NTAG424SDMOptions, NTAG424SDMPlan, NTAG424SDMResult };
 export type NTAG424Response = NTAG424ResponsePayload;
 /**
  * An NTAG 424 DNA operation. `configureSDM`, `changeKey` and `lock` change the

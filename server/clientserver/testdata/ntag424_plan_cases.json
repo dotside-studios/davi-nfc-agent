@@ -1,0 +1,169 @@
+[
+  {
+    "name": "picc and mac",
+    "request": {
+      "op": "planSDM",
+      "urlTemplate": "https://example.com/t?p={picc}\u0026m={mac}"
+    },
+    "response": {
+      "op": "planSDM",
+      "plan": {
+        "ndefHex": "0048D1014455046578616D706C652E636F6D2F743F703D3030303030303030303030303030303030303030303030303030303030303030266D3D30303030303030303030303030303030",
+        "length": 74,
+        "settings": {
+          "fileType": 0,
+          "fileSize": 0,
+          "commMode": "plain",
+          "readWrite": 0,
+          "change": 0,
+          "read": 14,
+          "write": 0,
+          "sdmEnabled": true,
+          "mirrorUID": true,
+          "mirrorReadCounter": true,
+          "asciiEncoding": true,
+          "sdmCounterRet": 15,
+          "piccDataOffset": 23,
+          "macInputOffset": 58,
+          "macOffset": 58
+        }
+      }
+    }
+  },
+  {
+    "name": "uid and counter in the clear",
+    "request": {
+      "op": "planSDM",
+      "urlTemplate": "https://example.com/t?uid={uid}\u0026ctr={ctr}\u0026m={mac}"
+    },
+    "response": {
+      "op": "planSDM",
+      "plan": {
+        "ndefHex": "0043D1013F55046578616D706C652E636F6D2F743F7569643D3030303030303030303030303030266374723D303030303030266D3D30303030303030303030303030303030",
+        "length": 69,
+        "settings": {
+          "fileType": 0,
+          "fileSize": 0,
+          "commMode": "plain",
+          "readWrite": 0,
+          "change": 0,
+          "read": 14,
+          "write": 0,
+          "sdmEnabled": true,
+          "mirrorUID": true,
+          "mirrorReadCounter": true,
+          "asciiEncoding": true,
+          "sdmMetaRead": 14,
+          "sdmCounterRet": 15,
+          "uidOffset": 25,
+          "readCounterOffset": 44,
+          "macInputOffset": 53,
+          "macOffset": 53
+        }
+      }
+    }
+  },
+  {
+    "name": "encrypted file data",
+    "request": {
+      "op": "planSDM",
+      "urlTemplate": "https://example.com/t?p={picc}\u0026e={enc}\u0026m={mac}",
+      "sdm": {
+        "metaRead": 1,
+        "fileRead": 1,
+        "encLength": 64
+      }
+    },
+    "response": {
+      "op": "planSDM",
+      "plan": {
+        "ndefHex": "008BD1018755046578616D706C652E636F6D2F743F703D303030303030303030303030303030303030303030303030303030303030303026653D30303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030266D3D30303030303030303030303030303030",
+        "length": 141,
+        "settings": {
+          "fileType": 0,
+          "fileSize": 0,
+          "commMode": "plain",
+          "readWrite": 0,
+          "change": 0,
+          "read": 14,
+          "write": 0,
+          "sdmEnabled": true,
+          "mirrorUID": true,
+          "mirrorReadCounter": true,
+          "encryptFileData": true,
+          "asciiEncoding": true,
+          "sdmMetaRead": 1,
+          "sdmFileRead": 1,
+          "sdmCounterRet": 15,
+          "piccDataOffset": 23,
+          "macInputOffset": 58,
+          "macOffset": 125,
+          "encOffset": 58,
+          "encLength": 64
+        }
+      }
+    }
+  },
+  {
+    "name": "http with www prefix",
+    "request": {
+      "op": "planSDM",
+      "urlTemplate": "http://www.example.com/{picc}{mac}"
+    },
+    "response": {
+      "op": "planSDM",
+      "plan": {
+        "ndefHex": "0041D1013D55016578616D706C652E636F6D2F303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+        "length": 67,
+        "settings": {
+          "fileType": 0,
+          "fileSize": 0,
+          "commMode": "plain",
+          "readWrite": 0,
+          "change": 0,
+          "read": 14,
+          "write": 0,
+          "sdmEnabled": true,
+          "mirrorUID": true,
+          "mirrorReadCounter": true,
+          "asciiEncoding": true,
+          "sdmCounterRet": 15,
+          "piccDataOffset": 19,
+          "macInputOffset": 51,
+          "macOffset": 51
+        }
+      }
+    }
+  },
+  {
+    "name": "no prefix abbreviation",
+    "request": {
+      "op": "planSDM",
+      "urlTemplate": "ftp://example.com/{picc}{mac}"
+    },
+    "response": {
+      "op": "planSDM",
+      "plan": {
+        "ndefHex": "0047D1014355006674703A2F2F6578616D706C652E636F6D2F303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+        "length": 73,
+        "settings": {
+          "fileType": 0,
+          "fileSize": 0,
+          "commMode": "plain",
+          "readWrite": 0,
+          "change": 0,
+          "read": 14,
+          "write": 0,
+          "sdmEnabled": true,
+          "mirrorUID": true,
+          "mirrorReadCounter": true,
+          "asciiEncoding": true,
+          "sdmCounterRet": 15,
+          "piccDataOffset": 25,
+          "macInputOffset": 57,
+          "macOffset": 57
+        }
+      }
+    }
+  }
+]

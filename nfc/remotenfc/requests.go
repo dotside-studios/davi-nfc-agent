@@ -449,7 +449,17 @@ func (m *Manager) deviceCanTransceive(deviceID string) bool {
 // read-only mode withdraws all of them: a tag must not advertise an operation
 // the manager would refuse.
 func (m *Manager) deviceDeclared(deviceID string, want func(DeviceCapabilities) bool) bool {
-	if !m.deviceReachable(deviceID) {
+	return m.deviceDeclaredAs(deviceID, true, want)
+}
+
+// deviceDeclaredAs is deviceDeclared, with the mode's withdrawal of tag-changing
+// operations applied or set aside. Only an operation that is a read where it
+// stands has any business setting it aside.
+func (m *Manager) deviceDeclaredAs(deviceID string, withMode bool, want func(DeviceCapabilities) bool) bool {
+	if withMode && !m.deviceReachable(deviceID) {
+		return false
+	}
+	if !withMode && !m.deviceConnected(deviceID) {
 		return false
 	}
 	device, ok := m.GetDevice(deviceID)
@@ -479,7 +489,11 @@ func (m *Manager) deviceReachable(deviceID string) bool {
 	if !m.tagModificationAllowed() {
 		return false
 	}
+	return m.deviceConnected(deviceID)
+}
 
+// deviceConnected is deviceReachable without the mode.
+func (m *Manager) deviceConnected(deviceID string) bool {
 	device, ok := m.GetDevice(deviceID)
 	if !ok || !device.IsActive() {
 		return false

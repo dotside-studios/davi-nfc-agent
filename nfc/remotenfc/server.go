@@ -136,7 +136,7 @@ func (m *Manager) serveSession(conn *wsconn.SafeConn, admitted string) {
 			reason = DisconnectGoodbye
 			m.handleGoodbye(conn, deviceID, req)
 			return
-		case WSTypeDeviceWriteResponse, WSTypeDeviceTransceiveResponse:
+		case WSTypeDeviceWriteResponse, WSTypeDeviceTransceiveResponse, WSTypeDeviceTransceiveSequenceResponse:
 			handlerErr = m.handleDeviceResponse(deviceID, req)
 		default:
 			deviceWarn.Printf("Unknown message type: %s", req.Type)

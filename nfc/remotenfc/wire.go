@@ -21,6 +21,9 @@ const (
 	WSTypeDeviceWriteResponse      = "deviceWriteResponse"
 	WSTypeDeviceTransceiveRequest  = "deviceTransceiveRequest"
 	WSTypeDeviceTransceiveResponse = "deviceTransceiveResponse"
+
+	WSTypeDeviceTransceiveSequenceRequest  = "deviceTransceiveSequenceRequest"
+	WSTypeDeviceTransceiveSequenceResponse = "deviceTransceiveSequenceResponse"
 )
 
 // DeviceCapabilities defines the capabilities of a connected NFC device.
@@ -40,6 +43,12 @@ type DeviceCapabilities struct {
 	CanTransceive    bool `json:"canTransceive,omitempty"`
 	CanTransceiveRaw bool `json:"canTransceiveRaw,omitempty"`
 	CanLock          bool `json:"canLock,omitempty"`
+
+	// CanTransceiveSequence is the device running a batch of APDU exchanges
+	// itself, with one request and one answer however many steps it carries. It
+	// presumes CanTransceive. A device that does not declare it is sent one
+	// deviceTransceiveRequest per step instead.
+	CanTransceiveSequence bool `json:"canTransceiveSequence,omitempty"`
 
 	SupportedTagTypes []string `json:"supportedTagTypes,omitempty"` // e.g. ["MIFARE Classic", "NTAG"]
 	DeviceType        string   `json:"deviceType,omitempty"`        // e.g. "smartphone", "pn532-serial"

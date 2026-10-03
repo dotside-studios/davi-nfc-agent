@@ -98,6 +98,7 @@ class NFCDeviceClient {
     this.canTransceive = options.canTransceive || false;
     this.canTransceiveRaw = options.canTransceiveRaw || false;
     this.canLock = options.canLock || false;
+    this.canTransceiveSequence = options.canTransceiveSequence || false;
     this.deviceType = options.deviceType || '';
     this.supportedTagTypes = options.supportedTagTypes || [];
     this.maxBaudRate = options.maxBaudRate || 0;
@@ -127,6 +128,7 @@ class NFCDeviceClient {
       registered: [],
       writeRequest: [],
       transceiveRequest: [],
+      transceiveSequenceRequest: [],
       connected: [],
       disconnected: [],
       error: []
@@ -366,6 +368,7 @@ class NFCDeviceClient {
     if (this.canTransceive) caps.canTransceive = true;
     if (this.canTransceiveRaw) caps.canTransceiveRaw = true;
     if (this.canLock) caps.canLock = true;
+    if (this.canTransceiveSequence) caps.canTransceiveSequence = true;
     if (this.deviceType) caps.deviceType = this.deviceType;
     if (this.supportedTagTypes.length) caps.supportedTagTypes = this.supportedTagTypes;
     if (this.maxBaudRate) caps.maxBaudRate = this.maxBaudRate;
@@ -447,6 +450,15 @@ class NFCDeviceClient {
           tagUID: payload.tagUID,
           data: payload.data,
           raw: payload.raw === true,
+          timeoutMs: payload.timeoutMs
+        });
+        break;
+      case 'deviceTransceiveSequenceRequest':
+        this._emit('transceiveSequenceRequest', {
+          requestID: payload.requestID,
+          deviceID: payload.deviceID,
+          tagUID: payload.tagUID,
+          steps: payload.steps || [],
           timeoutMs: payload.timeoutMs
         });
         break;
@@ -626,6 +638,33 @@ class NFCDeviceClient {
         requestID: requestID,
         success: success,
         ...(data ? { data } : {}),
+        ...(error ? { error } : {}),
+        ...(errorCode ? { errorCode } : {})
+      }
+    });
+  }
+
+  /**
+   * Respond to a transceive sequence request from the server.
+   * @param {string} requestID - The request ID from the sequence request
+   * @param {boolean} success - Whether the sequence ran
+   * @param {string[]} [replies] - Base64 whole reply (status word included) of every step that ran
+   * @param {number} [stoppedAt] - Index of the step whose reply ended the run early, or -1 when every step ran
+   * @param {string} [error] - Error message if unsuccessful
+   * @param {string} [errorCode] - Wire error code, e.g. 'TAG_REMOVED'
+   */
+  async respondToTransceiveSequence(requestID, success, replies = [], stoppedAt = -1, error = '', errorCode = '') {
+    if (!this.connected) {
+      throw new Error('Not connected to server');
+    }
+
+    this._send({
+      type: 'deviceTransceiveSequenceResponse',
+      payload: {
+        requestID: requestID,
+        success: success,
+        ...(replies.length ? { replies } : {}),
+        stoppedAt: stoppedAt,
         ...(error ? { error } : {}),
         ...(errorCode ? { errorCode } : {})
       }

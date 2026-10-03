@@ -253,11 +253,19 @@ func (s *Supervisor) TransceiveTag(ctx context.Context, device, tagUID string, d
 }
 
 // BeginRawSessionTag leases the reader holding the tag, so a multi-step raw
-// exchange is not disturbed by polling or other operations. A tag held by a
-// remote device cannot be leased.
+// exchange is not disturbed by polling or other operations.
+//
+// A tag held by a phone is never leased: the agent does not poll it, and the
+// operating system owns the tag session, which a device keeps open for as long
+// as the tag is in its field. A sequence or an NTAG 424 operation on it already
+// runs as one tag operation.
 func (s *Supervisor) BeginRawSessionTag(ctx context.Context, device, tagUID string, ttl time.Duration) (string, error) {
 	if s.heldElsewhere(device) != nil {
-		return "", NewNotSupportedError("RawSession")
+		return "", &NFCError{
+			Code:    ErrCodeNotSupported,
+			Op:      "RawSession",
+			Message: "a tag held by a phone cannot be leased: the phone's operating system owns the tag session; send a sequence instead",
+		}
 	}
 	_, reader, err := s.readerFor(device)
 	if err != nil {
@@ -287,10 +295,15 @@ func (s *Supervisor) TransceiveInSessionTag(ctx context.Context, leaseID string,
 }
 
 // TransceiveSequenceTag runs several raw exchanges under one tag operation. A
-// tag held by a remote device cannot be driven this way.
+// device holding the tag runs them itself when it can, and is sent one exchange
+// per step when it cannot.
 func (s *Supervisor) TransceiveSequenceTag(ctx context.Context, device, tagUID string, steps []SequenceStep) (*SequenceResult, error) {
-	if s.heldElsewhere(device) != nil {
-		return nil, NewNotSupportedError("TransceiveSequence")
+	if holder := s.heldElsewhere(device); holder != nil {
+		sequencer, ok := holder.(TagSequencer)
+		if !ok {
+			return nil, NewNotSupportedError("TransceiveSequence")
+		}
+		return sequencer.TransceiveSequenceTag(ctx, device, tagUID, steps)
 	}
 	_, reader, err := s.readerFor(device)
 	if err != nil {
@@ -310,17 +323,39 @@ func (s *Supervisor) TransceiveSequenceInSessionTag(ctx context.Context, leaseID
 }
 
 // WithNTAG424Tag runs fn under one tag operation on the NTAG 424 DNA the named
-// device is holding. A tag held by a remote device is not one the agent can
-// authenticate with.
+// device is holding. A tag a phone holds is driven by the same session a reader
+// uses, over the phone's own exchange.
 func (s *Supervisor) WithNTAG424Tag(ctx context.Context, device, tagUID string, fn func(NTAG424Operator) error) error {
-	if s.heldElsewhere(device) != nil {
-		return NewNotSupportedError("NTAG424")
+	if holder := s.heldElsewhere(device); holder != nil {
+		return s.withNTAG424Held(ctx, holder, device, tagUID, fn)
 	}
 	_, reader, err := s.readerFor(device)
 	if err != nil {
 		return err
 	}
 	return reader.WithNTAG424(ctx, tagUID, fn)
+}
+
+// withNTAG424Held runs fn on an NTAG 424 DNA a device holds. The device is
+// asked the card's commands one exchange at a time, so authenticating costs it
+// two round trips.
+func (s *Supervisor) withNTAG424Held(ctx context.Context, holder TagHolder, device, tagUID string, fn func(NTAG424Operator) error) error {
+	sessions, ok := holder.(TagSessionHolder)
+	if !ok {
+		return NewNotSupportedError("NTAG424")
+	}
+
+	if typer, ok := holder.(TagTyper); ok && ntag424Excluded(typer.TagTypeOn(device)) {
+		return NewNotSupportedError("NTAG424")
+	}
+
+	s.mu.Lock()
+	keys := s.ntag424Keys.Copy()
+	s.mu.Unlock()
+
+	return sessions.WithTagSession(ctx, device, tagUID, func() error {
+		return fn(NewNTAG424Session(TagTransport(ctx, holder, device, tagUID), tagUID, keys))
+	})
 }
 
 func (s *Supervisor) leasedReaders() []*deviceReader {

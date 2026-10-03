@@ -23,6 +23,11 @@ type Device struct {
 	capabilities *DeviceCapabilities // What it said it can do, nil if it said nothing
 	tag          nfc.Tag             // The tag it is holding, nil when its field is empty
 	metadata     map[string]string   // Additional device info
+
+	// opSlot serializes the operations the agent runs on the tag the device is
+	// holding, as a reader's operation slot does for a polled one. A buffered
+	// channel rather than a mutex so a waiter can give up with its context.
+	opSlot chan struct{}
 }
 
 // NewDevice creates a new smartphone device instance.
@@ -39,6 +44,7 @@ func NewDevice(deviceID string, req DeviceRegistrationRequest) *Device {
 		lastSeen:     time.Now(),
 		capabilities: req.Capabilities,
 		metadata:     req.Metadata,
+		opSlot:       make(chan struct{}, 1),
 	}
 }
 

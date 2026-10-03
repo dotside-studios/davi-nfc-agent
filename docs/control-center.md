@@ -74,6 +74,16 @@ in the console only; the agent does not persist it.
   unmodified and can lock or brick it, so the channel that carries one stays
   closed until an operator opens it. Also refused in read-only mode, since the
   agent cannot tell a `SELECT` from a write to a configuration page.
+- An **NTAG 424 DNA** panel for a tag the reader or a phone holds (a tag not
+  reported as one can be driven anyway on request): the real UID, key versions,
+  originality signature and NDEF file settings; an SDM form whose layout preview
+  is computed by the agent (`ntag424Request` op `planSDM`, which touches no
+  tag), showing the URL with each mirror marked, the span the MAC covers and the
+  offsets; and Configure SDM. Replacing a key and locking the NDEF file confirm
+  in the page, by typing a phrase, before the request carries `confirm: true`.
+  The agent runs the authenticated session with the keys it holds, which never
+  reach the page; the one key that does is the one an operator types for an
+  explicit key change, sent once and cleared.
 
 The console writes over the ordinary client endpoint, exactly as an application
 would, so there is one implementation of the write path.

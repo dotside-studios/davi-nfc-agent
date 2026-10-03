@@ -1,7 +1,10 @@
 import type {
   NFCErrorCode,
+  NTAG424FileSettings,
   NTAG424ResponsePayload,
   NTAG424SDMOptions,
+  NTAG424SDMPlan,
+  NTAG424SDMResult,
 } from "./wire.generated";
 
 export type { NFCErrorCode };
@@ -245,7 +248,7 @@ export interface TransceiveSequenceResult {
   stoppedAt: number;
 }
 
-export type { NTAG424SDMOptions };
+export type { NTAG424FileSettings, NTAG424SDMOptions, NTAG424SDMPlan, NTAG424SDMResult };
 export type NTAG424Response = NTAG424ResponsePayload;
 
 /**
@@ -272,6 +275,8 @@ export type NTAG424Request = TagTarget &
     | { op: "getKeyVersion"; keyNo: number }
     | { op: "readSig" }
     | { op: "lock"; confirm: true }
+    /** Lays out an SDM URL without touching a tag; no tag need be present. */
+    | { op: "planSDM"; urlTemplate: string; sdm?: NTAG424SDMOptions }
   );
 
 export interface RawSession {

@@ -11,8 +11,20 @@ type (
 	// Session is an authenticated transaction. See [ev2.Session].
 	Session = ev2.Session
 
+	// Channel is an authenticated exchange under either cipher suite. The
+	// command builders take one. See [ev2.Channel].
+	Channel = ev2.Channel
+
 	// Authenticator drives one authentication exchange. See [ev2.Authenticator].
 	Authenticator = ev2.Authenticator
+
+	// LRPSession is an authenticated transaction on a card in LRP mode. See
+	// [ev2.LRPSession].
+	LRPSession = ev2.LRPSession
+
+	// LRPAuthenticator drives one LRP authentication exchange. See
+	// [ev2.LRPAuthenticator].
+	LRPAuthenticator = ev2.LRPAuthenticator
 
 	// AuthMode selects which authentication a session starts with.
 	AuthMode = ev2.AuthMode
@@ -56,4 +68,10 @@ var (
 // See [ev2.NewAuthenticator].
 func NewAuthenticator(mode AuthMode, keyNo byte, key, ti []byte) (*Authenticator, error) {
 	return ev2.NewAuthenticator(mode, keyNo, key, ti)
+}
+
+// NewLRPAuthenticator prepares an LRP authentication exchange with the numbered
+// key. See [ev2.NewLRPAuthenticator].
+func NewLRPAuthenticator(mode AuthMode, keyNo byte, key, ti []byte) (*LRPAuthenticator, error) {
+	return ev2.NewLRPAuthenticator(mode, keyNo, key, ti)
 }

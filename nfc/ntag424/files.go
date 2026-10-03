@@ -39,7 +39,7 @@ func dataHeader(fileNo byte, offset, length uint32) ([]byte, error) {
 // ReadData builds the command that reads length bytes of a file from offset. A
 // length of zero reads to the end of the file. mode is the file's communication
 // mode.
-func ReadData(s *Session, fileNo byte, offset, length uint32, mode CommMode) ([]byte, error) {
+func ReadData(s Channel, fileNo byte, offset, length uint32, mode CommMode) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: ReadData needs an authenticated session")
 	}
@@ -63,7 +63,7 @@ func ReadDataPlain(fileNo byte, offset, length uint32) ([]byte, error) {
 
 // ParseReadData reads the card's answer to ReadData or ReadDataPlain. With a nil
 // session only the status is checked.
-func ParseReadData(s *Session, resp []byte, mode CommMode) ([]byte, error) {
+func ParseReadData(s Channel, resp []byte, mode CommMode) ([]byte, error) {
 	return CheckResponse(s, resp, mode)
 }
 
@@ -90,7 +90,7 @@ func checkWriteSize(data []byte, mode CommMode) error {
 // WriteData builds the command that writes data into a file at offset. mode is
 // the file's communication mode, and data longer than MaxWriteChunk(mode) is
 // refused.
-func WriteData(s *Session, fileNo byte, offset uint32, data []byte, mode CommMode) ([]byte, error) {
+func WriteData(s Channel, fileNo byte, offset uint32, data []byte, mode CommMode) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: WriteData needs an authenticated session")
 	}
@@ -117,13 +117,13 @@ func WriteDataPlain(fileNo byte, offset uint32, data []byte) ([]byte, error) {
 }
 
 // ParseWriteData verifies the card's answer to WriteData or WriteDataPlain.
-func ParseWriteData(s *Session, resp []byte, mode CommMode) error {
+func ParseWriteData(s Channel, resp []byte, mode CommMode) error {
 	_, err := CheckResponse(s, resp, mode)
 	return err
 }
 
 // GetFileCounters builds the command that reads a file's SDM read counter.
-func GetFileCounters(s *Session, fileNo byte) ([]byte, error) {
+func GetFileCounters(s Channel, fileNo byte) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: GetFileCounters needs an authenticated session")
 	}
@@ -132,7 +132,7 @@ func GetFileCounters(s *Session, fileNo byte) ([]byte, error) {
 
 // ParseFileCounters reads the card's answer to GetFileCounters: the SDM read
 // counter, from the first three bytes of the data.
-func ParseFileCounters(s *Session, resp []byte) (uint32, error) {
+func ParseFileCounters(s Channel, resp []byte) (uint32, error) {
 	data, err := CheckResponse(s, resp, CommFull)
 	if err != nil {
 		return 0, err
@@ -151,7 +151,7 @@ func GetFileSettingsPlain(fileNo byte) []byte {
 
 // ParseFileSettingsResponse reads the card's answer to GetFileSettings or
 // GetFileSettingsPlain. With a nil session only the status is checked.
-func ParseFileSettingsResponse(s *Session, resp []byte) (*FileSettings, error) {
+func ParseFileSettingsResponse(s Channel, resp []byte) (*FileSettings, error) {
 	data, err := CheckResponse(s, resp, CommMAC)
 	if err != nil {
 		return nil, err

@@ -25,6 +25,9 @@ const (
 	ctrMirrorChars  = 2 * counterLength
 	macMirrorChars  = 2 * MACSize
 	encBlockChars   = 2 * 16
+
+	// An LRP tag mirrors its random number ahead of the PICCData block.
+	lrpPiccMirrorChars = 2 * LRPPICCDataSize
 )
 
 // NDEFFileSize is the size of the NDEF file, NLEN included, which bounds the
@@ -51,6 +54,10 @@ type SDMOptions struct {
 	// EncLength is the width of {enc} in mirrored characters: a multiple of 32,
 	// which is 16 bytes of file data per 32 characters. Zero means 32.
 	EncLength uint32
+
+	// LRP plans for a tag in LRP mode, whose {picc} mirror is wider. {enc} is
+	// not available there.
+	LRP bool
 }
 
 // SDMPlan is an NDEF message and the file settings that make a tag mirror into
@@ -125,6 +132,10 @@ func PlanSDM(urlTemplate string, opts SDMOptions) (*SDMPlan, error) {
 		return nil, fmt.Errorf("ntag424: MetaRead %#x is not a key number", opts.MetaRead)
 	}
 
+	if opts.LRP && hasEnc {
+		return nil, fmt.Errorf("ntag424: %s is not available for a tag in LRP mode", PlaceholderEnc)
+	}
+
 	encLength := opts.EncLength
 	if encLength == 0 {
 		encLength = encBlockChars
@@ -169,7 +180,7 @@ func PlanSDM(urlTemplate string, opts SDMOptions) (*SDMPlan, error) {
 		settings.MirrorUID, settings.MirrorReadCounter = true, true
 		settings.SDMMetaRead = opts.MetaRead
 		settings.PICCDataOffset = at(PlaceholderPICC)
-		firstMirrorEnd = pos[PlaceholderPICC] + piccMirrorChars
+		firstMirrorEnd = pos[PlaceholderPICC] + piccWidth(opts)
 	} else {
 		settings.MirrorUID, settings.MirrorReadCounter = true, true
 		settings.SDMMetaRead = AccessFree
@@ -237,11 +248,22 @@ func expandTemplate(tmpl string, opts SDMOptions) (string, map[string]int, error
 			return "", nil, fmt.Errorf("ntag424: %s appears twice", matched.name)
 		}
 		width := matched.width
-		if matched.name == PlaceholderEnc {
+		switch matched.name {
+		case PlaceholderEnc:
 			width = encWidth
+		case PlaceholderPICC:
+			width = piccWidth(opts)
 		}
 		pos[matched.name] = out.Len()
 		out.WriteString(strings.Repeat("0", width))
 		rest = rest[len(matched.name):]
 	}
+}
+
+// piccWidth is the width of the {picc} mirror in characters.
+func piccWidth(opts SDMOptions) int {
+	if opts.LRP {
+		return lrpPiccMirrorChars
+	}
+	return piccMirrorChars
 }

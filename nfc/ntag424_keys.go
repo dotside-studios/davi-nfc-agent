@@ -30,6 +30,7 @@ type ntag424KeyConfigurable interface {
 
 func ntag424KeysEqual(a, b NTAG424Keys) bool {
 	return a.Diversify == b.Diversify &&
+		a.AllowLRP == b.AllowLRP &&
 		bytes.Equal(a.Master, b.Master) &&
 		bytes.Equal(a.SystemID, b.SystemID) &&
 		maps.EqualFunc(a.Slots, b.Slots, bytes.Equal)

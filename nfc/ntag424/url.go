@@ -150,6 +150,9 @@ func Verify(data *URLData, keys Keys) (*Tap, error) {
 // there is one and from the plain mirrors otherwise.
 func piccDataFor(data *URLData, keys Keys) (*PICCData, error) {
 	if len(data.PICCData) > 0 {
+		if keys.LRP {
+			return DecryptPICCDataLRP(keys.MetaRead, data.PICCData)
+		}
 		return DecryptPICCData(keys.MetaRead, data.PICCData)
 	}
 	if data.HasPlainPICCData {
@@ -158,6 +161,7 @@ func piccDataFor(data *URLData, keys Keys) (*PICCData, error) {
 			ReadCounter:     data.Counter,
 			UIDMirrored:     len(data.UID) > 0,
 			CounterMirrored: true,
+			LRP:             keys.LRP,
 		}, nil
 	}
 	return nil, fmt.Errorf("%w: neither encrypted PICCData nor a plain UID", ErrNotSDM)
@@ -186,8 +190,11 @@ func ParseURLWith(rawURL string, names Names) (*URLData, error) {
 		return nil, fmt.Errorf("%w: no MAC parameter", ErrNotSDM)
 	}
 
-	if data.PICCData, err = hexParam(query, names.PICCData, PICCDataSize); err != nil {
+	if data.PICCData, err = hexParam(query, names.PICCData, 0); err != nil {
 		return nil, err
+	}
+	if n := len(data.PICCData); n != 0 && n != PICCDataSize && n != LRPPICCDataSize {
+		return nil, fmt.Errorf("%w: %d bytes, want %d (AES) or %d (LRP)", ErrPICCData, n, PICCDataSize, LRPPICCDataSize)
 	}
 	if len(data.PICCData) == 0 {
 		if data.UID, data.Counter, data.HasPlainPICCData, err = plainMirrors(query, names); err != nil {

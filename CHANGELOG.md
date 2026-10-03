@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
+  ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
+  any status word as a successful exchange, so `91 AF` and `6A 82` reach the
+  client. `transceiveResponse` gains `sw` (four uppercase hex characters) and
+  `body` (the reply without the status word, base64); `data` stays the full
+  reply. A phone's `deviceTransceiveResponse.data` must end with SW1SW2
+- **A card's session survives between requests.** The PC/SC device caches the
+  refined tag kind and the tag object per card presence, so `GetTags` sends no
+  probe and a driver's open session persists. The poll loop no longer re-reads
+  NDEF for a card already published and still present, which was resetting
+  authenticated sessions
+- **Raw sessions.** `rawSessionBeginRequest` / `rawSessionEndRequest` lease the
+  reader to one client for a multi-step exchange: polling sends the card nothing,
+  other operations wait, and the lease ends after `ttlMs` (default 5000, most
+  30000) without an exchange, on card removal or on disconnect.
+  `transceiveRequest` takes an optional `sessionId`, and an unknown session is
+  `RAW_SESSION_EXPIRED`. Gated and audited like an exchange
+- **Package `nfc/ntag424`** for the NTAG 424 DNA: AN10922 key diversification
+  and `KeySet`, the command builders and parsers (file settings, ReadData and
+  WriteData in plain, MAC and full modes, file counters, key versions,
+  SetConfiguration, ReadSig, TT status), typed card status errors, LRP
+  detection, `PlanSDM` to lay out an SDM URL, and `VerifyURLFresh` with a
+  `CounterStore` replay guard. The agent exposes no verify route; verification
+  is for the backend that receives the URL
+- **NTAG 424 DNA driver.** The reader authenticates over EV2 with held keys
+  (`Supervisor.SetNTAG424Keys`, master or per-slot, optionally diversified by
+  UID), keeps the session across polls, backs off on the card's authentication
+  delay and refuses LRP-mode cards. NDEF in a protected file is read and written
+  in MAC or full mode, `ConfigureSDM` writes and verifies an SDM URL, `lock`
+  rewrites the file's access rights, and a random-ID card is routed by its real
+  UID once a key resolves it
+- **`nfctest` emulates an NTAG 424 DNA**: native and wrapped commands, EV2
+  authentication, five keys, three files with access rights, SDM mirroring,
+  random ID and the failed-authentication limit, for tests that drive the real
+  driver
+- **`transceiveSequenceRequest`** runs up to 32 APDU exchanges under one tag
+  operation, or inside a raw session, with `expectSW` and `stopOnSW` per step
+  and `stoppedAt` in the response. Same gates and audit as `transceive`; a
+  tag held by a phone answers `NOT_SUPPORTED`
+- **`ntag424Request`** runs `getFileSettings`, `configureSDM`, `changeKey`,
+  `getCardUID`, `getKeyVersion`, `readSig` and `lock` on an NTAG 424 DNA with the
+  keys the agent holds. Changes are refused in read-only mode; `changeKey` and
+  `lock` need `confirm: true`; keys are never returned or logged. The client
+  library gains `transceiveSequence` and `ntag424`
+- **Tag capabilities report NTAG 424 facts**: `sdmEnabled`, `keysHeld` (key
+  numbers only), `randomID` and `lrp`, all omitted when false
+- `docs/device-setup.md` covers the iOS `iso7816.select-identifiers` entitlement
+  (`D2760000850101` for NTAG 424 DNA), Android `IsoDep`, and the reply format
+
+### Fixed
+
+- EV2 secure messaging counted a `NonFirst` authentication's command counter
+  from the wrong start, so a session opened with `AuthenticateEV2NonFirst`
+  rejected its first command
+- Type 4 NDEF access follows the capability container: writes use the NDEF file
+  ID the CC names, NLEN is length-checked, and chunk sizes honour its MLe and MLc
+
 - **A DESFire EV1's files behind AES keys are now reachable.** An EV1 does not
   answer `AuthenticateEV2First`, so an EV1 whose NDEF file named a key fell back
   to unauthenticated access and reported itself read-only. **Package `nfc/ev1`**

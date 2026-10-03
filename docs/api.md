@@ -878,6 +878,137 @@ each exchange. A tag held by a remote device cannot be leased and answers
 
 Accepts an optional `deviceID`. See [Naming the tag](#naming-the-tag).
 
+### Raw Sequence (transceiveSequence)
+
+Several APDU exchanges under one tag operation, so polling and other clients
+cannot reach the card between them. It is the multi-step counterpart of
+[transceive](#raw-exchange-transceive) and shares its gates, audit and routing.
+
+```json
+{
+  "id": "req_5",
+  "type": "transceiveSequenceRequest",
+  "payload": {
+    "sessionId": "9f2c0e...",
+    "steps": [
+      { "data": "AKQEAAdE...", "expectSW": ["9000"] },
+      { "data": "kHEAAAIAAA==", "stopOnSW": ["6A82", "6700"] }
+    ]
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `steps` | array | Yes | One to 32 steps, run in order |
+| `steps[].data` | bytes (base64) | Yes | The command |
+| `steps[].expectSW` | string[] | No | Four-hex-character status words. The run stops after this step unless its reply's status word is one of these |
+| `steps[].stopOnSW` | string[] | No | The run stops after this step when its reply's status word is one of these. Wins over `expectSW` |
+| `sessionId` | string | No | Run inside a [raw session](#raw-sessions), which already names the tag |
+
+Every step is APDU-level. Status words compare case-insensitively. A reply
+shorter than a status word cannot match `expectSW`, so a run with `expectSW`
+stops on it.
+
+**Response** (`type: "transceiveSequenceResponse"`):
+
+```json
+{
+  "id": "req_5",
+  "type": "transceiveSequenceResponse",
+  "success": true,
+  "payload": {
+    "results": [
+      { "data": "kAA=", "sw": "9000" },
+      { "data": "aoI=", "sw": "6A82" }
+    ],
+    "stoppedAt": 1
+  }
+}
+```
+
+`results` has one entry per step that ran, each shaped as a
+`transceiveResponse` payload (`data` the whole reply, `sw`, `body`). `stoppedAt`
+is the index of the step whose reply ended the run early, or `-1` when every
+step ran. A step that stops the run still returns its result with
+`success: true`; `success` is false only when an exchange could not be performed
+(the results of earlier steps are then lost with the error).
+
+Gating is the same as a single exchange: `RAW_CHANNEL_DISABLED` while the raw
+channel is closed and `READ_ONLY` in read-only mode. Each step is written to the
+audit log before the run. A tag held by a remote device answers
+`NOT_SUPPORTED`. A request with no steps, more than 32, bad base64 or a status
+word that is not four hex characters is `INVALID_REQUEST`.
+
+### NTAG 424 DNA (ntag424Request)
+
+Operations on an NTAG 424 DNA the agent holds keys for (see
+`Supervisor.SetNTAG424Keys`). The agent builds every command and runs it in an
+authenticated session; keys are held by the agent and never returned. The tag
+must be on one of the agent's own readers, and is named like any other
+([Naming the tag](#naming-the-tag)).
+
+```json
+{
+  "id": "req_6",
+  "type": "ntag424Request",
+  "payload": { "op": "getFileSettings", "uid": "04A1B2C3D4E5F6" }
+}
+```
+
+The response is `ntag424Response` with the `op` echoed and only that
+operation's fields set.
+
+| `op` | Arguments | Response fields | Changes the tag |
+|------|-----------|-----------------|-----------------|
+| `getFileSettings` | `fileNo` (default 2, the NDEF file) | `fileSettings`: file type and size, `commMode` (`plain`, `mac`, `full`), access rights, SDM flags and offsets | No |
+| `getCardUID` | none | `uid`: the real UID, which differs from the presented one under random ID | No |
+| `getKeyVersion` | `keyNo` (0 to 4) | `keyNo`, `keyVersion` | No |
+| `readSig` | none | `signature`: the 56-byte originality signature, base64, unverified | No |
+| `configureSDM` | `urlTemplate`, optional `sdm` | `sdm`: `url`, `verified`, `verifyError`, `uid`, `counter` | Yes |
+| `changeKey` | `keyNo`, `authKeyNo`, `version`, `newKeySource`, `newKey`, `confirm` | `changed` | Yes, irreversible |
+| `lock` | `confirm` | `locked` | Yes, irreversible |
+
+**configureSDM** writes a URL that the tag mirrors per tap. `urlTemplate` holds
+`{picc}` (encrypted UID and counter) or `{uid}` and `{ctr}` (in the clear),
+optionally `{enc}` (encrypted file data), and always `{mac}`, for example
+`https://example.com/t?p={picc}&m={mac}`. `sdm` carries key numbers and access
+rights, each 0 to 4, 14 for free or 15 for never; an omitted one takes its
+default (`read` free, `counterRet` never, the rest key 0), and `encLength` sets
+the width of `{enc}`. The agent plans the layout, writes the NDEF message and
+file settings, reads the file back as a tap and checks its MAC under the keys it
+holds. The settings are applied even when verification fails: `verified` is then
+false and `verifyError` says why. The read-back counts as one tap, so
+`counter` is one higher than before.
+
+**changeKey** replaces key `keyNo`, authenticating with `authKeyNo`, and sets
+its version byte. `newKeySource` is `"configured"`, meaning the key the agent
+holds for `keyNo` for this tag's UID (diversified when the key set is), or
+`"explicit"` with `newKey` as 32 hex characters. The key is never echoed,
+logged or audited: the audit entry names key numbers and the source only. The
+agent's own key set is not updated; set the new keys before the next operation.
+When `keyNo` is not `authKeyNo` the card checks the old key too, which is the
+one the agent holds.
+
+**lock** makes the NDEF file read-only by setting its write rights to never,
+keeping the change right. It needs the change key.
+
+`changeKey` and `lock` cannot be undone and need `"confirm": true`, or fail with
+`INVALID_REQUEST`. `configureSDM`, `changeKey` and `lock` are refused with
+`READ_ONLY` in read-only mode; the rest are reads. None needs the raw channel,
+and each is written to the audit log (changes at warning level).
+
+Errors: a tag that is not an NTAG 424 DNA, or one held by a remote device, is
+`NOT_SUPPORTED`; a missing key, a refused key, the card's authentication delay
+(`91 AD`), a permission denial or an LRP-mode card is `AUTH_FAILED`; other card
+statuses are `TRANSCEIVE_FAILED`.
+
+To check a tapped SDM URL on the backend, use the Go library
+`github.com/dotside-studios/davi-nfc-agent/nfc/ntag424`: `VerifyURLFresh(url,
+keys, store)` verifies the MAC and refuses a replay with `ErrReplay` by tracking
+the highest counter seen per UID in a `CounterStore` (`MemoryCounterStore` is
+one). The agent itself exposes no verify route.
+
 ### Tag Capabilities
 
 Every `tagData` broadcast includes a `capabilities` object describing what the
@@ -911,6 +1042,10 @@ when supported, render a capacity meter, etc.) without a round-trip.
 | `tagFamily` | `MIFARE Classic`, `DESFire`, `DESFire EV1`, `DESFire EV2`, `DESFire EV3`, `NTAG`, `MIFARE Ultralight`, `Type 4`, `FeliCa`, … |
 | `supportsNdef` | Tag supports NDEF |
 | `supportsPassword` | Tag supports simple password protection (NTAG21x `PWD`/`PACK`) |
+| `sdmEnabled` | NTAG 424 DNA: the NDEF file mirrors per-tap data, as far as its settings were last read (omitted when false) |
+| `keysHeld` | NTAG 424 DNA: key numbers (0 to 4) the agent holds a key for, never the keys (omitted when none) |
+| `randomID` | NTAG 424 DNA: the card presented a random UID for this tap (omitted when false) |
+| `lrp` | NTAG 424 DNA: the card is in LRP mode, which the agent cannot authenticate (omitted when false) |
 
 `canWrite`, `canLock` and `canTransceive` describe what the agent will actually
 do, not just what the tag is built for: they are reported false while the agent
@@ -946,6 +1081,10 @@ reader has a card, otherwise to the reader. For a device-held tag it is answered
 from what the device declared at the scan, with no round trip, so it costs
 nothing to ask. Accepts an optional `deviceID`; see
 [Naming the tag](#naming-the-tag).
+
+For an NTAG 424 DNA, a `capabilitiesRequest` reads the NDEF file's settings once
+if they were never read and no session is open, so `sdmEnabled` is filled in;
+the NTAG 424 fields otherwise come from what the driver already holds.
 
 If nothing is holding a tag, `success` is `false` with `NO_CARD`.
 

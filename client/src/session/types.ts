@@ -109,7 +109,7 @@ export interface TagCapabilities {
   keysHeld?: number[];
   /** NTAG 424 DNA: the card presents a random UID. */
   randomID?: boolean;
-  /** NTAG 424 DNA: the card is in LRP mode, which the agent cannot use. */
+  /** NTAG 424 DNA: the card is in LRP mode, which the agent drives only when its keys allow LRP. */
   lrp?: boolean;
 }
 

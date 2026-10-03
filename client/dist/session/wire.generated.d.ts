@@ -549,7 +549,7 @@ export interface TagCapabilities {
      * far as its settings were last read. KeysHeld lists the key numbers the
      * agent holds a key for, never the keys. RandomID reports that the card
      * presented a random UID. LRP reports a card in LRP mode, which the agent
-     * cannot authenticate.
+     * authenticates to only when its keys allow LRP.
      */
     sdmEnabled?: boolean;
     keysHeld?: number[];

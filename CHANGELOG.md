@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `NTAG424Operator.ReadOriginality` returns the signature and verdict. It
   uses the standard library's `crypto/ecdsa` over `elliptic.P224`, so no new
   dependency. The NXP key constant is not yet confirmed against a published
-  UID and signature pair
+  UID and signature pair.
 - **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
   ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
   any status word as a successful exchange, so `91 AF` and `6A 82` reach the

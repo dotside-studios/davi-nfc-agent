@@ -994,6 +994,9 @@ type type4Emulator struct {
 	version [][]byte
 	frame   int // index of the next version frame to send
 
+	// ntag is the NTAG 424 DNA's secure side, nil for any other Type 4 tag.
+	ntag *ntag424State
+
 	removalModel
 }
 
@@ -1065,6 +1068,9 @@ func (e *type4Emulator) Transceive(cmd []byte) ([]byte, error) {
 
 	if len(cmd) < 4 {
 		return apduSW(0x6700), nil // wrong length
+	}
+	if e.ntag != nil {
+		return e.ntag.transceive(e, cmd), nil
 	}
 	if cmd[0] == nfc.CLADESFire {
 		return e.wrappedCommand(cmd), nil
@@ -1278,16 +1284,16 @@ func Type4(uid string) *EmulatedCard {
 
 // NTAG424 constructs a blank NTAG 424 DNA. Its NDEF layer is the Type 4 one,
 // with the ISO-wrapped GET_VERSION added that detection reads to tell this card
-// from any other Type 4 tag. The card's AES side is not modelled, since no
-// driver here speaks it.
-func NTAG424(uid string) *EmulatedCard {
-	return newCard(nfc.DetectedNTAG424, uid, newNTAG424Emulator(uid))
+// from any other Type 4 tag. The AES side (EV2 authentication, keys, file
+// settings, SDM) is modelled in ntag424_emulator.go; see NTAG424Option.
+func NTAG424(uid string, opts ...NTAG424Option) *EmulatedCard {
+	return newCard(nfc.DetectedNTAG424, uid, newNTAG424Emulator(uid, opts...))
 }
 
 // newNTAG424Emulator is a Type 4 emulator that answers GET_VERSION as an
 // NTAG 424 DNA: NXP vendor, NTAG product type, major 0x30, the 504-byte storage
 // code and the ISO 14443-4 protocol byte, across three frames.
-func newNTAG424Emulator(uid string) *type4Emulator {
+func newNTAG424Emulator(uid string, opts ...NTAG424Option) *type4Emulator {
 	e := newType4Emulator()
 	hardware := []byte{0x04, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}
 	software := []byte{0x04, 0x04, 0x02, 0x30, 0x00, 0x11, 0x05}
@@ -1302,6 +1308,7 @@ func newNTAG424Emulator(uid string) *type4Emulator {
 	production = append(production, 0x04, 0x91, 0x3A, 0x2D, 0x00, 0x00, 0x1A)
 
 	e.version = [][]byte{hardware, software, production}
+	e.ntag = newNTAG424State(production[:7], opts)
 	return e
 }
 

@@ -251,6 +251,13 @@ export interface TransceiveRequestPayload extends TagTarget {
    * fields are not needed.
    */
   sessionId?: string;
+  /**
+   * AutoGetResponse has the agent follow a 61xx reply with GET RESPONSE until
+   * the card stops, and retry a 6Cxx reply once with the corrected Le,
+   * returning the concatenated body with the final status word. Omitted
+   * returns the card's first reply unchanged. Not valid with Raw.
+   */
+  autoGetResponse?: boolean;
 }
 
 /**
@@ -297,6 +304,11 @@ export interface TransceiveStep {
    * of these, each four hex characters.
    */
   stopOnSW?: string[];
+  /**
+   * AutoGetResponse chains this step's reply as it does on a
+   * transceiveRequest. ExpectSW and StopOnSW then see the final status word.
+   */
+  autoGetResponse?: boolean;
 }
 
 /**
@@ -348,9 +360,11 @@ export interface NTAG424SDMOptions {
 /**
  * NTAG424RequestPayload is an operation on an NTAG 424 DNA the agent holds
  * keys for. Op selects it: getFileSettings, configureSDM, changeKey,
- * getCardUID, getKeyVersion, readSig or lock. configureSDM, changeKey and
- * lock change the tag and are refused in read-only mode; changeKey and lock
- * are irreversible and also need Confirm.
+ * getCardUID, getKeyVersion, readSig, lock or planSDM. configureSDM,
+ * changeKey and lock change the tag and are refused in read-only mode;
+ * changeKey and lock are irreversible and also need Confirm. planSDM only
+ * lays out a URL template as configureSDM would, touches no tag and needs
+ * none present.
  */
 export interface NTAG424RequestPayload extends TagTarget {
   op: string;
@@ -435,11 +449,33 @@ export interface NTAG424SDMResult {
 }
 
 /**
+ * NTAG424SDMPlan is what planSDM lays out for a URL template: the NDEF file
+ * content configureSDM would write, and the file settings it would apply,
+ * with nothing sent to the tag.
+ */
+export interface NTAG424SDMPlan {
+  /**
+   * NDEFHex is the whole NDEF file content, uppercase hex: NLEN, then one URI
+   * record with each mirror as ASCII zeros of its final width.
+   */
+  ndefHex: string;
+  /** Length is the size of that content in bytes. */
+  length: number;
+  /**
+   * Settings are the file settings configureSDM would write. Their offsets
+   * count from the start of NDEFHex, so the first record byte is at 2.
+   */
+  settings: NTAG424FileSettings | null;
+}
+
+/**
  * NTAG424ResponsePayload answers an ntag424Request. Op echoes the request,
  * and only the fields of that operation are set.
  */
 export interface NTAG424ResponsePayload {
   op: string;
+  /** Plan answers planSDM. */
+  plan?: NTAG424SDMPlan;
   /** FileSettings answers getFileSettings. */
   fileSettings?: NTAG424FileSettings;
   /** SDM answers configureSDM. */
@@ -450,10 +486,12 @@ export interface NTAG424ResponsePayload {
   keyNo?: number;
   keyVersion?: number;
   /**
-   * Signature answers readSig: the 56-byte originality signature, base64,
-   * unverified.
+   * Signature answers readSig: the 56-byte originality signature, base64.
+   * Genuine is whether it verifies over the card's real UID under NXP's public
+   * key.
    */
   signature?: string;
+  genuine?: boolean;
   /** Locked answers lock and Changed answers changeKey. */
   locked?: boolean;
   changed?: boolean;

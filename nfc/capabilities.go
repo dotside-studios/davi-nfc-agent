@@ -64,6 +64,12 @@ type DeviceCapabilities struct {
 	CanTransceive bool `json:"canTransceive"`
 	CanPoll       bool `json:"canPoll"`
 
+	// CanTransceiveRaw reports a framing-level exchange: the command is the
+	// tag's own frame, without an ISO 7816 envelope, as an NTAG21x READ_SIG or
+	// PWD_AUTH is. It is a rarer capability than CanTransceive, so it is
+	// reported separately and left out when false.
+	CanTransceiveRaw bool `json:"canTransceiveRaw,omitempty"`
+
 	// Supported tag types
 	SupportedTagTypes []string `json:"supportedTagTypes,omitempty"`
 
@@ -106,6 +112,27 @@ type DeviceTransceiver interface {
 	SupportsTransceive() bool
 }
 
+// DeviceRawTransceiver is an optional interface that lets a device declare that
+// it can exchange framing-level frames with the tag, as a PN533-based reader
+// does with InCommunicateThru. Devices that do not implement it report
+// CanTransceiveRaw=false. SupportsTransceiveRaw must answer from what is
+// already known: it is called while building capabilities and sends nothing to
+// the card.
+type DeviceRawTransceiver interface {
+	SupportsTransceiveRaw() bool
+}
+
+// RawCardTransport is what a CardTransport offers when it can carry a
+// framing-level exchange. A tag driver built on a transport that is not one
+// refuses a raw exchange as not supported.
+type RawCardTransport interface {
+	DeviceRawTransceiver
+
+	// TransceiveRaw sends frame to the tag as it is, the reader adding and
+	// checking the CRC, and returns the tag's reply without a status word.
+	TransceiveRaw(frame []byte) ([]byte, error)
+}
+
 // GetTagCapabilities returns what a tag reports it can do.
 func GetTagCapabilities(tag Tag) TagCapabilities {
 	return tag.Capabilities()
@@ -143,6 +170,9 @@ func BuildDeviceCapabilities(device Device) DeviceCapabilities {
 	// An explicit DeviceTransceiver declaration overrides the defaults above.
 	if tr, ok := device.(DeviceTransceiver); ok {
 		caps.CanTransceive = tr.SupportsTransceive()
+	}
+	if rt, ok := device.(DeviceRawTransceiver); ok {
+		caps.CanTransceiveRaw = rt.SupportsTransceiveRaw()
 	}
 
 	return caps

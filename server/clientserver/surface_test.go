@@ -84,6 +84,9 @@ func TestNTAG424ReadOps(t *testing.T) {
 	if sig, _ := base64.StdEncoding.DecodeString(res.Signature); len(sig) != 56 {
 		t.Errorf("signature is %d bytes, want 56", len(sig))
 	}
+	if res.Genuine == nil || *res.Genuine {
+		t.Errorf("genuine = %v, want false for the emulator's placeholder signature", res.Genuine)
+	}
 }
 
 func TestNTAG424MutatingOpsRefusedInReadOnlyMode(t *testing.T) {

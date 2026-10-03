@@ -189,9 +189,21 @@ it that way. iOS `sendCommand` returns the status word beside the payload, so
 append `sw1` and `sw2` to the data before answering. A reply of the status word
 alone is valid. See [Transceive Request](api.md#transceive-request).
 
-A tag held by a phone cannot be driven by `transceiveSequence` or
-`ntag424Request`, or leased as a raw session: those need the agent's own
-reader and answer `NOT_SUPPORTED`.
+**Sequences and NTAG 424 operations.** A client's `transceiveSequence` and
+`ntag424Request` work on a tag your app holds. The agent builds the commands and
+sends them to the phone as ordinary `deviceTransceiveRequest` exchanges, so
+nothing beyond `canTransceive` is needed; an EV2 authentication then costs two
+round trips. To avoid a round trip per step, declare `canTransceiveSequence` and
+answer `deviceTransceiveSequenceRequest`: run its `steps` in order on the open
+`IsoDep` connection (or iOS tag session), stop after a step whose status word is
+in `stopOnSW` or, when `expectSW` is present, not in it, and answer with every
+reply that ran and `stoppedAt` (`-1` when all ran). See
+[Transceive Sequence Request](api.md#transceive-sequence-request). The agent
+checks your `stoppedAt` against the rules it sent, so apply them exactly.
+
+A tag held by a phone cannot be leased as a raw session: the operating system
+owns the tag session, so `rawSessionBeginRequest` answers `NOT_SUPPORTED`. A
+sequence or an NTAG 424 operation is the unit that runs without interruption.
 
 ## Local network permission (iOS 14+)
 

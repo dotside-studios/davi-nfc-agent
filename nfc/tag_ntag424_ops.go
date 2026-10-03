@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 
@@ -33,6 +34,12 @@ type NTAG424Operator interface {
 
 	// ReadSig reads the 56-byte originality signature, unverified.
 	ReadSig() ([]byte, error)
+
+	// ReadOriginality reads the originality signature and verifies it over the
+	// card's real UID, resolved with GetCardUID on a random-ID card. A nil
+	// key means NXP's, and genuine is false for a signature that does not
+	// verify.
+	ReadOriginality(pub *ecdsa.PublicKey) (sig []byte, genuine bool, err error)
 
 	// ConfigureSDM writes a plan's NDEF message and file settings, then reads
 	// the file back as a tap and verifies it under the keys held. The read
@@ -210,6 +217,18 @@ func (t *pcscNTAG424Tag) ReadSig() ([]byte, error) {
 		return err
 	})
 	return sig, err
+}
+
+func (t *pcscNTAG424Tag) ReadOriginality(pub *ecdsa.PublicKey) ([]byte, bool, error) {
+	uid, err := t.GetCardUID()
+	if err != nil {
+		return nil, false, err
+	}
+	sig, err := t.ReadSig()
+	if err != nil {
+		return nil, false, err
+	}
+	return sig, ntag424.VerifyOriginality(uid, sig, pub), nil
 }
 
 func (t *pcscNTAG424Tag) ConfigureSDM(plan *ntag424.SDMPlan) (*NTAG424SDMResult, error) {

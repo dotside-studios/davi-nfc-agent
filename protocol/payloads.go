@@ -116,6 +116,12 @@ type TransceiveRequestPayload struct {
 	// rawSessionBeginRequest. The session already names the tag, so the target
 	// fields are not needed.
 	SessionID string `json:"sessionId,omitempty"`
+
+	// AutoGetResponse has the agent follow a 61xx reply with GET RESPONSE
+	// until the card stops, and retry a 6Cxx reply once with the corrected Le,
+	// returning the concatenated body with the final status word. Omitted
+	// returns the card's first reply unchanged. Not valid with Raw.
+	AutoGetResponse bool `json:"autoGetResponse,omitempty"`
 }
 
 // RawSessionBeginRequestPayload leases the reader holding the tag it names, so
@@ -159,6 +165,10 @@ type TransceiveStep struct {
 	// StopOnSW ends the run after this step when the reply's status word is one
 	// of these, each four hex characters.
 	StopOnSW []string `json:"stopOnSW,omitempty"`
+
+	// AutoGetResponse chains this step's reply as it does on a
+	// transceiveRequest. ExpectSW and StopOnSW then see the final status word.
+	AutoGetResponse bool `json:"autoGetResponse,omitempty"`
 }
 
 // TransceiveSequenceRequestPayload runs several APDU exchanges with the tag it
@@ -204,9 +214,10 @@ type NTAG424SDMOptions struct {
 
 // NTAG424RequestPayload is an operation on an NTAG 424 DNA the agent holds
 // keys for. Op selects it: getFileSettings, configureSDM, changeKey,
-// getCardUID, getKeyVersion, readSig or lock. configureSDM, changeKey and lock
-// change the tag and are refused in read-only mode; changeKey and lock are
-// irreversible and also need Confirm.
+// getCardUID, getKeyVersion, readSig, lock or planSDM. configureSDM, changeKey
+// and lock change the tag and are refused in read-only mode; changeKey and lock
+// are irreversible and also need Confirm. planSDM only lays out a URL template
+// as configureSDM would, touches no tag and needs none present.
 type NTAG424RequestPayload struct {
 	TagTarget
 
@@ -287,10 +298,29 @@ type NTAG424SDMResult struct {
 	Counter uint32 `json:"counter,omitempty"`
 }
 
+// NTAG424SDMPlan is what planSDM lays out for a URL template: the NDEF file
+// content configureSDM would write, and the file settings it would apply, with
+// nothing sent to the tag.
+type NTAG424SDMPlan struct {
+	// NDEFHex is the whole NDEF file content, uppercase hex: NLEN, then one URI
+	// record with each mirror as ASCII zeros of its final width.
+	NDEFHex string `json:"ndefHex"`
+
+	// Length is the size of that content in bytes.
+	Length int `json:"length"`
+
+	// Settings are the file settings configureSDM would write. Their offsets
+	// count from the start of NDEFHex, so the first record byte is at 2.
+	Settings *NTAG424FileSettings `json:"settings"`
+}
+
 // NTAG424ResponsePayload answers an ntag424Request. Op echoes the request, and
 // only the fields of that operation are set.
 type NTAG424ResponsePayload struct {
 	Op string `json:"op"`
+
+	// Plan answers planSDM.
+	Plan *NTAG424SDMPlan `json:"plan,omitempty"`
 
 	// FileSettings answers getFileSettings.
 	FileSettings *NTAG424FileSettings `json:"fileSettings,omitempty"`
@@ -305,9 +335,11 @@ type NTAG424ResponsePayload struct {
 	KeyNo      *int `json:"keyNo,omitempty"`
 	KeyVersion *int `json:"keyVersion,omitempty"`
 
-	// Signature answers readSig: the 56-byte originality signature, base64,
-	// unverified.
+	// Signature answers readSig: the 56-byte originality signature, base64.
+	// Genuine is whether it verifies over the card's real UID under NXP's
+	// public key.
 	Signature string `json:"signature,omitempty"`
+	Genuine   *bool  `json:"genuine,omitempty"`
 
 	// Locked answers lock and Changed answers changeKey.
 	Locked  bool `json:"locked,omitempty"`

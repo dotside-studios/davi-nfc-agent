@@ -644,3 +644,25 @@ table.grid th.mono {
     max-height: calc(100vh - 260px);
   }
 }
+
+/* Mirrors in the SDM layout preview. */
+.sdm-mirror {
+  background: #cfe3ff;
+  color: #000;
+}
+.sdm-mirror.mac {
+  background: #ffe2b8;
+}
+.sdm-mirror.enc {
+  background: #d9f2d0;
+}
+:root[data-theme="dark"] .sdm-mirror {
+  background: #28466e;
+  color: var(--text);
+}
+:root[data-theme="dark"] .sdm-mirror.mac {
+  background: #6b4a1f;
+}
+:root[data-theme="dark"] .sdm-mirror.enc {
+  background: #2f5a28;
+}

@@ -149,7 +149,17 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 		return nil, err
 	}
 
+	if req.AutoGetResponse && !req.Raw {
+		return s.transceiveChained(ctx, req)
+	}
+
 	if req.SessionID != "" {
+		// A lease carries APDU-level exchanges only. Sending the frame as an
+		// APDU instead would be the silent downgrade raw exists to avoid.
+		if req.Raw {
+			return nil, protocol.WrapError(protocol.ErrCodeNotSupported, nfc.NewNotSupportedError("TransceiveRaw"),
+				"framing-level exchanges are not supported inside a raw session")
+		}
 		holder, err := s.rawSessions()
 		if err != nil {
 			return nil, err
@@ -178,6 +188,57 @@ func (s *tagOps) Transceive(ctx context.Context, req server.TransceiveOp) ([]byt
 	return data, nil
 }
 
+// transceiveChained is an exchange with autoGetResponse. It runs as a one step
+// sequence where it can, so the GET RESPONSE commands share the tag operation or
+// lease of the command and nothing reaches the card between them. A tag the
+// agent holds only through a phone has no such run, and is chained here over
+// repeated device exchanges instead, each of which is its own round trip to the
+// phone.
+func (s *tagOps) transceiveChained(ctx context.Context, req server.TransceiveOp) ([]byte, error) {
+	steps := []nfc.SequenceStep{{Data: req.Data, AutoGetResponse: true}}
+	holder, sequenced := s.tags.(nfc.SequenceHolder)
+
+	if req.SessionID != "" {
+		if !sequenced {
+			return nil, protocol.WrapError(protocol.ErrCodeNotSupported, nfc.NewNotSupportedError("TransceiveSequence"),
+				"raw sessions are not supported here")
+		}
+		auditRawExchange(req.Data, req.Raw, req.DeviceID, req.TagUID)
+		result, err := holder.TransceiveSequenceInSessionTag(ctx, req.SessionID, steps)
+		if err != nil {
+			return nil, sourceFailure(err, req.DeviceID, "exchange", protocol.ErrCodeTransceiveFailed)
+		}
+		auditRawFollowups(result.Followups, req.DeviceID, req.TagUID, req.SessionID)
+		return result.Replies[0], nil
+	}
+
+	rt, err := s.resolveRoute(req.TagUID, req.DeviceID, req.AllowUntargeted)
+	if err != nil {
+		return nil, err
+	}
+	auditRawExchange(req.Data, req.Raw, rt.device, rt.uid)
+
+	if sequenced {
+		result, err := holder.TransceiveSequenceTag(ctx, rt.device, rt.uid, steps)
+		if err == nil {
+			auditRawFollowups(result.Followups, rt.device, rt.uid, "")
+			return result.Replies[0], nil
+		}
+		if !nfc.IsNotSupportedError(err) {
+			return nil, sourceFailure(err, rt.device, "exchange", protocol.ErrCodeTransceiveFailed)
+		}
+	}
+
+	reply, follow, err := nfc.ExchangeChained(req.Data, func(cmd []byte) ([]byte, error) {
+		return rt.holder.TransceiveTag(ctx, rt.device, rt.uid, cmd, false)
+	})
+	auditRawFollowups([][][]byte{follow}, rt.device, rt.uid, "")
+	if err != nil {
+		return nil, sourceFailure(err, rt.device, "exchange", protocol.ErrCodeTransceiveFailed)
+	}
+	return reply, nil
+}
+
 // TransceiveSequence runs several exchanges under one tag operation, under the
 // same gates and audit as a single raw exchange.
 func (s *tagOps) TransceiveSequence(ctx context.Context, req server.SequenceOp) (*nfc.SequenceResult, error) {
@@ -196,6 +257,7 @@ func (s *tagOps) TransceiveSequence(ctx context.Context, req server.SequenceOp) 
 		if err != nil {
 			return nil, sourceFailure(err, req.DeviceID, "sequence", protocol.ErrCodeTransceiveFailed)
 		}
+		auditRawFollowups(result.Followups, req.DeviceID, req.TagUID, req.SessionID)
 		return result, nil
 	}
 
@@ -209,6 +271,7 @@ func (s *tagOps) TransceiveSequence(ctx context.Context, req server.SequenceOp) 
 	if err != nil {
 		return nil, sourceFailure(err, rt.device, "sequence", protocol.ErrCodeTransceiveFailed)
 	}
+	auditRawFollowups(result.Followups, rt.device, rt.uid, "")
 	return result, nil
 }
 

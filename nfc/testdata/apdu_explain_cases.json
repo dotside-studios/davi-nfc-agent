@@ -203,6 +203,102 @@
     "warnings": []
   },
   {
+    "hex": "3A0407",
+    "raw": true,
+    "summary": "native FAST_READ — NTAG pages 4 to 7",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "3C00",
+    "raw": true,
+    "summary": "native READ_SIG — NTAG originality signature (address 0)",
+    "cls": "info",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "3902",
+    "raw": true,
+    "summary": "native READ_CNT — NTAG counter 2",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "A5020100000000",
+    "raw": true,
+    "summary": "native INCR_CNT — raises Ultralight EV1/NTAG counter 2",
+    "cls": "write",
+    "mutating": true,
+    "recognized": true,
+    "warnings": [
+      "writes to the tag; a write to a configuration or OTP page is not reversible"
+    ]
+  },
+  {
+    "hex": "1A00",
+    "raw": true,
+    "summary": "native AUTHENTICATE — Ultralight C 3DES authentication",
+    "cls": "auth",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF00000004D4423C00",
+    "raw": false,
+    "summary": "direct transmit → PN532 InCommunicateThru → native READ_SIG — NTAG originality signature (address 0)",
+    "cls": "info",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF00000004D4423000",
+    "raw": false,
+    "summary": "direct transmit → PN532 InCommunicateThru → native READ — Ultralight/NTAG page 0 (16 bytes), or MIFARE Classic block read",
+    "cls": "read",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF00000003D4421B",
+    "raw": false,
+    "summary": "direct transmit → PN532 InCommunicateThru → native PWD_AUTH — NTAG password authentication",
+    "cls": "auth",
+    "mutating": false,
+    "recognized": true,
+    "warnings": []
+  },
+  {
+    "hex": "FF00000002D442",
+    "raw": false,
+    "summary": "direct transmit → PN532 InCommunicateThru — empty frame",
+    "cls": "unknown",
+    "mutating": true,
+    "recognized": false,
+    "warnings": [
+      "unrecognised command; the agent cannot tell whether it writes or locks"
+    ]
+  },
+  {
+    "hex": "FF00000003D44A01",
+    "raw": false,
+    "summary": "direct transmit → PN532 command, not InCommunicateThru",
+    "cls": "unknown",
+    "mutating": true,
+    "recognized": false,
+    "warnings": [
+      "unrecognised command; the agent cannot tell whether it writes or locks"
+    ]
+  },
+  {
     "hex": "FF",
     "raw": true,
     "summary": "unrecognised framing command (opcode FF)",

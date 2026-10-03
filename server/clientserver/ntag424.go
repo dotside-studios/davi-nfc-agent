@@ -23,6 +23,7 @@ const (
 	ntag424GetKeyVersion   = "getKeyVersion"
 	ntag424ReadSig         = "readSig"
 	ntag424Lock            = "lock"
+	ntag424PlanSDM         = "planSDM"
 )
 
 const (
@@ -42,9 +43,13 @@ func (s *tagOps) NTAG424(ctx context.Context, req server.NTAG424Op) (*protocol.N
 	r := req.Request
 	switch r.Op {
 	case ntag424GetFileSettings, ntag424ConfigureSDM, ntag424ChangeKey, ntag424GetCardUID,
-		ntag424GetKeyVersion, ntag424ReadSig, ntag424Lock:
+		ntag424GetKeyVersion, ntag424ReadSig, ntag424Lock, ntag424PlanSDM:
 	default:
 		return nil, protocol.Errorf(protocol.ErrCodeInvalidRequest, "unknown ntag424 op %q", r.Op)
+	}
+
+	if r.Op == ntag424PlanSDM {
+		return planSDM(r)
 	}
 
 	mutating := ntag424Mutating(r.Op)
@@ -82,6 +87,30 @@ func (s *tagOps) NTAG424(ctx context.Context, req server.NTAG424Op) (*protocol.N
 		return nil, ntag424Failure(err, rt.device, r.Op)
 	}
 	return out, nil
+}
+
+// planSDM lays out a URL template as configureSDM would, for a client to show
+// before it writes. It holds no keys and reaches no tag.
+func planSDM(r protocol.NTAG424RequestPayload) (*protocol.NTAG424ResponsePayload, error) {
+	if strings.TrimSpace(r.URLTemplate) == "" {
+		return nil, protocol.Errorf(protocol.ErrCodeInvalidRequest, "urlTemplate is required")
+	}
+	opts, err := sdmOptions(r.SDM)
+	if err != nil {
+		return nil, protocol.Errorf(protocol.ErrCodeInvalidRequest, "%v", err)
+	}
+	plan, err := ntag424.PlanSDM(r.URLTemplate, opts)
+	if err != nil {
+		return nil, protocol.Errorf(protocol.ErrCodeInvalidRequest, "%v", err)
+	}
+	return &protocol.NTAG424ResponsePayload{
+		Op: r.Op,
+		Plan: &protocol.NTAG424SDMPlan{
+			NDEFHex:  strings.ToUpper(hex.EncodeToString(plan.NDEF)),
+			Length:   len(plan.NDEF),
+			Settings: fileSettingsPayload(&plan.Settings),
+		},
+	}, nil
 }
 
 // ntag424Plan validates a request and returns what runs it, with a description
@@ -213,12 +242,13 @@ func (s *tagOps) ntag424Plan(r protocol.NTAG424RequestPayload) (func(nfc.NTAG424
 
 	case ntag424ReadSig:
 		return func(op nfc.NTAG424Operator) (*protocol.NTAG424ResponsePayload, error) {
-			sig, err := op.ReadSig()
+			sig, genuine, err := op.ReadOriginality(nil)
 			if err != nil {
 				return nil, err
 			}
 			o := out()
 			o.Signature = base64.StdEncoding.EncodeToString(sig)
+			o.Genuine = &genuine
 			return o, nil
 		}, "", nil
 

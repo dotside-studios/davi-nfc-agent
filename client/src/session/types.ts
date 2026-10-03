@@ -1,7 +1,10 @@
 import type {
   NFCErrorCode,
+  NTAG424FileSettings,
   NTAG424ResponsePayload,
   NTAG424SDMOptions,
+  NTAG424SDMPlan,
+  NTAG424SDMResult,
 } from "./wire.generated";
 
 export type { NFCErrorCode };
@@ -203,10 +206,19 @@ export interface TransceiveRequest extends TagTarget {
   raw?: boolean;
   /** Sends the exchange inside a raw session from `beginRawSession`. */
   sessionId?: string;
+  /**
+   * Has the agent follow a 61xx reply with GET RESPONSE until the card stops,
+   * and retry a 6Cxx reply once with the corrected Le. The reply is the
+   * concatenated body with the final status word. Unset returns the card's
+   * first reply unchanged. Not valid with `raw`.
+   */
+  autoGetResponse?: boolean;
 }
 
 export interface SequenceStep {
   data: Uint8Array;
+  /** Chains this step's reply as `autoGetResponse` does on a `TransceiveRequest`. */
+  autoGetResponse?: boolean;
   /** Stops the run after this step unless the status word is one of these, as four hex characters. */
   expectSW?: string[];
   /** Stops the run after this step when the status word is one of these. */
@@ -236,7 +248,7 @@ export interface TransceiveSequenceResult {
   stoppedAt: number;
 }
 
-export type { NTAG424SDMOptions };
+export type { NTAG424FileSettings, NTAG424SDMOptions, NTAG424SDMPlan, NTAG424SDMResult };
 export type NTAG424Response = NTAG424ResponsePayload;
 
 /**
@@ -263,6 +275,8 @@ export type NTAG424Request = TagTarget &
     | { op: "getKeyVersion"; keyNo: number }
     | { op: "readSig" }
     | { op: "lock"; confirm: true }
+    /** Lays out an SDM URL without touching a tag; no tag need be present. */
+    | { op: "planSDM"; urlTemplate: string; sdm?: NTAG424SDMOptions }
   );
 
 export interface RawSession {

@@ -61,6 +61,11 @@ const (
 // NTAG424FileSizes are the sizes of files 01, 02 and 03.
 var NTAG424FileSizes = [3]int{32, 256, 128}
 
+// NTAG424WithSignature sets the 56 bytes the card answers ReadSig with.
+func NTAG424WithSignature(sig []byte) NTAG424Option {
+	return func(s *ntag424State) { s.signature = append([]byte(nil), sig...) }
+}
+
 // NTAG424Signature is the fixed 56 bytes the emulator answers ReadSig with.
 var NTAG424Signature = func() []byte {
 	b := make([]byte, ntag424.SigSize)
@@ -94,6 +99,7 @@ type ntag424State struct {
 	versions [5]byte
 	files    [3]n4File
 
+	signature []byte
 	randomID  bool
 	presented []byte
 
@@ -893,6 +899,9 @@ func (s *ntag424State) readSig(cmd []byte) []byte {
 	}
 	if hdr[0] != 0x00 {
 		return n4SW(n4StParameter)
+	}
+	if s.signature != nil {
+		return s.answer(s.signature, ev2.CommFull)
 	}
 	return s.answer(NTAG424Signature, ev2.CommFull)
 }

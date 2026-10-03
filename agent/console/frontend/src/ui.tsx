@@ -149,6 +149,94 @@ export function ActionLink({
   )
 }
 
+/**
+ * A button for an irreversible operation that asks again in the page itself: it
+ * opens a box naming what will happen and takes the phrase the operator must
+ * type. `run` is called with what was typed, and builds its request from that,
+ * so nothing is sent until the box is satisfied.
+ */
+export function InlineConfirm({
+  label,
+  prompt,
+  phrase,
+  run,
+  disabled,
+  onDone,
+}: {
+  label: ReactNode
+  prompt: ReactNode
+  phrase: string
+  run: (typed: string) => Promise<unknown>
+  disabled?: boolean
+  onDone?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const mutation = useMutation({
+    mutationFn: run,
+    onSuccess: () => {
+      setOpen(false)
+      setTyped('')
+      onDone?.()
+    },
+  })
+
+  if (!open) {
+    return (
+      <span className="row tight">
+        <button type="button" className="link danger" disabled={disabled} onClick={() => setOpen(true)}>
+          {label}
+        </button>
+      </span>
+    )
+  }
+
+  const ready = typed.trim().toLowerCase() === phrase.toLowerCase()
+
+  return (
+    <div className="notice err" role="alertdialog">
+      <div>{prompt}</div>
+      <div className="row" style={{ marginTop: 4 }}>
+        <label className="row tight">
+          <span className="dim">Type "{phrase}" to confirm</span>
+          <input
+            type="text"
+            value={typed}
+            autoFocus
+            spellCheck={false}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="danger"
+          disabled={!ready || mutation.isPending}
+          onClick={() => mutation.mutate(typed)}
+        >
+          {mutation.isPending ? 'working…' : 'Confirm'}
+        </button>
+        <button
+          type="button"
+          className="link"
+          disabled={mutation.isPending}
+          onClick={() => {
+            setOpen(false)
+            setTyped('')
+            mutation.reset()
+          }}
+        >
+          cancel
+        </button>
+      </div>
+      {mutation.error ? (
+        <div className="err">
+          {mutation.error instanceof Error ? mutation.error.message : String(mutation.error)}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /** An empty-state line for a table or list. */
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>

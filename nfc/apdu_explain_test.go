@@ -71,6 +71,7 @@ func builderCases() []builderCase {
 		{name: "ReadBinaryAPDU", cmd: ReadBinaryAPDU(4, 4), class: ClassRead, summarySub: "READ BINARY"},
 		{name: "UpdateBinaryAPDU", cmd: UpdateBinaryAPDU(4, four), class: ClassWrite, mutates: true, summarySub: "UPDATE BINARY"},
 		{name: "ReadBinaryExtAPDU", cmd: ReadBinaryExtAPDU(0x0000, 16), class: ClassRead, summarySub: "READ BINARY"},
+		{name: "GET RESPONSE", cmd: []byte{0x00, 0xC0, 0x00, 0x00, 0x10}, class: ClassRead, summarySub: "GET RESPONSE"},
 		{name: "UpdateBinaryExtAPDU", cmd: UpdateBinaryExtAPDU(0x0000, four), class: ClassWrite, mutates: true, summarySub: "UPDATE BINARY"},
 		{name: "SelectFileAPDU", cmd: SelectFileAPDU([]byte{0xE1, 0x03}), class: ClassSelect, summarySub: "SELECT"},
 		{name: "SelectFileByAIDAPDU", cmd: SelectFileByAIDAPDU(aid), class: ClassSelect, summarySub: "NDEF Type 4 application"},

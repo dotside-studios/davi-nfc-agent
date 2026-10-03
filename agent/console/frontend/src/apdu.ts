@@ -314,6 +314,10 @@ function describePcscDirect(e: ApduExplanation, f: Fields): void {
       e.recognized = false
       return
     }
+    if (f.data[0] === PN532_HOST) {
+      describePn532(e, f.data)
+      return
+    }
     const inner = explain(f.data, true)
     e.summary = `direct transmit → ${inner.summary}`
     e.cls = inner.cls
@@ -323,6 +327,35 @@ function describePcscDirect(e: ApduExplanation, f: Fields): void {
   }
   e.summary = `PC/SC direct command (P1 ${hb(f.p1)})`
   e.cls = 'reader-control'
+}
+
+/** Opens every command the host sends a PN532 or PN533, which an ACR122 passes through Direct Transmit. */
+const PN532_HOST = 0xd4
+
+/** The PN532 command that exchanges a frame with the tag as it is. */
+const PN532_IN_COMMUNICATE_THRU = 0x42
+
+/**
+ * Decodes a PN532 command carried in a Direct Transmit. Only InCommunicateThru is
+ * understood, and its frame is decoded as a native command; any other chip
+ * command is unrecognised, so it is not assumed harmless.
+ */
+function describePn532(e: ApduExplanation, data: Uint8Array): void {
+  if (data.length < 2 || data[1] !== PN532_IN_COMMUNICATE_THRU) {
+    e.summary = 'direct transmit → PN532 command, not InCommunicateThru'
+    e.recognized = false
+    return
+  }
+  if (data.length === 2) {
+    e.summary = 'direct transmit → PN532 InCommunicateThru — empty frame'
+    e.recognized = false
+    return
+  }
+  const inner = explainFraming(data.subarray(2))
+  e.summary = `direct transmit → PN532 InCommunicateThru → ${inner.summary}`
+  e.cls = inner.cls
+  e.recognized = inner.recognized
+  e.warnings.push(...inner.warnings)
 }
 
 function describeDesfire(e: ApduExplanation, f: Fields): void {
@@ -453,7 +486,7 @@ function explainFraming(cmd: Uint8Array): ApduExplanation {
       e.cls = 'read'
       break
     case 0x3a:
-      e.summary = 'native FAST_READ — NTAG page range'
+      e.summary = cmd.length >= 3 ? `native FAST_READ — NTAG pages ${cmd[1]} to ${cmd[2]}` : 'native FAST_READ — NTAG page range'
       e.cls = 'read'
       break
     case 0xa2:
@@ -478,12 +511,20 @@ function explainFraming(cmd: Uint8Array): ApduExplanation {
       e.cls = 'auth'
       break
     case 0x3c:
-      e.summary = 'native READ_SIG — NTAG originality signature'
+      e.summary = `native READ_SIG — NTAG originality signature (address ${arg})`
       e.cls = 'info'
       break
     case 0x39:
-      e.summary = 'native READ_CNT — NTAG counter'
+      e.summary = `native READ_CNT — NTAG counter ${arg}`
       e.cls = 'read'
+      break
+    case 0xa5:
+      e.summary = `native INCR_CNT — raises Ultralight EV1/NTAG counter ${arg}`
+      e.cls = 'write'
+      break
+    case 0x1a:
+      e.summary = 'native AUTHENTICATE — Ultralight C 3DES authentication'
+      e.cls = 'auth'
       break
     case 0x50:
       e.summary = 'native HALT'

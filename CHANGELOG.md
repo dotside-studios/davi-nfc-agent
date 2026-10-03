@@ -9,6 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NTAG 424 DNA originality signature is verified.** `readSig` now returns
+  `genuine` beside `signature`: whether the 56-byte r||s ECDSA signature
+  verifies over the card's real UID (resolved with `GetCardUID` on a random-ID
+  card) under NXP's secp224r1 key. The UID is signed unhashed and used directly
+  as the ECDSA message. `ntag424.VerifyOriginality` takes an optional public key,
+  and `NTAG424Operator.ReadOriginality` returns the signature and verdict. It
+  uses the standard library's `crypto/ecdsa` over `elliptic.P224`, so no new
+  dependency. The NXP key constant is not yet confirmed against a published
+  UID and signature pair.
+- **ISO 7816 response chaining on the raw channel.** `transceiveRequest` and
+  each step of `transceiveSequenceRequest` take an optional `autoGetResponse`.
+  Set, the agent follows `61xx` with GET RESPONSE until the card stops (at most
+  64 rounds), retries `6Cxx` once with the corrected Le, and returns the
+  concatenated body with the final status word, all inside the exchange's tag
+  operation or raw session. Each follow-up is audited as part of the same
+  exchange. Unset, replies are returned unchanged. `BuildAPDU` now builds the
+  extended form for data beyond 255 bytes instead of truncating Lc, and
+  `BuildExtendedAPDU` and `ATRExtendedLength` (extended Lc/Le from the ATR's
+  card capabilities) are added for driver code.
+- **`raw: true` works on PC/SC readers.** A `transceiveRequest` with `raw` set now
+  sends a framing-level exchange through the reader, so an NTAG21x, Ultralight or
+  Classic tag can be sent `READ_SIG` (`3C 00`), `READ_CNT`, `FAST_READ` and
+  `PWD_AUTH`. ACR122 class readers wrap the frame in Direct Transmit carrying PN532
+  `InCommunicateThru` and map a nonzero PN532 status byte to an error. Other readers
+  use a PC/SC Part 3 transparent exchange session, and are only taken to support it
+  once they accept a start-session command (probed once per reader). A reader with
+  neither refuses `raw: true` with `NOT_SUPPORTED` instead of sending an APDU, as
+  does `raw: true` inside a raw session. The agent's own readers report
+  `canTransceiveRaw` in their device capabilities (omitted when false). The APDU
+  explainer labels `FAST_READ`, `READ_SIG`, `READ_CNT`, `INCR_CNT` and the
+  PN532-wrapped Direct Transmit, in Go and in the console. The PC/SC Part 3 data
+  object tags and the PN532 and ACR122 frames are from the manuals and unchecked
+  against hardware; see `docs/api.md`.
+- **Sequences and NTAG 424 operations on a phone's tag.** `transceiveSequenceRequest`
+  and `ntag424Request` now work on a tag a phone holds, as one tag operation on
+  the device: serialized per device, refused for a tag the phone is not holding
+  and for a card family that is not an NTAG 424 DNA. The device protocol gains
+  `deviceTransceiveSequenceRequest` / `deviceTransceiveSequenceResponse` and the
+  `canTransceiveSequence` capability; the device runs the batch under the same
+  `expectSW` / `stopOnSW` rules and reports `stoppedAt`, and the agent verifies
+  the run against the rules. A device that does not declare it is sent one
+  `deviceTransceiveRequest` per step. The NTAG 424 driver runs over a
+  `CardTransport` adapter on the device's exchange (`nfc.NewNTAG424Session`,
+  `nfc.TagTransport`), so EV2 authentication costs two device round trips. Raw
+  sessions stay `NOT_SUPPORTED` on a phone, with the reason documented. The
+  device client library gains `canTransceiveSequence` and
+  `respondToTransceiveSequence`
+- **Control Center NTAG 424 panel.** In the Tag tab: card info (UID, key
+  versions, signature, file settings), an SDM form with the agent's own layout
+  preview via `planSDM`, Configure SDM, and change key and lock that confirm in
+  the page before sending `confirm: true`. The client library exports the
+  `NTAG424FileSettings`, `NTAG424SDMPlan` and `NTAG424SDMResult` types
+- **`ntag424Request` op `planSDM`.** A dry run of `configureSDM`: returns the
+  NDEF content (`plan.ndefHex`, `plan.length`) and file settings with offsets
+  for a URL template, touching no tag and needing none present.
 - **NTAG 424 DNA: LRP mode, behind an opt-in.** New package `nfc/lrp` implements
   the Leakage Resilient Primitive (plaintext generation, updated keys, LRICB,
   CMAC_LRP), with its plaintexts, updated keys, LRICB and CMAC_LRP pinned to NXP's
@@ -22,8 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capabilities. The authentication and secure-messaging layout, the SDM session
   vector and the MAC truncation are not validated against an NXP transcript or
   hardware, which is why `AllowLRP` is off by default. Not supported in LRP mode:
-  `ChangeKey` and encrypted SDM file data
-
+  `ChangeKey` and encrypted SDM file data.
 - **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
   ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
   any status word as a successful exchange, so `91 AF` and `6A 82` reach the

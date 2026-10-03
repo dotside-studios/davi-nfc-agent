@@ -45,6 +45,17 @@ type TagTransceiver interface {
 	Transceive(data []byte) ([]byte, error)
 }
 
+// TagRawTransceiver provides a framing-level exchange with the tag: the
+// command is the tag's own frame, with no ISO 7816 envelope, and the reply
+// carries no status word. It is what reaches an NTAG21x READ_SIG, READ_CNT or
+// PWD_AUTH, which Transceive refuses because those tags do not speak APDUs.
+//
+// A tag whose reader cannot carry one answers with a not-supported error, so
+// the interface says the driver can ask, not that the exchange will happen.
+type TagRawTransceiver interface {
+	TransceiveRaw(frame []byte) ([]byte, error)
+}
+
 // TagLocker provides read-only locking capability.
 // Tags that can be made permanently read-only implement this interface.
 // Use GetTagCapabilities(tag).CanLock to check if a tag supports this.

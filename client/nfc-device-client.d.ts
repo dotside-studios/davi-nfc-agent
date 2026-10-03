@@ -84,6 +84,14 @@ export interface NFCDeviceClientOptions {
   canTransceiveRaw?: boolean;
 
   /**
+   * Device runs a batch of APDU exchanges itself, answering a
+   * `transceiveSequenceRequest` with every reply. Presumes `canTransceive`.
+   * A device that does not declare it is sent one `transceiveRequest` per step.
+   * @default false
+   */
+  canTransceiveSequence?: boolean;
+
+  /**
    * Device can make a tag read-only
    * @default false
    */
@@ -317,6 +325,44 @@ export interface TransceiveRequestEvent {
 }
 
 /**
+ * One command of a sequence request and the status words that decide whether
+ * the run goes on after it.
+ */
+export interface TransceiveSequenceStepEvent {
+  /** Command bytes, base64 in transit */
+  data: string;
+
+  /**
+   * Stop the run after this step unless the reply's status word is one of
+   * these, each four uppercase hex characters. Absent expects anything.
+   */
+  expectSW?: string[];
+
+  /**
+   * Stop the run after this step when the reply's status word is one of
+   * these, each four uppercase hex characters.
+   */
+  stopOnSW?: string[];
+}
+
+/**
+ * A batch of APDU exchanges requested by the agent. Run the steps in order
+ * with nothing else reaching the tag between them.
+ */
+export interface TransceiveSequenceRequestEvent {
+  requestID: string;
+  deviceID: string;
+
+  /** UID of the tag the agent expects to be in the field */
+  tagUID?: string;
+
+  steps: TransceiveSequenceStepEvent[];
+
+  /** Bound for each exchange, in milliseconds */
+  timeoutMs?: number;
+}
+
+/**
  * Tag data for scan events
  */
 export interface DeviceTagData {
@@ -437,6 +483,7 @@ export interface DeviceErrorEvent {
 export type RegisteredHandler = (event: RegisteredEvent) => void;
 export type WriteRequestHandler = (event: WriteRequestEvent) => void;
 export type TransceiveRequestHandler = (event: TransceiveRequestEvent) => void;
+export type TransceiveSequenceRequestHandler = (event: TransceiveSequenceRequestEvent) => void;
 export type DeviceConnectedHandler = (event: DeviceConnectedEvent) => void;
 export type DeviceDisconnectedHandler = () => void;
 export type DeviceErrorHandler = (error: DeviceErrorEvent) => void;
@@ -444,7 +491,7 @@ export type DeviceErrorHandler = (error: DeviceErrorEvent) => void;
 /**
  * Event name types
  */
-export type DeviceEventName = 'registered' | 'writeRequest' | 'transceiveRequest' | 'connected' | 'disconnected' | 'error';
+export type DeviceEventName = 'registered' | 'writeRequest' | 'transceiveRequest' | 'transceiveSequenceRequest' | 'connected' | 'disconnected' | 'error';
 
 /**
  * Event handler type map
@@ -452,6 +499,7 @@ export type DeviceEventName = 'registered' | 'writeRequest' | 'transceiveRequest
 export interface DeviceEventHandlerMap {
   registered: RegisteredHandler;
   transceiveRequest: TransceiveRequestHandler;
+  transceiveSequenceRequest: TransceiveSequenceRequestHandler;
   writeRequest: WriteRequestHandler;
   connected: DeviceConnectedHandler;
   disconnected: DeviceDisconnectedHandler;
@@ -580,6 +628,18 @@ export class NFCDeviceClient {
    * @param errorCode - Wire error code (e.g. 'TAG_REMOVED')
    */
   respondToTransceive(requestID: string, success: boolean, data?: string, error?: string, errorCode?: string): Promise<void>;
+
+  /**
+   * Respond to a transceive sequence request from the server
+   *
+   * @param requestID - The request ID from the sequence request
+   * @param success - Whether the sequence ran
+   * @param replies - Base64 whole reply, status word included, of every step that ran
+   * @param stoppedAt - Index of the step whose reply ended the run early, or -1 when every step ran
+   * @param error - Error message if unsuccessful
+   * @param errorCode - Wire error code (e.g. 'TAG_REMOVED')
+   */
+  respondToTransceiveSequence(requestID: string, success: boolean, replies?: string[], stoppedAt?: number, error?: string, errorCode?: string): Promise<void>;
 
   /**
    * Get the assigned device ID

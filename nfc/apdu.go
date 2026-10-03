@@ -81,8 +81,30 @@ func ParseAPDUResponse(raw []byte) (APDUResponse, error) {
 	}, nil
 }
 
-// BuildAPDU constructs an APDU command
+// Limits of the extended APDU form: Lc is at most 65535, Le at most 65536,
+// which is encoded as 00 00.
+const (
+	MaxExtendedLc = 0xFFFF
+	MaxExtendedLe = 0x10000
+)
+
+// BuildAPDU constructs an APDU command in the short form. Data longer than 255
+// bytes cannot be carried by it and builds the extended form instead, with Le
+// widened to two bytes, 00 meaning the most (65536). Data beyond 65535 bytes
+// builds nothing and returns nil.
 func BuildAPDU(cla, ins, p1, p2 byte, data []byte, le *byte) []byte {
+	if len(data) > 0xFF {
+		var ext *int
+		if le != nil {
+			v := int(*le)
+			if v == 0 {
+				v = MaxExtendedLe
+			}
+			ext = &v
+		}
+		return BuildExtendedAPDU(cla, ins, p1, p2, data, ext)
+	}
+
 	cmd := []byte{cla, ins, p1, p2}
 
 	if len(data) > 0 {
@@ -94,6 +116,44 @@ func BuildAPDU(cla, ins, p1, p2 byte, data []byte, le *byte) []byte {
 		cmd = append(cmd, *le)
 	}
 
+	return cmd
+}
+
+// BuildExtendedAPDU constructs an APDU command in the extended form: Lc of
+// three bytes (00 then two) and Le of three bytes without data or two with it,
+// as ISO 7816-4 defines. le is the expected length, 1 to 65536, with 65536
+// encoded as 00 00; nil sends no Le. It returns nil for data longer than 65535
+// bytes or an le outside 0 to 65536. An le of 0 is read as the most, like 00.
+//
+// Only a card that declares extended length (see ATRExtendedLength) and a
+// reader that passes it through take this form.
+func BuildExtendedAPDU(cla, ins, p1, p2 byte, data []byte, le *int) []byte {
+	if len(data) > MaxExtendedLc {
+		return nil
+	}
+	leVal := 0
+	if le != nil {
+		if *le < 0 || *le > MaxExtendedLe {
+			return nil
+		}
+		leVal = *le
+		if leVal == MaxExtendedLe {
+			leVal = 0
+		}
+	}
+
+	cmd := []byte{cla, ins, p1, p2}
+	if len(data) > 0 {
+		cmd = append(cmd, 0x00, byte(len(data)>>8), byte(len(data)))
+		cmd = append(cmd, data...)
+		if le != nil {
+			cmd = append(cmd, byte(leVal>>8), byte(leVal))
+		}
+		return cmd
+	}
+	if le != nil {
+		cmd = append(cmd, 0x00, byte(leVal>>8), byte(leVal))
+	}
 	return cmd
 }
 

@@ -204,9 +204,10 @@ type NTAG424SDMOptions struct {
 
 // NTAG424RequestPayload is an operation on an NTAG 424 DNA the agent holds
 // keys for. Op selects it: getFileSettings, configureSDM, changeKey,
-// getCardUID, getKeyVersion, readSig or lock. configureSDM, changeKey and lock
-// change the tag and are refused in read-only mode; changeKey and lock are
-// irreversible and also need Confirm.
+// getCardUID, getKeyVersion, readSig, lock or planSDM. configureSDM, changeKey
+// and lock change the tag and are refused in read-only mode; changeKey and lock
+// are irreversible and also need Confirm. planSDM only lays out a URL template
+// as configureSDM would, touches no tag and needs none present.
 type NTAG424RequestPayload struct {
 	TagTarget
 
@@ -287,10 +288,29 @@ type NTAG424SDMResult struct {
 	Counter uint32 `json:"counter,omitempty"`
 }
 
+// NTAG424SDMPlan is what planSDM lays out for a URL template: the NDEF file
+// content configureSDM would write, and the file settings it would apply, with
+// nothing sent to the tag.
+type NTAG424SDMPlan struct {
+	// NDEFHex is the whole NDEF file content, uppercase hex: NLEN, then one URI
+	// record with each mirror as ASCII zeros of its final width.
+	NDEFHex string `json:"ndefHex"`
+
+	// Length is the size of that content in bytes.
+	Length int `json:"length"`
+
+	// Settings are the file settings configureSDM would write. Their offsets
+	// count from the start of NDEFHex, so the first record byte is at 2.
+	Settings *NTAG424FileSettings `json:"settings"`
+}
+
 // NTAG424ResponsePayload answers an ntag424Request. Op echoes the request, and
 // only the fields of that operation are set.
 type NTAG424ResponsePayload struct {
 	Op string `json:"op"`
+
+	// Plan answers planSDM.
+	Plan *NTAG424SDMPlan `json:"plan,omitempty"`
 
 	// FileSettings answers getFileSettings.
 	FileSettings *NTAG424FileSettings `json:"fileSettings,omitempty"`

@@ -263,6 +263,8 @@ export type NTAG424Request = TagTarget &
     | { op: "getKeyVersion"; keyNo: number }
     | { op: "readSig" }
     | { op: "lock"; confirm: true }
+    /** Lays out an SDM URL without touching a tag; no tag need be present. */
+    | { op: "planSDM"; urlTemplate: string; sdm?: NTAG424SDMOptions }
   );
 
 export interface RawSession {

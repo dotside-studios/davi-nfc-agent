@@ -100,6 +100,11 @@ type memEmulator struct {
 	present     bool
 	removalModel
 
+	// signature is the originality signature READ_SIG returns, set only on the
+	// NTAG21x family, which also has the counter and FAST_READ the framing-level
+	// exchange offers. See rawframe.go.
+	signature []byte
+
 	failWrites int  // NAK the next N writes (retry testing)
 	corrupt    bool // store inverted bytes (verification testing)
 
@@ -126,7 +131,7 @@ func newNTAGEmulator(model nfc.DetectedTagType) *memEmulator {
 	case nfc.DetectedNTAG216:
 		maxPages, dynLock = 231, 226
 	}
-	return &memEmulator{pages: make([][4]byte, maxPages), dynLockPage: dynLock, present: true}
+	return &memEmulator{pages: make([][4]byte, maxPages), dynLockPage: dynLock, present: true, signature: emuSignature()}
 }
 
 func newUltralightEmulator() *memEmulator {
@@ -171,6 +176,8 @@ func (e *memEmulator) Transceive(cmd []byte) ([]byte, error) {
 	}
 	ins, page := cmd[1], cmd[3]
 	switch ins {
+	case directTransmitINS:
+		return e.directTransmit(cmd), nil
 	case nfc.INSReadBinary:
 		data, ok := e.readMem(int(page), int(cmd[4]))
 		if !ok {
@@ -1331,6 +1338,10 @@ func newNTAG424Emulator(uid string, opts ...NTAG424Option) *type4Emulator {
 
 // UID returns the card's UID.
 func (c *EmulatedCard) UID() string { return c.uid }
+
+// Transport returns the bare emulated silicon, for wiring a lower layer onto it,
+// such as a PC/SC reader fake that forwards its pseudo-APDUs.
+func (c *EmulatedCard) Transport() nfc.CardTransport { return c.transport }
 
 // Tag returns the underlying driver-backed tag (escape hatch for low-level use).
 func (c *EmulatedCard) Tag() nfc.Tag { return c.card.Tag() }

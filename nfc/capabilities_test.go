@@ -1,6 +1,10 @@
 package nfc
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestInferTagCapabilities_MifareClassic1K(t *testing.T) {
 	caps := InferTagCapabilities("MIFARE Classic 1K")
@@ -329,5 +333,42 @@ func TestUltralightEV1Capabilities(t *testing.T) {
 				t.Errorf("CanLock = %v, want %v", caps.CanLock, tt.wantCanLock)
 			}
 		})
+	}
+}
+
+// mockDeviceWithRaw declares framing-level exchange support explicitly.
+type mockDeviceWithRaw struct {
+	mockDeviceWithInfo
+	supportsRaw bool
+}
+
+func (m *mockDeviceWithRaw) SupportsTransceiveRaw() bool { return m.supportsRaw }
+
+func TestBuildDeviceCapabilities_RawTransceive(t *testing.T) {
+	if caps := BuildDeviceCapabilities(NewMockDevice()); caps.CanTransceiveRaw {
+		t.Error("a device that declares nothing reports CanTransceiveRaw")
+	}
+	if caps := BuildDeviceCapabilities(&mockDeviceWithRaw{supportsRaw: true}); !caps.CanTransceiveRaw {
+		t.Error("a device declaring raw support does not report CanTransceiveRaw")
+	}
+	if caps := BuildDeviceCapabilities(&mockDeviceWithRaw{}); caps.CanTransceiveRaw {
+		t.Error("a device declaring no raw support reports CanTransceiveRaw")
+	}
+}
+
+func TestDeviceCapabilities_RawFlagIsLeftOutWhenFalse(t *testing.T) {
+	off, err := json.Marshal(DeviceCapabilities{DeviceType: "pcsc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(off), "canTransceiveRaw") {
+		t.Errorf("wire form %s carries canTransceiveRaw when false", off)
+	}
+	on, err := json.Marshal(DeviceCapabilities{DeviceType: "pcsc", CanTransceiveRaw: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(on), `"canTransceiveRaw":true`) {
+		t.Errorf("wire form %s omits canTransceiveRaw when true", on)
 	}
 }

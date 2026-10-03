@@ -29,6 +29,10 @@ type Manager struct {
 	stopMu    sync.Mutex
 	stopped   chan struct{}
 	closeOnce sync.Once
+
+	// rawProbes remembers what each reader answered about framing-level
+	// exchange.
+	rawProbes rawProbes
 }
 
 // NewManager creates a manager for the PC/SC readers attached to this machine.
@@ -152,7 +156,7 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	}
 
 	// Create device wrapper
-	dev, err := newDevice(ctx, card, readerName)
+	dev, err := newDevice(ctx, card, readerName, &m.rawProbes)
 	if err != nil {
 		_ = card.Disconnect(leaveCard)
 		return nil, fmt.Errorf("failed to initialize device: %w", err)
@@ -205,7 +209,11 @@ func (m *Manager) Devices() ([]nfc.DeviceListing, error) {
 
 	listings := make([]nfc.DeviceListing, 0, len(readers))
 	for _, reader := range readers {
-		listings = append(listings, nfc.DeviceListing{Path: reader, ID: reader, Capabilities: readerTransport})
+		caps := readerTransport
+		// Only the name says so before a card is present. Any other reader's
+		// answer comes from probing it, once a card has been connected.
+		caps.CanTransceiveRaw = isACR122(reader)
+		listings = append(listings, nfc.DeviceListing{Path: reader, ID: reader, Capabilities: caps})
 	}
 	return listings, nil
 }

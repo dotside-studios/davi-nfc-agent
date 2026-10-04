@@ -52,7 +52,7 @@ var lrpSessionVectorSuffix = []byte{0x96, 0x69}
 // [LRPAuthenticator] does this itself; it is exported for the card's side of the
 // exchange, which has to arrive at the same key.
 func DeriveLRPSessionKey(key, rndA, rndB []byte) ([]byte, error) {
-	block, err := NewCipher(key)
+	k, err := lrp.New(key, lrp.UpdateMAC)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func DeriveLRPSessionKey(key, rndA, rndB []byte) ([]byte, error) {
 	sv = append(sv, rndB[6:16]...)
 	sv = append(sv, rndA[8:16]...)
 	sv = append(sv, lrpSessionVectorSuffix...)
-	return CMAC(block, sv), nil
+	return k.CMAC(sv), nil
 }
 
 // LRPAuthenticator drives one LRP authentication exchange, in two round trips:
@@ -156,7 +156,9 @@ func (a *LRPAuthenticator) Challenge(response []byte) ([]byte, error) {
 
 	ti := a.ti
 	if a.mode == AuthNonFirst {
-		a.session, err = NewLRPSession(ti, master, a.counter, 1)
+		// AuthenticateLRPNonFirst enciphers nothing, so secure messaging starts
+		// the counter at zero; after AuthenticateLRPFirst zero is spent.
+		a.session, err = NewLRPSession(ti, master, a.counter, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +192,7 @@ func (a *LRPAuthenticator) Finish(response []byte) (*LRPSession, error) {
 
 	s := a.session
 	if a.mode == AuthNonFirst {
-		if subtle.ConstantTimeCompare(s.macKey.CMAC(nil), data) != 1 {
+		if subtle.ConstantTimeCompare(s.macKey.CMAC(lrpPICCProof(a.rndB, a.rndA, nil)), data) != 1 {
 			return nil, ErrAuthFailed
 		}
 		a.stage = 2
@@ -198,7 +200,7 @@ func (a *LRPAuthenticator) Finish(response []byte) (*LRPSession, error) {
 	}
 
 	enc, mac := data[:BlockSize], data[BlockSize:]
-	if subtle.ConstantTimeCompare(s.macKey.CMAC(enc), mac) != 1 {
+	if subtle.ConstantTimeCompare(s.macKey.CMAC(lrpPICCProof(a.rndB, a.rndA, enc)), mac) != 1 {
 		return nil, ErrAuthFailed
 	}
 	plain, err := s.encKey.Decrypt(lrpCounterBytes(0), enc)
@@ -238,11 +240,11 @@ func LRPAnswer(first bool, key, rndB, payload, ti []byte, counter uint16) (reply
 	}
 
 	if !first {
-		s, err = NewLRPSession(ti, master, counter, 1)
+		s, err = NewLRPSession(ti, master, counter, 0)
 		if err != nil {
 			return nil, nil, err
 		}
-		return s.macKey.CMAC(nil), s, nil
+		return s.macKey.CMAC(lrpPICCProof(rndB, rndA, nil)), s, nil
 	}
 
 	s, err = NewLRPSession(ti, master, 0, 1)
@@ -251,11 +253,20 @@ func LRPAnswer(first bool, key, rndB, payload, ti []byte, counter uint16) (reply
 	}
 	capture := make([]byte, 0, lrpCaptureSize)
 	capture = append(capture, ti...)
-	capture = append(capture, make([]byte, lrpCapLen)...) // PDcap2
+	capture = append(capture, lrpPCDCap2[:]...) // PDcap2
 	capture = append(capture, lrpPCDCap2[:]...)
 	enc, err := s.encKey.Encrypt(lrpCounterBytes(0), capture)
 	if err != nil {
 		return nil, nil, err
 	}
-	return append(enc, s.macKey.CMAC(enc)...), s, nil
+	return append(enc, s.macKey.CMAC(lrpPICCProof(rndB, rndA, enc))...), s, nil
+}
+
+// lrpPICCProof is what the card's MAC covers: both random numbers, the card's
+// first, then on AuthenticateLRPFirst the enciphered capture.
+func lrpPICCProof(rndB, rndA, picc []byte) []byte {
+	out := make([]byte, 0, 2*randomSize+len(picc))
+	out = append(out, rndB...)
+	out = append(out, rndA...)
+	return append(out, picc...)
 }

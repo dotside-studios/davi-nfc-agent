@@ -238,8 +238,8 @@ func NTAG424WithSDM(plan *ntag424.SDMPlan) NTAG424Option {
 
 // NTAG424WithLRP switches the card to the LRP cipher suite, as the permanent
 // SetConfiguration switch does. It then answers authentication with the LRP
-// exchange, secures messages with LRP, and mirrors LRP PICCData. File data
-// encryption is refused in this mode.
+// exchange, secures messages with LRP, and mirrors LRP PICCData. It does not
+// mirror encrypted file data in this mode.
 func NTAG424WithLRP() NTAG424Option {
 	return func(s *ntag424State) { s.lrp = true }
 }

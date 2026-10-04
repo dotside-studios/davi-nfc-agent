@@ -329,7 +329,7 @@ func authStatus(resp []byte) error {
 //
 // The cipher suite is the card's: its first answer says whether it is in AES
 // or LRP mode. A card in LRP mode is refused unless NTAG424Keys.AllowLRP asks
-// for it, since the LRP exchange is not validated against real hardware. The
+// for it, since the LRP exchange has not run against real hardware. The
 // card's delay (91 AD) and a key it refused are remembered and not tried again
 // until the keys change, because each failure counts toward the card's
 // lockout.

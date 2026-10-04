@@ -1172,14 +1172,14 @@ To check a tapped SDM URL on the backend, use the Go library
 keys, store)` verifies the MAC and refuses a replay with `ErrReplay` by tracking
 the highest counter seen per UID in a `CounterStore` (`MemoryCounterStore` is
 one). The agent itself exposes no verify route. For a tag in LRP mode set
-`Keys.LRP`; it is verified the same way, except that encrypted file data is not
-supported there.
+`Keys.LRP`; it is verified the same way.
 
 A tag switched to the LRP cipher suite is driven only when the keys passed to
-`SetNTAG424Keys` have `AllowLRP` set. It is off by default because the LRP
-exchange is built from NXP's description and is not yet validated against a
-published transcript or real hardware. Changing a key in LRP mode is not
-supported.
+`SetNTAG424Keys` have `AllowLRP` set. The LRP primitive is checked against every
+test vector in NXP's AN12304 and AuthenticateLRPFirst against the worked example
+in AN12321, but LRP secure messaging and LRP SDM follow the NT4H2421Gx data
+sheet with no published example to check them against, and none of it has run
+against real hardware, so it is off by default.
 
 #### NTAG 424 on a phone
 

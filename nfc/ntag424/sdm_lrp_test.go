@@ -2,7 +2,6 @@ package ntag424
 
 import (
 	"bytes"
-	"crypto/aes"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -12,11 +11,9 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc/lrp"
 )
 
-// An LRP tap, built here from the primitives by hand and verified through the
-// package's own entry points. These pin the package to its own derivation, not
-// to a published LRP SUN message: no AN12196 LRP example is pinned, so a
-// mistake in how the session vector or MAC truncation is read from the
-// specification would pass these.
+// An LRP tap, built here from the primitives by hand following NT4H2421Gx
+// Rev. 3.0 sections 9.3.4.2, 9.3.8.2 and 9.3.9.2, and verified through the
+// package's own entry points. NXP publishes no LRP SUN message to pin them to.
 
 var (
 	lrpMetaKey = mustHexLRP("00112233445566778899AABBCCDDEEFF")
@@ -54,11 +51,11 @@ func lrpTap(t *testing.T, ctr uint32, input []byte) (picc, mac []byte) {
 
 	sv := append([]byte{0x00, 0x01, 0x00, 0x80}, lrpUID...)
 	sv = append(sv, byte(ctr), byte(ctr>>8), byte(ctr>>16), 0x1E, 0xE1)
-	block, err := aes.NewCipher(lrpFileKey)
+	fileKey, err := lrp.New(lrpFileKey, lrp.UpdateMAC)
 	if err != nil {
 		t.Fatal(err)
 	}
-	master := ev2.CMAC(block, sv)
+	master := fileKey.CMAC(sv)
 	macKey, err := lrp.New(master, lrp.UpdateMAC)
 	if err != nil {
 		t.Fatal(err)
@@ -121,12 +118,6 @@ func TestVerifyURLLRPRejects(t *testing.T) {
 			t.Errorf("err = %v, want ErrPICCData", err)
 		}
 	})
-	t.Run("encrypted file data", func(t *testing.T) {
-		data := &PICCData{UID: lrpUID, UIDMirrored: true, CounterMirrored: true, LRP: true}
-		if _, err := DecryptFileData(lrpFileKey, data, make([]byte, 16)); !errors.Is(err, ErrLRPFileData) {
-			t.Errorf("err = %v, want ErrLRPFileData", err)
-		}
-	})
 }
 
 func TestVerifyURLFreshLRP(t *testing.T) {
@@ -187,5 +178,37 @@ func TestParseURLPICCDataSizes(t *testing.T) {
 	_, err := ParseURL("https://example.test/t?e=0011223344&c=94EED9EE65337086")
 	if !errors.Is(err, ErrPICCData) {
 		t.Errorf("err = %v, want ErrPICCData", err)
+	}
+}
+
+// NT4H2421Gx 9.3.6.2: the file data is LRICB under the session encryption key,
+// the second updated key of the session master key, counting from the read
+// counter (LSB first) and three zero bytes.
+func TestDecryptFileDataLRP(t *testing.T) {
+	var ctr uint32 = 0x000102
+	data := &PICCData{UID: lrpUID, UIDMirrored: true, ReadCounter: ctr, CounterMirrored: true, LRP: true}
+	plain := []byte("0123456789ABCDEF")
+
+	sv := append([]byte{0x00, 0x01, 0x00, 0x80}, lrpUID...)
+	sv = append(sv, byte(ctr), byte(ctr>>8), byte(ctr>>16), 0x1E, 0xE1)
+	fileKey, err := lrp.New(lrpFileKey, lrp.UpdateMAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encKey, err := lrp.New(fileKey.CMAC(sv), lrp.UpdateENC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := encKey.Encrypt([]byte{byte(ctr), byte(ctr >> 8), byte(ctr >> 16), 0, 0, 0}, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := DecryptFileData(lrpFileKey, data, enc)
+	if err != nil {
+		t.Fatalf("DecryptFileData: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("DecryptFileData = %q, want %q", got, plain)
 	}
 }

@@ -36,17 +36,11 @@ const NDEFFileNo = 0x02
 // session's own. version is the new key's version byte, which the card reports
 // afterwards.
 //
-// A card in LRP mode is refused with ErrLRPKeyChange: how it wants the new key
-// presented is not implemented here.
-//
 // A key change cannot be undone: a card whose key becomes a value nobody holds
 // cannot be authenticated to again, and has no reset.
 func ChangeKey(s Channel, keyNo, authKeyNo byte, oldKey, newKey []byte, version byte) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: ChangeKey needs an authenticated session")
-	}
-	if _, lrp := s.(*LRPSession); lrp {
-		return nil, ErrLRPKeyChange
 	}
 	if len(newKey) != KeySize {
 		return nil, fmt.Errorf("%w: new key is %d bytes", ErrKeySize, len(newKey))

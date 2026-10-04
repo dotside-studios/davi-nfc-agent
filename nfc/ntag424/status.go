@@ -27,10 +27,6 @@ var (
 	// ErrLRP reports a tag in LRP mode that the caller has not allowed the
 	// agent to authenticate to. See KeySet.AllowLRP.
 	ErrLRP = errors.New("ntag424: tag is in LRP mode, which is not enabled")
-
-	// ErrLRPKeyChange reports a ChangeKey on a session in LRP mode, which is
-	// not implemented.
-	ErrLRPKeyChange = errors.New("ntag424: changing a key in LRP mode is not supported")
 )
 
 // StatusError is a status word the card answered with other than success. It

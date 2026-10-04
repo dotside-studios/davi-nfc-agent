@@ -23,8 +23,9 @@ const (
 	UpdateENC = 1
 )
 
-// updatedKeyCount is how many updated keys a key is expanded into.
-const updatedKeyCount = 3
+// updatedKeyCount is how many updated keys a key is expanded into. Secure
+// messaging uses the first two; AN12304's test vectors use four.
+const updatedKeyCount = 4
 
 // Key is a key expanded for LRP: its sixteen plaintexts, and the one updated
 // key a use of it evaluates under. A Key is immutable and safe for concurrent
@@ -79,15 +80,23 @@ func UpdatedKeys(key []byte) [][]byte {
 	return out
 }
 
-// eval walks input one nibble at a time, high nibble first. Each nibble picks a
-// plaintext, which is encrypted under the running key to give the next one. The
-// finalised form encrypts a zero block under the last, so the value handed out
-// is never one the walk itself used as a key.
+// eval walks input one nibble at a time, high nibble first.
 func (k *Key) eval(input []byte, final bool) []byte {
-	y := k.updated[:]
+	nibbles := make([]byte, 0, 2*len(input))
 	for _, b := range input {
-		y = encrypt(y, k.plaintexts[b>>4][:])
-		y = encrypt(y, k.plaintexts[b&0x0F][:])
+		nibbles = append(nibbles, b>>4, b&0x0F)
+	}
+	return k.evalNibbles(nibbles, final)
+}
+
+// evalNibbles is the evaluation itself. Each nibble picks a plaintext, which is
+// encrypted under the running key to give the next one. The finalised form
+// encrypts a zero block under the last, so the value handed out is never one
+// the walk itself used as a key.
+func (k *Key) evalNibbles(nibbles []byte, final bool) []byte {
+	y := k.updated[:]
+	for _, n := range nibbles {
+		y = encrypt(y, k.plaintexts[n][:])
 	}
 	if final {
 		y = encrypt(y, make([]byte, BlockSize))

@@ -77,6 +77,7 @@ built-in web console.
 ./davi-nfc-agent -require-paired-devices  # Admit only devices that have paired
 ./davi-nfc-agent -allow-loopback-bypass   # Admit connections from this host with no secret (off by default)
 ./davi-nfc-agent -allow-raw-apdu          # Open the raw APDU channel so clients can send raw exchanges (off by default)
+./davi-nfc-agent -keys keys.json          # Card keys for MIFARE Classic, DESFire and NTAG 424 DNA (or DAVI_NFC_KEYS), see docs/card-keys.md
 ./davi-nfc-agent -install-ca           # Trust this agent in browsers (installs a local CA)
 ./davi-nfc-agent -auto-tls=false       # Disable automatic TLS certificate management
 ./davi-nfc-agent -cert cert.pem -key key.pem  # Use your own TLS certificate

@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/keyfile"
 )
 
 // Preferences are what an operator can change while the agent runs, and the
@@ -269,6 +270,30 @@ func (a *Agent) adoptReaderSettings() {
 
 	readers.SetMode(mode)
 	readers.SetFeedback(feedback)
+	a.keysSnapshot().Apply(readers)
+}
+
+// SetKeys replaces the card keys, reaching the readers already running as well
+// as those a later start opens. Replacing the NTAG 424 keys drops the sessions
+// the readers hold open under the old ones.
+//
+// Keys are not preferences: they are not part of [Preferences], and no
+// snapshot, event or log line carries them.
+func (a *Agent) SetKeys(keys keyfile.Keys) {
+	cp := keys.Copy()
+	a.settingsMu.Lock()
+	a.keys = cp
+	a.settingsMu.Unlock()
+
+	if readers := a.supervisor.Load(); readers != nil {
+		cp.Copy().Apply(readers)
+	}
+}
+
+func (a *Agent) keysSnapshot() keyfile.Keys {
+	a.settingsMu.RLock()
+	defer a.settingsMu.RUnlock()
+	return a.keys.Copy()
 }
 
 // normalizeCardTypes drops blanks and duplicates and sorts what is left, so two

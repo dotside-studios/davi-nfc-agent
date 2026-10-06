@@ -232,6 +232,12 @@ in. Serving those devices is not the manager's business: the driver's endpoint
 goes on the server plugin as `ServeMode[server.ModeDevice]`, built from what the
 agent answers, and a build that mounts none serves its own readers alone.
 
+`Options.KeysFile` is the path of the key file behind `-keys` (see
+[Card keys](card-keys.md)); `Setup` also reads `DAVI_NFC_KEYS` when it is empty,
+and fails if the file cannot be loaded. A program that holds keys itself builds
+`agent.Config` with `Keys`, or calls `Agent.SetKeys` while the agent runs, which
+reaches the readers already open.
+
 Flags and the standard logger belong to the program. Registering flags writes to
 `flag.CommandLine`, which would collide with the flags of anything embedding the
 agent, so the shipped command adds its own flag set on top of `Options` in

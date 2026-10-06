@@ -193,6 +193,10 @@ func (r *deviceReader) WithNTAG424(ctx context.Context, expectUID string, fn fun
 		if !ok {
 			return NewNotSupportedError("NTAG424")
 		}
+		// The keys may have changed since the tag was identified, which a
+		// rotation does while the card is still on the reader. Keys equal to
+		// the ones it holds leave an open session alone.
+		r.applyKeys(tag)
 		return fn(op)
 	})
 }

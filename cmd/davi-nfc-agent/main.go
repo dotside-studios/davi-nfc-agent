@@ -162,6 +162,10 @@ func main() {
 
 	app := tray.New(rt)
 
+	if keysPath := keyFilePath(opts); keysPath != "" {
+		watchKeyFile(rt.Agent, keysPath)
+	}
+
 	// The control center, served from the same listener. Nil in a -tags nowebui
 	// build, where Endpoints is empty.
 	controlCenter := console.New(console.Config{

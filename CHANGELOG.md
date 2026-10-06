@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worked example in AN12321 Table 3, and the driver's `NTAG424LRPSwitch.EnableLRP`
   sends it under key 0. The switch is permanent, so it is library-only and not
   on the client protocol. The emulator applies it.
+- **Card keys load from a key file.** `-keys <path>` (or `DAVI_NFC_KEYS`) names
+  a JSON file of hex keys for MIFARE Classic (`classic`), DESFire
+  (`desfire.slots`) and NTAG 424 DNA (`ntag424`: `master`, `diversify`,
+  `systemID`, `slots`, `allowLRP`), so the stock app can authenticate to cards
+  without a custom build. The file is validated strictly (unknown fields, bad
+  hex and wrong key lengths are refused, and errors never echo key material),
+  must be a regular file, and on Linux and macOS must not be accessible to group
+  or others, as `ssh` checks a private key. A file that cannot be loaded stops
+  the agent from starting. The log names the kinds and numbers loaded, never a
+  key. SIGHUP reloads the file, keeping the old keys if the new file is bad.
+  `agent.Options.KeysFile`, `agent.Config.Keys`, `Agent.SetKeys` and the new
+  `nfc/keyfile` package expose it to embedding programs; see
+  `docs/card-keys.md`. An NTAG 424 operation with no key now says keys are
+  loaded with `-keys`, and the NTAG 424 operator applies the keys current at the
+  operation rather than those from when the card was first seen, so a reload
+  reaches a card that is still on the reader.
 - **NTAG 424 DNA originality signature is verified.** `readSig` now returns
   `genuine` beside `signature`: whether the 56-byte r||s ECDSA signature
   verifies over the card's real UID (resolved with `GetCardUID` on a random-ID

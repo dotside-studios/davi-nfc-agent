@@ -196,7 +196,7 @@ func (t *pcscNTAG424Tag) GetCardUID() ([]byte, error) {
 		return t.keyUID(), nil
 	}
 	if t.heldKeys().Empty() {
-		return nil, NewAuthError("GetCardUID (NTAG 424)", t.uid, fmt.Errorf("no keys held"))
+		return nil, NewAuthError("GetCardUID (NTAG 424)", t.uid, ErrNoNTAG424Key)
 	}
 	if err := t.resolveUID(); err != nil {
 		return nil, err

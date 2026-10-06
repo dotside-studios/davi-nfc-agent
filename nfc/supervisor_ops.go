@@ -351,11 +351,45 @@ func (s *Supervisor) withNTAG424Held(ctx context.Context, holder TagHolder, devi
 
 	s.mu.Lock()
 	keys := s.ntag424Keys.Copy()
+	clock, timeout := s.clock, s.phoneOpTimeout
 	s.mu.Unlock()
+	if clock == nil {
+		clock = NewRealClock()
+	}
+	if timeout <= 0 {
+		timeout = NTAG424PhoneOperationTimeout
+	}
 
 	return sessions.WithTagSession(ctx, device, tagUID, func() error {
-		return fn(NewNTAG424Session(TagTransport(ctx, holder, device, tagUID), tagUID, keys))
+		// The time spent waiting for the device is the caller's to bound
+		// through ctx; the operation's own starts here.
+		deadline := clock.Now().Add(timeout)
+		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+			deadline = d
+		}
+		opCtx, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+
+		budget := NewOpBudget(clock, deadline, NTAG424ExchangeFloor)
+		return fn(NewNTAG424SessionWithBudget(TagTransport(opCtx, holder, device, tagUID), tagUID, keys, budget))
 	})
+}
+
+// SetPhoneOperationTimeout sets how long one NTAG 424 DNA operation on a tag a
+// phone holds may take in all. Zero restores NTAG424PhoneOperationTimeout. A
+// reader's operations are not bounded by it.
+func (s *Supervisor) SetPhoneOperationTimeout(d time.Duration) {
+	s.mu.Lock()
+	s.phoneOpTimeout = d
+	s.mu.Unlock()
+}
+
+// SetClock sets the clock the phone operation deadline is measured on, for
+// tests. Nil restores the real one.
+func (s *Supervisor) SetClock(c Clock) {
+	s.mu.Lock()
+	s.clock = c
+	s.mu.Unlock()
 }
 
 func (s *Supervisor) leasedReaders() []*deviceReader {

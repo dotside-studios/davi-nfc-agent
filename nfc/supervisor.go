@@ -43,6 +43,12 @@ type Supervisor struct {
 	desfireKeys DESFireKeys
 	ntag424Keys NTAG424Keys
 
+	// clock and phoneOpTimeout time an NTAG 424 operation on a tag a phone
+	// holds. A nil clock is the real one and a zero timeout is
+	// NTAG424PhoneOperationTimeout.
+	clock          Clock
+	phoneOpTimeout time.Duration
+
 	scans  event.Signal[NFCData]
 	status event.Signal[DeviceStatus]
 

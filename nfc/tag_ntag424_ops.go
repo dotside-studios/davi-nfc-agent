@@ -71,6 +71,15 @@ func (t *pcscNTAG424Tag) ConfiguredKey(keyNo byte) ([]byte, error) {
 	return key, nil
 }
 
+// n4ConfigureSDMWriteExchanges is what the writes of ConfigureSDM need of the
+// device, counted from a run of the simulated phone over a factory card: 2 to
+// read the file settings, 7 for the NDEF write (application, capability
+// container and file selects, then clear, one chunk and the length), and 6 for
+// the settings change (read of the settings, a session under the change key,
+// the change). The read-back after them is not counted, because it changes
+// nothing.
+const n4ConfigureSDMWriteExchanges = 2 + 7 + 6
+
 // NTAG424SDMResult is the outcome of ConfigureSDM. When the settings were
 // applied but the tap could not be verified, the result carries the URL read
 // back with a nil Tap, alongside the error.
@@ -89,6 +98,12 @@ func (t *pcscNTAG424Tag) GetFileSettings(fileNo byte) (*ntag424.FileSettings, er
 func (t *pcscNTAG424Tag) ChangeFileSettings(fileNo byte, settings ntag424.FileSettings) error {
 	encoded, err := settings.Encode()
 	if err != nil {
+		return err
+	}
+
+	// Reading the settings, authenticating under the change key and the change
+	// itself.
+	if err := t.budget.Require("change file settings", 1+3+1); err != nil {
 		return err
 	}
 
@@ -111,6 +126,7 @@ func (t *pcscNTAG424Tag) ChangeFileSettings(fileNo byte, settings ntag424.FileSe
 		if err != nil {
 			return err
 		}
+		t.noteWrite()
 		resp, err := t.transmitRaw(cmd)
 		if err != nil {
 			return err
@@ -135,11 +151,15 @@ func (t *pcscNTAG424Tag) ChangeKey(keyNo byte, newKey []byte, version byte, auth
 			return NewAuthError("ChangeKey (NTAG 424)", t.UID(), err)
 		}
 	}
+	if err := t.budget.Require("change key", t.authExchanges(authKeyNo)+1); err != nil {
+		return err
+	}
 	err := t.withSession(authKeyNo, func(s ev2.Channel) error {
 		cmd, err := ntag424.ChangeKey(s, keyNo, authKeyNo, old, newKey, version)
 		if err != nil {
 			return err
 		}
+		t.noteWrite()
 		resp, err := t.transmitRaw(cmd)
 		if err != nil {
 			return err
@@ -273,13 +293,38 @@ func (t *pcscNTAG424Tag) ConfigureSDM(plan *ntag424.SDMPlan) (*NTAG424SDMResult,
 		return nil, fmt.Errorf("%s: plan NLEN %d does not match its %d message bytes", op, nlen, len(plan.NDEF)-2)
 	}
 
-	if err := t.WriteData(plan.NDEF[2:]); err != nil {
-		return nil, fmt.Errorf("%s: write NDEF: %w", op, err)
-	}
-	if err := t.ChangeFileSettings(n4FileNDEF, plan.Settings); err != nil {
-		return nil, fmt.Errorf("%s: change file settings: %w", op, err)
+	if err := t.budget.Require("configure SDM", n4ConfigureSDMWriteExchanges); err != nil {
+		return nil, &SDMStateError{State: SDMNothingWritten, Err: fmt.Errorf("%s: %w", op, err)}
 	}
 
+	before := t.writesCount()
+	if err := t.WriteData(plan.NDEF[2:]); err != nil {
+		state := SDMNothingWritten
+		if t.writesCount() > before {
+			state = SDMNDEFIndeterminate
+		}
+		return nil, &SDMStateError{State: state, Err: fmt.Errorf("%s: write NDEF: %w", op, err)}
+	}
+	written := t.writesCount()
+	if err := t.ChangeFileSettings(n4FileNDEF, plan.Settings); err != nil {
+		state := SDMNDEFWritten
+		if t.writesCount() > written {
+			state = SDMSettingsIndeterminate
+		}
+		return nil, &SDMStateError{State: state, Err: fmt.Errorf("%s: change file settings: %w", op, err)}
+	}
+
+	result, err := t.verifySDM(op, plan)
+	if err != nil {
+		return result, &SDMStateError{State: SDMConfiguredUnverified, Err: err}
+	}
+	return result, nil
+}
+
+// verifySDM reads the NDEF file back after ConfigureSDM wrote it and checks the
+// tap it mirrors under the keys held. The result carries the URL read, with a
+// nil Tap, when only the verification failed.
+func (t *pcscNTAG424Tag) verifySDM(op string, plan *ntag424.SDMPlan) (*NTAG424SDMResult, error) {
 	data, err := t.ReadData()
 	if err != nil {
 		return nil, fmt.Errorf("%s: read back: %w", op, err)

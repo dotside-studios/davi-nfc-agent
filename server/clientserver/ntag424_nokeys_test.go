@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 	"github.com/dotside-studios/davi-nfc-agent/nfc/nfctest"
@@ -29,5 +30,27 @@ func TestNTAG424OpWithoutKeysSaysHowToLoadThem(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "-keys <file>") {
 		t.Errorf("error %q does not say keys are loaded with -keys", err)
+	}
+}
+
+// An operation refused for want of time is a retryable timeout, and the
+// message says what the tag was left holding.
+func TestNTAG424DeadlineIsATimeoutNamingTheTagState(t *testing.T) {
+	cause := &nfc.SDMStateError{
+		State: nfc.SDMNothingWritten,
+		Err:   &nfc.OperationDeadlineError{Step: "write NDEF data", Exchanges: 7, PerExchange: 3 * time.Second, Remaining: 14 * time.Second},
+	}
+	err := ntag424Failure(cause, "phone-1", "configureSDM")
+
+	if got := codeOf(err); got != protocol.ErrCodeTimeout {
+		t.Errorf("code = %q, want %q", got, protocol.ErrCodeTimeout)
+	}
+	if !protocol.ErrorPayloadFor(err).Retryable {
+		t.Error("a deadline refusal is not retryable")
+	}
+	for _, want := range []string{"deadline would be exceeded before write NDEF data", "no write sent", "nothing written"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
 	}
 }

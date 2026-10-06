@@ -343,6 +343,9 @@ func fileSettingsPayload(fs *ntag424.FileSettings) *protocol.NTAG424FileSettings
 // authentication failure; any other status the card answers is a failed
 // exchange.
 func ntag424Failure(err error, device, op string) error {
+	if nfc.IsOperationDeadlineError(err) {
+		return protocol.WrapError(protocol.ErrCodeTimeout, err, "NTAG 424 %s was not started", op)
+	}
 	var coded *protocol.CodedError
 	var nfcErr *nfc.NFCError
 	if errors.As(err, &coded) || errors.As(err, &nfcErr) {

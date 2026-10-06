@@ -117,7 +117,8 @@ func (d *device) Close() error {
 // startCardMonitor starts a background goroutine that monitors for card removal.
 // This provides the most reliable detection by continuously checking card state.
 func (d *device) startCardMonitor() {
-	d.stopMonitor = make(chan struct{})
+	stop := make(chan struct{})
+	d.stopMonitor = stop
 	d.cardRemoved = make(chan struct{}, 1)
 
 	go func() {
@@ -135,7 +136,7 @@ func (d *device) startCardMonitor() {
 
 		for {
 			select {
-			case <-d.stopMonitor:
+			case <-stop:
 				return
 			default:
 			}

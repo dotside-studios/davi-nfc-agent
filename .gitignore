@@ -12,3 +12,6 @@ build/
 # Built wire-type generator binary
 /sdkgen
 /sdkgen.exe
+
+# Hardware test captures
+/hwtest-out/

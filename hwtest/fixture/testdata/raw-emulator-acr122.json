@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "kind": "raw-framing",
+  "reader": "ACS ACR122U PICC Interface 00 00 (emulated)",
+  "atr": "3B8F8001804F0CA0000003060300030000000068",
+  "method": "acr122",
+  "canTransceiveRaw": true,
+  "tag": {
+    "uid": "04A1B2C3D4E5F6",
+    "type": "MIFARE Ultralight"
+  },
+  "setup": [
+    {
+      "command": "FFCA000000",
+      "response": "04A1B2C3D4E5F69000"
+    },
+    {
+      "command": "FFB0000404",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000504",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000604",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000704",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000804",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000904",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000A04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000B04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000C04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000D04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000E04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000F04",
+      "response": "000000009000"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "GET_VERSION",
+      "frame": "60",
+      "reply": "0004040201001103",
+      "wire": [
+        {
+          "command": "FF00000003D44260",
+          "response": "D5430000040402010011039000"
+        }
+      ]
+    },
+    {
+      "name": "READ_SIG",
+      "frame": "3C00",
+      "reply": "A0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBF",
+      "wire": [
+        {
+          "command": "FF00000004D4423C00",
+          "response": "D54300A0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBF9000"
+        }
+      ]
+    },
+    {
+      "name": "READ_CNT",
+      "frame": "3902",
+      "reply": "000000",
+      "wire": [
+        {
+          "command": "FF00000004D4423902",
+          "response": "D543000000009000"
+        }
+      ]
+    },
+    {
+      "name": "FAST_READ",
+      "frame": "3A0407",
+      "reply": "00000000000000000000000000000000",
+      "wire": [
+        {
+          "command": "FF00000005D4423A0407",
+          "response": "D54300000000000000000000000000000000009000"
+        }
+      ]
+    },
+    {
+      "name": "INVALID_PAGE",
+      "frame": "30FF",
+      "error": "TransceiveRaw: transceive failed: PN532 status 01: timeout, the tag did not answer",
+      "errorCode": "105",
+      "wire": [
+        {
+          "command": "FF00000004D44230FF",
+          "response": "D543019000"
+        }
+      ]
+    }
+  ],
+  "ndefAfter": {
+    "read": true,
+    "empty": true
+  }
+}

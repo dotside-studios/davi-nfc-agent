@@ -156,11 +156,13 @@ func (m *Manager) OpenDevice(deviceStr string) (nfc.Device, error) {
 	}
 
 	// Create device wrapper
+	card, obs := observe(card, readerName)
 	dev, err := newDevice(ctx, card, readerName, &m.rawProbes)
 	if err != nil {
 		_ = card.Disconnect(leaveCard)
 		return nil, fmt.Errorf("failed to initialize device: %w", err)
 	}
+	dev.announce(obs)
 
 	return dev, nil
 }

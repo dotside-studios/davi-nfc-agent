@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "kind": "raw-framing",
+  "reader": "Some Other Reader (emulated)",
+  "atr": "3B8F8001804F0CA0000003060300030000000068",
+  "method": "none",
+  "canTransceiveRaw": false,
+  "tag": {
+    "uid": "04A1B2C3D4E5F6",
+    "type": "MIFARE Ultralight"
+  },
+  "setup": [
+    {
+      "command": "FFCA000000",
+      "response": "04A1B2C3D4E5F69000"
+    },
+    {
+      "command": "FFC20000028100",
+      "response": "6D00"
+    },
+    {
+      "command": "FFB0000404",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000504",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000604",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000704",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000804",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000904",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000A04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000B04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000C04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000D04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000E04",
+      "response": "000000009000"
+    },
+    {
+      "command": "FFB0000F04",
+      "response": "000000009000"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "GET_VERSION",
+      "frame": "60",
+      "error": "TransceiveRaw: operation not supported",
+      "errorCode": "100"
+    },
+    {
+      "name": "READ_SIG",
+      "frame": "3C00",
+      "error": "TransceiveRaw: operation not supported",
+      "errorCode": "100"
+    },
+    {
+      "name": "READ_CNT",
+      "frame": "3902",
+      "error": "TransceiveRaw: operation not supported",
+      "errorCode": "100"
+    },
+    {
+      "name": "FAST_READ",
+      "frame": "3A0407",
+      "error": "TransceiveRaw: operation not supported",
+      "errorCode": "100"
+    },
+    {
+      "name": "INVALID_PAGE",
+      "frame": "30FF",
+      "error": "TransceiveRaw: operation not supported",
+      "errorCode": "100"
+    }
+  ],
+  "ndefAfter": {
+    "read": true,
+    "empty": true
+  }
+}

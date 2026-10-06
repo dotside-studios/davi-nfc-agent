@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/hex"
 	"testing"
 )
 
@@ -19,6 +20,22 @@ func signUID(t *testing.T, key *ecdsa.PrivateKey, uid []byte) []byte {
 	r.FillBytes(sig[:SigSize/2])
 	s.FillBytes(sig[SigSize/2:])
 	return sig
+}
+
+// AN12196 Rev. 2.0 Table 30: a genuine tag's UID and the signature it returned,
+// which verify under NXP's key with the UID signed unhashed.
+func TestVerifyOriginalityAN12196Table30(t *testing.T) {
+	uid, _ := hex.DecodeString("04518DFAA96180")
+	sig, _ := hex.DecodeString("D1940D17CFEDA4BFF80359AB975F9F6514313E8F90C1D3CAAF5941AD" +
+		"744A1CDF9A83F883CAFE0FE95D1939B1B7E47113993324473B785D21")
+	if !VerifyOriginality(uid, sig, nil) {
+		t.Fatal("AN12196's genuine signature does not verify under NXP's key")
+	}
+	tampered := append([]byte(nil), uid...)
+	tampered[6] ^= 0x01
+	if VerifyOriginality(tampered, sig, nil) {
+		t.Error("the signature verifies over another UID")
+	}
 }
 
 func TestNXPOriginalityKeyIsOnTheCurve(t *testing.T) {

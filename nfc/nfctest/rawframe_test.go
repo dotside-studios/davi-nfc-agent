@@ -8,6 +8,28 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
 )
 
+func TestRawFrames_NTAGAnswersGetVersionBySize(t *testing.T) {
+	const uid = "04A1B2C3D4E5F6"
+	for _, tt := range []struct {
+		card    *EmulatedCard
+		storage byte
+	}{
+		{NTAG213(uid), 0x0F},
+		{NTAG215(uid), 0x11},
+		{NTAG216(uid), 0x13},
+	} {
+		r := NewEmulatedReader(t, tt.card)
+		got, err := rawExchange(r, uid, 0x60)
+		if err != nil {
+			t.Fatalf("GET_VERSION: %v", err)
+		}
+		want := []byte{0x00, 0x04, 0x04, 0x02, 0x01, 0x00, tt.storage, 0x03}
+		if !bytes.Equal(got, want) {
+			t.Errorf("GET_VERSION = % X, want % X", got, want)
+		}
+	}
+}
+
 // rawExchange sends a framing-level frame through the reader, as a transceive
 // with raw set does.
 func rawExchange(r *EmulatedReader, uid string, frame ...byte) ([]byte, error) {

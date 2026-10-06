@@ -31,6 +31,7 @@ const (
 	frameWrite    = 0xA2
 	frameReadSig  = 0x3C
 	frameReadCnt  = 0x39
+	frameVersion  = 0x60
 
 	// The PN532 framing as an ACR122 carries it.
 	directTransmitINS = 0x00
@@ -109,6 +110,11 @@ func (e *memEmulator) nativeFrame(frame []byte) ([]byte, bool) {
 			return nil, false
 		}
 		return append([]byte(nil), e.signature...), true
+	case frameVersion:
+		if len(frame) != 1 || e.signature == nil {
+			return nil, false
+		}
+		return e.getVersion(), true
 	case frameReadCnt:
 		if len(frame) != 2 || frame[1] != 0x02 || e.signature == nil {
 			return nil, false
@@ -116,6 +122,21 @@ func (e *memEmulator) nativeFrame(frame []byte) ([]byte, bool) {
 		return []byte{0x00, 0x00, 0x00}, true
 	}
 	return nil, false
+}
+
+// getVersion answers GET_VERSION as an NTAG21x does (NTAG213/215/216 datasheet,
+// section on GET_VERSION): vendor NXP, product NTAG, storage code by size. The
+// emulator holds 45, 135 or 231 pages for the three, which names the model.
+// Caller holds e.mu.
+func (e *memEmulator) getVersion() []byte {
+	storage := byte(0x11)
+	switch len(e.pages) {
+	case 45:
+		storage = 0x0F
+	case 231:
+		storage = 0x13
+	}
+	return []byte{0x00, 0x04, 0x04, 0x02, 0x01, 0x00, storage, 0x03}
 }
 
 // directTransmit answers the Direct Transmit pseudo-APDU an ACR122 takes. Caller

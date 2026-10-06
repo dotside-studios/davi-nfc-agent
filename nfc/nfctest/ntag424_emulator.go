@@ -886,6 +886,21 @@ func (s *ntag424State) setConfiguration(cmd []byte) []byte {
 		s.failEnabled = data[0]&1 != 0
 		s.failLimit = binary.LittleEndian.Uint16(data[1:])
 		s.failDec = binary.LittleEndian.Uint16(data[3:])
+	case ntag424.ConfigCapability:
+		if len(data) != 10 {
+			return n4SW(n4StLength)
+		}
+		if data[4]&0x02 == 0 {
+			return s.answer(nil, ev2.CommFull)
+		}
+		// The answer goes out in the session that sent the switch; the card is
+		// LRP from then on, and its SDM configuration no longer applies.
+		reply := s.answer(nil, ev2.CommFull)
+		s.lrp = true
+		for i := range s.files {
+			s.files[i].settings.SDMEnabled = false
+		}
+		return reply
 	default:
 		return n4SW(n4StParameter)
 	}

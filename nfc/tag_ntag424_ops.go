@@ -152,6 +152,39 @@ func (t *pcscNTAG424Tag) ChangeKey(keyNo byte, newKey []byte, version byte, auth
 	return err
 }
 
+// NTAG424LRPSwitch is an NTAG 424 DNA driver that can switch the card to the
+// LRP cipher suite. It is kept off NTAG424Operator, and off the client
+// protocol, because the switch cannot be undone.
+type NTAG424LRPSwitch interface {
+	// EnableLRP switches the card to LRP under key 0. Afterwards the card
+	// refuses AES authentication, its SDM configuration is disabled, and the
+	// agent drives it only with NTAG424Keys.AllowLRP set.
+	EnableLRP() error
+}
+
+var _ NTAG424LRPSwitch = (*pcscNTAG424Tag)(nil)
+
+func (t *pcscNTAG424Tag) EnableLRP() error {
+	err := t.withSession(0, func(s ev2.Channel) error {
+		cmd, err := ntag424.EnableLRP(s)
+		if err != nil {
+			return err
+		}
+		resp, err := t.transmitRaw(cmd)
+		if err != nil {
+			return err
+		}
+		return ntag424.ParseSetConfiguration(s, resp)
+	})
+	if err == nil {
+		t.dropSession()
+		t.mu.Lock()
+		t.lrp = true
+		t.mu.Unlock()
+	}
+	return err
+}
+
 func (t *pcscNTAG424Tag) GetCardUID() ([]byte, error) {
 	t.mu.Lock()
 	real := t.realUID

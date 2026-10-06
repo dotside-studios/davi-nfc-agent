@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Switching an NTAG 424 DNA to LRP.** `ntag424.EnableLRP` builds the
+  SetConfiguration that switches a card to the LRP cipher suite, pinned to the
+  worked example in AN12321 Table 3, and the driver's `NTAG424LRPSwitch.EnableLRP`
+  sends it under key 0. The switch is permanent, so it is library-only and not
+  on the client protocol. The emulator applies it.
 - **NTAG 424 DNA originality signature is verified.** `readSig` now returns
   `genuine` beside `signature`: whether the 56-byte r||s ECDSA signature
   verifies over the card's real UID (resolved with `GetCardUID` on a random-ID

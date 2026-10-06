@@ -1169,7 +1169,12 @@ Errors: a tag that is not an NTAG 424 DNA, or a phone that declared no
 APDU exchange, is `NOT_SUPPORTED`; a missing key, a refused key, the card's authentication delay
 (`91 AD`), a permission denial or an LRP-mode card the keys do not allow is
 `AUTH_FAILED`; other card
-statuses are `TRANSCEIVE_FAILED`.
+statuses are `TRANSCEIVE_FAILED`. On a phone's tag, an operation that
+would not finish in time is refused with `TIMEOUT` (retryable) before the step
+that changes the tag is sent; see [NTAG 424 on a phone](#ntag-424-on-a-phone).
+A failed `configureSDM` names, in the error message, what it left on the tag
+(`nothing written`, `NDEF written, SDM not configured`, and so on), and running
+it again repairs each of them.
 
 To check a tapped SDM URL on the backend, use the Go library
 `github.com/dotside-studios/davi-nfc-agent/nfc/ntag424`: `VerifyURLFresh(url,
@@ -1203,6 +1208,17 @@ session lives only as long as the operation. The phone's reply must follow the
 [reply format](#transceive-request), and a phone's own timeouts apply (iOS ends
 a tag session after about twenty seconds). The agent's configured keys are used
 as for a reader.
+
+An operation on a phone's tag has an overall deadline of 15 seconds
+(`nfc.NTAG424PhoneOperationTimeout`), counted from when the agent starts
+sending to the phone and never beyond the request's own timeout, so waiting for
+another operation on the same phone does not count. Before each step that
+changes the tag (an NDEF write, `ChangeFileSettings`, `ChangeKey`, `lock`) the
+agent estimates the step's exchanges times the slowest exchange seen in the
+operation (at least 100 ms), and if that exceeds the time left it fails with
+`TIMEOUT` and the message `deadline would be exceeded before <step>: ... no
+write sent`, rather than starting a write it cannot finish. A reader's
+operations are not bounded this way.
 
 Operations on one phone are serialized, as a reader's are, so two clients'
 exchanges do not interleave on the tag. A phone that names another card family

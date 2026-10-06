@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NTAG 424 operations on a phone's tag have an overall deadline.** An
+  operation has `nfc.NTAG424PhoneOperationTimeout` (15 s, sized from the 22
+  exchanges `configureSDM` takes over the simulated phone and kept under iOS's
+  roughly 20 s tag session), or the caller's own timeout when shorter. Before
+  each step that changes the tag (NDEF write, `ChangeFileSettings`, `ChangeKey`,
+  `lock`) the driver checks the time left against the step's exchanges times the
+  slowest exchange seen in the operation, and fails with a typed
+  `nfc.OperationDeadlineError` (wire code `TIMEOUT`, `deadline would be exceeded
+  before <step>; no write sent`) instead of starting a write it cannot finish.
+  The budget (`nfc.OpBudget`) takes an injected `nfc.Clock`; the supervisor has
+  `SetPhoneOperationTimeout` and `SetClock`. `configureSDM` errors now carry the
+  state the tag was left in (`nfc.SDMStateError`: nothing written, NDEF written
+  with SDM not configured, and so on), and re-running it repairs each; the
+  recovery is in `docs/device-setup.md`. Readers are unchanged.
 - **A hardware test harness for raw framing and LRP.** `go test -tags hardware
   -run TestRawFraming ./hwtest` sends the frames of issue #96 through
   `Supervisor.TransceiveTag` on a real PC/SC reader, and `-run TestLRP` runs the

@@ -53,6 +53,13 @@ type pcscNTAG424Tag struct {
 	// ndefSettings is the NDEF file's settings as last read. It informs
 	// Capabilities only; every operation reads them afresh.
 	ndefSettings *ntag424.FileSettings
+
+	// budget, when set, is the time left for the operation this tag was made
+	// for. Each step that changes the card checks it before sending. writesSent
+	// counts the commands that change the card this tag has sent, so a failure
+	// can say whether anything was written.
+	budget     *OpBudget
+	writesSent int
 }
 
 func newPCSCNTAG424Tag(dev CardTransport, uid string) *pcscNTAG424Tag {
@@ -764,8 +771,20 @@ func (t *pcscNTAG424Tag) WriteData(data []byte) error {
 		return NewReadOnlyError("WriteData (NTAG 424)", t.UID(), err)
 	}
 	if !route.native {
+		// The select of the application, the read of the capability container
+		// and the select of the file, then the same writes as below. The chunk
+		// is the smallest the native path uses, so the estimate is not short.
+		if err := t.budget.Require("write NDEF data", 4+2+writeChunkCount(len(data), ntag424.CommFull)); err != nil {
+			return err
+		}
 		t.dropSession()
+		t.noteWrite()
 		return t.pcscISO14443Tag.WriteData(data)
+	}
+
+	// The clear and the final length are one write each, around the chunks.
+	if err := t.budget.Require("write NDEF data", t.authExchanges(route.keyNo)+2+writeChunkCount(len(data), route.mode)); err != nil {
+		return err
 	}
 
 	return t.withSession(route.keyNo, func(s ev2.Channel) error {
@@ -793,6 +812,7 @@ func (t *pcscNTAG424Tag) writeChunks(s ev2.Channel, mode ntag424.CommMode, offse
 		if err != nil {
 			return err
 		}
+		t.noteWrite()
 		resp, err := t.transmitRaw(cmd)
 		if err != nil {
 			return err
@@ -803,6 +823,35 @@ func (t *pcscNTAG424Tag) writeChunks(s ev2.Channel, mode ntag424.CommMode, offse
 		written += len(part)
 	}
 	return nil
+}
+
+// writeChunkCount is the number of commands that carry n bytes in mode.
+func writeChunkCount(n int, mode ntag424.CommMode) int {
+	chunk := ntag424.MaxWriteChunk(mode)
+	return (n + chunk - 1) / chunk
+}
+
+// noteWrite records that a command that changes the card is about to be sent.
+func (t *pcscNTAG424Tag) noteWrite() {
+	t.mu.Lock()
+	t.writesSent++
+	t.mu.Unlock()
+}
+
+func (t *pcscNTAG424Tag) writesCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.writesSent
+}
+
+// authExchanges is the number of exchanges that opening a session under keyNo
+// costs now: none when one is open, otherwise the select and the two parts of
+// the authentication.
+func (t *pcscNTAG424Tag) authExchanges(keyNo byte) int {
+	if s, n := t.currentSession(); s != nil && n == keyNo {
+		return 0
+	}
+	return 3
 }
 
 func (t *pcscNTAG424Tag) IsWritable() (bool, error) {

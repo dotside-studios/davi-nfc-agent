@@ -22,6 +22,17 @@ func NewNTAG424Session(transport CardTransport, uid string, keys NTAG424Keys) NT
 	return tag
 }
 
+// NewNTAG424SessionWithBudget is NewNTAG424Session for an operation with a
+// deadline: every exchange on transport is timed into budget, and each step that
+// changes the card checks the time left before it sends anything (see
+// OperationDeadlineError). A nil budget is NewNTAG424Session.
+func NewNTAG424SessionWithBudget(transport CardTransport, uid string, keys NTAG424Keys, budget *OpBudget) NTAG424Session {
+	tag := newPCSCNTAG424Tag(budget.Wrap(transport), uid)
+	tag.SetNTAG424Keys(keys)
+	tag.budget = budget
+	return tag
+}
+
 // TagSessionHolder is what a TagHolder offers when the tag it holds is not
 // polled by the agent, so nothing serializes the operations on it. fn runs with
 // the tag held for it alone, after checking the tag present is the one named.

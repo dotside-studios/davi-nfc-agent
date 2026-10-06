@@ -40,6 +40,11 @@ type simPhone struct {
 	// to be answered with, so a test can play a misbehaving device.
 	sequenceHook func(resp *DeviceTransceiveSequenceResponse)
 
+	// beforeReply, when set, runs after the card has answered a single exchange
+	// and before the phone replies, so a test can make the phone slow by
+	// advancing a clock.
+	beforeReply func(cmd []byte)
+
 	mu    sync.Mutex
 	steps [][]DeviceSequenceStep
 }
@@ -136,6 +141,9 @@ func (p *simPhone) serve() {
 				out.Success, out.Error = false, err.Error()
 			}
 			out.Data = reply
+			if p.beforeReply != nil {
+				p.beforeReply(in.Data)
+			}
 			p.send(WSTypeDeviceTransceiveResponse, out)
 
 		case WSTypeDeviceTransceiveSequenceRequest:

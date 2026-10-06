@@ -201,6 +201,38 @@ reply that ran and `stoppedAt` (`-1` when all ran). See
 [Transceive Sequence Request](api.md#transceive-sequence-request). The agent
 checks your `stoppedAt` against the rules it sent, so apply them exactly.
 
+**Deadline.** An NTAG 424 operation on a tag your app holds has 15 seconds in
+all, counted from when the agent starts sending to the phone, on top of the
+5 seconds each exchange may take. Before every step that changes the tag
+(writing the NDEF file, `ChangeFileSettings`, `ChangeKey`, `lock`) the agent
+estimates what the step needs from the slowest exchange it has seen in this
+operation, at least 100 ms each, and if the time left would not cover it, it
+fails with `TIMEOUT` before sending anything of that step. A slow phone
+therefore fails early with the tag untouched, rather than part way through. If
+the caller's own timeout is shorter than 15 seconds, that one applies. On iOS,
+keep the tag still against the phone until the operation answers: an iOS tag
+session ends after about 20 seconds and drops the tag as soon as it moves, which
+is why the deadline is below that. Do not hold exchanges back (queueing,
+background throttling); answer each one as soon as the card has.
+
+**Recovering a half-configured tag.** `configureSDM` writes the NDEF message,
+then the file settings, then reads the file back to verify. Its error says what
+the tag was left holding:
+
+| Tag state in the error | What is on the tag |
+| --- | --- |
+| nothing written | The failure came before any write was sent. The tag is as it was |
+| NDEF write interrupted, file contents indeterminate | A write of the NDEF file was sent and did not finish. The file may hold part of the new message |
+| NDEF written, SDM not configured | The new message is written and the file settings are unchanged, so the URL shows without its mirrors |
+| NDEF written, SDM configuration unconfirmed | The settings change was sent and its answer did not arrive. SDM may or may not be on |
+| NDEF written, SDM configured, read-back not verified | Both writes succeeded and the check afterwards failed. Tap the tag to verify it |
+
+In every case run `configureSDM` again with the same template and options. It is
+idempotent: it rewrites the same message and settings whatever the tag holds,
+and a run on a tag it has already configured leaves it as it was (the
+simulated-phone tests check both). It needs the change key to still be the one
+the agent holds, which a failed run does not alter.
+
 A tag held by a phone cannot be leased as a raw session: the operating system
 owns the tag session, so `rawSessionBeginRequest` answers `NOT_SUPPORTED`. A
 sequence or an NTAG 424 operation is the unit that runs without interruption.

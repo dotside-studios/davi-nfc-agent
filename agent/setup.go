@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/dotside-studios/davi-nfc-agent/buildinfo"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/keyfile"
 )
 
 // Default ports. The agent serves devices and clients from one listener.
@@ -78,6 +80,14 @@ type Options struct {
 	// starts with raw exchanges refused. Setup also reads
 	// DAVI_NFC_ALLOW_RAW_APDU=1.
 	AllowRawAPDU bool
+
+	// KeysFile is the path of a key file (see package keyfile) holding the
+	// MIFARE Classic, DESFire and NTAG 424 DNA keys the agent authenticates
+	// cards with. Empty holds none. Setup also reads DAVI_NFC_KEYS when this
+	// is empty. A file that cannot be read, is too open or does not validate
+	// fails Setup: running on without the keys would answer every keyed
+	// operation with a refusal that hides why.
+	KeysFile string
 
 	// Info is what this build calls itself; see agent.Config.Info. It decides
 	// the default config directory, so a program with its own identity should
@@ -168,6 +178,20 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 	// And for the raw APDU channel: off unless this run opens it.
 	askedForRawAPDU := opts.AllowRawAPDU || os.Getenv("DAVI_NFC_ALLOW_RAW_APDU") == "1"
 
+	var keys keyfile.Keys
+	keysPath := opts.KeysFile
+	if keysPath == "" {
+		keysPath = os.Getenv("DAVI_NFC_KEYS")
+	}
+	if keysPath != "" {
+		loaded, err := keyfile.Load(keysPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading keys from %s: %w", keysPath, err)
+		}
+		keys = loaded
+		agentLog.Printf("Loaded keys from %s: %s", keysPath, keys.Summary())
+	}
+
 	devicePort := opts.DevicePort
 	if devicePort == 0 {
 		// Options built by hand rather than from flags: the default, not a
@@ -207,6 +231,7 @@ func Setup(opts *Options, manager nfc.Manager) (*Runtime, error) {
 		Mode:                opts.Mode,
 		CardTypes:           opts.CardTypes,
 		DevicePath:          opts.DevicePath,
+		Keys:                keys,
 	})
 
 	return &Runtime{

@@ -31,6 +31,7 @@ func parseFlags() (opts *agent.Options, showVersion bool) {
 	flag.BoolVar(&opts.InstallCA, "install-ca", false, "Install a local certificate authority into the system trust store so browsers trust this agent. Not needed for phones, readers, or an externally provisioned certificate")
 	flag.StringVar(&opts.ConfigDir, "config-dir", "", "Config directory (default: platform-specific)")
 	flag.StringVar(&opts.AllowedOrigins, "allowed-origins", "", "Comma-separated browser origins allowed to connect (host:port), e.g. \"app.example.com,localhost:3002\". Use \"*\" to disable the check (not recommended)")
+	flag.StringVar(&opts.KeysFile, "keys", "", "Path to a JSON key file holding the MIFARE Classic, DESFire and NTAG 424 DNA keys to authenticate cards with (or set DAVI_NFC_KEYS). Must not be readable by group or others (chmod 600). The agent refuses to start if it cannot be loaded")
 	flag.Parse()
 
 	return opts, showVersion

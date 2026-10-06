@@ -13,6 +13,7 @@ import (
 	"github.com/dotside-studios/davi-nfc-agent/event"
 	"github.com/dotside-studios/davi-nfc-agent/logbuf"
 	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/keyfile"
 	"github.com/dotside-studios/davi-nfc-agent/traymenu"
 )
 
@@ -117,6 +118,11 @@ type Config struct {
 	Mode       nfc.ReaderMode
 	CardTypes  []string
 	DevicePath string
+
+	// Keys are the card keys the readers authenticate with. They are held in
+	// memory only: nothing the agent reports, persists or logs includes them.
+	// Changeable at runtime through SetKeys.
+	Keys keyfile.Keys
 }
 
 // Agent runs the NFC readers and reports what they see. Build one with New;
@@ -162,6 +168,11 @@ type Agent struct {
 	// would be lost with every restart.
 	readerMode   nfc.ReaderMode
 	pinnedDevice string
+
+	// keys are the card keys, held for the same reason, and guarded by
+	// settingsMu. Never part of Preferences or anything else the agent
+	// reports.
+	keys keyfile.Keys
 
 	// apiSecret is guarded rather than settled, because rotating it replaces
 	// it while the agent runs. Whatever checks it reads it per request, so a
@@ -237,6 +248,7 @@ func New(cfg Config) *Agent {
 		pinnedDevice:        cfg.DevicePath,
 		readerFeedback:      cfg.ReaderFeedback,
 		allowRawAPDU:        cfg.AllowRawAPDU,
+		keys:                cfg.Keys.Copy(),
 		cardTypes:           newCardTypeFilter(cfg.CardTypes),
 		logs:                cfg.Logs,
 		suppliedLogger:      suppliedLogger,

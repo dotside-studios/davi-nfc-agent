@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A hardware test harness for raw framing and LRP.** `go test -tags hardware
+  -run TestRawFraming ./hwtest` sends the frames of issue #96 through
+  `Supervisor.TransceiveTag` on a real PC/SC reader, and `-run TestLRP` runs the
+  checks of issue #99 on a spare NTAG 424 DNA, including the permanent switch
+  to LRP for the one tag named by `DAVI_HW_ENABLE_LRP_UID`. Both record every
+  command the reader saw into JSON fixtures, which `go test` replays through
+  the PC/SC parsers and `ev2.LRPSession` once they are committed under
+  `hwtest/fixture/testdata`. The procedures also run in the ordinary test suite
+  against the emulators, whose generated fixtures are committed. A new
+  `pcsc.SetObserver` hook, unset in the agent, reports each reader's traffic.
+  The nfctest NTAG emulator now answers the raw `GET_VERSION` frame. See
+  `docs/hardware-tests.md`. The raw framing and LRP caveats stay until a capture
+  from hardware is committed.
 - **Switching an NTAG 424 DNA to LRP.** `ntag424.EnableLRP` builds the
   SetConfiguration that switches a card to the LRP cipher suite, pinned to the
   worked example in AN12321 Table 3, and the driver's `NTAG424LRPSwitch.EnableLRP`

@@ -40,6 +40,10 @@ listener, and drives it over the published WebSocket protocols. Run it alone
 with `go test ./e2e/ -v` when changing anything a program embedding the agent
 depends on.
 
+Tests that need a reader and a tag are behind the `hardware` build tag and are
+never run by `go test ./...`. See [docs/hardware-tests.md](docs/hardware-tests.md)
+for how to run them and send back what they record.
+
 ## Advanced Building
 
 ### Cross-Platform Builds

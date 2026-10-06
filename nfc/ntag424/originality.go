@@ -9,12 +9,10 @@ import (
 )
 
 // OriginalityKeyHex is NXP's public key for the NTAG 424 DNA originality
-// signature, an uncompressed secp224r1 point (0x04, X, Y). It is the key public
-// tooling lists for the NTAG 424 DNA family and lies on the curve, but no
-// published UID and signature pair has been verified against it here. Pass a
-// key to VerifyOriginality to override it.
-const OriginalityKeyHex = "04B304DC4C615F5326FE9383DDEC9AA892DF3A57FA7FFB3276192BC0EA" +
-	"A252ED45A865E3B093A3D0DCE5BE29E92F1392CE7DE321E3E5C52B3A"
+// signature, an uncompressed secp224r1 point (0x04, X, Y), as AN12196 section
+// 7.2 publishes it. Pass a key to VerifyOriginality to override it.
+const OriginalityKeyHex = "048A9B380AF2EE1B98DC417FECC263F8449C7625CECE82D9B916C992DA" +
+	"209D68422B81EC20B65A66B5102A61596AF3379200599316A00A1410"
 
 const originalityScalarSize = SigSize / 2
 

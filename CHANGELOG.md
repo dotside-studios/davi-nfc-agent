@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the ECDSA message. `ntag424.VerifyOriginality` takes an optional public key,
   and `NTAG424Operator.ReadOriginality` returns the signature and verdict. It
   uses the standard library's `crypto/ecdsa` over `elliptic.P224`, so no new
-  dependency. The NXP key constant is not yet confirmed against a published
-  UID and signature pair.
+  dependency. The key and the unhashed UID are checked against the genuine
+  signature AN12196 publishes.
 - **ISO 7816 response chaining on the raw channel.** `transceiveRequest` and
   each step of `transceiveSequenceRequest` take an optional `autoGetResponse`.
   Set, the agent follows `61xx` with GET RESPONSE until the card stops (at most

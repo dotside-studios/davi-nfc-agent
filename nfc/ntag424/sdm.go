@@ -19,7 +19,9 @@
 //
 // The algorithms are NXP's AN12196, "NTAG 424 DNA and NTAG 424 DNA TagTamper
 // features and hints", and the tests pin every step to the worked examples in
-// that document. LRP-mode tags are not supported; only the AES cipher suite is.
+// that document. A tag in LRP mode mirrors a different PICCData block and
+// derives its keys with the Leakage Resilient Primitive (package lrp); set
+// Keys.LRP to verify one.
 package ntag424
 
 import (
@@ -32,10 +34,19 @@ import (
 	"strings"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc/ev2"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/lrp"
 )
 
 // PICCDataSize is the length of the encrypted PICCData block a tag mirrors.
 const PICCDataSize = 16
+
+// PICCRandSize is the length of the random number an LRP tag mirrors ahead of
+// its encrypted PICCData, which is the counter the PICCData is enciphered under.
+const PICCRandSize = 8
+
+// LRPPICCDataSize is the length of what an LRP tag mirrors in place of the
+// encrypted PICCData block: the random number, then the block.
+const LRPPICCDataSize = PICCRandSize + PICCDataSize
 
 // Errors reported here, kept distinct because a caller answers them differently:
 // a bad MAC is a forgery or the wrong key, a malformed parameter is a request
@@ -60,6 +71,11 @@ type Keys struct {
 	// FileRead is KSDMFileRead, from which the per-tap session keys are
 	// derived. It is what the MAC and any encrypted file data depend on.
 	FileRead []byte
+
+	// LRP selects the LRP cipher suite, for a tag switched to it. The tag then
+	// mirrors an 8-byte random number ahead of its PICCData, and the keys and
+	// MAC are derived with the Leakage Resilient Primitive.
+	LRP bool
 }
 
 // PICCData is what the tag says about itself on this tap.
@@ -76,6 +92,10 @@ type PICCData struct {
 	// session keys.
 	UIDMirrored     bool
 	CounterMirrored bool
+
+	// LRP reports that the tap came from a tag in LRP mode, which derives its
+	// session keys differently.
+	LRP bool
 }
 
 // piccDataTag bit assignments, from the PICCDataTag byte that opens a decrypted
@@ -111,6 +131,29 @@ func DecryptPICCData(metaReadKey, encrypted []byte) (*PICCData, error) {
 	plain := make([]byte, PICCDataSize)
 	cipher.NewCBCDecrypter(block, make([]byte, ev2.BlockSize)).CryptBlocks(plain, encrypted)
 	return parsePICCData(plain)
+}
+
+// DecryptPICCDataLRP is DecryptPICCData for a tag in LRP mode. What the tag
+// mirrors is an 8-byte random number then one encrypted block; the block is
+// LRICB under the SDM meta read key with the random number as its counter.
+func DecryptPICCDataLRP(metaReadKey, mirrored []byte) (*PICCData, error) {
+	key, err := lrp.New(metaReadKey, lrp.UpdateMAC)
+	if err != nil {
+		return nil, err
+	}
+	if len(mirrored) != LRPPICCDataSize {
+		return nil, fmt.Errorf("%w: %d bytes, want %d", ErrPICCData, len(mirrored), LRPPICCDataSize)
+	}
+	plain, err := key.Decrypt(mirrored[:PICCRandSize], mirrored[PICCRandSize:])
+	if err != nil {
+		return nil, err
+	}
+	data, err := parsePICCData(plain)
+	if err != nil {
+		return nil, err
+	}
+	data.LRP = true
+	return data, nil
 }
 
 // parsePICCData reads a decrypted PICCData block: a tag byte saying which
@@ -191,12 +234,50 @@ func sessionVector(prefix []byte, data *PICCData) []byte {
 	return sv
 }
 
+// The LRP session vector is a prefix, the mirrored fields, zero padding and a
+// suffix, 16 bytes in all.
+var (
+	lrpSVPrefix = []byte{0x00, 0x01, 0x00, 0x80}
+	lrpSVSuffix = []byte{0x1E, 0xE1}
+)
+
+// lrpSessionMaster derives the master key of an LRP tap from the file read key,
+// the UID and the read counter. The tap's MAC key is an updated key of it.
+func lrpSessionMaster(fileReadKey []byte, data *PICCData) ([]byte, error) {
+	key, err := lrp.New(fileReadKey, lrp.UpdateMAC)
+	if err != nil {
+		return nil, err
+	}
+	sv := make([]byte, ev2.BlockSize)
+	n := copy(sv, lrpSVPrefix)
+	if data.UIDMirrored {
+		n += copy(sv[n:], data.UID)
+	}
+	if data.CounterMirrored {
+		copy(sv[n:], encodeCounter(data.ReadCounter))
+	}
+	copy(sv[ev2.BlockSize-len(lrpSVSuffix):], lrpSVSuffix)
+	return key.CMAC(sv), nil
+}
+
 // MAC returns the SDMMAC over input for this tap: the CMAC under the tap's
-// session MAC key, truncated as the tag truncates it.
+// session MAC key, truncated as the tag truncates it. For a tap from a tag in
+// LRP mode (data.LRP) the CMAC is CMAC_LRP.
 //
 // input is the mirrored file data the tag covered, empty when the tag mirrors
 // nothing but PICCData.
 func MAC(fileReadKey []byte, data *PICCData, input []byte) ([]byte, error) {
+	if data.LRP {
+		master, err := lrpSessionMaster(fileReadKey, data)
+		if err != nil {
+			return nil, err
+		}
+		key, err := lrp.New(master, lrp.UpdateMAC)
+		if err != nil {
+			return nil, err
+		}
+		return ev2.TruncateMAC(key.CMAC(input)), nil
+	}
 	_, macKey, err := SessionKeys(fileReadKey, data)
 	if err != nil {
 		return nil, err
@@ -228,6 +309,12 @@ func VerifyMAC(fileReadKey []byte, data *PICCData, input, mac []byte) error {
 // The IV is the read counter encrypted under the session encryption key, so two
 // taps never encrypt the same file data alike.
 func DecryptFileData(fileReadKey []byte, data *PICCData, encrypted []byte) ([]byte, error) {
+	if len(encrypted) == 0 || len(encrypted)%ev2.BlockSize != 0 {
+		return nil, fmt.Errorf("ntag424: encrypted file data is %d bytes, want a multiple of %d", len(encrypted), ev2.BlockSize)
+	}
+	if data.LRP {
+		return decryptFileDataLRP(fileReadKey, data, encrypted)
+	}
 	encKey, _, err := SessionKeys(fileReadKey, data)
 	if err != nil {
 		return nil, err
@@ -235,9 +322,6 @@ func DecryptFileData(fileReadKey []byte, data *PICCData, encrypted []byte) ([]by
 	session, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, err
-	}
-	if len(encrypted) == 0 || len(encrypted)%ev2.BlockSize != 0 {
-		return nil, fmt.Errorf("ntag424: encrypted file data is %d bytes, want a multiple of %d", len(encrypted), ev2.BlockSize)
 	}
 
 	iv := make([]byte, ev2.BlockSize)
@@ -247,6 +331,22 @@ func DecryptFileData(fileReadKey []byte, data *PICCData, encrypted []byte) ([]by
 	plain := make([]byte, len(encrypted))
 	cipher.NewCBCDecrypter(session, iv).CryptBlocks(plain, encrypted)
 	return plain, nil
+}
+
+// decryptFileDataLRP is LRICB under the tap's session encryption key, counting
+// from the read counter (least significant byte first) followed by three zero
+// bytes.
+func decryptFileDataLRP(fileReadKey []byte, data *PICCData, encrypted []byte) ([]byte, error) {
+	master, err := lrpSessionMaster(fileReadKey, data)
+	if err != nil {
+		return nil, err
+	}
+	key, err := lrp.New(master, lrp.UpdateENC)
+	if err != nil {
+		return nil, err
+	}
+	counter := append(encodeCounter(data.ReadCounter), 0, 0, 0)
+	return key.Decrypt(counter, encrypted)
 }
 
 // UIDString renders the UID the way the rest of the agent writes one:

@@ -1163,14 +1163,23 @@ and each is written to the audit log (changes at warning level).
 
 Errors: a tag that is not an NTAG 424 DNA, or a phone that declared no
 APDU exchange, is `NOT_SUPPORTED`; a missing key, a refused key, the card's authentication delay
-(`91 AD`), a permission denial or an LRP-mode card is `AUTH_FAILED`; other card
+(`91 AD`), a permission denial or an LRP-mode card the keys do not allow is
+`AUTH_FAILED`; other card
 statuses are `TRANSCEIVE_FAILED`.
 
 To check a tapped SDM URL on the backend, use the Go library
 `github.com/dotside-studios/davi-nfc-agent/nfc/ntag424`: `VerifyURLFresh(url,
 keys, store)` verifies the MAC and refuses a replay with `ErrReplay` by tracking
 the highest counter seen per UID in a `CounterStore` (`MemoryCounterStore` is
-one). The agent itself exposes no verify route.
+one). The agent itself exposes no verify route. For a tag in LRP mode set
+`Keys.LRP`; it is verified the same way.
+
+A tag switched to the LRP cipher suite is driven only when the keys passed to
+`SetNTAG424Keys` have `AllowLRP` set. The LRP primitive is checked against every
+test vector in NXP's AN12304 and AuthenticateLRPFirst against the worked example
+in AN12321, but LRP secure messaging and LRP SDM follow the NT4H2421Gx data
+sheet with no published example to check them against, and none of it has run
+against real hardware, so it is off by default.
 
 #### NTAG 424 on a phone
 
@@ -1227,7 +1236,7 @@ when supported, render a capacity meter, etc.) without a round-trip.
 | `sdmEnabled` | NTAG 424 DNA: the NDEF file mirrors per-tap data, as far as its settings were last read (omitted when false) |
 | `keysHeld` | NTAG 424 DNA: key numbers (0 to 4) the agent holds a key for, never the keys (omitted when none) |
 | `randomID` | NTAG 424 DNA: the card presented a random UID for this tap (omitted when false) |
-| `lrp` | NTAG 424 DNA: the card is in LRP mode, which the agent cannot authenticate (omitted when false) |
+| `lrp` | NTAG 424 DNA: the card is in LRP mode, which the agent authenticates to only when `NTAG424Keys.AllowLRP` is set (omitted when false) |
 
 `canWrite`, `canLock` and `canTransceive` describe what the agent will actually
 do, not just what the tag is built for: they are reported false while the agent

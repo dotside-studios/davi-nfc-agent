@@ -106,7 +106,7 @@ func (t *pcscNTAG424Tag) ChangeFileSettings(fileNo byte, settings ntag424.FileSe
 		return err
 	}
 
-	err = t.withSession(keyNo, func(s *ev2.Session) error {
+	err = t.withSession(keyNo, func(s ev2.Channel) error {
 		cmd, err := ntag424.ChangeFileSettings(s, fileNo, encoded)
 		if err != nil {
 			return err
@@ -135,7 +135,7 @@ func (t *pcscNTAG424Tag) ChangeKey(keyNo byte, newKey []byte, version byte, auth
 			return NewAuthError("ChangeKey (NTAG 424)", t.UID(), err)
 		}
 	}
-	err := t.withSession(authKeyNo, func(s *ev2.Session) error {
+	err := t.withSession(authKeyNo, func(s ev2.Channel) error {
 		cmd, err := ntag424.ChangeKey(s, keyNo, authKeyNo, old, newKey, version)
 		if err != nil {
 			return err
@@ -204,7 +204,7 @@ func (t *pcscNTAG424Tag) ReadSig() ([]byte, error) {
 		return nil, err
 	}
 	var sig []byte
-	err = t.withSession(keyNo, func(s *ev2.Session) error {
+	err = t.withSession(keyNo, func(s ev2.Channel) error {
 		cmd, err := ntag424.ReadSig(s)
 		if err != nil {
 			return err
@@ -261,7 +261,7 @@ func (t *pcscNTAG424Tag) ConfigureSDM(plan *ntag424.SDMPlan) (*NTAG424SDMResult,
 	}
 	result := &NTAG424SDMResult{URL: url}
 
-	var keys ntag424.Keys
+	keys := ntag424.Keys{LRP: t.knownLRP()}
 	if n := plan.Settings.SDMMetaRead; n <= 4 {
 		if keys.MetaRead, err = t.keyFor(n); err != nil {
 			return result, fmt.Errorf("%s: verify: %w", op, err)

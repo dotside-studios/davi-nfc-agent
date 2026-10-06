@@ -64,6 +64,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ntag424Request` op `planSDM`.** A dry run of `configureSDM`: returns the
   NDEF content (`plan.ndefHex`, `plan.length`) and file settings with offsets
   for a URL template, touching no tag and needing none present.
+- **NTAG 424 DNA: LRP mode, behind an opt-in.** New package `nfc/lrp` implements
+  the Leakage Resilient Primitive (plaintext generation, updated keys, LRICB,
+  CMAC_LRP), with its plaintexts, updated keys, LRICB and CMAC_LRP pinned to NXP's
+  LRP worked examples. `nfc/ev2` gains `LRPAuthenticator` (AuthenticateLRPFirst
+  and NonFirst) and `LRPSession` (CommMode MAC and Full), and a `Channel`
+  interface both sessions satisfy; the `nfc/ntag424` command builders now take a
+  `Channel`. The driver picks the suite from the card's reply instead of
+  refusing it, when `NTAG424Keys.AllowLRP` is set. `Keys.LRP` verifies an LRP SUN
+  message in `VerifyURL` and `VerifyURLFresh`, `SDMOptions.LRP` plans its wider
+  PICCData mirror, and the emulator gains `NTAG424WithLRP`. `lrp` stays in the
+  capabilities. `ChangeKey` and encrypted SDM file data work in LRP mode too. The
+  primitive passes all 150 test vectors of AN12304 and AuthenticateLRPFirst
+  reproduces AN12321's worked example; LRP secure messaging and SDM follow the
+  NT4H2421Gx data sheet without a published example, and nothing has run on
+  hardware, which is why `AllowLRP` is off by default.
 - **The raw channel returns the card's whole reply.** `transceive` on a PC/SC
   ISO 14443 or DESFire tag now returns the reply with SW1SW2 attached and treats
   any status word as a successful exchange, so `91 AF` and `6A 82` reach the

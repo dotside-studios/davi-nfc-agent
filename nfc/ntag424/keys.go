@@ -52,6 +52,13 @@ type KeySet struct {
 	// Diversify derives each slot's key from Master and the card's UID rather
 	// than using Master itself.
 	Diversify bool
+
+	// AllowLRP lets the agent authenticate to a card that has been switched to
+	// the LRP cipher suite. It is off by default: the LRP exchange is built
+	// from NXP's description and is not yet validated against a published
+	// transcript or real hardware, so it must be asked for. A card in LRP mode
+	// is refused with ErrLRP while this is false.
+	AllowLRP bool
 }
 
 // Key returns the key for a key number on the card with this UID. The second
@@ -82,6 +89,7 @@ func (k KeySet) Copy() KeySet {
 		Master:    append([]byte(nil), k.Master...),
 		SystemID:  append([]byte(nil), k.SystemID...),
 		Diversify: k.Diversify,
+		AllowLRP:  k.AllowLRP,
 	}
 	if k.Master == nil {
 		out.Master = nil

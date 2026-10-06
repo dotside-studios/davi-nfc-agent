@@ -24,8 +24,9 @@ var (
 	// operation (91 9D).
 	ErrPermissionDenied = errors.New("ntag424: permission denied")
 
-	// ErrLRP reports a tag in LRP mode, which this package does not support.
-	ErrLRP = errors.New("ntag424: tag is in LRP mode, which is not supported")
+	// ErrLRP reports a tag in LRP mode that the caller has not allowed the
+	// agent to authenticate to. See KeySet.AllowLRP.
+	ErrLRP = errors.New("ntag424: tag is in LRP mode, which is not enabled")
 )
 
 // StatusError is a status word the card answered with other than success. It
@@ -74,7 +75,7 @@ func statusOf(resp []byte) ([]byte, error) {
 // to a command sent outside one. Use it for ChangeKey and ChangeFileSettings,
 // whose answers carry no data and whose MAC is the only proof the card applied
 // the change.
-func CheckResponse(s *Session, resp []byte, mode CommMode) ([]byte, error) {
+func CheckResponse(s Channel, resp []byte, mode CommMode) ([]byte, error) {
 	data, err := statusOf(resp)
 	if err != nil {
 		return nil, err
@@ -88,7 +89,7 @@ func CheckResponse(s *Session, resp []byte, mode CommMode) ([]byte, error) {
 // CheckChangeKeyResponse verifies the answer to ChangeKey. Changing the key the
 // session authenticated with ends the session, and the card answers with a bare
 // status; any other key is answered with a MAC.
-func CheckChangeKeyResponse(s *Session, resp []byte, keyNo, authKeyNo byte) error {
+func CheckChangeKeyResponse(s Channel, resp []byte, keyNo, authKeyNo byte) error {
 	if keyNo == authKeyNo {
 		_, err := statusOf(resp)
 		return err

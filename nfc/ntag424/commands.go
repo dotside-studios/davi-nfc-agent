@@ -38,7 +38,7 @@ const NDEFFileNo = 0x02
 //
 // A key change cannot be undone: a card whose key becomes a value nobody holds
 // cannot be authenticated to again, and has no reset.
-func ChangeKey(s *Session, keyNo, authKeyNo byte, oldKey, newKey []byte, version byte) ([]byte, error) {
+func ChangeKey(s Channel, keyNo, authKeyNo byte, oldKey, newKey []byte, version byte) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: ChangeKey needs an authenticated session")
 	}
@@ -81,7 +81,7 @@ func keyCRC(key []byte) []byte {
 //
 // settings is the encoded setting block; see FileSettings, whose Encode builds
 // one. A caller that has its own encoding can pass it here directly.
-func ChangeFileSettings(s *Session, fileNo byte, settings []byte) ([]byte, error) {
+func ChangeFileSettings(s Channel, fileNo byte, settings []byte) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: ChangeFileSettings needs an authenticated session")
 	}
@@ -93,7 +93,7 @@ func ChangeFileSettings(s *Session, fileNo byte, settings []byte) ([]byte, error
 
 // GetFileSettings builds the command that reads a file's settings back. The
 // answer is the encoded block, which ParseFileSettings reads.
-func GetFileSettings(s *Session, fileNo byte) ([]byte, error) {
+func GetFileSettings(s Channel, fileNo byte) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: GetFileSettings needs an authenticated session")
 	}
@@ -104,7 +104,7 @@ func GetFileSettings(s *Session, fileNo byte) ([]byte, error) {
 //
 // A card configured to answer with a random ID gives a different one on every
 // tap, and this is then the only way to learn which card it is.
-func GetCardUID(s *Session) ([]byte, error) {
+func GetCardUID(s Channel) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ntag424: GetCardUID needs an authenticated session")
 	}
@@ -112,7 +112,7 @@ func GetCardUID(s *Session) ([]byte, error) {
 }
 
 // ParseCardUID reads the card's answer to GetCardUID.
-func ParseCardUID(s *Session, response []byte) ([]byte, error) {
+func ParseCardUID(s Channel, response []byte) ([]byte, error) {
 	data, err := s.Response(response, CommFull)
 	if err != nil {
 		return nil, err

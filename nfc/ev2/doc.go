@@ -12,6 +12,10 @@
 // the card's answer, so the same code drives a PC/SC reader, a phone over the
 // device protocol, or a test.
 //
+// A card switched to the LRP cipher suite has its own [LRPAuthenticator] and
+// [LRPSession], built on package lrp. Both sessions satisfy [Channel], so the
+// command builders above them take either.
+//
 // The package touches no reader and imports nothing outside the standard
 // library. AES-CMAC is implemented here, since the standard library has none,
 // and is pinned to RFC 4493's vectors; every step of the exchange is pinned to

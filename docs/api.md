@@ -1094,8 +1094,12 @@ in a [raw session](#raw-sessions) on a phone, since none can be begun.
 
 ### NTAG 424 DNA (ntag424Request)
 
-Operations on an NTAG 424 DNA the agent holds keys for (see
-`Supervisor.SetNTAG424Keys`). The agent builds every command and runs it in an
+Operations on an NTAG 424 DNA the agent holds keys for. The shipped agent loads
+them from a key file given with `-keys` or `DAVI_NFC_KEYS` (see
+[Card keys](card-keys.md)); an embedding program uses
+`Supervisor.SetNTAG424Keys`. An operation that needs a key the agent does not
+hold fails with `authFailed` and a message saying keys are loaded with
+`-keys <file>`. The agent builds every command and runs it in an
 authenticated session; keys are held by the agent and never returned. The tag
 is on one of the agent's own readers or in a phone's field (see
 [NTAG 424 on a phone](#ntag-424-on-a-phone)), and is named like any other

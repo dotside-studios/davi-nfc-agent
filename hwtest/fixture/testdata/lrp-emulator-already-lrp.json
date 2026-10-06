@@ -1,0 +1,679 @@
+{
+  "version": 1,
+  "kind": "lrp",
+  "reader": "nfctest emulator",
+  "uid": "04A1B2C3D4E5F6",
+  "keys": {
+    "0": "10101010101010101010101010101010",
+    "1": "11111111111111111111111111111111",
+    "2": "12121212121212121212121212121212",
+    "3": "13131313131313131313131313131313",
+    "4": "14141414141414141414141414141414"
+  },
+  "steps": [
+    {
+      "name": "baseline",
+      "error": "getFileSettings 3: authenticate (NTAG 424): authentication failed: ntag424: tag is in LRP mode, which is not enabled",
+      "note": "the card is already in LRP mode, so there is no AES baseline",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90640000010000",
+          "response": "009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90640000010100",
+          "response": "009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90640000010200",
+          "response": "009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90640000010300",
+          "response": "009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90640000010400",
+          "response": "009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010100",
+          "response": "000000E02000009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "0000E0EE0001009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010300",
+          "response": "91AE"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000002000000",
+          "response": "01832D17687A05EDD28B4DB22FCEBE21BE91AF"
+        }
+      ]
+    },
+    {
+      "name": "refused-without-allowlrp",
+      "error": "authenticate (NTAG 424): authentication failed: ntag424: tag is in LRP mode, which is not enabled"
+    },
+    {
+      "name": "authenticate-and-read",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000008000602000000000000",
+          "response": "012DD69064B77559BBBBB9541942756ECE91AF"
+        },
+        {
+          "command": "90AF00002001C5FC5A0FA81523B6E795D2D48A49D24F5D7D10903FFE25753918B10D6F1BAC00",
+          "response": "33F60BD2FC6F3CBD1883EF357F728C3A5F95EE7C57D0EA5884A52ED7D1DBE2589100"
+        },
+        {
+          "command": "903C000009007F87FD976D4825EC00",
+          "response": "9A88F3163B59659B982285895FB5C5EE33BBB790DA9126FE40724D99EA6035B18350340ACE54C5488305C687E69C56754BFE134D428C1FB1AA5D3AD49F9773AE8EC383A2645E47299100"
+        },
+        {
+          "command": "906400000900A397D1EAC717FEDF00",
+          "response": "008B29891681EBEFA59100"
+        },
+        {
+          "command": "9064000009016B2D8965FAAC516800",
+          "response": "0040A3160A681A594C9100"
+        },
+        {
+          "command": "906400000902FF63651CBF46D66900",
+          "response": "00DFED1510BFD610A39100"
+        },
+        {
+          "command": "906400000903AC9C230931622FB500",
+          "response": "00889C3B95B27E81E39100"
+        },
+        {
+          "command": "906400000904C0342520A9C3FB5000",
+          "response": "0011923087F6A259619100"
+        },
+        {
+          "command": "90F500000902CF5C583B7DF2580F00",
+          "response": "0000E0EE000100F1027127FB0790629100"
+        }
+      ]
+    },
+    {
+      "name": "ndef-save-original",
+      "suite": "lrp",
+      "error": "ReadData (Type 4): tag holds no NDEF message",
+      "note": "the original message could not be read, so it will not be put back",
+      "wire": [
+        {
+          "command": "90F5000009020BCF5E35B446413700",
+          "response": "0000E0EE0001007D010311D829475A9100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "00009000"
+        }
+      ]
+    },
+    {
+      "name": "ndef-mac",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "0000E0EE0001009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000008000602000000000000",
+          "response": "014E0ABA7949B3370216589CAF8E8A353191AF"
+        },
+        {
+          "command": "90AF00002091A62C04FAEB36591DF1617EE7CA9E12B33453571E10E80819E7F3B12CB5B49500",
+          "response": "F344CD44CB015FE9B1EC3F677404A776BA3C493569A977E729C483B7E675777A9100"
+        },
+        {
+          "command": "905F0000190213C8BF62F46AA90F85CCF9B9EFF998FD2FC960B0C0ACA3EA00",
+          "response": "1AAA8EEDD370A6979100"
+        },
+        {
+          "command": "90F500000902F6F415E3E37F6A7F00",
+          "response": "000100000001007FBC2674B30F65869100"
+        },
+        {
+          "command": "908D000011020000000200000000D72221CEE24E12C000",
+          "response": "7013B5BFFDB17C5D9100"
+        },
+        {
+          "command": "908D00003002020000210000D1011D55046578616D706C652E636F6D2F646176692D68772F6E6465662D6D61635A9775497320C54900",
+          "response": "78A8856A94557F4E9100"
+        },
+        {
+          "command": "908D000011020000000200000021AEDFA9CCF8B2071A00",
+          "response": "08CC33E5B90AF6F69100"
+        },
+        {
+          "command": "90F500000902CC9802A9E45B0AAB00",
+          "response": "000100000001001C3CCF825C9029359100"
+        },
+        {
+          "command": "90AD00000F02000000020000999DB5BD93D49E9E00",
+          "response": "00218D4C1DF304CE08DD9100"
+        },
+        {
+          "command": "90AD00000F020200002100003AD6D18C9CA0AB9400",
+          "response": "D1011D55046578616D706C652E636F6D2F646176692D68772F6E6465662D6D6163A03916720F6EAAAA9100"
+        }
+      ]
+    },
+    {
+      "name": "ndef-full",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "90F5000009023456ABE7F42FAECC00",
+          "response": "00010000000100488F728A73625B989100"
+        },
+        {
+          "command": "905F000019029D2E2D4145848D9DC50BC5D9E6B7FC9CBE1DE41461483CDE00",
+          "response": "9CE5F94F238F363E9100"
+        },
+        {
+          "command": "90F500000902B43FDFAB522B087000",
+          "response": "00030000000100696AEA2D715DCF7E9100"
+        },
+        {
+          "command": "908D00001F020000000200000268A10851CF393C216E2603163AC7FC34C04F9F69DF378B00",
+          "response": "1F238024BE92D4CF9100"
+        },
+        {
+          "command": "908D00003F02020000220000F9400CBB7E9C608F8549E4546F48E86282AD67CE9D1AD82E223734EE23DA93B8E950D67FCED2562337A120D62B7D603F06C464F36E4DF8E000",
+          "response": "8C3DFF7725A5610F9100"
+        },
+        {
+          "command": "908D00001F02000000020000EF734F5BA33E9225AB6CD645C20A16D4602E4EB813B71B8400",
+          "response": "9EE8959302982CA79100"
+        },
+        {
+          "command": "90F50000090224822B117D98558400",
+          "response": "0003000000010054045136874A46159100"
+        },
+        {
+          "command": "90AD00000F02000000020000B3E61F7D16A17D1400",
+          "response": "D424A750FDBAF03BEFC8D2CC8563687562A404A5083EE8AD9100"
+        },
+        {
+          "command": "90AD00000F020200002200009644AE887E6449A300",
+          "response": "7E1ACD2CEC4CB5FFAA9412A93EE739014FB2BEE8F92D29800E0BA0062C59C2FEA3DD6A3FD6D009586178299BC37AE285B9E692108CB3B2619100"
+        }
+      ]
+    },
+    {
+      "name": "change-key-to-test",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "9064000009031091ED474F5AA3B100",
+          "response": "00CAF483146808C0FD9100"
+        },
+        {
+          "command": "90C4000029037F82D4C48BD9E132EE5EFCCA94628457812707D44EC7BDCA747930BCC9DEDB65D78B6EB871712DC800",
+          "response": "9B08CC04DC1529349100"
+        },
+        {
+          "command": "9064000009036A3E8EAE3B326A6A00",
+          "response": "0121729670CBA10AF19100"
+        }
+      ],
+      "keysAfter": {
+        "3": "A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5"
+      }
+    },
+    {
+      "name": "change-key-back",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000008000602000000000000",
+          "response": "01D23238572B0765D34919AB5B90478BBB91AF"
+        },
+        {
+          "command": "90AF000020F7DC3912CB873E0EE1BB50A283A2AB1FBEB3FC60D46E8E2751B47DCCA15BC64B00",
+          "response": "6428F6D04839C4B1C6CF304E6032A84AF2191D88D43CD29AA8DB1F324CA897249100"
+        },
+        {
+          "command": "90C400002903BACC4C7C66530724EDFD8421F3853ECA78A1E6358C94688FB7E8D34D6C3C83BA402627366F4E8FF100",
+          "response": "B3BAE36F1F51A8719100"
+        }
+      ],
+      "keysAfter": {
+        "3": "13131313131313131313131313131313"
+      }
+    },
+    {
+      "name": "sdm-encrypted-picc",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "91AE"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000008000602000000000000",
+          "response": "01A9B87471EE77D865B4879F3B7035E24E91AF"
+        },
+        {
+          "command": "90AF00002026285174A80E7C33E8F03850EF6A574104E32B85780046AED493450710A1E2C300",
+          "response": "97EF51CF5C98723EA96D3A925A02C2B43E5D3B785BA5A1DEB6082C072D7742AC9100"
+        },
+        {
+          "command": "90F500000902F23E3A050A9429F600",
+          "response": "000300000001007A9D29E344C190659100"
+        },
+        {
+          "command": "908D00001F0200000002000038BB55DBA093B9727BC1AC57C350E4E364E5F27A6198FD9800",
+          "response": "4C638C68AB9D576E9100"
+        },
+        {
+          "command": "908D00007F02020000670000E8AA56970833339DC25B4B8166E874755A1BB045BECC7B8F682E5336CE237ADEB8BA447DC7119BD542BDC62DBA29C7DB9F55869EC9F95D9685457C416A3DB665687C8A7291EC88E9B9F24470E8FC20C3E95462EE2292E286EB24EDBAE44FCFE7E30CC1DE23B80E63287BDF9DFBB3920BE0C09A72989354A700",
+          "response": "6CDC81C01091CB7D9100"
+        },
+        {
+          "command": "908D00001F020000000200008A59834B6C0F4720F65CF9ADE57FBC26544A5D70CB66A97800",
+          "response": "B20B7AEE8309A5D49100"
+        },
+        {
+          "command": "90F500000902627C019E60AA10EA00",
+          "response": "0003000000010024E17E8EFFDB638F9100"
+        },
+        {
+          "command": "905F000019023950415A498E5BCCBE9E3DB3281F9A856E7852D72A48AD1F00",
+          "response": "C1FA65B58DE3A62E9100"
+        },
+        {
+          "command": "90F500000902A5DC02A37BE7BA0400",
+          "response": "004000E0000100C1FF23240000590000590000640E8230EB6219759100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "00679000"
+        },
+        {
+          "command": "00B0000267",
+          "response": "D1016355046578616D706C652E636F6D2F646176692D68772F6C72703F706963633D453437464346354632414145353038373539464539444539313337303230353745434331394538444432354530453043266D61633D353446334641353535323238304636329000"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "004000E0000100C1FF232400005900005900009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "00679000"
+        },
+        {
+          "command": "00B0000267",
+          "response": "D1016355046578616D706C652E636F6D2F646176692D68772F6C72703F706963633D334646363946313642443036314335414241364533333239464133374332453344393732313741303238314135384336266D61633D313645413842394543303345303746419000"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "004000E0000100C1FF232400005900005900009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "00679000"
+        },
+        {
+          "command": "00B0000267",
+          "response": "D1016355046578616D706C652E636F6D2F646176692D68772F6C72703F706963633D343731323330384536433130323430313139443430363931433138354238373536304545314142354345344643303544266D61633D453838383444413845383637453931459000"
+        }
+      ]
+    },
+    {
+      "name": "sdm-plain-mirror",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "004000E0000100C1FF232400005900005900009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000008000602000000000000",
+          "response": "01B7B3D151AD2C7FDB87D064A1FE83BBD991AF"
+        },
+        {
+          "command": "90AF0000207BE3908782F8A9DC4534072AC76E216D954CA5B2394959409DCE7FE070C6C97300",
+          "response": "C718DE43FF58090A3A23B5D544AA0B7328E896B86C9B882E1722AC764DF182259100"
+        },
+        {
+          "command": "908D00000902000000020000000000",
+          "response": "9100"
+        },
+        {
+          "command": "908D000056020200004F0000D1014B55046578616D706C652E636F6D2F646176692D68772F6C72703F7569643D3030303030303030303030303030266374723D303030303030266D61633D3030303030303030303030303030303000",
+          "response": "9100"
+        },
+        {
+          "command": "908D00000902000000020000004F00",
+          "response": "9100"
+        },
+        {
+          "command": "90F500000902DAC53D4BFCAC3E9F00",
+          "response": "004000E0000100C1FF23240000590000590000A21BA27B7E9345EC9100"
+        },
+        {
+          "command": "905F00002902F056ABA1DD11F087FB6D7BFB1745F5D12A60AC582ACE2A27A951666C49D071C9A65763A19A499AD900",
+          "response": "02B9984CAFDCFAE89100"
+        },
+        {
+          "command": "90F5000009029938B1B84860631B00",
+          "response": "004000E0000100C1FFE32300003600004100004100000C51B0C2D1983F0E9100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "004F9000"
+        },
+        {
+          "command": "00B000024F",
+          "response": "D1014B55046578616D706C652E636F6D2F646176692D68772F6C72703F7569643D3034413142324333443445354636266374723D303030303033266D61633D423645464242303535363945424632359000"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "004000E0000100C1FFE32300003600004100004100009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "004F9000"
+        },
+        {
+          "command": "00B000024F",
+          "response": "D1014B55046578616D706C652E636F6D2F646176692D68772F6C72703F7569643D3034413142324333443445354636266374723D303030303034266D61633D413630414533364344303239453242399000"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "004000E0000100C1FFE32300003600004100004100009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "00A4000C02E103",
+          "response": "9000"
+        },
+        {
+          "command": "00B000000F",
+          "response": "00172000FF00FF0406E104010000009000"
+        },
+        {
+          "command": "00A4000C02E104",
+          "response": "9000"
+        },
+        {
+          "command": "00B0000002",
+          "response": "004F9000"
+        },
+        {
+          "command": "00B000024F",
+          "response": "D1014B55046578616D706C652E636F6D2F646176692D68772F6C72703F7569643D3034413142324333443445354636266374723D303030303035266D61633D434230353231364335354538303634419000"
+        }
+      ]
+    },
+    {
+      "name": "restore-file-settings",
+      "suite": "lrp",
+      "wire": [
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "90F50000010200",
+          "response": "004000E0000100C1FFE32300003600004100004100009100"
+        },
+        {
+          "command": "00A4040007D276000085010100",
+          "response": "9000"
+        },
+        {
+          "command": "9071000008000602000000000000",
+          "response": "01414662B77DEF5E5E4FC98D40F38FBEE491AF"
+        },
+        {
+          "command": "90AF0000205D3A18AB8CFCAF48E56EE2A4A5C59716A92B87F6F43E882CD9C029055220D1BA00",
+          "response": "6355366A3F1D4E2EF84D51D25BAC33889564C773A51FF00E9B963351CF6BA84B9100"
+        },
+        {
+          "command": "905F0000190286B8BFFEDFC71B92DCFC89FEC165C706750A391D2F48AF2C00",
+          "response": "6A6438A187A388959100"
+        }
+      ]
+    }
+  ],
+  "urls": [
+    {
+      "name": "sdm-encrypted-picc-tap-1",
+      "url": "https://example.com/davi-hw/lrp?picc=E47FCF5F2AAE508759FE9DE913702057ECC19E8DD25E0E0C\u0026mac=54F3FA5552280F62",
+      "metaReadKey": 2,
+      "fileReadKey": 3,
+      "lrp": true,
+      "counter": 0
+    },
+    {
+      "name": "sdm-encrypted-picc-tap-2",
+      "url": "https://example.com/davi-hw/lrp?picc=3FF69F16BD061C5ABA6E3329FA37C2E3D97217A0281A58C6\u0026mac=16EA8B9EC03E07FA",
+      "metaReadKey": 2,
+      "fileReadKey": 3,
+      "lrp": true,
+      "counter": 1
+    },
+    {
+      "name": "sdm-encrypted-picc-tap-3",
+      "url": "https://example.com/davi-hw/lrp?picc=4712308E6C10240119D40691C185B87560EE1AB5CE4FC05D\u0026mac=E8884DA8E867E91E",
+      "metaReadKey": 2,
+      "fileReadKey": 3,
+      "lrp": true,
+      "counter": 2
+    },
+    {
+      "name": "sdm-plain-mirror-tap-1",
+      "url": "https://example.com/davi-hw/lrp?uid=04A1B2C3D4E5F6\u0026ctr=000003\u0026mac=B6EFBB05569EBF25",
+      "fileReadKey": 3,
+      "lrp": true,
+      "counter": 3
+    },
+    {
+      "name": "sdm-plain-mirror-tap-2",
+      "url": "https://example.com/davi-hw/lrp?uid=04A1B2C3D4E5F6\u0026ctr=000004\u0026mac=A60AE36CD029E2B9",
+      "fileReadKey": 3,
+      "lrp": true,
+      "counter": 4
+    },
+    {
+      "name": "sdm-plain-mirror-tap-3",
+      "url": "https://example.com/davi-hw/lrp?uid=04A1B2C3D4E5F6\u0026ctr=000005\u0026mac=CB05216C55E8064A",
+      "fileReadKey": 3,
+      "lrp": true,
+      "counter": 5
+    }
+  ]
+}

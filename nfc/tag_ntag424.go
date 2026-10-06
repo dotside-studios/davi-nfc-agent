@@ -168,7 +168,7 @@ func (t *pcscNTAG424Tag) sessionKey() (byte, error) {
 	if n, ok := t.anyHeldKey(); ok {
 		return n, nil
 	}
-	return 0, NewAuthError("NTAG 424 session", t.UID(), fmt.Errorf("no key held"))
+	return 0, NewAuthError("NTAG 424 session", t.UID(), ErrNoNTAG424Key)
 }
 
 // keyUID is the UID per-card keys derive from: the real one, or the presented
@@ -202,7 +202,10 @@ func (t *pcscNTAG424Tag) keyFor(keyNo byte) ([]byte, error) {
 	}
 	key, ok := keys.Key(keyNo, t.keyUID())
 	if !ok {
-		return nil, fmt.Errorf("no key held for key %d", keyNo)
+		if keys.Empty() {
+			return nil, ErrNoNTAG424Key
+		}
+		return nil, fmt.Errorf("no key held for key %d: add it to the key file given with -keys", keyNo)
 	}
 	return key, nil
 }
@@ -631,7 +634,7 @@ func (t *pcscNTAG424Tag) routeFor(fs *ntag424.FileSettings, write bool) (n4Route
 	if free {
 		keyNo, ok := t.anyHeldKey()
 		if !ok {
-			return n4Route{}, fmt.Errorf("the file needs a %s session and no key is held", modeName(fs.CommMode))
+			return n4Route{}, fmt.Errorf("the file needs a %s session and no key is held: load keys with -keys <file> (or DAVI_NFC_KEYS)", modeName(fs.CommMode))
 		}
 		route.keyNo = keyNo
 		return route, nil

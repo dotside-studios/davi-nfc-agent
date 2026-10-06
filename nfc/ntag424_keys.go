@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"bytes"
+	"errors"
 	"maps"
 
 	"github.com/dotside-studios/davi-nfc-agent/nfc/ntag424"
@@ -21,6 +22,11 @@ import (
 // Keys live in memory for as long as the process does. Nothing persists them
 // and nothing logs them.
 type NTAG424Keys = ntag424.KeySet
+
+// ErrNoNTAG424Key is why an operation that needs a key was refused when the
+// agent holds no NTAG 424 key at all. It names the remedy, which is the
+// shipped command's: it holds no key material.
+var ErrNoNTAG424Key = errors.New("no NTAG 424 key is held: load keys with -keys <file> (or DAVI_NFC_KEYS)")
 
 // ntag424KeyConfigurable is implemented by tags that authenticate with AES keys
 // the agent holds (the NTAG 424 DNA).

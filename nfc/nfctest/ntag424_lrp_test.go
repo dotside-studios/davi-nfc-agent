@@ -12,7 +12,8 @@ import (
 // The driver against an emulated card in LRP mode. The emulator and the driver
 // share the ev2 and lrp packages, so these prove the driver picks the suite from
 // the card's reply and drives it end to end, not that the exchange matches real
-// hardware: no LRP transcript from NXP is pinned anywhere yet.
+// hardware. The pieces NXP publishes examples for are pinned in nfc/lrp and
+// nfc/ev2.
 
 func n4LRPKeys() nfc.NTAG424Keys {
 	keys := n4Keys()
@@ -191,5 +192,44 @@ func TestNTAG424LRPConfigureSDMEndToEnd(t *testing.T) {
 		if _, err := ntag424.VerifyURLWith(url, ntag424.Keys{MetaRead: zero, FileRead: zero}, names); err == nil {
 			t.Error("an LRP URL verified under AES keys")
 		}
+	}
+}
+
+// Switching a card to LRP: it answers under the AES session that sent the
+// switch, then refuses AES, drops its SDM configuration, and is driven only
+// with AllowLRP.
+func TestNTAG424EnableLRP(t *testing.T) {
+	plan, err := ntag424.PlanSDM("https://davi.social/t?p={picc}&m={mac}", ntag424.SDMOptions{
+		MetaRead: 1, FileRead: 1, CounterRet: 1, Change: 0, Read: ntag424.AccessFree, Write: 0, ReadWrite: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := NTAG424(ntag424UID,
+		NTAG424WithKeys(map[byte][]byte{0: n4Key0, 1: n4Key1}),
+		NTAG424WithSDM(plan),
+	).WithNTAG424Keys(n4Keys())
+	if card.Tag().Capabilities().LRP {
+		t.Fatal("a factory card reports LRP")
+	}
+
+	if err := card.Tag().(nfc.NTAG424LRPSwitch).EnableLRP(); err != nil {
+		t.Fatalf("EnableLRP: %v", err)
+	}
+	if card.NTAG424FileSettings(ntag424.NDEFFileNo).SDMEnabled {
+		t.Error("SDM is still enabled after the switch")
+	}
+
+	op := card.Tag().(nfc.NTAG424Operator)
+	if _, err := op.ReadSig(); !errors.Is(err, ntag424.ErrLRP) {
+		t.Errorf("ReadSig without AllowLRP: %v, want ErrLRP", err)
+	}
+
+	card.WithNTAG424Keys(n4LRPKeys())
+	if _, err := op.ReadSig(); err != nil {
+		t.Fatalf("ReadSig with AllowLRP: %v", err)
+	}
+	if !card.Tag().Capabilities().LRP {
+		t.Error("capabilities do not report the switched card as LRP")
 	}
 }

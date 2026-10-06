@@ -1185,6 +1185,12 @@ in AN12321, but LRP secure messaging and LRP SDM follow the NT4H2421Gx data
 sheet with no published example to check them against, and none of it has run
 against real hardware, so it is off by default.
 
+A custom build can switch a tag to LRP with `NTAG424LRPSwitch.EnableLRP`, which
+the NTAG 424 driver implements; it authenticates under key 0 and sends
+SetConfiguration option `05h` as AN12321 Table 3 shows it. The switch is
+permanent and disables the tag's SDM configuration, so it is not offered over
+the client protocol.
+
 #### NTAG 424 on a phone
 
 The agent runs the same session against a tag a phone holds, over the phone's

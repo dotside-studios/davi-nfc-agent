@@ -21,6 +21,7 @@ const (
 // SetConfiguration options.
 const (
 	ConfigPICC              = 0x00
+	ConfigCapability        = 0x05
 	ConfigFailedAuthCounter = 0x0A
 )
 
@@ -90,6 +91,22 @@ func SetFailedAuthCounter(s Channel, enable bool, limit, decrement uint16) ([]by
 	binary.LittleEndian.PutUint16(data[1:], limit)
 	binary.LittleEndian.PutUint16(data[3:], decrement)
 	return SetConfiguration(s, ConfigFailedAuthCounter, data)
+}
+
+// capabilityLRP is the PDCap2.1 bit of the capability data that switches the
+// card to LRP.
+const capabilityLRP = 0x02
+
+// EnableLRP builds the command that switches the card to the LRP cipher suite,
+// as AN12321 Table 3 shows it: option 05h, with the LRP bit set in PDCap2.1.
+//
+// The switch is permanent. Afterwards the card refuses AES authentication, and
+// its SDM configuration is disabled because LRP mirrors PICCData of another
+// size. It must be sent in a session under the application master key.
+func EnableLRP(s Channel) ([]byte, error) {
+	data := make([]byte, 10)
+	data[4] = capabilityLRP
+	return SetConfiguration(s, ConfigCapability, data)
 }
 
 // ParseSetConfiguration verifies the card's answer to any SetConfiguration.

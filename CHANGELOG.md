@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-07
+
 ### Added
 
 - **NTAG 424 operations on a phone's tag have an overall deadline.** An
@@ -154,7 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **NTAG 424 DNA driver.** The reader authenticates over EV2 with held keys
   (`Supervisor.SetNTAG424Keys`, master or per-slot, optionally diversified by
   UID), keeps the session across polls, backs off on the card's authentication
-  delay and refuses LRP-mode cards. NDEF in a protected file is read and written
+  delay and supports LRP-mode cards when `AllowLRP` is enabled. NDEF in a
+  protected file is read and written
   in MAC or full mode, `ConfigureSDM` writes and verifies an SDM URL, `lock`
   rewrites the file's access rights, and a random-ID card is routed by its real
   UID once a key resolves it
@@ -164,8 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   driver
 - **`transceiveSequenceRequest`** runs up to 32 APDU exchanges under one tag
   operation, or inside a raw session, with `expectSW` and `stopOnSW` per step
-  and `stoppedAt` in the response. Same gates and audit as `transceive`; a
-  tag held by a phone answers `NOT_SUPPORTED`
+  and `stoppedAt` in the response. Same gates and audit as `transceive`,
+  including for a tag held by a phone
 - **`ntag424Request`** runs `getFileSettings`, `configureSDM`, `changeKey`,
   `getCardUID`, `getKeyVersion`, `readSig` and `lock` on an NTAG 424 DNA with the
   keys the agent holds. Changes are refused in read-only mode; `changeKey` and
@@ -175,41 +178,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   numbers only), `randomID` and `lrp`, all omitted when false
 - `docs/device-setup.md` covers the iOS `iso7816.select-identifiers` entitlement
   (`D2760000850101` for NTAG 424 DNA), Android `IsoDep`, and the reply format
-
-### Fixed
-
-- EV2 secure messaging counted a `NonFirst` authentication's command counter
-  from the wrong start, so a session opened with `AuthenticateEV2NonFirst`
-  rejected its first command
-- Type 4 NDEF access follows the capability container: writes use the NDEF file
-  ID the CC names, NLEN is length-checked, and chunk sizes honour its MLe and MLc
-
-- **A DESFire EV1's files behind AES keys are now reachable.** An EV1 does not
-  answer `AuthenticateEV2First`, so an EV1 whose NDEF file named a key fell back
-  to unauthenticated access and reported itself read-only. **Package `nfc/ev1`**
-  implements the exchange it does answer, `AuthenticateAES` (`0xAA`), and the
-  messaging that follows: no transaction identifier and no counter, a chaining
-  vector that every MAC continues and replaces, and the leading eight bytes of
-  each MAC on the wire, where the generation after it keeps the odd-indexed ones
-- The driver picks the exchange from the generation the card reported, so an EV1
-  is offered only the older one and an EV2 or EV3 only the newer. A DESFire whose
-  generation is unknown tries the newer first and falls back, since a card that
-  does not implement it refuses it without changing anything
-- `ev2.CMACFrom` is CMAC with the chain starting somewhere other than zero, which
-  is what the older generation's messaging needs. `CMAC` is now that with a zero
-  vector, and RFC 4493's vectors still pin it
-- `nfctest.DESFireEV1` is an emulated card of that generation: it refuses the
-  newer exchange and answers the older, and its card side verifies what the
-  driver sends rather than accepting it
-
-### Changed
-
-- Enciphered communication on an EV1 is refused rather than driven with the
-  wrong scheme. That generation protects an enciphered file with a checksum
-  inside the ciphertext rather than a MAC beside it, which `nfc/ev1` does not
-  implement; a file asking for it reports so instead of failing at the card
-
-### Added
 
 - **FeliCa is detected and scans for its identifier.** A FeliCa presented to a
   reader was previously an unsupported tag; it now reaches clients as an
@@ -224,32 +192,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in pcsc-tools. Detection constants are the part of this package with nothing
   behind them: no round trip to fail, and no emulator to disagree, because the
   emulators are built from a kind detection already chose
-
-### Fixed
-
-- **Four card names in the ATR table named the wrong card.** Against the
-  registry: `0x0004` is an SLE55R rather than a MIFARE Mini, `0x0006` and
-  `0x0007` are ST SR176 and SRI X4K rather than MIFARE Plus, `0x000A` and
-  `0x000B` are Atmel AT88SC parts rather than Plus in SL2, and `0x0026`, read
-  here as a DESFire, is the Mini. Only the last had a driver behind it, so a
-  MIFARE Mini was being driven down the DESFire path; the rest named kinds with
-  no driver and fell through to command detection either way. The table now
-  reads the card name as the two bytes it is, rather than the low byte alone,
-  and ignores the standard byte before it, which varies by reader
-
-### Fixed
-
-- **A DESFire's NDEF application was selected with its identifier reversed.**
-  An application identifier travels least significant byte first, so the NFC
-  Forum's 0x000001 is `01 00 00` on the wire; the driver sent `00 00 01`, which
-  names application 0x010000 and is on no NDEF-formatted card. Every DESFire
-  would have failed its SELECT and scanned as identity-only, never yielding its
-  message. Nothing here caught it: the emulator was written to answer what the
-  driver sends, so both sides agreed on the wrong bytes. `nfc.DESFireAID`
-  encodes an identifier so the order is stated once rather than written out at
-  each call
-
-### Added
 
 - **Differential vectors for the DESFire commands this driver builds**, in
   `nfc/desfire_vectors_test.go`, taken from libfreefare and the Proxmark3
@@ -363,10 +305,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `GetFileSettings`. Each is pinned to its worked example: Tables 18, 25, 26
   and 28 reproduce their published APDUs byte for byte, including the card's own
   flavour of CRC-32, which differs from the usual one by its final inversion.
-  These build APDUs and read answers; nothing in the agent calls them. There is
-  no tag operation, no client verb, no console entry and no key store, so the
-  agent still holds no AES key: whoever holds one builds the command and sends it
-  over a channel of their choosing, the raw APDU channel included. `ChangeKey`
+  These build APDUs and read answers; the agent's NTAG 424 driver and client
+  operations use them with the keys the agent holds. `ChangeKey`
   cannot be undone, and a wrong one leaves a tag nobody can authenticate to
 - **`nfc/ntag424` verifies an NTAG 424 DNA's SDM (SUN) taps**, offline. A tag
   configured for Secure Dynamic Messaging rewrites its own URL on every read,
@@ -384,7 +324,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the URL and the primitives, which read whatever a caller was handed. A
   verified MAC proves the tap came from the tag, not that it is fresh: a
   captured URL verifies forever, so compare the read counter against the highest
-  already seen for that UID. LRP-mode tags are not supported
+  already seen for that UID, or use `VerifyURLFresh` with a `CounterStore`.
+  LRP-mode taps are supported when `Keys.LRP` is set
 - **NTAG 424 DNA support**, at the NDEF level. The card is now detected, named
   `NTAG424`, and driven through the existing Type 4 path, with the 416-byte
   layout and 254-byte NDEF ceiling its three standard files give it, so an
@@ -397,9 +338,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command-based detection before any application or file is selected. A card
   that does not implement it answers with an error status word and is left to
   the detection that follows, so nothing else pays more than a single APDU. The
-  card's AES commands (authentication, file settings, SDM) remain
-  unimplemented; `supportsAuthentication` describes the card, not the driver.
-  Reach those commands through the raw APDU channel
+  card's AES commands (authentication, file settings, SDM) are implemented by
+  the NTAG 424 driver and exposed through `ntag424Request`
 - `nfc.ParseWrappedGetVersionResponse` reads a `GET_VERSION` answered over
   ISO 14443-4, where the frame carries no header byte and the status is in SW2
   under `SW1=0x91`. `nfc.NTAG424GetVersionAPDU` builds the wrapped command it
@@ -407,6 +347,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   three-frame version chain on top of the Type 4 emulator
 
 ### Changed
+
+- Enciphered communication on an EV1 is refused rather than driven with the
+  wrong scheme. That generation protects an enciphered file with a checksum
+  inside the ciphertext rather than a MAC beside it, which `nfc/ev1` does not
+  implement; a file asking for it reports so instead of failing at the card
 
 - The client library's view of the wire is generated from the Go that serves
   it. `cmd/sdkgen` reads package `protocol` and writes
@@ -432,6 +377,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `protocol.WSType*` had five of them
 
 ### Fixed
+
+- EV2 secure messaging counted a `NonFirst` authentication's command counter
+  from the wrong start, so a session opened with `AuthenticateEV2NonFirst`
+  rejected its first command
+- Type 4 NDEF access follows the capability container: writes use the NDEF file
+  ID the CC names, NLEN is length-checked, and chunk sizes honour its MLe and MLc
+
+- **A DESFire EV1's files behind AES keys are now reachable.** An EV1 does not
+  answer `AuthenticateEV2First`, so an EV1 whose NDEF file named a key fell back
+  to unauthenticated access and reported itself read-only. **Package `nfc/ev1`**
+  implements the exchange it does answer, `AuthenticateAES` (`0xAA`), and the
+  messaging that follows: no transaction identifier and no counter, a chaining
+  vector that every MAC continues and replaces, and the leading eight bytes of
+  each MAC on the wire, where the generation after it keeps the odd-indexed ones
+- The driver picks the exchange from the generation the card reported, so an EV1
+  is offered only the older one and an EV2 or EV3 only the newer. A DESFire whose
+  generation is unknown tries the newer first and falls back, since a card that
+  does not implement it refuses it without changing anything
+- `ev2.CMACFrom` is CMAC with the chain starting somewhere other than zero, which
+  is what the older generation's messaging needs. `CMAC` is now that with a zero
+  vector, and RFC 4493's vectors still pin it
+- `nfctest.DESFireEV1` is an emulated card of that generation: it refuses the
+  newer exchange and answers the older, and its card side verifies what the
+  driver sends rather than accepting it
+
+- **Four card names in the ATR table named the wrong card.** Against the
+  registry: `0x0004` is an SLE55R rather than a MIFARE Mini, `0x0006` and
+  `0x0007` are ST SR176 and SRI X4K rather than MIFARE Plus, `0x000A` and
+  `0x000B` are Atmel AT88SC parts rather than Plus in SL2, and `0x0026`, read
+  here as a DESFire, is the Mini. Only the last had a driver behind it, so a
+  MIFARE Mini was being driven down the DESFire path; the rest named kinds with
+  no driver and fell through to command detection either way. The table now
+  reads the card name as the two bytes it is, rather than the low byte alone,
+  and ignores the standard byte before it, which varies by reader
+
+- **A DESFire's NDEF application was selected with its identifier reversed.**
+  An application identifier travels least significant byte first, so the NFC
+  Forum's 0x000001 is `01 00 00` on the wire; the driver sent `00 00 01`, which
+  names application 0x010000 and is on no NDEF-formatted card. Every DESFire
+  would have failed its SELECT and scanned as identity-only, never yielding its
+  message. Nothing here caught it: the emulator was written to answer what the
+  driver sends, so both sides agreed on the wrong bytes. `nfc.DESFireAID`
+  encodes an identifier so the order is stated once rather than written out at
+  each call
 
 - A permanently failing read is reported once per card rather than once per
   poll. The reader polls ten times a second, so an unreadable card filled the

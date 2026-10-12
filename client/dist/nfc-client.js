@@ -243,7 +243,9 @@ var DaviNFC = (() => {
         case "tagData": {
           const tag = parseTagData(payload);
           if (!tag.uid) {
-            this.clearTag();
+            if (tag.deviceID === this.tag?.deviceID) {
+              this.clearTag();
+            }
             break;
           }
           this.tag = tag;
@@ -375,11 +377,10 @@ var DaviNFC = (() => {
     }
     /** Asks the tag, rather than reading what the scan captured. */
     async getCapabilities(target) {
-      const response = await this.sendRequest(
+      return this.sendRequest(
         "capabilitiesRequest",
         this.aimed({}, target)
       );
-      return response.capabilities ?? {};
     }
     async healthCheck() {
       const response = await fetch(`${this.serverUrl}/api/v1/health`);

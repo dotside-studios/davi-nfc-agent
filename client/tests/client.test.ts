@@ -351,6 +351,38 @@ describe("naming the tag a request applies to", () => {
     expect(client.currentTag()?.uid).toBe("04A1B2");
   });
 
+  it("drops a phone's tag when that phone reports it left", async () => {
+    const { client, ws } = await connected();
+    const onRemoved = vi.fn();
+    client.on("tagRemoved", onRemoved);
+
+    ws.emit({ type: "tagData", payload: { uid: "04A1B2", deviceID: "phone-7" } });
+    ws.emit({ type: "tagData", payload: { uid: "", deviceID: "phone-7" } });
+
+    expect(onRemoved).toHaveBeenCalledWith({ uid: "04A1B2" });
+    expect(client.currentTag()).toBeNull();
+  });
+
+  it("keeps a tag when another device's tag leaves", async () => {
+    const { client, ws } = await connected();
+    const onRemoved = vi.fn();
+    client.on("tagRemoved", onRemoved);
+
+    ws.emit({ type: "tagData", payload: { uid: "04A1B2", deviceID: "phone-7" } });
+    ws.emit({ type: "tagData", payload: { uid: "", deviceID: "phone-9" } });
+    expect(client.currentTag()?.uid).toBe("04A1B2");
+
+    // The agent's own reader failing a read names no device.
+    ws.emit({ type: "tagData", payload: { uid: "", err: "get tags error" } });
+    expect(client.currentTag()?.uid).toBe("04A1B2");
+
+    ws.emit({ type: "tagData", payload: { uid: "04C3D4" } });
+    ws.emit({ type: "tagData", payload: { uid: "", deviceID: "phone-9" } });
+    expect(client.currentTag()?.uid).toBe("04C3D4");
+
+    expect(onRemoved).not.toHaveBeenCalled();
+  });
+
   it("drops the local reader's tag when it reports no card", async () => {
     const { client, ws } = await connected();
     ws.emit({ type: "tagData", payload: { uid: "04A1B2" } });
@@ -471,7 +503,7 @@ describe("tag operations", () => {
     await expect(asking).resolves.toMatchObject({ keyVersion: 0 });
   });
 
-  it("getCapabilities() unwraps the capabilities the agent nests", async () => {
+  it("getCapabilities() resolves to the payload the agent replies with", async () => {
     const { client, ws } = await connected();
     const asking = client.getCapabilities();
     const sent = JSON.parse(ws.send.mock.calls[0][0]);
@@ -479,11 +511,26 @@ describe("tag operations", () => {
 
     ws.emit({
       id: sent.id,
+      type: "capabilitiesResponse",
       success: true,
-      payload: { capabilities: { canWrite: true, maxNdefSize: 504 } },
+      payload: {
+        canLock: false,
+        canRead: true,
+        canTransceive: false,
+        canWrite: false,
+        supportsNdef: true,
+        tagFamily: "Unknown",
+      },
     });
 
-    await expect(asking).resolves.toEqual({ canWrite: true, maxNdefSize: 504 });
+    await expect(asking).resolves.toEqual({
+      canLock: false,
+      canRead: true,
+      canTransceive: false,
+      canWrite: false,
+      supportsNdef: true,
+      tagFamily: "Unknown",
+    });
   });
 
   it("lock() sends a lockRequest and resolves with the outcome", async () => {

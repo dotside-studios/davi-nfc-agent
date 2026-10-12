@@ -1,0 +1,9 @@
+{
+  "payload": {
+    "deviceID": "dev_abc123",
+    "err": null,
+    "text": "",
+    "uid": ""
+  },
+  "type": "tagData"
+}

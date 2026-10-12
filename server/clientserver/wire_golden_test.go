@@ -216,6 +216,21 @@ func TestGoldenTagDataOnRemoval(t *testing.T) {
 	golden(t, "tagdata_removed", tagDataMessage(nfc.NFCData{}))
 }
 
+// A phone's tag leaving names the phone, as its scans do, so a client holding
+// another device's tag can tell the removal is not about it.
+func TestGoldenTagDataOnPhoneRemoval(t *testing.T) {
+	golden(t, "tagdata_removed_device", tagDataMessage(nfc.NFCData{
+		Device:     "dev_abc123",
+		RemovedUID: "04A1B2C3D4E5F6",
+	}))
+}
+
+// A failed read on the agent's own reader names the reader, which is not a
+// deviceID, so the removal shape leaves it out.
+func TestGoldenTagDataOnReaderErrorOmitsDevice(t *testing.T) {
+	golden(t, "tagdata_removed", tagDataMessage(nfc.NFCData{Device: "mock:usb:001"}))
+}
+
 func TestGoldenDeviceStatus(t *testing.T) {
 	golden(t, "devicestatus", protocol.WebSocketMessage{
 		Type: server.WSMessageTypeDeviceStatus,

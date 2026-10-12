@@ -27,7 +27,7 @@ func TestBroadcastWithNoClientsIsFine(t *testing.T) {
 		Broadcast(nfc.NFCData{Card: nfc.NewCard(nfc.NewMockTag("04000001"))})
 }
 
-// The deviceStatus payload carries the field names docs/api.md documents.
+// The deviceStatus payload carries the field names docs/client-api.md documents.
 // nfc.DeviceStatus is marshalled directly, so without json tags it carried the
 // Go names and every field a client read was undefined.
 func TestDeviceStatusIsBroadcastInTheDocumentedShape(t *testing.T) {

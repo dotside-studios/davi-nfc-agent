@@ -2,7 +2,7 @@ import type { WriteRecord } from './types'
 
 /**
  * Record kinds the composer can build and the fields each uses, mirroring the
- * Record Fields table in docs/api.md.
+ * record field tables in docs/client-api.md.
  */
 export interface RecordKind {
   type: string

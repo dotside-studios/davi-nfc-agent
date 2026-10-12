@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-12
+
 ### Fixed
 
+- **`getCapabilities()` returns the tag's capabilities.** The agent sends the
+  capabilities as the `capabilitiesResponse` payload itself, but the client read
+  them from a nested `capabilities` key, so `getCapabilities()` and the React
+  hook's `refreshCapabilities` always resolved to `{}`.
 - **A phone's tag leaving reaches clients.** A device's `tagRemoved` used to stop
   at the agent, so a client kept a phone-held tag after it left. It is now
   broadcast as a `tagData` with an empty `uid` and the device's `deviceID`, and

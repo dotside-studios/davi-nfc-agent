@@ -7,7 +7,8 @@ Two libraries in `client/`, one per side of the agent:
 | `NFCClient` | An application reading scans and acting on tags | [Client API](client-api.md) |
 | `NFCDeviceClient` | A phone, browser or Node.js process acting as a reader | [Device API](device-api.md) |
 
-Neither is published to npm. Both are in this repository.
+Neither is published to npm. Both are in [`client/`](../client) of the agent's
+repository.
 
 ## NFCClient
 

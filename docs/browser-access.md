@@ -60,8 +60,8 @@ ask for it once and keep it on that machine, for instance in `localStorage`.
 
 ## 4. Connect
 
-Copy the client library into the site. It is built into `client/dist` in this
-repository:
+Copy the client library into the site. A built copy is committed in
+[`client/dist`](../client/dist) of the agent's repository:
 
 ```bash
 cp client/dist/nfc-client.esm.js your-site/

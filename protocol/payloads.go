@@ -52,9 +52,15 @@ type TagDataPayload struct {
 // is in the field. An empty UID is how a client recognises it. It also carries
 // a scan that failed before any tag was read, in Err.
 type TagRemovedPayload struct {
-	UID  string  `json:"uid"`
-	Text string  `json:"text"`
-	Err  *string `json:"err"`
+	UID  string `json:"uid"`
+	Text string `json:"text"`
+
+	// DeviceID names the device whose tag left. Absent for the agent's own
+	// reader, as on [TagDataPayload], so a client holding a tag from one device
+	// keeps it when another device's tag leaves.
+	DeviceID string `json:"deviceID,omitempty"`
+
+	Err *string `json:"err"`
 }
 
 // WriteResponsePayload answers a writeRequest that landed, with what reached

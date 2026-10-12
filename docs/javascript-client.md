@@ -125,7 +125,7 @@ removes it.
 | Event | Payload | When |
 |-------|---------|------|
 | `tagData` | `TagData` | A tag was read |
-| `tagRemoved` | `{ uid }` | The tag the client last reported left the agent's reader |
+| `tagRemoved` | `{ uid }` | The tag the client last reported left the reader or device that read it |
 | `deviceStatus` | `{ connected, device?, message?, cardPresent? }` | The agent's own reader changed state |
 | `connected` | `{}` | The connection opened |
 | `disconnected` | `{}` | The connection closed |
@@ -135,9 +135,11 @@ removes it.
 differences: `scannedAt` is a `Date`, `err` is named `error`, and the original
 payload is kept in `_raw`.
 
-`tagRemoved` comes from the agent's reader reporting no card. The agent sends
-nothing when a phone's tag leaves, so for a tag with a `deviceID` the event
-does not fire and `currentTag()` keeps returning it.
+`tagRemoved` fires and `currentTag()` returns `null` when the agent reports a
+[removal](client-api.md#removal-and-failed-reads) about the current tag: one
+naming the tag's `deviceID`, or for a tag the agent's own reader read, one
+naming no device or a `deviceStatus` with `cardPresent: false`. A removal
+naming another device leaves the current tag in place.
 
 ### Errors
 

@@ -133,8 +133,19 @@ read that failed before any tag was identified, with the reason in `err`:
 { "type": "tagData", "payload": { "uid": "", "text": "", "err": null } }
 ```
 
-This is sent for the agent's own reader. When a phone's tag leaves its field,
-clients are not sent a message; a request for that tag fails with `NO_CARD`.
+When a paired device's tag leaves, the same message carries the device's
+`deviceID`, so a client holding a tag from another reader can tell the removal
+is not about it:
+
+```json
+{ "type": "tagData", "payload": { "uid": "", "text": "", "deviceID": "6f1c…", "err": null } }
+```
+
+Without `deviceID`, it is about the agent's own reader. That reader also
+reports a tag leaving as `cardPresent: false` in [deviceStatus](#devicestatus).
+A device that disconnects without sending
+[tagRemoved](device-api.md#tagremoved) produces no removal; a request for its
+tag then fails with `NO_CARD`.
 
 #### Identity-only scans
 

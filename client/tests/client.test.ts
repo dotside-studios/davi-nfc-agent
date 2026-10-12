@@ -503,7 +503,7 @@ describe("tag operations", () => {
     await expect(asking).resolves.toMatchObject({ keyVersion: 0 });
   });
 
-  it("getCapabilities() unwraps the capabilities the agent nests", async () => {
+  it("getCapabilities() resolves to the payload the agent replies with", async () => {
     const { client, ws } = await connected();
     const asking = client.getCapabilities();
     const sent = JSON.parse(ws.send.mock.calls[0][0]);
@@ -511,11 +511,26 @@ describe("tag operations", () => {
 
     ws.emit({
       id: sent.id,
+      type: "capabilitiesResponse",
       success: true,
-      payload: { capabilities: { canWrite: true, maxNdefSize: 504 } },
+      payload: {
+        canLock: false,
+        canRead: true,
+        canTransceive: false,
+        canWrite: false,
+        supportsNdef: true,
+        tagFamily: "Unknown",
+      },
     });
 
-    await expect(asking).resolves.toEqual({ canWrite: true, maxNdefSize: 504 });
+    await expect(asking).resolves.toEqual({
+      canLock: false,
+      canRead: true,
+      canTransceive: false,
+      canWrite: false,
+      supportsNdef: true,
+      tagFamily: "Unknown",
+    });
   });
 
   it("lock() sends a lockRequest and resolves with the outcome", async () => {

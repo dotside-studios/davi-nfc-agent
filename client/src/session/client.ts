@@ -428,11 +428,10 @@ export class NFCClient {
 
   /** Asks the tag, rather than reading what the scan captured. */
   async getCapabilities(target?: TagTarget): Promise<TagCapabilities> {
-    const response = await this.sendRequest<{ capabilities?: TagCapabilities }>(
+    return this.sendRequest<TagCapabilities>(
       "capabilitiesRequest",
       this.aimed({}, target),
     );
-    return response.capabilities ?? {};
   }
 
   async healthCheck(): Promise<HealthCheckResponse> {

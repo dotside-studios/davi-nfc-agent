@@ -1287,9 +1287,7 @@ Response (`type: "capabilitiesResponse"`):
   "id": "req_cap",
   "type": "capabilitiesResponse",
   "success": true,
-  "payload": {
-    "capabilities": { "canWrite": true, "canLock": true, "supportsPassword": true, "maxNdefSize": 504 }
-  }
+  "payload": { "canWrite": true, "canLock": true, "supportsPassword": true, "maxNdefSize": 504 }
 }
 ```
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`NFCDeviceClient` keeps the query of the server URL it is given.** It built
+  the connection URL by appending `?mode=device`, so a URL carrying
+  `?secret=TOKEN` became `?secret=TOKEN?mode=device` and the agent refused it
+  with 401. It now sets `mode=device` alongside the parameters already there.
+
+### Added
+
+- **`NFCDeviceClient` takes a `secret` option**, sent as `?secret=`, for a
+  browser, which cannot put a device token in an Authorization header.
+
 ## [1.5.0] - 2026-10-07
 
 ### Added

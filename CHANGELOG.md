@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A phone's tag leaving reaches clients.** A device's `tagRemoved` used to stop
+  at the agent, so a client kept a phone-held tag after it left. It is now
+  broadcast as a `tagData` with an empty `uid` and the device's `deviceID`, and
+  `NFCClient` clears its tag and fires `tagRemoved` when the removal names the
+  device that read it. A removal naming another device, or a failed read on the
+  agent's own reader, leaves a phone's tag in place.
+- **`NFCDeviceClient` keeps the query of the server URL it is given.** It built
+  the connection URL by appending `?mode=device`, so a URL carrying
+  `?secret=TOKEN` became `?secret=TOKEN?mode=device` and the agent refused it
+  with 401. It now sets `mode=device` alongside the parameters already there.
+
+### Added
+
+- **`NFCDeviceClient` takes a `secret` option**, sent as `?secret=`, for a
+  browser, which cannot put a device token in an Authorization header.
+
 ## [1.5.0] - 2026-10-07
 
 ### Added

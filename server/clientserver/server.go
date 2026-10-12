@@ -780,9 +780,16 @@ func tagDataMessage(data nfc.NFCData) protocol.WebSocketMessage {
 	}
 
 	if data.Card == nil {
+		payload := protocol.TagRemovedPayload{Err: errStr}
+		// Only a device reporting its own scans names the tag that left, and a
+		// phone's tags carry that same device as deviceID. A failed read on the
+		// agent's own reader names a reader path, which is not a deviceID.
+		if data.RemovedUID != "" {
+			payload.DeviceID = data.Device
+		}
 		return protocol.WebSocketMessage{
 			Type:    server.WSMessageTypeTagData,
-			Payload: protocol.TagRemovedPayload{Err: errStr},
+			Payload: payload,
 		}
 	}
 

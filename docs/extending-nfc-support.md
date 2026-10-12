@@ -1,15 +1,17 @@
 # Extending NFC Support
 
-This guide explains how to add support for new NFC readers or tag types to the davi-nfc-agent.
+This guide covers adding a reader backend or a tag type to the agent by
+implementing the interfaces in package `nfc`. Using an existing backend from a
+program of your own is covered in [Custom Builds](custom-builds.md).
 
-## Architecture Overview
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      MultiManager                           │
-│     Aggregates multiple managers, routes device requests    │
+│                 multimanager.MultiManager                   │
+│     Aggregates several managers, routes device requests     │
 ├──────────────────┬──────────────────┬───────────────────────┤
-│  HardwareManager │ remotenfc.Manager│   YourManager         │
+│   pcsc.Manager   │ remotenfc.Manager│   YourManager         │
 │  (PC/SC readers) │ (WebNFC/mobile)  │   (custom)            │
 └────────┬─────────┴────────┬─────────┴──────────┬────────────┘
          │                  │                    │
@@ -20,27 +22,29 @@ This guide explains how to add support for new NFC readers or tag types to the d
        Tag[]              Tag[]               Tag[]
 ```
 
+| Interface | Purpose |
+|-----------|---------|
+| `nfc.Manager` | Lists devices and opens them |
+| `nfc.Device` | An opened reader: polls for tags and exchanges bytes |
+| `nfc.Tag` | One tag: identity, read, write, transceive, lock, capabilities |
+
 A backend implements no authentication of its own. Devices that dial in reach it
 through `pairing.Gate.Admit`, which wraps the backend's endpoint at the mount,
 checks the credential and names the device it admitted; the backend reads that
 name with `deviceid.Of(r)` and registers the device under it, or mints one when
 nothing admitted the connection.
 
-The gate is not in this tree. It wraps endpoints, so a backend with none — a
-reader attached to this machine — is untouched by it. What it asks of the tree
-is `DisconnectDevice`, so revoking a credential ends the session holding it.
+The gate is not in the manager tree. It wraps endpoints, so a backend with none,
+such as a reader attached to this machine, is untouched by it. What it asks of
+the tree is `DisconnectDevice`, so revoking a credential ends the session
+holding it.
 
-### Core Interfaces
+## Adding a reader backend
 
-| Interface | Purpose |
-|-----------|---------|
-| `Manager` | Device discovery and connection |
-| `Device` | Hardware communication |
-| `Tag` | Tag operations (read/write/transceive) |
+The samples below build one package, `myreader`, for a polled reader that
+cannot exchange raw bytes with its tags.
 
-## Adding a New Device Type
-
-### Step 1: Implement the Manager Interface
+### Step 1: The manager
 
 ```go
 package myreader
@@ -48,649 +52,347 @@ package myreader
 import "github.com/dotside-studios/davi-nfc-agent/nfc"
 
 type MyManager struct {
-    // Your connection state (USB, serial, network, etc.)
+	// Your connection state: USB, serial, network.
 }
 
 func NewManager() *MyManager {
-    return &MyManager{}
+	return &MyManager{}
 }
 
 // Devices lists what this manager offers, and what is known of each before it
-// is opened. Capabilities.CanPoll says the agent may open it and read from it;
-// a device that reports its own scans declares SupportsEvents instead and is
-// left out of every reader list.
+// is opened. CanPoll says the agent may open the device and poll it; a device
+// that reports its own scans declares SupportsEvents instead and is left out of
+// every reader list.
 func (m *MyManager) Devices() ([]nfc.DeviceListing, error) {
-    // Enumerate connected devices, naming them "myreader:usb:001" or
-    // "myreader:192.168.1.100".
-    return []nfc.DeviceListing{
-        {
-            Path:         "myreader:default",
-            Capabilities: nfc.DeviceCapabilities{CanPoll: true, CanTransceive: true},
-        },
-    }, nil
+	return []nfc.DeviceListing{{
+		Path:         "myreader:default",
+		ID:           "myreader:default",
+		Capabilities: nfc.DeviceCapabilities{CanPoll: true, DeviceType: "myreader"},
+	}}, nil
 }
 
-// OpenDevice opens a device by its identifier
-// The device should be fully initialized and ready to use when returned
+// OpenDevice returns the device ready to use: the agent performs no further
+// initialization.
 func (m *MyManager) OpenDevice(deviceStr string) (nfc.Device, error) {
-    // Parse deviceStr and connect to the hardware
-    device := &MyDevice{
-        connection: deviceStr,
-    }
-
-    // Perform any device-specific initialization here
-    // The returned device should be ready to use immediately
-
-    return device, nil
+	return &MyDevice{connection: deviceStr}, nil
 }
 ```
 
-### Step 2: Implement the Device Interface
+### Step 2: The device
+
+`nfc.Device` has five methods. The device below also implements
+`DeviceInfoProvider`, which names it in its capabilities, and
+`DeviceTransceiver`, because a device that does not implement it is reported as
+`CanTransceive: true`.
 
 ```go
 type MyDevice struct {
-    connection string
-    // Your hardware handle (serial port, USB handle, socket, etc.)
+	connection string
+	// Your hardware handle: serial port, USB handle, socket.
 }
 
-func (d *MyDevice) Close() error {
-    // Clean up resources
-    return nil
-}
-
-func (d *MyDevice) String() string {
-    return "My NFC Reader"
-}
-
-func (d *MyDevice) Connection() string {
-    return d.connection
-}
-
-// DeviceType returns the device type identifier (implements DeviceInfoProvider)
-func (d *MyDevice) DeviceType() string {
-    return "myreader"
-}
-
-// SupportedTagTypes returns supported tag types (implements DeviceInfoProvider)
-func (d *MyDevice) SupportedTagTypes() []string {
-    return []string{"MIFARE Classic", "NTAG"}
-}
+func (d *MyDevice) Close() error       { return nil }
+func (d *MyDevice) String() string     { return "My NFC Reader" }
+func (d *MyDevice) Connection() string { return d.connection }
 
 func (d *MyDevice) Transceive(txData []byte) ([]byte, error) {
-    // Send raw bytes to the reader and return response
-    // This is for device-level commands, not tag communication
-    return nil, nfc.NewNotSupportedError("Transceive")
+	return nil, nfc.NewNotSupportedError("Transceive")
 }
 
+// SupportsTransceive keeps the reported capabilities in step with Transceive.
+func (d *MyDevice) SupportsTransceive() bool { return false }
+
+func (d *MyDevice) DeviceType() string          { return "myreader" }
+func (d *MyDevice) SupportedTagTypes() []string { return []string{"NTAG"} }
+
+// GetTags polls the reader and returns the tags on it, empty when there are
+// none.
 func (d *MyDevice) GetTags() ([]nfc.Tag, error) {
-    // Poll for tags on the reader
-    // Return detected tags
+	uid, present, err := d.poll()
+	if err != nil || !present {
+		return nil, err
+	}
+	return []nfc.Tag{&MyTag{uid: uid, device: d}}, nil
+}
 
-    // Example: detect a tag and wrap it
-    tagUID := "04A1B2C3D4E5F6"
-    tagType := "MIFARE Classic 1K"
+// poll, readMemory and writeMemory stand for your reader's own commands.
+func (d *MyDevice) poll() (uid string, present bool, err error) { return "", false, nil }
 
-    tag := &MyTag{
-        uid:     tagUID,
-        tagType: tagType,
-        device:  d,
-    }
+func (d *MyDevice) readMemory(uid string) ([]byte, error) {
+	return nil, nfc.NewNotSupportedError("readMemory")
+}
 
-    return []nfc.Tag{tag}, nil
+func (d *MyDevice) writeMemory(uid string, data []byte) error {
+	return nfc.NewNotSupportedError("writeMemory")
 }
 ```
 
-### Step 3: Implement the Tag Interface
+### Step 3: The tag
 
-The `Tag` interface bundles several role interfaces (identity, connection, read,
-write, transceive, lock). Rather than implement all of them, **embed
-`nfc.BaseTag`** and override only the methods your tag actually supports. The
-base provides safe defaults: connection is a no-op, and write/transceive/lock
-operations report "not supported".
-
-You only ever need to implement the four methods that have no sensible default:
-`UID()`, `Type()`, `NumericType()`, and `ReadData()`.
+`nfc.Tag` combines the role interfaces in
+[`nfc/tag.go`](../nfc/tag.go): identity, connection, read, write, transceive,
+lock and `Capabilities()`. Embed `nfc.BaseTag` and implement the four methods it
+has no default for: `UID`, `Type`, `NumericType` and `ReadData`. `BaseTag`
+supplies the rest: connection is a no-op, write, transceive and lock report
+not supported, and `Capabilities()` reports a readable NDEF tag and nothing
+else.
 
 ```go
 type MyTag struct {
-    nfc.BaseTag // supplies Connect/Disconnect/WriteData/Transceive/IsWritable/CanMakeReadOnly/MakeReadOnly
+	nfc.BaseTag
 
-    uid     string
-    tagType string
-    device  *MyDevice
+	uid    string
+	device *MyDevice
 }
 
-// --- TagIdentifier (required) ---
-
-func (t *MyTag) UID() string {
-    return t.uid
-}
-
-func (t *MyTag) Type() string {
-    return t.tagType
-}
-
-func (t *MyTag) NumericType() int {
-    return 0 // Your type code
-}
-
-// --- TagReader (required) ---
+func (t *MyTag) UID() string      { return t.uid }
+func (t *MyTag) Type() string     { return "NTAG213" }
+func (t *MyTag) NumericType() int { return 0 }
 
 func (t *MyTag) ReadData() ([]byte, error) {
-    // Read NDEF data from the tag and return raw NDEF bytes.
-    return nil, nil
+	memory, err := t.device.readMemory(t.uid)
+	if err != nil {
+		return nil, err
+	}
+	ndef, found := nfc.TLVFindNDEF(memory)
+	if !found {
+		return nil, nfc.NewNoPayloadError("ReadData", t.uid, nil)
+	}
+	return ndef, nil
 }
-
-// --- TagCapabilityProvider (optional but recommended) ---
-
-func (t *MyTag) Capabilities() nfc.TagCapabilities {
-    return nfc.TagCapabilities{
-        CanRead:       true,
-        CanWrite:      true,
-        CanTransceive: false,
-        CanLock:       false,
-        TagFamily:     "MIFARE Classic",
-        Technology:    "ISO14443A",
-        MemorySize:    1024,
-        SupportsNDEF:  true,
-    }
-}
-
-// --- Override only what you support ---
-
-// If your tag is writable, override WriteData (otherwise it inherits the
-// BaseTag default that returns a NotSupported error):
-func (t *MyTag) WriteData(data []byte) error {
-    // Write NDEF data to the tag.
-    return nil
-}
-
-// Connect/Disconnect/Transceive/IsWritable/CanMakeReadOnly/MakeReadOnly are all
-// inherited from nfc.BaseTag. Override any of them the same way if your tag
-// supports them.
 ```
-
-> Keep `Capabilities()` in sync with what you actually override: if you advertise
-> `CanWrite: true`, make sure you override `WriteData`. See
-> [Capability-Based Implementation](#capability-based-implementation) for a test
-> helper that catches drift.
-
-### Tags that carry no NDEF
 
 `ReadData` must not report an absent NDEF message by returning zero bytes and a
 nil error, which is indistinguishable from a successful read of an empty tag.
-Return `nfc.NewNoPayloadError` instead:
+Return `nfc.NewNoPayloadError`, and the reader publishes the tag as a scan
+carrying its identity alone. A tag that never carries NDEF reports
+`SupportsNDEF: false`, which skips the read.
+
+A tag that supports more overrides the operation and `Capabilities()` together,
+so what it advertises and what it does cannot drift apart:
 
 ```go
-func (t *MyTag) ReadData() ([]byte, error) {
-    data, err := t.read()
-    if err != nil {
-        return nil, err
-    }
-    ndef, found := nfc.TLVFindNDEF(data)
-    if !found {
-        return nil, nfc.NewNoPayloadError("ReadData", t.uid, nil)
-    }
-    return ndef, nil
-}
-```
-
-The reader publishes such a tag as a scan carrying its identity alone. A tag
-that never carries NDEF should also report `SupportsNDEF: false`, which skips
-the read.
-
-### Step 4: Register with MultiManager
-
-In your main.go or initialization code:
-
-```go
-import (
-    "github.com/dotside-studios/davi-nfc-agent/nfc"
-    "github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
-    "myproject/myreader"
-)
-
-func main() {
-    manager := multimanager.NewMultiManager(
-        multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
-        multimanager.ManagerEntry{Name: "myreader", Manager: myreader.NewManager()},
-    )
-
-    // Use the manager...
-}
-```
-
-## Dynamic Device Discovery
-
-Implement `DeviceChangeNotifier` to notify the system when devices are added or removed:
-
-```go
-type MyManager struct {
-    devices     map[string]*MyDevice
-    devicesChan chan struct{}
-    mu          sync.RWMutex
-}
-
-// DeviceChanges returns a channel that signals when devices change.
-// Implements nfc.DeviceChangeNotifier.
-func (m *MyManager) DeviceChanges() <-chan struct{} {
-    return m.devicesChan
-}
-
-// Call this when a device is added or removed
-func (m *MyManager) notifyDeviceChange() {
-    select {
-    case m.devicesChan <- struct{}{}:
-    default:
-        // Channel full, skip notification
-    }
-}
-```
-
-The `MultiManager` automatically listens to managers that implement `DeviceChangeNotifier` and forwards change notifications.
-
-## Capability-Based Implementation
-
-You don't need to implement all methods if your device doesn't support them.
-Embed `nfc.BaseTag` so unsupported operations already return the right
-"not supported" error, then advertise what *is* supported via `Capabilities()`:
-
-```go
-type MyTag struct {
-    nfc.BaseTag // WriteData/Transceive/MakeReadOnly default to "not supported"
-    // ...
+func (t *MyTag) WriteData(data []byte) error {
+	return t.device.writeMemory(t.uid, data)
 }
 
 func (t *MyTag) Capabilities() nfc.TagCapabilities {
-    return nfc.TagCapabilities{
-        CanRead:       true,
-        CanWrite:      false, // Read-only device; no need to override WriteData
-        CanTransceive: false,
-        CanLock:       false,
-    }
+	return nfc.TagCapabilities{
+		CanRead:      true,
+		CanWrite:     true,
+		SupportsNDEF: true,
+		TagFamily:    "NTAG",
+		Technology:   "ISO14443A",
+	}
 }
 ```
 
-Because the defaults come from `BaseTag`, a read-only tag literally just needs
-`UID`, `Type`, `NumericType`, and `ReadData`. There is no `WriteData`
-boilerplate
-to write.
+A tag whose content arrives from elsewhere rather than being read live, as a
+phone's does, sets `ReadsAreSnapshot`, so a write is not confirmed by reading it
+back.
 
-### Keeping capabilities honest
-
-`Capabilities()` and actual method behavior are two separate sources of truth, so
-they can drift. Drop `nfc.AssertCapabilitiesConsistent` into your tests to catch
-the common cases (it performs only non-mutating checks and never writes or locks
-the tag):
+### Step 4: Register the manager
 
 ```go
-func TestMyTagCapabilities(t *testing.T) {
-    tag := &MyTag{ /* ... */ }
-    if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {
-        t.Fatal(err)
-    }
+package main
+
+import (
+	"example.com/myreader"
+
+	"github.com/dotside-studios/davi-nfc-agent/nfc"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/multimanager"
+	"github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
+)
+
+func main() {
+	manager := multimanager.NewMultiManager(
+		multimanager.ManagerEntry{Name: nfc.ManagerTypeHardware, Manager: pcsc.NewManager()},
+		multimanager.ManagerEntry{Name: "myreader", Manager: myreader.NewManager()},
+	)
+	defer manager.Close()
+
+	// Hand manager to agent.Setup or nfc.NewSupervisor; see custom-builds.md.
 }
 ```
 
-Callers can check capabilities before calling methods:
+## Optional interfaces
+
+| Implemented by | Interface | Method | Effect |
+|---|---|---|---|
+| Device | `DeviceInfoProvider` | `DeviceType()`, `SupportedTagTypes()` | Fills `DeviceType` and `SupportedTagTypes` in the capabilities |
+| Device | `DeviceEventEmitter` | `SupportsEvents()` | True reports `SupportsEvents` and clears `CanPoll` |
+| Device | `DeviceTransceiver` | `SupportsTransceive()` | Sets `CanTransceive`, which is true without it |
+| Device | `DeviceRawTransceiver` | `SupportsTransceiveRaw()` | Sets `CanTransceiveRaw`, which is false without it |
+| Device | `DeviceHealthChecker` | `IsHealthy()` | Checked before reusing a device that is already open |
+| Tag | `TagRawTransceiver` | `TransceiveRaw(frame)` | Framing-level exchange, with no ISO 7816 envelope |
+| Tag | `AdvancedWriter` | `WriteDataWithOptions(data, opts)` | Used instead of `WriteData` when a write asks for `ForceInitialize` |
+| Manager | `DeviceChangeNotifier` | `DeviceChanges()` | Signals devices added or removed |
+| Manager | `TagReporter` | `Scans()` | Publishes scans from devices that report their own |
+| Manager | `DeviceDisconnector` | `DisconnectDevice(id, reason)` | Ends a live session, for revocation |
+| Manager | (bare method) | `Close()` | Called by `MultiManager.Close` |
+
+### Device capabilities
+
+`nfc.GetDeviceCapabilities(device)` builds a `DeviceCapabilities` from the
+interfaces above. It starts from `CanPoll: true`, `CanTransceive: true` and
+`DeviceType: "unknown"`, then:
+
+- `DeviceInfoProvider` sets `DeviceType` (`"pcsc"` for the PC/SC backend,
+  `"smartphone"` for a phone) and `SupportedTagTypes`.
+- `DeviceEventEmitter` returning true sets `SupportsEvents` and clears
+  `CanPoll`. It leaves `CanTransceive` alone: how a device reports scans says
+  nothing about whether it can exchange bytes with the tag.
+- `DeviceTransceiver` decides `CanTransceive`.
+- `DeviceRawTransceiver` decides `CanTransceiveRaw`. Its method must answer from
+  what is already known, since it is called while building capabilities and
+  sends nothing to the card.
+
+### Raw frames
+
+`TransceiveRaw` reaches commands that are not APDUs, such as an NTAG21x
+`READ_SIG`, `READ_CNT` or `PWD_AUTH`. The reader sends a raw exchange only to a
+tag implementing `TagRawTransceiver`, and refuses it as not supported
+otherwise. A device that can carry one, as a PN533-based reader does with
+`InCommunicateThru`, implements `DeviceRawTransceiver` to report
+`CanTransceiveRaw`. A tag driver built on an `nfc.CardTransport` checks for
+`nfc.RawCardTransport`, and refuses the exchange when the transport is not one.
+
+### Write options
 
 ```go
-caps := nfc.GetTagCapabilities(tag)
-if caps.CanWrite {
-    tag.WriteData(data)
-} else {
-    log.Println("Tag does not support writing")
-}
-```
-
-### Capability Helper Functions
-
-Use these convenience functions for common capability checks:
-
-```go
-// Check tag capabilities
-if nfc.CanTagRead(tag) {
-    data, _ := tag.ReadData()
-}
-
-if nfc.CanTagWrite(tag) {
-    tag.WriteData(data)
-}
-
-if nfc.CanTagTransceive(tag) {
-    resp, _ := tag.Transceive(apdu)
-}
-
-if nfc.CanTagLock(tag) {
-    tag.MakeReadOnly()
-}
-```
-
-### DeviceCapabilities
-
-Use `GetDeviceCapabilities()` to inspect device capabilities:
-
-```go
-caps := nfc.GetDeviceCapabilities(device)
-
-// DeviceCapabilities struct:
-// - CanTransceive: bool      // Device supports raw transceive
-// - CanPoll: bool            // Device supports polling for tags
-// - SupportedTagTypes: []string  // e.g., ["MIFARE Classic", "NTAG"]
-// - DeviceType: string       // e.g., "libnfc", "smartphone"
-// - MaxBaudRate: int         // Max baud rate in bps
-// - SupportsEvents: bool     // Tag arrival/removal events
-
-if caps.SupportsEvents {
-    // Event-driven device (e.g., smartphone)
-} else if caps.CanPoll {
-    // Polling device (e.g., hardware reader)
-}
-```
-
-Capabilities are automatically built from optional interfaces the device implements (`DeviceInfoProvider`, `DeviceEventEmitter`).
-
-## Error Handling
-
-Use the structured error types for consistent error handling:
-
-```go
-import "github.com/dotside-studios/davi-nfc-agent/nfc"
-
-// For unsupported operations
-return nfc.NewNotSupportedError("Transceive")
-
-// For authentication failures
-return nfc.NewAuthError("ReadData", tag.UID(), err)
-
-// For read/write failures
-return nfc.NewReadError("ReadData", err)
-return nfc.NewWriteError("WriteData", err)
-
-// For generic errors with context
-return nfc.WrapError(nfc.ErrCodeReadFailed, "ReadSector", "failed to read sector 1", err)
-```
-
-Callers can handle errors programmatically:
-
-```go
-if nfc.IsNotSupportedError(err) {
-    // Operation not supported, try alternative
-}
-
-if nfc.IsAuthError(err) {
-    // Authentication failed, maybe try different key
-}
-
-code := nfc.GetErrorCode(err)
-switch code {
-case nfc.ErrCodeTagRemoved:
-    // Tag was removed, retry
-case nfc.ErrCodeReadFailed:
-    // Read failed, handle error
-}
-```
-
-## Advanced Write Operations
-
-For tags that need special write handling, implement the `AdvancedWriter` interface:
-
-```go
-// TagWriteOptions controls write behavior
-type TagWriteOptions struct {
-    // ForceInitialize wipes and reinitializes the tag before writing.
-    // WARNING: This erases all existing data.
-    ForceInitialize bool
-}
-
-// AdvancedWriter is an optional interface for tags supporting write options.
-// Implement WriteDataWithOptions to handle special write cases.
 func (t *MyTag) WriteDataWithOptions(data []byte, opts nfc.TagWriteOptions) error {
-    if opts.ForceInitialize {
-        // Wipe and reinitialize the tag
-        if err := t.format(); err != nil {
-            return err
-        }
-    }
-    return t.WriteData(data)
+	if opts.ForceInitialize {
+		// Wipe and reinitialize the tag; this erases everything on it.
+	}
+	return t.WriteData(data)
 }
 ```
 
-The reader automatically uses `WriteDataWithOptions` when available:
+### Device discovery
 
 ```go
-// Writing with force initialization
-opts := nfc.TagWriteOptions{ForceInitialize: true}
-if writer, ok := tag.(nfc.AdvancedWriter); ok {
-    err := writer.WriteDataWithOptions(data, opts)
-} else {
-    // Fallback to standard write
-    err := tag.WriteData(data)
+type MyManager struct {
+	changes chan struct{}
+}
+
+// DeviceChanges implements nfc.DeviceChangeNotifier.
+func (m *MyManager) DeviceChanges() <-chan struct{} {
+	return m.changes
+}
+
+// notifyDeviceChange is called when a device is added or removed. A send that
+// would block is dropped, since one pending signal already says "look again".
+func (m *MyManager) notifyDeviceChange() {
+	select {
+	case m.changes <- struct{}{}:
+	default:
+	}
 }
 ```
 
-## Optional: Serving Your Own Connections
+`MultiManager` listens to every child that implements `DeviceChangeNotifier`
+and forwards its signals on its own `DeviceChanges`.
 
-A manager whose devices connect over the network, rather than being attached to
-this machine, owns that transport itself. `remotenfc` is the worked example: it
-serves the WebSocket endpoint phones connect to.
-
-Expose an `http.Handler` and let the agent mount it. Keep authentication out of
-it, since that is the agent's policy and not the driver's, and take anything
-else the agent configures as options:
-
-```go
-func (m *MyManager) Handler(opts MyServerOptions) http.Handler {
-    // ...
-}
-```
-
-For cleanup, implement `Close()`. `MultiManager` calls it on every manager that
-has one:
-
-```go
-func (m *MyManager) Close() {
-    // Stop goroutines, drop connections
-}
-```
-
-## Testing Your Implementation
-
-Create mock implementations for testing:
-
-```go
-func TestMyDevice(t *testing.T) {
-    device := &MyDevice{connection: "test"}
-
-    // Test capabilities
-    caps := device.Capabilities()
-    if !caps.CanPoll {
-        t.Error("Expected CanPoll to be true")
-    }
-
-    // Test GetTags
-    tags, err := device.GetTags()
-    if err != nil {
-        t.Errorf("GetTags failed: %v", err)
-    }
-
-    // Test tag capabilities
-    for _, tag := range tags {
-        tagCaps := nfc.GetTagCapabilities(tag)
-        if !tagCaps.CanRead {
-            t.Error("Expected tag to support reading")
-        }
-    }
-}
-```
-
-## Examples
-
-### Read-Only Network Device
-
-A device that receives tag data over the network (read-only):
-
-```go
-type NetworkTag struct {
-    nfc.BaseTag // write/transceive/lock default to "not supported"
-
-    uid     string
-    tagType string
-    data    []byte // Pre-loaded data
-}
-
-func (t *NetworkTag) UID() string      { return t.uid }
-func (t *NetworkTag) Type() string     { return t.tagType }
-func (t *NetworkTag) NumericType() int { return 0 }
-
-func (t *NetworkTag) Capabilities() nfc.TagCapabilities {
-    return nfc.TagCapabilities{
-        CanRead:       true,
-        CanWrite:      false,
-        CanTransceive: false,
-        CanLock:       false,
-        TagFamily:     t.tagType,
-    }
-}
-
-func (t *NetworkTag) ReadData() ([]byte, error) {
-    return t.data, nil
-}
-
-// No WriteData needed; inherited from nfc.BaseTag as "not supported".
-```
-
-### Serial PN532 Reader
-
-A device connected via serial port:
-
-```go
-type PN532Device struct {
-    port   io.ReadWriteCloser
-    conn   string
-}
-
-func (d *PN532Device) DeviceType() string {
-    return "pn532-serial"
-}
-
-func (d *PN532Device) SupportedTagTypes() []string {
-    return []string{"MIFARE Classic", "NTAG", "ISO14443-4"}
-}
-
-func (d *PN532Device) GetTags() ([]nfc.Tag, error) {
-    // Send InListPassiveTarget command
-    cmd := []byte{0xD4, 0x4A, 0x01, 0x00}
-    resp, err := d.sendCommand(cmd)
-    if err != nil {
-        return nil, err
-    }
-
-    // Parse response and create tags
-    // ...
-}
-```
-
-## Interface Reference
-
-### Methods you must implement
-
-These four have no sensible default and must be implemented on every tag:
-
-| Method | Interface |
-|--------|-----------|
-| `UID()` | TagIdentifier |
-| `Type()` | TagIdentifier |
-| `NumericType()` | TagIdentifier |
-| `ReadData()` | TagReader |
-
-### Methods provided by `nfc.BaseTag`
-
-Embedding `nfc.BaseTag` supplies these with safe defaults. Override only the ones
-your tag supports:
-
-| Method | Interface | BaseTag default |
-|--------|-----------|-----------------|
-| `Connect()` | TagConnection | no-op (returns nil) |
-| `Disconnect()` | TagConnection | no-op (returns nil) |
-| `WriteData()` | TagWriter | returns NotSupported |
-| `Transceive()` | TagTransceiver | returns NotSupported |
-| `IsWritable()` | TagLocker | returns false |
-| `CanMakeReadOnly()` | TagLocker | returns false |
-| `MakeReadOnly()` | TagLocker | returns NotSupported |
-
-### Optional Methods
-
-| Method | Interface | Purpose |
-|--------|-----------|---------|
-| `Capabilities()` | TagCapabilityProvider | Runtime tag capability discovery |
-| `WriteDataWithOptions()` | AdvancedWriter | Write with initialization options |
-| `DeviceChanges()` | DeviceChangeNotifier | Device add/remove notifications |
-| `DeviceType()` | DeviceInfoProvider | Device type identifier ("libnfc", "smartphone") |
-| `SupportedTagTypes()` | DeviceInfoProvider | List of supported tag types |
-| `SupportsEvents()` | DeviceEventEmitter | Whether device emits tag events |
-| `SupportsTransceive()` | DeviceTransceiver | Whether device supports raw transceive |
-| `IsHealthy()` | DeviceHealthChecker | Connection health validation |
-| `Close()` | (bare method) | Cleanup on shutdown, called by MultiManager |
-
-### DeviceInfoProvider Interface
-
-Implement this interface to provide device metadata. Capabilities are built automatically from this:
-
-```go
-func (d *MyDevice) DeviceType() string {
-    return "myreader"
-}
-
-func (d *MyDevice) SupportedTagTypes() []string {
-    return []string{"MIFARE Classic", "NTAG"}
-}
-```
-
-### DeviceEventEmitter Interface
-
-For event-based devices (like smartphones) that receive tags via events rather than polling:
-
-```go
-func (d *MyDevice) SupportsEvents() bool {
-    return true  // Tags arrive as events, not via polling
-}
-```
-
-When `SupportsEvents()` returns true, `BuildDeviceCapabilities()` will automatically set:
-- `CanPoll: false`
-- `SupportsEvents: true`
-
-`CanTransceive` is unaffected: how a device reports scans says nothing about
-whether it can exchange bytes with the tag. Implement `DeviceTransceiver` to
-declare that.
-
-### DeviceTransceiver Interface
-
-Devices default to `CanTransceive: true`. If your device's `Transceive` actually
-returns a `NotSupported` error, implement `DeviceTransceiver` so the reported
-capabilities match reality:
-
-```go
-func (d *MyDevice) SupportsTransceive() bool {
-    return false // Device cannot do raw transceive
-}
-```
-
-When present, `SupportsTransceive()` is authoritative for `CanTransceive` in the
-capabilities built by `BuildDeviceCapabilities()`.
-
-### DeviceHealthChecker Interface
-
-For devices that support connection health checking:
+### Health checks
 
 ```go
 func (d *MyDevice) IsHealthy() error {
-    if !d.isConnected {
-        return fmt.Errorf("device not connected")
-    }
-    return nil
+	if _, _, err := d.poll(); err != nil {
+		return fmt.Errorf("myreader not responding: %w", err)
+	}
+	return nil
 }
 ```
 
-The `DeviceManager` uses this interface to check device health before operations.
+When asked to connect to a device it already holds, the device manager reuses
+it if `IsHealthy` returns nil and reopens it otherwise. A device without the
+method is assumed healthy.
+
+### Serving your own connections
+
+A manager whose devices connect over the network, rather than being attached to
+this machine, owns that transport. `remotenfc` is the worked example: it serves
+the WebSocket endpoint phones connect to through `Manager.Handler`. Expose an
+`http.Handler`, keep authentication out of it, and take anything else the
+program configures as options. The program mounts it on the server plugin under
+`server.ModeDevice` (see [Custom Builds](custom-builds.md)).
+
+Implement `Close()`, with no arguments and no return value, to stop goroutines
+and drop connections. `MultiManager.Close` calls it on every child that has it;
+a `Close() error` does not match and is not called.
+
+## Errors
+
+Return the structured errors in package `nfc`, so the agent and its clients can
+tell the cases apart (see [Errors](errors.md) for how they reach a client):
+
+| Constructor | Use |
+|---|---|
+| `nfc.NewNotSupportedError(op)` | An operation this tag or device cannot perform |
+| `nfc.NewNoPayloadError(op, uid, cause)` | A tag that was read and holds no NDEF message |
+| `nfc.NewAuthError(op, uid, cause)` | Authentication to the tag failed |
+| `nfc.NewReadError(op, cause)`, `nfc.NewWriteError(op, cause)` | A read or write failed |
+| `nfc.WrapError(code, op, message, cause)` | Any other `nfc.ErrCode*` with context |
+
+## Testing
+
+`nfc.AssertCapabilitiesConsistent` checks a tag's `Capabilities()` against its
+query methods: `CanLock` against `CanMakeReadOnly()`, `IsReadOnly` against
+`IsWritable()`, and `SupportsNDEF: false` against what `ReadData` returns. It
+never writes, transceives or locks, so it is safe on hardware; cover those
+operations in tests of your own.
+
+```go
+func TestMyDevice(t *testing.T) {
+	device := &MyDevice{connection: "test"}
+
+	caps := nfc.GetDeviceCapabilities(device)
+	if !caps.CanPoll || caps.CanTransceive {
+		t.Errorf("capabilities = %+v", caps)
+	}
+
+	tag := &MyTag{uid: "04A1B2C3D4E5F6", device: device}
+	if err := nfc.AssertCapabilitiesConsistent(tag); err != nil {
+		t.Fatal(err)
+	}
+}
+```
+
+`nfc/nfctest` emulates tags in memory behind an `nfc.CardTransport`, for testing
+a tag driver's I/O without hardware.
+
+## Example: a serial PN532 reader
+
+An outline of a PN532 device's polling. `sendCommand` and `parseTargets` stand
+for your serial framing and response parsing; the remaining `nfc.Device` methods
+follow Step 2.
+
+```go
+type PN532Device struct {
+	port io.ReadWriteCloser
+	conn string
+}
+
+func (d *PN532Device) DeviceType() string          { return "pn532-serial" }
+func (d *PN532Device) SupportedTagTypes() []string { return []string{"MIFARE Classic", "NTAG"} }
+
+func (d *PN532Device) GetTags() ([]nfc.Tag, error) {
+	// InListPassiveTarget: one target, 106 kbps type A.
+	resp, err := d.sendCommand([]byte{0xD4, 0x4A, 0x01, 0x00})
+	if err != nil {
+		return nil, err
+	}
+	return d.parseTargets(resp), nil
+}
+```
+
+The PN532 carries raw frames with `InCommunicateThru`, so such a device can also
+implement `DeviceRawTransceiver` and give its NTAG tags `TransceiveRaw`.
+
+## Interface reference
+
+| Type | Must implement | Supplied by `nfc.BaseTag` |
+|---|---|---|
+| `nfc.Manager` | `OpenDevice`, `Devices` | |
+| `nfc.Device` | `Close`, `String`, `Connection`, `Transceive`, `GetTags` | |
+| `nfc.Tag` | `UID`, `Type`, `NumericType`, `ReadData` | `Connect`, `Disconnect` (no-op); `WriteData`, `Transceive`, `MakeReadOnly` (not supported); `IsWritable`, `CanMakeReadOnly` (false); `Capabilities` (`CanRead`, `SupportsNDEF`) |

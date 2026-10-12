@@ -126,6 +126,12 @@ export interface TagDataPayload {
 export interface TagRemovedPayload {
     uid: string;
     text: string;
+    /**
+     * DeviceID names the device whose tag left. Absent for the agent's own
+     * reader, as on [TagDataPayload], so a client holding a tag from one device
+     * keeps it when another device's tag leaves.
+     */
+    deviceID?: string;
     err: string | null;
 }
 /**

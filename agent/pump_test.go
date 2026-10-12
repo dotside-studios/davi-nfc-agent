@@ -126,6 +126,38 @@ func TestForwardScanPassesErrorsThrough(t *testing.T) {
 	}
 }
 
+// A device that reports its own scans reports its tag leaving too, and that
+// reaches the clients: nothing else tells them a phone's tag is gone.
+func TestForwardScanReportsADevicesRemoval(t *testing.T) {
+	a := newPumpAgent(t)
+	sink := newSink(t, a)
+
+	a.forwardScan(nfc.NFCData{Device: "phone-7", RemovedUID: "04A1B2C3"})
+
+	got := awaitScan(t, sink)
+	if got.Card != nil || got.Err != nil {
+		t.Fatalf("got %+v, want a removal", got)
+	}
+	if got.Device != "phone-7" || got.RemovedUID != "04A1B2C3" {
+		t.Errorf("got device %q, uid %q; want the phone and the tag that left", got.Device, got.RemovedUID)
+	}
+}
+
+// A scan with no card, no error and no tag named says nothing, and is not
+// reported.
+func TestForwardScanDropsAnEmptyScan(t *testing.T) {
+	a := newPumpAgent(t)
+	sink := newSink(t, a)
+
+	a.forwardScan(nfc.NFCData{Device: "phone-7"})
+
+	select {
+	case got := <-sink.tags:
+		t.Errorf("an empty scan was reported: %+v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // What the readers scan reaches whatever serves clients, which subscribes to
 // the agent rather than being handed the scans. A client's half of that trip is
 // e2e's: see TestAScanOnTheReaderReachesAClientAndAnObserver.

@@ -275,9 +275,13 @@ export class NFCClient {
     switch (type) {
       case "tagData": {
         const tag = parseTagData(payload as RawTagPayload);
-        // A tag with no UID is how removal is reported.
+        // A tag with no UID is how removal is reported. It names the device
+        // whose tag left, or none for the agent's own reader, and says nothing
+        // about a tag another reader holds.
         if (!tag.uid) {
-          this.clearTag();
+          if (tag.deviceID === this.tag?.deviceID) {
+            this.clearTag();
+          }
           break;
         }
         this.tag = tag;

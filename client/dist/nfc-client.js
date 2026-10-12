@@ -243,7 +243,9 @@ var DaviNFC = (() => {
         case "tagData": {
           const tag = parseTagData(payload);
           if (!tag.uid) {
-            this.clearTag();
+            if (tag.deviceID === this.tag?.deviceID) {
+              this.clearTag();
+            }
             break;
           }
           this.tag = tag;

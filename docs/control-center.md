@@ -1,7 +1,7 @@
 # Control Center
 
-A web console served by the agent for managing it and for advanced tag
-operations.
+The web console the agent serves, for an operator managing it and for tag
+operations beyond what an application offers.
 
 ## Opening it
 
@@ -13,8 +13,7 @@ The token is spent on first use and expires after two minutes, so a URL that
 ends up in shell history or browser autocomplete is already useless. Sessions
 last 12 hours.
 
-There is no way in other than the tray. See
-[Who can open it](#who-can-open-it) below.
+There is no way in other than the tray.
 
 > **On a self-signed certificate**, the browser shows its usual warning the
 > first time and you click through. This is the one browser client that works on
@@ -33,12 +32,11 @@ checks must all pass on every control request:
 | `Origin`/`Referer` is the agent itself | A page you happen to be visiting driving the console via your cookie |
 | A tray-minted session cookie | Another local account or process pointing at the port |
 
-The `Origin` check reads `RemoteAddr`, never `X-Forwarded-For`: a forwarding
-header is attacker-controlled and is not evidence of locality.
+The loopback check uses the connection's address, never `X-Forwarded-For`, so a
+proxy on this machine does not make a remote request look local.
 
-The origin allowlist is not consulted. An entry in `allowed-origins.json`
-authorises a console to *read tags*; it never confers the ability to revoke a
-device or rotate the secret. The control routes are also served without the
+The origin allowlist is not consulted. An allowed origin may read and write
+tags; it never administers the agent. The control routes are also served without the
 permissive CORS headers the client endpoints carry.
 
 Use **Security → sign out all** to end every console session at once, including
@@ -67,8 +65,7 @@ in the console only; the agent does not persist it.
   records), with a live size estimate against the tag's actual capacity.
 - Also erase, and lock (irreversible, and gated behind typing `lock`).
 - A **raw exchange (APDU)** console: hex in, hex and ASCII out, with ISO 7816
-  status words decoded, per-exchange timing, presets built from the commands
-  `nfc/apdu.go` already constructs, and a toggle between APDU-level and
+  status words decoded, per-exchange timing, presets for common commands, and a toggle between APDU-level and
   framing-level exchange. Gated behind the **raw APDU channel**, a toggle under
   the reader controls that is off by default: a raw command reaches the tag
   unmodified and can lock or brick it, so the channel that carries one stays
@@ -126,172 +123,15 @@ The buffer is in memory only, and is lost when the agent exits.
 
 ## Browser origins
 
-The agent only accepts WebSocket upgrades whose `Origin` matches its own
-host:port. Otherwise any site the operator visits could drive the reader,
-including permanently locking cards. A console served from anywhere else, which
-includes every hosted one, must be allowed. The Davi consoles already are.
+**Security → Browser origins** lists the allowlist, every origin refused since
+the agent started with a one-click **allow**, and **Allow any origin (this
+session)**, which turns the check off until the agent exits. Setting up a web
+page to connect is covered in [Connect from a browser](browser-access.md).
 
-When a page is refused, the tray offers it as *"Allow example.com"*, and one
-click admits it and persists the choice, with no restart. **Browser origins** in
-the console lists the allowlist, every origin refused since startup, and the
-session override. To preload one instead, at first run or for an unattended
-install:
+## Preferences
 
-```bash
-./davi-nfc-agent -allowed-origins "console.example.com,localhost:3002"
-# or
-DAVI_NFC_ALLOWED_ORIGINS="console.example.com" ./davi-nfc-agent
-```
-
-Entries are matched on host:port. Full URLs are accepted and reduced, so
-`https://console.example.com` and `console.example.com` are equivalent. The
-allowlist lives in `allowed-origins.json` in the config directory.
-
-**Allow any origin (this session)** turns the check off until the agent
-restarts. It is never persisted, and it is not a way to skip configuring an
-origin: while it is on, any page the operator opens can read, write and
-permanently lock cards.
-
-A trusted certificate is a separate requirement. The allowlist decides *who may
-connect*; TLS decides whether the browser will open the connection at all. A
-`wss://` connection to an untrusted certificate fails outright, and unlike a
-page visit there is no warning to click through. See
-[TLS & Certificates](api.md#tls--certificates).
-
-## Where a preference lives
-
-The agent holds every preference and nothing writes them anywhere. A change made
-in the console or from a tray menu reaches the agent, and both surfaces redraw
-from it, so the two cannot disagree about what the agent is doing:
-
-```
-console ─┐                          ┌─ agent            (what is in force)
-         ├─ Agent.SetReaderMode &c ─┤
-tray  ───┘                          └─ tray menu        (redrawn from the agent)
-```
-
-The console's `settings` block in the state snapshot is `Agent.Preferences()`,
-what the agent is set to right now.
-
-A change lasts as long as the agent runs. What it starts with comes from
-`agent.Config`, which the command fills from its flags, so a preference that
-should survive a restart is set at launch rather than saved.
-
-A program embedding the agent that wants an operator's change to outlive the
-process reads it back from the agent and persists it however it likes. That is
-the same arrangement the origin allowlist and the device registry are under,
-each of which keeps its own file.
-
-## Building
-
-`agent/console/frontend/dist` is committed and embedded with `go:embed`, so `go build ./cmd/davi-nfc-agent`
-works with no Node installed. After changing anything under
-`agent/console/frontend/src`:
-
-```bash
-make webui     # npm install && npm run build
-git add agent/console/frontend/dist
-```
-
-For hot reload against a running agent:
-
-```bash
-make webui-dev                                  # proxies to localhost:9470
-VITE_AGENT=https://localhost:9480 make webui-dev
-```
-
-The dev server proxies `/control` and `/ws`, so it drives a real agent rather
-than a mock. If `agent/console/frontend/dist` is missing entirely the agent still starts
-and serves its protocol; the root falls back to the plain-text banner.
-
-To drive the console without a reader, for screenshots or to check a panel that
-needs paired devices and blocked origins to be interesting, there is a
-harness that serves the real control handler over a seeded host and a stubbed
-tag feed. It is skipped unless `SCREENSHOT_ADDR` is set:
-
-```bash
-SCREENSHOT_ADDR=127.0.0.1:9911 SCREENSHOT_TOKEN_FILE=/tmp/tok \
-  go test -run TestScreenshotHarness -timeout 20m ./agent/console/
-# then open http://127.0.0.1:9911/control/session?token=$(cat /tmp/tok)
-```
-
-## Leaving it out
-
-The console is one package. `agent/console/` holds the whole thing: the gate,
-the routes, the state snapshot, the dispatcher, the adapter onto the agent, and
-the frontend it embeds:
-
-```
-agent/console/
-  doc.go              the package doc
-  console.go          the wiring entry point: New, Endpoints
-  host_contract.go    the Host interface, the console's only view of the agent
-  host.go             the Host implementation over a live agent
-  auth.go             the three-check gate
-  server.go           routes, the live socket
-  state.go            the state snapshot
-  actions.go          the action dispatcher
-  preferences.go      the preference DTO, shared with the tray
-  embed.go            go:embed of frontend/dist
-  frontend/           the Vite + React console
-    src/
-    dist/             built and committed
-```
-
-The serving half reaches the agent only through `Host`, the ~35 methods declared
-in `host_contract.go` and implemented in `host.go`. The console's entire reach
-into the agent is readable in one file, and its tests run against a fake host
-with no hardware behind them.
-
-`go build -tags nowebui ./cmd/davi-nfc-agent` produces an agent without the
-control center: no `/control` routes, no privileged API, no tray entry, and no
-frontend in the binary. Roughly 620 KB smaller, and the console's strings are
-absent entirely.
-
-```bash
-make build-nowebui
-make test-nowebui     # the suite under the same tag
-```
-
-Everything in `agent/console/` carries `//go:build !nowebui` except
-`preferences.go`, which the tray needs in either build, and `doc.go`.
-`agent/console/console_nowebui.go` and `agent/tray/console_nowebui.go` supply
-the stubs under the opposite tag.
-
-The agent itself needs no tag either way, and does not know the console at all.
-`Endpoints` returns `[]serverplugin.Endpoint`, which the program hands to the server
-plugin like any other route, so the dependency runs one way: `agent/console`
-imports `agent`, never the reverse, and `main` is the only place that wires the
-two together. Under `nowebui` that call returns nothing and the rest of the
-build is unchanged.
-
-Dropping the console from a custom build is therefore a tag, not a patch, and
-deleting `agent/console/` removes it outright.
-
-The agent's protocol is unaffected. Raw tag exchanges and the log ring stay
-in either build. Both are reachable without the console, and the transceive
-channel is part of the client API rather than a console feature.
-
-## API
-
-The console's endpoints, all under the gate described in [Who can open it](#who-can-open-it).
-They are not a public API and carry no compatibility guarantee.
-
-| Route | Purpose |
-|---|---|
-| `GET /control/session?token=` | Exchange a handoff token for a session cookie |
-| `POST /control/signout` | End this session |
-| `GET /control/state` | Full agent state snapshot |
-| `GET /control/logs?since=` | Buffered log entries after a sequence number |
-| `POST /control/action` | `{"action": "...", "params": {...}}` |
-| `GET /control/ws` | Live state snapshots and log lines |
-
-Actions: `agent.start`, `agent.stop`, `agent.quit`,
-`reader.selectDevice`, `reader.setMode`, `reader.setCardTypes`,
-`settings.save`, `devices.revoke`, `devices.revokeAll`,
-`devices.setRequirePaired`, `clients.disconnect`, `origins.allow`, `origins.revoke`,
-`origins.setAllowAny`, `security.rotateAPISecret`, `security.rotatePairingPIN`,
-`security.installCA`, `security.regenerateCertificate`, `security.revokeControlSessions`.
-
-Tag operations are absent here on purpose: the console does those over the
-client API described in [api.md](api.md).
+The console and the tray change the same settings in the agent, and both show
+what the agent is set to, so they never disagree. A change lasts until the
+agent exits. To start the agent with a setting, use its flag; see
+[Configuration](configuration.md). The origin allowlist and paired devices are
+saved to files and survive a restart.

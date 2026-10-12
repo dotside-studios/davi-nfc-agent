@@ -21,6 +21,13 @@ func (a *Agent) forwardScan(data nfc.NFCData) {
 	}
 
 	if data.Card == nil {
+		// A device that reports its own scans also reports the tag leaving,
+		// naming it. Clients hear of it here or not at all: the agent's own
+		// reader says the same through its status, which no phone affects.
+		if data.RemovedUID != "" {
+			a.logger.Printf("Tag %s left %s", data.RemovedUID, data.Device)
+			a.reportTag(data)
+		}
 		return
 	}
 

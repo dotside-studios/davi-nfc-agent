@@ -1,26 +1,9 @@
-# Setting up an iOS or Android device
+# Pair a phone
 
-How a native app pairs with the agent and connects to it. For the message
-protocol itself see the [Device API](api.md#device-api).
-
-## Do devices need TLS?
-
-Devices do not need a certificate authority, and native apps should not install
-one. A CA in a trust store can sign for any name, not just this agent, and on
-iOS granting Full Trust is a system-wide decision.
-
-TLS itself stays on. The agent serves `wss://` with a self-signed
-certificate, and your app verifies it by **pinning the agent's public key**
-rather than by chain of trust. The pin is handed to you at pairing and does not
-change when the agent's certificate is reissued.
-
-So the setup cost moved off the user and onto the app: no profile to install, a
-few lines of trust-evaluation code instead.
-
-You *can* run the agent without TLS (`-auto-tls=false`) and connect over `ws://`,
-but see [Running without TLS](#running-without-tls): both platforms block
-cleartext by default, and the traffic carries card UIDs and tag contents across
-whatever network the device is on.
+How a native iOS or Android app pairs with the agent, connects, and verifies
+it. The messages it then exchanges are in the [Device API](device-api.md). Why
+devices pin a key rather than install a certificate authority is explained in
+[Security](security.md#whether-the-connection-is-to-the-agent-tls).
 
 ## 1. Pair
 
@@ -73,9 +56,9 @@ pairing again.
 `publicKeyPin` in the response repeats the `spki` the QR carried. They must
 match; a mismatch means the QR did not come from this agent.
 
-The PIN is on the kiosk: system tray, agent logs, and the pairing page at
-`http://<agent-host>:9472`. Five wrong attempts lock pairing until the agent
-restarts.
+The PIN is on the kiosk: the tray (**Copy Pairing PIN**), the agent's log, and
+the setup page at `http://<agent-host>:9472`. After five wrong attempts pairing
+answers `429` until the agent restarts or the PIN is regenerated from the tray.
 
 Port 9472 is the cleartext bootstrap listener. It serves the setup page and
 hands out the local certificate authority to a device that does not trust the
@@ -91,7 +74,7 @@ wss://<agent-host>:9470/ws?mode=device
 Present the token as `Authorization: Bearer <deviceToken>`, or `?secret=` if
 your WebSocket client cannot set headers. Offer the `davi-nfc-device.v1`
 subprotocol, then send `hello`. See
-[Device Registration](api.md#device-registration).
+[Registration](device-api.md#registration).
 
 ## 3. Verify the agent by its pin
 
@@ -162,7 +145,9 @@ code looks right and every connection fails.
 The agent can send a tag raw commands through a phone only if the phone's app
 can speak ISO 7816 to it, which both platforms gate.
 
-**iOS.** The app's entitlements must list the applications it selects, in
+### iOS entitlements
+
+The app's entitlements must list the applications it selects, in
 `com.apple.developer.nfc.readersession.iso7816.select-identifiers`, and an
 `NFCTagReaderSession` must be opened with `.iso14443`. Without the identifier
 the OS refuses the select. For NDEF on an NTAG 424 DNA, and for any raw access
@@ -179,17 +164,23 @@ Add the identifiers of any other application the agent will be asked to select
 (a DESFire application's AID, for instance). The same value belongs in the
 app's `Info.plist` under `com.apple.developer.nfc.readersession.iso7816.select-identifiers`.
 
-**Android.** Use `IsoDep` for APDU-level exchange (`IsoDep.transceive`) and
+### Android tag technologies
+
+Use `IsoDep` for APDU-level exchange (`IsoDep.transceive`) and
 `NfcA` for framing-level. Call `IsoDep.connect()` once per tag and keep the
 connection for the whole session; raise `IsoDep.setTimeout` for slow commands.
 
-**Reply format.** `deviceTransceiveResponse.data` must be the card's whole
+### Reply format
+
+`deviceTransceiveResponse.data` must be the card's whole
 reply and must end with SW1SW2. Android's `IsoDep.transceive` already returns
 it that way. iOS `sendCommand` returns the status word beside the payload, so
 append `sw1` and `sw2` to the data before answering. A reply of the status word
-alone is valid. See [Transceive Request](api.md#transceive-request).
+alone is valid. See [deviceTransceiveRequest](device-api.md#devicetransceiverequest).
 
-**Sequences and NTAG 424 operations.** A client's `transceiveSequence` and
+### Sequences and NTAG 424 operations
+
+A client's `transceiveSequence` and
 `ntag424Request` work on a tag your app holds. The agent builds the commands and
 sends them to the phone as ordinary `deviceTransceiveRequest` exchanges, so
 nothing beyond `canTransceive` is needed; an EV2 authentication then costs two
@@ -198,10 +189,12 @@ answer `deviceTransceiveSequenceRequest`: run its `steps` in order on the open
 `IsoDep` connection (or iOS tag session), stop after a step whose status word is
 in `stopOnSW` or, when `expectSW` is present, not in it, and answer with every
 reply that ran and `stoppedAt` (`-1` when all ran). See
-[Transceive Sequence Request](api.md#transceive-sequence-request). The agent
+[deviceTransceiveSequenceRequest](device-api.md#devicetransceivesequencerequest). The agent
 checks your `stoppedAt` against the rules it sent, so apply them exactly.
 
-**Deadline.** An NTAG 424 operation on a tag your app holds has 15 seconds in
+### Deadline
+
+An NTAG 424 operation on a tag your app holds has 15 seconds in
 all, counted from when the agent starts sending to the phone, on top of the
 5 seconds each exchange may take. Before every step that changes the tag
 (writing the NDEF file, `ChangeFileSettings`, `ChangeKey`, `lock`) the agent
@@ -215,7 +208,9 @@ session ends after about 20 seconds and drops the tag as soon as it moves, which
 is why the deadline is below that. Do not hold exchanges back (queueing,
 background throttling); answer each one as soon as the card has.
 
-**Recovering a half-configured tag.** `configureSDM` writes the NDEF message,
+### Recovering a half-configured tag
+
+`configureSDM` writes the NDEF message,
 then the file settings, then reads the file back to verify. Its error says what
 the tag was left holding:
 
@@ -229,8 +224,7 @@ the tag was left holding:
 
 In every case run `configureSDM` again with the same template and options. It is
 idempotent: it rewrites the same message and settings whatever the tag holds,
-and a run on a tag it has already configured leaves it as it was (the
-simulated-phone tests check both). It needs the change key to still be the one
+and a run on a tag it has already configured leaves it as it was. It needs the change key to still be the one
 the agent holds, which a failed run does not alter.
 
 A tag held by a phone cannot be leased as a raw session: the operating system
@@ -264,11 +258,11 @@ setup, and a poor default for a shop floor on shared WiFi.
 
 ## Requiring pairing
 
-Once your devices pair, the agent can be set to admit nothing else. See
-[Requiring pairing](api.md#requiring-pairing). Until then the shared API secret
+Once your devices pair, start the agent with `-require-paired-devices`, or turn
+on **Require pairing** in the tray, to admit nothing else. Until then the shared API secret
 still works, so an unpaired device is not locked out. A device connecting over
 loopback presents a credential too, unless the agent was started with
-`-allow-loopback-bypass`. See [The loopback bypass](api.md#the-loopback-bypass).
+`-allow-loopback-bypass`. See [The loopback bypass](security.md#the-loopback-bypass).
 
 ## Troubleshooting
 

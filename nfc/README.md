@@ -1,507 +1,144 @@
 # NFC Package
 
-A Go package providing a unified, high-level abstraction for NFC operations across multiple card types.
+Package `nfc` is the agent's NFC layer: the interfaces a reader backend
+implements, the drivers for each tag type, NDEF encoding and decoding, and the
+`Supervisor` that operates every reader a backend offers.
 
-The package itself is transport-agnostic: it defines the tag and device interfaces and the tag drivers, while the backends that implement them live beside it (`nfc/pcsc` for readers attached to this machine, `nfc/remotenfc` for a phone acting as a reader).
+It is transport-agnostic. The backends live beside it:
 
-## Overview
+| Package | Backend |
+|---|---|
+| `nfc/pcsc` | PC/SC readers on this machine, through goscard without cgo, or `ebfe/scard` with `-tags cgopcsc` |
+| `nfc/remotenfc` | Phones and WebNFC browsers acting as readers over the device WebSocket protocol |
+| `nfc/multimanager` | Several backends behind one `Manager` |
+| `nfc/virtualnfc` | A software reader carrying virtual tags |
 
-The `nfc` package provides a modular architecture for working with NFC tags, abstracting away the complexity of different card types and protocols:
+The API reference is the godoc: `go doc github.com/dotside-studios/davi-nfc-agent/nfc`.
+Adding a reader backend or a tag type is covered in
+[Extending NFC support](../docs/extending-nfc-support.md), and using the
+package from a program of your own in
+[Custom Builds](../docs/custom-builds.md#driving-the-readers-directly).
 
-- **Unified API**: Single interface for all supported card types
-- **High-level abstractions**: `io.Reader`/`io.Writer` interface for NDEF data
-- **Low-level access**: Direct protocol access when needed
-- **Device management**: Automatic device discovery and lifecycle management
+## Layers
 
-## Architecture
+- **`Manager` and `Device`** list and open readers. A `Device` polls with
+  `GetTags` and returns tags ready to use.
+- **`Tag`** is one tag at the protocol level, composed of the role interfaces in
+  [`tag.go`](tag.go). Type-specific operations are further interfaces, such as
+  `ClassicTag` for sector and block access.
+- **`Card` and `Message`** sit above a tag: `Card` is an `io.Reader` and
+  `io.Writer` over its NDEF data, and `ReadMessage` decodes it.
+- **`Supervisor`** opens every reader a manager offers, polls them, and
+  publishes their scans on one signal, each naming the reader it came from.
+  Operations name the reader they apply to.
 
-```
-┌─────────────────────────────────────────┐
-│          Application Layer              │
-│      (WebSocket Server, CLI, etc)       │
-└─────────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────┐
-│          High-Level API                 │
-│   Card (io.Reader/Writer interface)     │
-│   Message (NDEF encoding/decoding)      │
-└─────────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────┐
-│          Tag Abstraction Layer          │
-│  Tag interface (unified operations)     │
-└─────────────────────────────────────────┘
-                   │
-       ┌───────────┴───────────┬──────────┐
-       ↓                       ↓          ↓
-┌──────────────┐  ┌─────────────────┐  ┌────────────┐
-│ ClassicTag   │  │   DESFireTag    │  │ ISO14443   │
-│ UltralightTag│  │   (others...)   │  │   Type4    │
-└──────────────┘  └─────────────────┘  └────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────┐
-│        Device Management Layer          │
-│   Manager, Device (connection mgmt)     │
-└─────────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────┐
-│      Reader backend (nfc/pcsc)          │
-│  goscard by default, ebfe/scard with    │
-│  -tags cgopcsc                          │
-└─────────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────┐
-│  System: pcsclite / WinSCard / PCSC.fw  │
-└─────────────────────────────────────────┘
-```
+## Supported card types
 
-## Core Components
+| Type | Driver |
+|---|---|
+| MIFARE Classic 1K and 4K | `tag_classic.go`, `tag_classic_format.go` |
+| MIFARE Ultralight, Ultralight C, Ultralight EV1 | `tag_ultralight.go` |
+| NTAG213, NTAG215, NTAG216 | `tag_ntag.go` |
+| MIFARE DESFire, EV1, EV2, EV3 | `tag_desfire.go`, `tag_desfire_session.go`, `tag_desfire_channel.go` |
+| NTAG 424 DNA | `tag_ntag424.go`, `tag_ntag424_session.go`, `tag_ntag424_ops.go` |
+| ISO 14443-4 Type 4 | `tag_iso14443.go` |
+| FeliCa | `tag_felica.go`, identifier only |
 
-### Manager
+`NewTagForType` maps a detected type to its driver. A type detected without a
+driver, such as MIFARE Plus, has no tag.
 
-Device discovery and connection management.
+## Example
 
 ```go
-import "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
-
-// Create a manager for the PC/SC readers on this machine
-manager := pcsc.NewManager()
-
-// List available NFC readers
-devices, err := manager.Devices()
-
-// Open a device
-device, err := manager.OpenDevice(devices[0].Path)
-defer device.Close()
-```
-
-**File**: `manager.go`, `pcsc/manager.go`
-
-### Device
-
-Represents a connected NFC reader device.
-
-```go
-// Poll for tags
-tags, err := device.GetTags()
-
-// Get device information
-connStr := device.Connection()
-
-// Close device
-device.Close()
-```
-
-**Files**: `device.go`, `pcsc/device.go`
-
-### Tag
-
-Low-level hardware protocol interface. Provides direct access to tag operations.
-
-```go
-type Tag interface {
-    UID() string
-    Type() string
-    ReadData() ([]byte, error)
-    WriteData(data []byte) error
-    Connect() error
-    Disconnect() error
-    IsWritable() (bool, error)
-}
-```
-
-**Files**:
-- `tag.go` - Interface definition
-- `tag_classic.go` - MIFARE Classic implementation
-- `tag_desfire.go` - MIFARE DESFire implementation
-- `tag_ultralight.go` - MIFARE Ultralight implementation
-- `tag_iso14443.go` - ISO14443-4 Type 4 implementation
-
-### Reader feedback
-
-Devices whose reader has an indicator LED or a buzzer implement
-`FeedbackDevice`, an optional interface alongside `Device`:
-
-```go
-if fb, ok := device.(nfc.FeedbackDevice); ok {
-    _ = fb.Signal(nfc.SignalSuccess)
-}
-```
-
-`Supervisor.SetFeedback(true)` has the readers signal their own reads, writes and
-locks. The signal plays in the background and a reader that cannot show it
-reports a not-supported error, so nothing about the operation changes.
-
-`nfc/pcsc` implements this for ACR122 readers with the ACS LED and buzzer
-command, sent over `SCardControl` or, where the PC/SC stack will not carry
-escape commands, as a pseudo-APDU over the card connection.
-
-**Files**: `feedback.go`, `pcsc/feedback.go`, `pcsc/acr122.go`
-
-### Card
-
-High-level abstraction implementing `io.Reader`, `io.Writer`, and `io.Closer`.
-
-```go
-// Create card from tag
 card := nfc.NewCard(tag)
 
-// Read NDEF data
-data, err := io.ReadAll(card)
-
-// Write NDEF data
-io.WriteString(card, "Hello, NFC!")
-card.Close()
-
-// Read as structured message
 msg, err := card.ReadMessage()
-```
+if err != nil {
+	return err
+}
+if ndef, ok := msg.(*nfc.NDEFMessage); ok {
+	text, _ := ndef.GetText()
+	log.Printf("text: %s", text)
+}
 
-**File**: `card.go`
+card.Reset()
+if err := card.WriteMessage(nfc.NewNDEFMessage().AddText("Hello", "en")); err != nil {
+	return err
+}
 
-### Message
-
-NDEF message encoding and decoding.
-
-```go
-// Decode NDEF message
-msg, err := nfc.DecodeNDEF(data)
-
-// Access text records
-text, err := msg.GetText()
-
-// Create new text message
-msg := nfc.NewNDEFMessage()
-msg.AddTextRecord("Hello!", "en")
-data, _ := msg.Encode()
-```
-
-**Files**: `message.go`, `ndef.go`
-
-## Supported Card Types
-
-### MIFARE Classic (1K/4K)
-
-Sector and block-based memory structure with key authentication.
-
-```go
-if classic, ok := tag.(*nfc.ClassicTag); ok {
-    // Read specific sector/block
-    data, err := classic.Read(sector, block, key, keyType)
-
-    // Write to sector/block
-    err = classic.Write(sector, block, data, key, keyType)
+// Sector and block access on MIFARE Classic.
+if classic, ok := card.GetUnderlyingTag().(nfc.ClassicTag); ok {
+	key := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	block, err := classic.Read(1, 0, key, nfc.KeyTypeA)
+	if err != nil {
+		return err
+	}
+	log.Printf("sector 1 block 0: %x", block)
 }
 ```
 
-**Features**:
-- Sector/block read/write
-- Key A/B authentication
-- NDEF formatting and read/write
-- Auto key discovery for reading
-
-**File**: `tag_classic.go`
-
-### MIFARE DESFire (EV1/EV2/EV3)
-
-Application and file-based structure with advanced security.
+Tests run without hardware against the mocks (`NewMockManager`,
+`NewMockDevice`, `NewMockTag` and the type-specific `NewMockClassicTag`,
+`NewMockNtagTag`, `NewMockISO14443Tag`) or the emulators in `nfc/nfctest`:
 
 ```go
-if desfire, ok := tag.(*nfc.DESFireTag); ok {
-    // List applications
-    apps, err := desfire.ApplicationIds()
+tag := nfc.NewMockTag("04A1B2C3D4E5F6")
+tag.TagType = "MIFARE Classic 1K"
+tag.Data = []byte("test data")
 
-    // Select application
-    err = desfire.SelectApplication(appId)
-
-    // Read/write files
-    data, err := desfire.ReadData(fileNo)
-}
+data, err := io.ReadAll(nfc.NewCard(tag))
 ```
 
-**Features**:
-- Application management
-- File-based data storage
-- NDEF read/write support
-- Secure authentication
+## Design decisions
 
-**File**: `tag_desfire.go`
+**Tag and Card are separate.** `Tag` is the protocol: identity, raw reads and
+writes, transceive, locking, and type-specific access by type assertion. `Card`
+is the data: standard `io` semantics over the NDEF payload, which is what most
+callers want.
 
-### MIFARE Ultralight (including Ultralight C)
+**A tag declares its capabilities.** `Capabilities()` is part of `Tag`, and the
+built-in drivers declare theirs in `tag_profile.go`, the single source for each
+type's `Type()`, `NumericType()` and capabilities. `InferTagCapabilities`
+guesses from a type name only when no tag is left to ask, such as for a card
+decoded from the wire.
 
-Page-based memory with simple read/write operations.
+**An empty tag is an error, not empty data.** A tag that holds no NDEF message
+reports `NewNoPayloadError` rather than zero bytes, so a successful read of an
+empty message and a tag with nothing on it stay distinguishable. `ReadMessage`
+returns `*NDEFMessage` for NDEF data and `*TextMessage` for raw bytes that do
+not decode.
 
-```go
-if ultralight, ok := tag.(*nfc.UltralightTag); ok {
-    // Read page
-    data, err := ultralight.ReadPage(page)
+**Connection is the backend's.** `GetTags` returns tags ready to use, and
+`Connect` and `Disconnect` exist for the interface; the built-in drivers and
+`BaseTag` implement them as no-ops.
 
-    // Write page
-    err = ultralight.WritePage(page, data)
-}
-```
+**One operation per reader at a time.** The `Supervisor` is safe to use from any
+goroutine. Each reader runs one tag operation at a time, bounded by the caller's
+context and the reader's timeout, and a caller arriving while an abandoned
+operation is still finishing is refused with `ErrReaderBusy`. A program driving
+a `Device` and its tags directly, without a `Supervisor`, serializes its own
+operations on a tag.
 
-**Features**:
-- Page-based read/write
-- NDEF read/write support
-- Compact memory layout
-
-**File**: `tag_ultralight.go`
-
-### ISO14443-4 Type 4A/B
-
-Standard ISO14443 Type 4 tags with NDEF support.
-
-```go
-// Works automatically through Card interface
-card := nfc.NewCard(tag)
-data, _ := io.ReadAll(card)
-```
-
-**Features**:
-- Standard NDEF operations
-- Direct APDU access via `Transceive()`
-
-**File**: `tag_iso14443.go`
-
-## Usage Examples
-
-### Basic Read/Write
-
-```go
-package main
-
-import (
-    "fmt"
-    "io"
-
-    "github.com/dotside-studios/davi-nfc-agent/nfc"
-    "github.com/dotside-studios/davi-nfc-agent/nfc/pcsc"
-)
-
-func main() {
-    // Initialize manager and device
-    manager := pcsc.NewManager()
-    devices, _ := manager.Devices()
-    device, _ := manager.OpenDevice(devices[0].Path)
-    defer device.Close()
-
-    // Get tags
-    tags, _ := device.GetTags()
-    if len(tags) == 0 {
-        fmt.Println("No tags found")
-        return
-    }
-
-    // Read from card
-    card := nfc.NewCard(tags[0])
-    data, _ := io.ReadAll(card)
-    fmt.Printf("Read: %s\n", string(data))
-
-    // Write to card
-    card.Reset()
-    io.WriteString(card, "Hello, NFC!")
-    card.Close()
-}
-```
-
-### Working with NDEF Messages
-
-```go
-// Read structured NDEF message
-card := nfc.NewCard(tag)
-msg, err := card.ReadMessage()
-
-switch m := msg.(type) {
-case *nfc.NDEFMessage:
-    // Access text records
-    text, _ := m.GetText()
-    fmt.Printf("Text: %s\n", text)
-
-    // Access URI records
-    uri, _ := m.GetURI()
-    fmt.Printf("URI: %s\n", uri)
-
-case *nfc.TextMessage:
-    // Raw bytes (non-NDEF)
-    fmt.Printf("Raw: %x\n", m.Data)
-}
-
-// Write NDEF message
-ndefMsg := nfc.NewNDEFMessage()
-ndefMsg.AddTextRecord("Hello World", "en")
-err = card.WriteMessage(ndefMsg)
-```
-
-### Card-Specific Operations
-
-```go
-// Get underlying tag for advanced operations
-tag := card.GetUnderlyingTag()
-
-// MIFARE Classic: sector access
-if classic, ok := tag.(*nfc.ClassicTag); ok {
-    key := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-    data, _ := classic.Read(1, 0, key, nfc.KeyTypeA)
-}
-
-// DESFire: application management
-if desfire, ok := tag.(*nfc.DESFireTag); ok {
-    apps, _ := desfire.ApplicationIds()
-    for _, app := range apps {
-        fmt.Printf("App: %06X\n", app)
-    }
-}
-
-// Ultralight: page operations
-if ultralight, ok := tag.(*nfc.UltralightTag); ok {
-    page4, _ := ultralight.ReadPage(4)
-    fmt.Printf("Page 4: %x\n", page4)
-}
-```
-
-### Continuous Polling
-
-```go
-manager := pcsc.NewManager()
-devices, _ := manager.Devices()
-device, _ := manager.OpenDevice(devices[0].Path)
-defer device.Close()
-
-for {
-    tags, err := device.GetTags()
-    if err != nil {
-        time.Sleep(100 * time.Millisecond)
-        continue
-    }
-
-    for _, tag := range tags {
-        card := nfc.NewCard(tag)
-        data, _ := io.ReadAll(card)
-        fmt.Printf("UID: %s, Data: %s\n", card.UID, string(data))
-    }
-
-    time.Sleep(500 * time.Millisecond)
-}
-```
-
-## Testing
-
-The package includes comprehensive mocks for testing without physical hardware:
-
-```go
-// Mock manager
-manager := nfc.NewMockManager()
-device := nfc.NewMockDevice()
-tag := nfc.NewMockTag("04A1B2C3D4E5F6", "MIFARE Classic 1K")
-
-// Configure mock behavior
-tag.SetReadData([]byte("test data"))
-
-// Use in tests
-card := nfc.NewCard(tag)
-data, _ := io.ReadAll(card)
-```
-
-**Files**: `tag_mock.go`, `device_mock.go`, `manager_mock.go`
-
-## Key Design Decisions
-
-### Why separate Tag and Card?
-
-- **Tag**: Low-level hardware protocol interface
-  - Direct access to card-specific features
-  - Minimal abstraction over libfreefare
-  - Type assertions for card-specific operations
-
-- **Card**: High-level data interface
-  - Standard Go `io.Reader`/`io.Writer` semantics
-  - NDEF-focused operations
-  - Simplified API for common use cases
-
-### NDEF vs Raw Data
-
-The package automatically handles NDEF parsing:
-
-```go
-msg, err := card.ReadMessage()
-
-// Returns NDEFMessage if NDEF-formatted
-// Returns TextMessage (raw bytes) if not NDEF
-```
-
-This allows applications to handle both formatted and unformatted tags gracefully.
-
-### Connection Management
-
-The package handles connection lifecycle automatically:
-
-- `device.GetTags()` performs polling and returns ready-to-use tags
-- `Tag.Connect()` / `Disconnect()` exist for interface completeness but are not
-  required by the framework; tags are usable as soon as `GetTags()` returns them
-  (custom tags can inherit these as no-ops from `nfc.BaseTag`)
-- Clean up with `device.Close()`
-
-## Thread Safety
-
-The package is **not thread-safe**. If you need concurrent access:
-
-- Use one `Manager` per goroutine, OR
-- Protect `Device` and `Tag` operations with mutexes
-
-## Dependencies
-
-- **github.com/ElMostafaIdrassi/goscard**: PC/SC without cgo (`nfc/pcsc`)
-- **github.com/ebfe/scard**: the cgo binding, used only with `-tags cgopcsc`
-- PC/SC runtime (built into macOS/Windows, `pcsclite` on Linux)
-
-## Files Reference
+## Files
 
 | File | Purpose |
-|------|---------|
-| `manager.go` | Manager interface |
-| `pcsc/manager.go` | PC/SC manager implementation |
-| `device.go` | Device interface |
-| `pcsc/device.go` | PC/SC device implementation |
-| `tag.go` | Tag interface and base types |
-| `tag_base.go` | Shared base tag struct |
-| `tag_classic.go` | MIFARE Classic implementation |
-| `tag_desfire.go` | MIFARE DESFire implementation |
-| `tag_ultralight.go` | MIFARE Ultralight implementation |
-| `tag_ntag.go` | NTAG implementation |
-| `tag_iso14443.go` | ISO14443-4 Type 4 implementation |
-| `tagdetect.go` | ATR/UID-based tag detection |
-| `apdu.go` | APDU command construction |
-| `tlv.go` | TLV encode/decode utilities |
-| `card.go` | High-level Card abstraction |
-| `message.go` | Message interface and types |
-| `ndef.go` | NDEF encoding/decoding |
-| `constants.go` | Card type and key constants |
-| `keys.go` | Key management utilities |
-| `cache.go` | Tag caching for debouncing |
-| `capabilities.go` | Tag capability detection |
-| `feedback.go` | Reader LED and buzzer signals |
-| `pcsc/feedback.go` | LED and buzzer over SCardControl |
-| `pcsc/acr122.go` | ACR122 LED and buzzer commands |
-| `errors.go` | Error types and handling |
-| `*_test.go` | Unit tests |
-| `*_mock.go` | Test mocks |
-
-## Contributing
-
-When adding support for new card types:
-
-1. Implement the `Tag` interface
-2. Add NDEF read/write if supported
-3. Include card-specific methods as needed
-4. Add unit tests with mocks
-5. Update this documentation
-
-## License
-
-MIT License - See main repository LICENSE file
+|---|---|
+| `manager.go`, `device.go`, `tag.go` | The `Manager`, `Device` and `Tag` interfaces and their optional extensions |
+| `capabilities.go` | `TagCapabilities`, `DeviceCapabilities`, and how a device's are built |
+| `tag_base.go` | `CardTransport` and the base the PC/SC drivers share |
+| `tag_base_default.go` | `BaseTag`, the defaults a custom tag embeds |
+| `tag_profile.go` | Each built-in type's name, numeric type and capabilities |
+| `tag_*.go` | The drivers listed under [Supported card types](#supported-card-types) |
+| `tagdetect.go` | Tag detection from the ATR and UID |
+| `emulated_tag.go` | Production drivers over an emulated `CardTransport`, for `nfc/nfctest` |
+| `supervisor.go`, `supervisor_ops.go` | The `Supervisor` and the operations it routes to a reader |
+| `reader.go` | One reader: polling, reading, writing, locking and transceiving |
+| `device_manager.go` | Opening one device, reconnecting it, and reporting its lifecycle |
+| `scan_debounce.go` | Suppressing repeated scans of a card held on a polling reader |
+| `cache.go` | The last scanned UID |
+| `card.go`, `message.go`, `ndef.go`, `tlv.go` | `Card`, NDEF messages and records, TLV framing |
+| `apdu.go`, `apdu_chain.go`, `apdu_explain.go` | APDU construction, chaining, and decoding a command into what it does |
+| `keys.go`, `desfire_keys.go`, `ntag424_keys.go` | Card keys |
+| `feedback.go` | `FeedbackDevice`, for readers with an LED or buzzer |
+| `errors.go` | `NFCError` and its codes |
+| `*_mock.go` | Mocks for testing |

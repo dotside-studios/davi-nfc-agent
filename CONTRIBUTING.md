@@ -1,27 +1,19 @@
 # Contributing
 
-Thanks for your interest in contributing to the NFC Agent!
+## Setting up
 
-## Development Setup
+You need Go 1.25 or later. Node.js is needed only to rebuild the client library
+or the Control Center frontend.
 
-### Requirements
+On Linux, install the PC/SC service to run the agent against a reader:
 
-- Go 1.24 or later
-- PC/SC library (for running with hardware)
-
-### Installing Dependencies
-
-**Linux:**
 ```bash
 sudo apt install pcscd libpcsclite1
 ```
 
-No additional dependencies needed for **macOS** and **Windows**. The agent
-resolves the PC/SC library at runtime and builds without cgo, so no C toolchain
-or `-dev` package is involved; `libpcsclite-dev` is only needed to build the
-`-tags cgopcsc` fallback backend.
-
-### Building
+macOS and Windows need nothing extra. The agent loads the PC/SC library at
+runtime and builds without cgo, so no C toolchain or `-dev` package is needed.
+`libpcsclite-dev` is only for the `-tags cgopcsc` backend.
 
 ```bash
 git clone https://github.com/dotside-studios/davi-nfc-agent.git
@@ -29,235 +21,139 @@ cd davi-nfc-agent
 go build ./cmd/davi-nfc-agent
 ```
 
-### Running Tests
+## Checks
+
+Run these before opening a pull request. CI runs the same tests, lint and
+client checks on every pull request to `master`, along with `govulncheck` and a
+build of every release target:
 
 ```bash
-go test ./...
+go test -race -shuffle=on ./...
+golangci-lint run
+make test-nowebui     # the suite without the Control Center
+make client-test      # the TypeScript client
 ```
 
-`e2e/` builds an agent the way `docs/custom-builds.md` does, on a real TLS
-listener, and drives it over the published WebSocket protocols. Run it alone
-with `go test ./e2e/ -v` when changing anything a program embedding the agent
-depends on.
+`make lint` runs `go vet` in both builds and lists files `gofmt` would change.
+
+`e2e/` builds an agent the way [Custom builds](docs/custom-builds.md) does, on a
+real TLS listener, and drives it over the published protocols. Run it on its own
+with `go test ./e2e/ -v` after changing anything an embedding program depends
+on.
 
 Tests that need a reader and a tag are behind the `hardware` build tag and are
-never run by `go test ./...`. See [docs/hardware-tests.md](docs/hardware-tests.md)
-for how to run them and send back what they record.
+never run by `go test ./...`. See [Hardware tests](docs/hardware-tests.md).
 
-## Advanced Building
+Without a reader, `go run ./cmd/davi-virtual-reader` runs a software reader on
+the same supervisor the agent uses, and takes commands to tap, remove and write
+tags. Type `help` at its prompt.
 
-### Cross-Platform Builds
+## Generated files
 
-**macOS / Linux / WSL** (`scripts/build.sh`):
-```bash
-# Build for current platform
-./scripts/build.sh
-
-# Build for specific platform
-./scripts/build.sh linux amd64
-./scripts/build.sh linux arm64
-./scripts/build.sh darwin amd64
-./scripts/build.sh darwin arm64
-./scripts/build.sh windows amd64
-```
-
-**Windows** (`scripts/build.ps1`, PowerShell 5.1+):
-```powershell
-# Build for current platform (windows/amd64 by default)
-./scripts/build.ps1
-
-# Build for a specific Windows arch
-./scripts/build.ps1 windows arm64
-```
-
-Cross-compilation _from Windows_ to Linux/macOS is not supported by
-`build.ps1` (needs mingw/clang); use WSL + `build.sh` for that case.
-
-### Build with Version Info
-
-```bash
-BUILD_VERSION=1.0.0 ./scripts/build.sh
-```
-
-### Build Artifacts
-
-Binaries are created in the current directory:
-
-- `davi-nfc-agent-linux-amd64`
-- `davi-nfc-agent-linux-arm64`
-- `davi-nfc-agent-darwin-amd64`
-- `davi-nfc-agent-darwin-arm64`
-- `davi-nfc-agent-windows-amd64.exe`
-
-### Generated files
-
-Three things in the tree are generated and committed, so that building the
-agent needs no Node and consuming the client library needs no build step. CI
-regenerates all three and fails if the tree does not match, naming the command
-to run.
+Three things are generated and committed, so building the agent needs no Node
+and using the client library needs no build step. CI regenerates them and fails
+if the tree differs.
 
 | Path | Rebuild with | From |
 |------|--------------|------|
 | `client/src/session/wire.generated.ts` | `make types` | package `protocol` |
 | `client/dist/` | `make client` | `client/src/` |
-| `agent/console/frontend/dist/` | `make webui` | the console's `src/` |
+| `agent/console/frontend/dist/` | `make webui` | `agent/console/frontend/src/` |
 
-`make types` is the one to run after changing anything in `protocol/`. It is
-how the client library's view of the wire stays in step with the agent's:
-the error codes, the message types and the payload shapes are declared once in
-Go and written out as TypeScript by `cmd/sdkgen`. Do not edit the
-generated file. What the client library adds over the wire is hand-written in
-`client/src/session/types.ts` and is not generated.
+Run `make types` after changing anything in `protocol/`. The error codes,
+message types and payload shapes are declared once in Go and written out as
+TypeScript by `cmd/sdkgen`, which keeps the client library in step with the
+agent. What the library adds on top is hand-written in
+`client/src/session/types.ts`. `make types` needs only Go.
 
-`make types` needs only Go. The other two need Node.
+Working on the Control Center itself, including its dev server and the
+screenshot harness, is covered in [agent/console](agent/console/README.md).
 
-### CI/CD
+## Cross-compiling
 
-The GitHub Actions workflow (`.github/workflows/build.yml`) automatically:
-
-1. Builds for all platforms on push to master
-2. Creates releases with binaries
-3. Sets version info from git tags
-
-**Manual Release:**
+`scripts/build.sh` builds for the current platform, or for the one named:
 
 ```bash
-# Tag a release
-git tag v1.0.0
-git push origin v1.0.0
-
-# CI will build with BUILD_VERSION=v1.0.0
+./scripts/build.sh
+./scripts/build.sh linux arm64
+BUILD_VERSION=1.0.0 ./scripts/build.sh darwin arm64
 ```
 
-## Project Architecture
+The targets are `linux`, `darwin` and `windows` on `amd64` and `arm64`. The
+binary is written to the current directory as `davi-nfc-agent-<os>-<arch>`,
+with `.exe` on Windows.
+
+On Windows, `scripts/build.ps1` (PowerShell 5.1+) builds Windows targets. Use
+WSL and `build.sh` to build for Linux or macOS from Windows.
+
+## Releases
+
+Pushing a tag of the form `v1.2.3` runs `.github/workflows/release.yml`, which
+builds every platform with `BUILD_VERSION` set to the tag, smoke-tests each
+binary and publishes a GitHub release with the archives.
+
+```bash
+git tag v1.6.0
+git push origin v1.6.0
+```
+
+Record user-visible changes in [CHANGELOG.md](CHANGELOG.md) in the same pull
+request as the change.
+
+## Project layout
 
 ```
 davi-nfc-agent/
 ├── cmd/
-│   └── davi-nfc-agent/  # The binary: picks the NFC backend and wires the rest
-│                        # (see docs/custom-builds.md to build your own)
-├── agent/               # The agent itself: lifecycle, config, plugins
-│   ├── agent.go         # Core agent logic
-│   ├── setup.go         # Options and Setup, what the flags resolve to
-│   ├── plugin.go        # Plugin, AgentContext, activation
-│   ├── serverplugin/    # The listener and everything served from it
-│   ├── pairingplugin/   # The pairing listener and its tray entries
-│   ├── trustplugin/     # Installing the local certificate authority
-│   ├── console/         # Control center: API, frontend, agent adapter
-│   │                    #   (-tags nowebui drops it)
-│   └── tray/            # System tray UI (the only fyne.io/systray dependency)
-├── buildinfo/           # Version and build metadata
-├── nfc/                 # NFC abstraction layer
-│   ├── manager.go       # Device manager interface
-│   ├── device.go        # Device interface
-│   ├── tag.go           # Tag interface
-│   ├── reader.go        # NFC reader implementation
-│   ├── remotenfc/       # Phones and other networked devices, and the
-│   │                    #   WebSocket endpoint they connect to
-│   └── multimanager/    # Multiple manager aggregation
-├── server/              # The bridge between tag sources and clients, and the
-│   │                    #   credential checks both endpoints are gated by
-│   ├── listener/        # One HTTP listener: a port, a mux, TLS, mDNS
-│   ├── clientserver/    # Client connections, and the tag operations they ask
-│   │                    #   for, resolved against whatever holds the tag
-│   ├── netinfo/         # The addresses this machine serves on
-│   └── wsconn/          # Write-safe WebSocket wrapper shared by the above
-├── traymenu/            # Declarative tray menus, with no toolkit behind them
-│   └── fynetray/        # The real tray, on fyne.io/systray
-├── clipboard/           # Copying text to the system clipboard
-├── secure/              # Restricting a file or directory to the current user
-│   └── tls/             # Auto-TLS certificates, the local CA, and pairing
-├── protocol/            # Protocol definitions
-├── client/              # TypeScript client library (src/), plus its built dist/
-├── scripts/             # Build scripts
-└── docs/                # Documentation
+│   ├── davi-nfc-agent/       The shipped binary: flags, NFC backends, plugins
+│   ├── davi-virtual-reader/  A software reader for development
+│   └── sdkgen/               Writes the client library's wire types
+├── agent/                    The agent: lifecycle, preferences, plugins
+│   ├── serverplugin/         The listener and what is served from it
+│   ├── pairingplugin/        The pairing listener and its tray entries
+│   ├── trustplugin/          Installing the local certificate authority
+│   ├── console/              The Control Center (-tags nowebui drops it)
+│   └── tray/                 The system tray
+├── nfc/                      Readers, tags and the supervisor over them
+│   ├── pcsc/                 PC/SC readers
+│   ├── remotenfc/            Phones and other devices, and their endpoint
+│   ├── multimanager/         Several backends as one
+│   ├── virtualnfc/           Software tags
+│   ├── nfctest/              Tag emulators for tests
+│   ├── keyfile/              Loading the card key file
+│   └── ntag424/, ev1/, ev2/, lrp/  NTAG 424 DNA and DESFire cryptography
+├── server/                   Credential checks and the client/device split
+│   ├── listener/             One HTTP listener: port, mux, TLS, mDNS
+│   ├── clientserver/         Client connections and the tag operations they ask for
+│   └── netinfo/, deviceid/, wsconn/
+├── protocol/                 The wire types both endpoints share
+├── secure/                   Restricting files to the current user
+│   ├── tls/                  Certificates, the local CA, the setup listener
+│   └── pairing/              Device pairing and tokens
+├── traymenu/                 Declarative tray menus; see traymenu/README.md
+├── client/                   The TypeScript client library
+├── e2e/, hwtest/             End-to-end and hardware tests
+└── docs/
 ```
 
-### Key Components
+The NFC layer is described in [nfc/README.md](nfc/README.md), and adding a
+reader or tag type in [Extending NFC support](docs/extending-nfc-support.md).
 
-**NFC Layer** (`nfc/`)
-- Abstraction over PC/SC (ebfe/scard)
-- Modular design supporting hardware and smartphone readers
-- See [nfc/README.md](nfc/README.md) for details
+## Pull requests
 
-**Server Layer** (`server/`)
-- One listener on port 9470 (configurable via `-device-port`) serves both roles
-  on one path, distinguished by the mode a connection declares:
-  `/ws?mode=device` for devices, `/ws` for clients
-  - **listener**: the listener itself, and the mux of what was mounted on it.
-    It knows nothing about NFC
-  - **clientserver**: fans a scan out to every connected client, serves their
-    requests, and resolves the tag each one names. `serverplugin.Plugin` runs
-    one and mounts the routes it is reached on
-- A client request is a call rather than a message on a channel: there is no
-  bridge between the two halves
+- Branch from `master`, and keep one change per pull request.
+- Write commit messages as [Conventional Commits](https://www.conventionalcommits.org/):
 
-**Tray Menu** (`traymenu/`)
-- Declarative menu building, with clicks delivered as signals rather than
-  channels the caller has to poll
-- Runs on a driver: `traymenu/fynetray` for the real tray, `NewFake` in tests,
-  `Discard` where there is none. The toolkit, and the cgo it needs on macOS,
-  arrives only with `fynetray`
-- Depends on nothing else in this repository
-- See [traymenu/README.md](traymenu/README.md) for the pattern
+  ```
+  feat(ntag424): give NTAG 424 operations on a phone an overall deadline
+  fix(server): refuse a write when the named tag is not present
+  docs: split the protocol reference by endpoint
+  ```
 
-**Security** (`secure/`)
-- `secure` restricts a file or directory to the current user, which is what
-  guards the certificate, the API secret and the device credentials on disk
-- `secure/tls` manages the certificate: generation, the local authority,
-  network change detection, and the CA bootstrap server a device pairs through
+- Add tests for new behaviour, and update the docs a change affects.
 
-## Code Style
+## Reporting a bug
 
-- Follow standard Go conventions
-- Run `go fmt` before committing
-- Use meaningful variable and function names
-- Add comments for exported functions
-
-## Submitting Changes
-
-### Pull Request Process
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests: `go test ./...`
-5. Commit with clear message: `git commit -m "Add feature X"`
-6. Push to your fork: `git push origin feature/my-feature`
-7. Open a Pull Request
-
-### Commit Messages
-
-Use clear, descriptive commit messages:
-
-```
-feat: add support for DESFire EV3 cards
-fix: handle connection timeout gracefully
-docs: update API documentation
-refactor: simplify device manager interface
-```
-
-### What to Include
-
-- Clear description of changes
-- Tests for new functionality
-- Documentation updates if needed
-- Update CHANGELOG if applicable
-
-## Adding NFC Support
-
-To add support for new NFC readers or tag types, see [docs/extending-nfc-support.md](docs/extending-nfc-support.md).
-
-## Reporting Issues
-
-When reporting bugs, please include:
-
-- Operating system and version
-- NFC reader model
-- Steps to reproduce
-- Expected vs actual behavior
-- Relevant log output
-
-## Questions?
-
-Open an issue for questions or discussions.
+Include the operating system, the reader model, the tag type, what you did,
+what you expected, and the log. The Control Center's **Activity** tab downloads
+the log as text.

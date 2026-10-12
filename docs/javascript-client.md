@@ -280,12 +280,12 @@ device.connect().then(() => {
 
 ### Browsers
 
-A browser cannot set headers on a WebSocket, so put the token in the URL. The
-library appends `?mode=device` to whatever URL it is given, so give it a URL
-that already has its query and ends in `&`:
+A browser cannot set headers on a WebSocket, so pass the token as `secret`. The
+library sends it as `?secret=` on the connection URL:
 
 ```javascript
-const device = new NFCDeviceClient(`wss://AGENT_HOST:9470/ws?mode=device&secret=${deviceToken}&`, {
+const device = new NFCDeviceClient("wss://AGENT_HOST:9470", {
+  secret: deviceToken,
   deviceName: "Chrome on Android",
   platform: "web",
   nfcType: "webnfc",
@@ -323,9 +323,11 @@ new NFCDeviceClient(serverUrl, options)
 | `heartbeatInterval` | `30000` | Milliseconds |
 | `autoReconnect` | `true` | Reconnect after a drop, up to 10 times |
 | `reconnectDelay` | `3000` | Milliseconds between attempts |
+| `secret` | | The device token or API secret, sent as `?secret=`. Replaces one already in `serverUrl` |
 
-`serverUrl` may use `http(s)` or `ws(s)`. `/ws` is appended unless it is already
-in the URL, and then `?mode=device`. The capabilities beyond `canRead`,
+`serverUrl` may use `http(s)` or `ws(s)`. `/ws` is appended to its path unless
+the path already ends in it, and `mode=device` is added to its query, keeping
+any parameters already there. The capabilities beyond `canRead`,
 `canWrite` and `nfcType` are sent only to an agent that speaks protocol version
 1.
 

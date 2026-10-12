@@ -136,6 +136,13 @@ export interface NFCDeviceClientOptions {
    * @default 3000
    */
   reconnectDelay?: number;
+
+  /**
+   * Device token or API secret, sent as `?secret=` on the connection URL.
+   * Overrides a `secret` already in the server URL. In a browser this is the
+   * only way to present one, as a WebSocket cannot carry an Authorization header.
+   */
+  secret?: string;
 }
 
 /**

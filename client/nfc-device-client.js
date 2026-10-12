@@ -83,9 +83,11 @@ class NFCDeviceClient {
    * @param {number} [options.heartbeatInterval=30000] - Heartbeat interval in ms
    * @param {boolean} [options.autoReconnect=true] - Automatically reconnect on disconnect
    * @param {number} [options.reconnectDelay=3000] - Delay in ms before reconnecting
+   * @param {string} [options.secret] - Device token or API secret, sent as `?secret=`. Overrides one already in serverUrl
    */
   constructor(serverUrl, options = {}) {
-    this.serverUrl = serverUrl.replace(/\/$/, '');
+    this.serverUrl = serverUrl;
+    this.secret = options.secret || '';
     this._WebSocketClass = options.WebSocket || (typeof WebSocket !== 'undefined' ? WebSocket : null);
     this.deviceName = options.deviceName || 'NFC Device';
     this.platform = options.platform || 'unknown';
@@ -187,6 +189,28 @@ class NFCDeviceClient {
   }
 
   /**
+   * The device endpoint URL: serverUrl with a ws(s) scheme, `/ws` on the path,
+   * and `mode=device` and `secret` set alongside any query it already carries.
+   * A browser cannot set an Authorization header on a WebSocket, so the query
+   * is the only place it can present a credential.
+   * @returns {string}
+   * @private
+   */
+  _buildUrl() {
+    const url = new URL(this.serverUrl);
+    url.protocol = url.protocol.replace(/^http/, 'ws');
+    const path = url.pathname.replace(/\/+$/, '');
+    if (!path.endsWith('/ws')) {
+      url.pathname = path + '/ws';
+    }
+    url.searchParams.set('mode', 'device');
+    if (this.secret) {
+      url.searchParams.set('secret', this.secret);
+    }
+    return url.toString();
+  }
+
+  /**
    * Establishes WebSocket connection and registers as a device
    * @returns {Promise<void>}
    */
@@ -194,14 +218,7 @@ class NFCDeviceClient {
     try {
       const WebSocketClass = this._getWebSocketClass();
 
-      // Build WebSocket URL with device mode
-      let wsUrl = this.serverUrl.replace(/^http/, 'ws');
-      if (!wsUrl.includes('/ws')) {
-        wsUrl += '/ws';
-      }
-      wsUrl += '?mode=device';
-
-      this.ws = new WebSocketClass(wsUrl, [DEVICE_SUBPROTOCOL_V1]);
+      this.ws = new WebSocketClass(this._buildUrl(), [DEVICE_SUBPROTOCOL_V1]);
 
       this.ws.onopen = async () => {
         this.connected = true;

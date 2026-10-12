@@ -112,11 +112,6 @@ naming nothing and the agent refuses it with `TAG_NOT_NAMED`.
 Bytes are `Uint8Array` in both directions; the library does the base64. A
 request not answered within 30 seconds rejects.
 
-`getCapabilities()` reads a `capabilities` field from the answer, which the
-agent does not send: the capabilities are the answer's payload itself, so it
-currently resolves to `{}`. Read `tag.capabilities` from `tagData`, or send
-`capabilitiesRequest` over the protocol, until that is fixed.
-
 ### Events
 
 `client.on(event, handler)` adds a handler and `client.off(event, handler)`
